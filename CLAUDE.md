@@ -1,3 +1,67 @@
+# CoreApp (de-Googled fork)
+
+This is an **unofficial, Android-only fork** of the Core Devices Pebble mobile
+app. It is not affiliated with or endorsed by Core Devices. The fork is
+distributed under GPLv3 (see `LICENSE`); upstream's commercial licensing
+option does not apply here.
+
+## Fork goals
+
+1. **Run fully featured without Google Play services or Firebase.** The app
+   must work on de-Googled Android (GrapheneOS, LineageOS, and similar).
+2. **Strip telemetry.** Crashlytics, analytics heartbeats, and the Memfault
+   firmware-diagnostics relay.
+3. **Weather without Play services.** Manual latitude/longitude entry. The
+   place search uses the platform Geocoder, which is GMS-backed and
+   non-functional on de-Googled ROMs; current-location weather already works
+   via `LocationManager`.
+4. **Open the watch microphone API to third-party applications.** A
+   documented, permission-gated audio capture API usable by any authorized
+   app, rather than locking watch mic audio to first-party features.
+5. Secondary: make battery analytics usable without a sign-in wall, if
+   feasible.
+
+## Fork rules (these override the upstream rules below where they conflict)
+
+- **Android-only.** iOS sources remain in-tree but are unmaintained. Do not
+  write, fix, or build iOS code. This supersedes upstream's "all features
+  must work on both Android and iOS" rule.
+- **De-Google at the DI seam, not by mass deletion.** Swap Firebase/GMS-backed
+  implementations for no-op or GMS-free ones at the Koin module level, keeping
+  upstream call sites intact so upstream merges stay cheap. Out-of-scope
+  feature modules (`experimental`, `index-ai`, `mcp`: the Ring/Index AI
+  features) are unplugged from the build (`settings.gradle.kts` + DI wiring)
+  with sources left in place for the same reason.
+- **Verify against the artifact.** De-Google changes are confirmed against the
+  built APK (no `com.google.firebase`/`com.google.android.gms` classes, no
+  unexpected network endpoints), not just against the source tree.
+- **Minimal new dependencies.** Every new or upgraded dependency is vetted
+  before code is written against it: actively maintained, current stable
+  version, no known advisories, non-deprecated API surface, and a real need
+  that the standard library or existing deps cannot meet.
+- **Security first.** No known security flaw ships, however small; genuinely
+  deferred issues are documented in `KNOWN_ISSUES.md` with rationale. Any
+  cross-app interface (e.g. the third-party mic API) must be explicitly
+  authorization-gated (signature/knownSigner-level permissions or equivalent),
+  never openly exported.
+- **License compliance.** Keep `LICENSE` and copyright notices intact; changes
+  are tracked through git history per GPLv3 §5.
+- **Branch discipline.** Feature work happens on branches, each reviewed
+  before merging to master. Commits are logical units that build and pass
+  tests, with an imperative subject and a body explaining what and why.
+- **House style: no em dashes** in anything committed to this fork (docs,
+  comments, commit messages). Use commas, colons, semicolons, or parentheses
+  instead. Upstream text kept verbatim (like the section below) is exempt.
+
+---
+
+# Upstream documentation
+
+Everything below is upstream's CLAUDE.md, kept intact so upstream merges stay
+cheap. Where it conflicts with the fork rules above, the fork rules win
+(notably: iOS instructions are unmaintained here, and the Ring/Index modules
+are slated to be unplugged from the build).
+
 # CoreApp
 
 Kotlin Multiplatform / Compose Multiplatform app targeting Android and iOS.
@@ -138,4 +202,3 @@ When asked to make a release build and install it on a local device, follow the 
     - wait long enough for `PebbleService` / Ring BLE scanning to start, then check for `FATAL EXCEPTION`, `ClassNotFoundException`, `Room cannot verify`, and `Process: coredevices.coreapp`.
 
 Release builds are minified. If a release-only crash appears in Haversine/native BLE code, check R8 keep rules before changing app logic. In particular, the Haversine native library resolves `com.wtlp.haversinesatellitelibrary.logging.HaversineLog` by exact JVM class name, so the app proguard rules must keep that class.
-
