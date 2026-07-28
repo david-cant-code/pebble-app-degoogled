@@ -149,7 +149,12 @@ class WeatherAppBlobRecord(
     val tomorrowLowTemp = SShort(m, tomorrowLowTemp, endianness = Endian.Little)
     val lastUpdateTimeUtc = SUInt(m, lastUpdateTimeUtc, endianness = Endian.Little)
     val isCurrentLocation = SBoolean(m, isCurrentLocation)
-    val allStringsLength = SUShort(m, (locationName.length + 2 + forecastShort.length + 2).toUShort(), endianness = Endian.Little)
+    // UTF-8 byte counts, not String.length: SLongString writes UTF-8 bytes on the wire.
+    val allStringsLength = SUShort(
+        m,
+        (locationName.encodeToByteArray().size + 2 + forecastShort.encodeToByteArray().size + 2).toUShort(),
+        endianness = Endian.Little,
+    )
     val locationName = SLongString(m, locationName, endianness = Endian.Little)
     val forecastShort = SLongString(m, forecastShort, endianness = Endian.Little)
 }
@@ -325,7 +330,12 @@ class WeatherAppBlobRecordV4(
     )
 
     // --- variable-length trailing strings (MUST stay last) ---
-    val allStringsLength = SUShort(m, (locationName.length + 2 + forecastShort.length + 2).toUShort(), endianness = Endian.Little)
+    // UTF-8 byte counts, not String.length: SLongString writes UTF-8 bytes on the wire.
+    val allStringsLength = SUShort(
+        m,
+        (locationName.encodeToByteArray().size + 2 + forecastShort.encodeToByteArray().size + 2).toUShort(),
+        endianness = Endian.Little,
+    )
     val locationName = SLongString(m, locationName, endianness = Endian.Little)
     val forecastShort = SLongString(m, forecastShort, endianness = Endian.Little)
 }
