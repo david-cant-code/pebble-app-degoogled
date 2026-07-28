@@ -19,6 +19,7 @@ import coredevices.pebble.services.PebbleHttpClient.Companion.get
 import coredevices.pebble.services.PebbleHttpClient.Companion.put
 import coredevices.pebble.ui.CommonAppType
 import coredevices.pebble.weather.WeatherResponse
+import coredevices.pebble.weather.formatCoordinate
 import coredevices.util.CoreConfigFlow
 import coredevices.util.WeatherUnit
 import dev.gitlive.firebase.Firebase
@@ -241,12 +242,17 @@ class PebbleHttpClient(
     override suspend fun getBootConfig(url: String): BootConfig? = get(url, auth = HttpClientAuthType.Pebble)
 }
 
-private val COORDINATE_REGEX = Regex("""/(-?\d+\.\d+)/(-?\d+\.\d+)""")
+// Scrubs the whole geocode path segments rather than matching a number shape:
+// a shape-anchored pattern silently stops scrubbing when the coordinate
+// rendering changes (e.g. scientific notation for near-zero values).
+private val COORDINATE_REGEX = Regex("""/geocode/[^/?#]+/[^/?#]+""")
+
+internal fun String.scrubGeocodeCoordinates(): String =
+    replace(COORDINATE_REGEX, "/geocode/xx.xxxxxx/yy.yyyyyy")
 
 private fun String.sanitizeUrl(libPebble: LibPebble): String {
     if (libPebble.config.value.notificationConfig.obfuscateContent) {
-        // Replaces /37.756/-122.419 with /xx.xxxxxx/yy.yyyyyy
-        return this.replace(COORDINATE_REGEX, "/xx.xxxxxx/yy.yyyyyy")
+        return this.scrubGeocodeCoordinates()
     }
     return this
 }
@@ -422,7 +428,9 @@ class RealPebbleWebServices(
     }
 
     override suspend fun getWeather(latitude: Double, longitude: Double, units: WeatherUnit, language: String): WeatherResponse? {
-        val url = "https://weather-api.repebble.com/api/v1/geocode/$latitude/$longitude?language=$language&units=${units.code}"
+        // Fixed-point rendering: raw Double interpolation emits scientific notation
+        // below 1e-3, which weather-api may not parse.
+        val url = "https://weather-api.repebble.com/api/v1/geocode/${formatCoordinate(latitude)}/${formatCoordinate(longitude)}?language=$language&units=${units.code}"
         return httpClient.get(url, auth = HttpClientAuthType.None)
     }
 
