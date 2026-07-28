@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.EditLocationAlt
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Refresh
@@ -39,6 +40,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
@@ -46,6 +48,9 @@ import co.touchlab.kermit.Logger
 import coredevices.database.WeatherLocationDao
 import coredevices.database.WeatherLocationEntity
 import coredevices.pebble.weather.WeatherFetcher
+import coredevices.pebble.weather.coordinateDisplayName
+import coredevices.pebble.weather.parseLatitude
+import coredevices.pebble.weather.parseLongitude
 import coredevices.pebble.weather.usefulName
 import coredevices.ui.M3Dialog
 import dev.jordond.compass.Place
@@ -180,6 +185,8 @@ fun WeatherScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
     }
 }
 
+private enum class AddLocationMode { Choose, Search, Manual }
+
 @Composable
 private fun AddWeatherLocationDialog(
     onDismiss: () -> Unit,
@@ -187,11 +194,16 @@ private fun AddWeatherLocationDialog(
     allowCurrentLocation: Boolean,
     orderIndex: Int,
 ) {
-    var showFixedLocationSearch by remember { mutableStateOf(!allowCurrentLocation) }
+    var mode by remember { mutableStateOf(AddLocationMode.Choose) }
     var addressQuery by remember { mutableStateOf("") }
     val autoComplete = remember { Autocomplete.mobile() }
     var suggestions by remember { mutableStateOf<List<Place>>(emptyList()) }
     var searchFailed by remember { mutableStateOf(false) }
+    var latitudeText by remember { mutableStateOf("") }
+    var longitudeText by remember { mutableStateOf("") }
+    var nameText by remember { mutableStateOf("") }
+    val latitude = parseLatitude(latitudeText)
+    val longitude = parseLongitude(longitudeText)
 
     LaunchedEffect(addressQuery) {
         if (addressQuery.length >= 3) {
@@ -213,76 +225,76 @@ private fun AddWeatherLocationDialog(
 
     M3Dialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (showFixedLocationSearch) "Search Location" else "Add Weather Location") },
+        title = {
+            Text(
+                when (mode) {
+                    AddLocationMode.Choose -> "Add Weather Location"
+                    AddLocationMode.Search -> "Search Location"
+                    AddLocationMode.Manual -> "Enter Coordinates"
+                }
+            )
+        },
+        scrollableContent = mode == AddLocationMode.Manual,
         buttons = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
+            if (mode == AddLocationMode.Manual) {
+                Spacer(Modifier.width(8.dp))
+                TextButton(
+                    enabled = latitude != null && longitude != null,
+                    onClick = {
+                        if (latitude == null || longitude == null) return@TextButton
+                        onAddLocation(
+                            WeatherLocationEntity(
+                                key = Uuid.random(),
+                                name = nameText.trim()
+                                    .ifEmpty { coordinateDisplayName(latitude, longitude) },
+                                latitude = latitude,
+                                longitude = longitude,
+                                currentLocation = false,
+                                orderIndex = orderIndex,
+                            )
+                        )
+                        onDismiss()
+                    },
+                ) { Text("Add") }
+            }
         },
     ) {
-        if (!showFixedLocationSearch) {
-            // Initial choice screen
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        when (mode) {
+            AddLocationMode.Choose -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (allowCurrentLocation) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                val location = WeatherLocationEntity(
-                                    key = Uuid.random(),
-                                    name = "Current Location",
-                                    latitude = null,
-                                    longitude = null,
-                                    currentLocation = true,
-                                    orderIndex = orderIndex,
-                                )
-                                onAddLocation(location)
-                                onDismiss()
-                            }
-                            .padding(vertical = 12.dp, horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                    AddLocationChoice(
+                        icon = Icons.Default.MyLocation,
+                        title = "Current Location",
+                        subtitle = "Uses your device's location",
                     ) {
-                        Icon(
-                            Icons.Default.MyLocation,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
+                        val location = WeatherLocationEntity(
+                            key = Uuid.random(),
+                            name = "Current Location",
+                            latitude = null,
+                            longitude = null,
+                            currentLocation = true,
+                            orderIndex = orderIndex,
                         )
-                        Spacer(Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Current Location", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                "Uses your device's location",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        onAddLocation(location)
+                        onDismiss()
                     }
                 }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showFixedLocationSearch = true }
-                        .padding(vertical = 12.dp, horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Default.LocationOn,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Fixed Location", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            "Search for a specific address",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                AddLocationChoice(
+                    icon = Icons.Default.LocationOn,
+                    title = "Fixed Location",
+                    subtitle = "Search for a specific address",
+                ) { mode = AddLocationMode.Search }
+
+                AddLocationChoice(
+                    icon = Icons.Default.EditLocationAlt,
+                    title = "Coordinates",
+                    subtitle = "Enter latitude and longitude",
+                ) { mode = AddLocationMode.Manual }
             }
-        } else {
-            // Fixed location search screen
-            Column {
+
+            AddLocationMode.Search -> Column {
                 OutlinedTextField(
                     value = addressQuery,
                     onValueChange = { addressQuery = it },
@@ -342,6 +354,10 @@ private fun AddWeatherLocationDialog(
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(top = 12.dp),
                     )
+                    TextButton(
+                        onClick = { mode = AddLocationMode.Manual },
+                        modifier = Modifier.padding(top = 4.dp),
+                    ) { Text("Enter coordinates instead") }
                 } else if (addressQuery.length >= 3) {
                     Text(
                         "Type to search for locations...",
@@ -351,6 +367,74 @@ private fun AddWeatherLocationDialog(
                     )
                 }
             }
+
+            // Plain text keyboard on these fields: some IMEs' decimal layouts
+            // have no minus key, which southern/western coordinates need.
+            AddLocationMode.Manual -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = latitudeText,
+                    onValueChange = { latitudeText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Latitude") },
+                    placeholder = { Text("e.g. 51.5074") },
+                    singleLine = true,
+                    isError = latitudeText.isNotBlank() && latitude == null,
+                    supportingText = if (latitudeText.isNotBlank() && latitude == null) {
+                        { Text("Number between -90 and 90") }
+                    } else null,
+                )
+                OutlinedTextField(
+                    value = longitudeText,
+                    onValueChange = { longitudeText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Longitude") },
+                    placeholder = { Text("e.g. -0.1278") },
+                    singleLine = true,
+                    isError = longitudeText.isNotBlank() && longitude == null,
+                    supportingText = if (longitudeText.isNotBlank() && longitude == null) {
+                        { Text("Number between -180 and 180") }
+                    } else null,
+                )
+                OutlinedTextField(
+                    value = nameText,
+                    onValueChange = { nameText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Name (optional)") },
+                    placeholder = { Text("Defaults to the coordinates") },
+                    singleLine = true,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddLocationChoice(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
