@@ -112,7 +112,6 @@ kotlin {
                 implementation(libs.webview)
                 implementation(libs.backhandler)
                 api(libs.uri)
-                implementation(libs.firebase.crashlytics)
                 implementation(libs.firebase.auth)
                 implementation(libs.firebase.firestore)
                 implementation(libs.coredevices.speex)

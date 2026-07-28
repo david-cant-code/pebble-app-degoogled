@@ -16,8 +16,6 @@ import coredevices.pebble.services.PebbleWebServices
 import coredevices.util.AppResumed
 import coredevices.util.DoneInitialOnboarding
 import coredevices.util.PermissionRequester
-import dev.gitlive.firebase.Firebase
-import dev.gitlive.firebase.crashlytics.crashlytics
 import io.rebble.libpebblecommon.connection.BleDiscoveredPebbleDevice
 import io.rebble.libpebblecommon.connection.CommonConnectedDevice
 import io.rebble.libpebblecommon.connection.ConnectedPebble
@@ -33,7 +31,6 @@ import io.rebble.libpebblecommon.metadata.WatchHardwarePlatform
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.mapNotNull
@@ -105,21 +102,6 @@ class PebbleAppDelegate(
                 }
             }
             GlobalScope.launch {
-                libPebble.watches.mapNotNull { watches ->
-                    watches.maxByOrNull { if (it is KnownPebbleDevice) it.lastConnected.epochSeconds else 0 }
-                }.filterIsInstance<KnownPebbleDevice>().distinctUntilChanged().collect { device ->
-                    Firebase.crashlytics.setCustomKey("last_connected_serial", device.serial)
-                    Firebase.crashlytics.setCustomKey(
-                        "last_connected_watch_type",
-                        device.watchType.revision
-                    )
-                    Firebase.crashlytics.setCustomKey(
-                        "last_connected_watch_firmware",
-                        device.runningFwVersion
-                    )
-                }
-            }
-            GlobalScope.launch {
                 libPebble.watches.collect { watches ->
                     watches.forEach { watch ->
                         if (watch is ConnectedPebble.Firmware) {
@@ -166,22 +148,9 @@ class PebbleAppDelegate(
                     combine(flows) { it.toList() }
                 }.collect {
                     val activeSessions = it.filterNotNull()
-                    Firebase.crashlytics.setCustomKey("active_pkjs_sessions", activeSessions.size)
                     logger.d { "Active PKJS sessions: ${activeSessions.size}" }
                     activeSessions.take(4).forEachIndexed { index, session ->
                         val uuid = session.uuid.toString()
-                        Firebase.crashlytics.setCustomKey(
-                            "pkjs_session_${index}_app_uuid",
-                            uuid
-                        )
-                        Firebase.crashlytics.setCustomKey(
-                            "pkjs_${uuid}_app",
-                            session.appInfo.longName
-                        )
-                        Firebase.crashlytics.setCustomKey(
-                            "pkjs_${uuid}_ready",
-                            session.sessionIsReady
-                        )
                         logger.d { "PKJS session ${index}: $uuid (${session.appInfo.longName}) is ready: ${session.sessionIsReady}" }
                     }
                 }

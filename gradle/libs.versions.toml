@@ -28,7 +28,6 @@ monitorVersion = "1.8.0"
 androidXTestVersion = "1.7.0"
 androidXRulesVersion = "1.7.0"
 googleServices = "4.4.4"
-firebase-crashlytics-plugin = "3.0.6"
 androidVersion = "2.4.0"
 androidx-activityCompose = "1.12.4"
 androidx-credentials = "1.5.0"
@@ -79,7 +78,6 @@ nativeCocoaPods = { id = "org.jetbrains.kotlin.native.cocoapods", version.ref = 
 kotlinx-atomicfu = { id = "org.jetbrains.kotlinx.atomicfu", version.ref = "atomicfu" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 googleServices = { id = "com.google.gms.google-services", version.ref = "googleServices" }
-firebaseCrashlytics = { id = "com.google.firebase.crashlytics", version.ref = "firebase-crashlytics-plugin" }
 androidVersion = { id = "de.nanogiants.android-versioning", version.ref = "androidVersion" }
 buildKonfig = { id = "com.codingfeline.buildkonfig", version.ref = "buildkonfig" }
 androidKotlinMultiplatformLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
@@ -146,8 +144,6 @@ androidx-navigation-compose = { group = "org.jetbrains.androidx.navigation", nam
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebase-bom" }
 firebase-auth = { group = "dev.gitlive", name = "firebase-auth", version.ref = "firebase-kotlin" }
 firebase-firestore = { group = "dev.gitlive", name = "firebase-firestore", version.ref = "firebase-kotlin" }
-firebase-crashlytics = { group = "dev.gitlive", name = "firebase-crashlytics", version.ref = "firebase-kotlin" }
-firebase-crashlytics-ndk = { group = "com.google.firebase", name = "firebase-crashlytics-ndk" }
 firebase-storage = { group = "dev.gitlive", name = "firebase-storage", version.ref = "firebase-kotlin" }
 kmpnotifier = { group = "io.github.mirzemehdi", name = "kmpnotifier", version.ref = "kmpnotifier" }
 mixpanel-android = { module = "com.mixpanel.android:mixpanel-android", version.ref = "mixpanel-android" }

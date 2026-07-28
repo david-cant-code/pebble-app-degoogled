@@ -96,8 +96,6 @@ import coredevices.ring.ui.theme.IndexThemeHost
 import coredevices.ring.ui.viewmodel.MessagePlaybackState
 import coredevices.ring.ui.viewmodel.RecordingDetailsViewModel
 import coredevices.util.rememberUiContext
-import dev.gitlive.firebase.Firebase
-import dev.gitlive.firebase.crashlytics.crashlytics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.flow
@@ -111,7 +109,6 @@ import coreapp.util.generated.resources.Res as UtilRes
 
 @Composable
 fun RecordingDetails(id: Long, coreNav: CoreNav) {
-    Firebase.crashlytics.setCustomKey("recording_details_recording_id", id)
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val uiContext = rememberUiContext()
@@ -258,7 +255,6 @@ fun RecordingDetails(id: Long, coreNav: CoreNav) {
             )
         }
     }
-    Firebase.crashlytics.setCustomKey("recording_details_recording_id", 0)
 }
 
 @Composable
