@@ -125,7 +125,6 @@ import coredevices.pebble.ui.SettingsIds.EnableHealthTracking
 import coredevices.pebble.ui.SettingsIds.EnableSleepInsights
 import coredevices.pebble.ui.SettingsIds.OfflineSpeechRecognition
 import coredevices.pebble.ui.SettingsKeys.KEY_ENABLE_MEMFAULT_UPLOADS
-import coredevices.pebble.ui.SettingsKeys.KEY_ENABLE_MIXPANEL_UPLOADS
 import coredevices.pebble.weather.WeatherFetcher
 import coredevices.ui.ConfirmDialog
 import coredevices.ui.CoreLinearProgressIndicator
@@ -446,7 +445,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     val uiContext = rememberUiContext()
     val analyticsBackend: AnalyticsBackend = koinInject()
     val enableMemfault = remember { mutableStateOf(settings.getBoolean(KEY_ENABLE_MEMFAULT_UPLOADS, true)) }
-    val enableMixpanel = remember { mutableStateOf(settings.getBoolean(KEY_ENABLE_MIXPANEL_UPLOADS, true)) }
     val enableExperimentalDevices: EnableExperimentalDevices = koinInject()
     val experimentalDevices by enableExperimentalDevices.enabled.collectAsState()
     val appUpdateTracker: AppUpdateTracker = koinInject()
@@ -492,7 +490,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
             missingPermissions,
             updateState,
             enableMemfault,
-            enableMixpanel,
             coreConfig,
             experimentalDevices,
             loggedIn,
@@ -1526,21 +1523,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                             coreAnalytics.logEvent("memfault_collection_disabled")
                         }
                         settings.set(KEY_ENABLE_MEMFAULT_UPLOADS, it)
-                    },
-                ),
-                basicSettingsToggleItem(
-                    title = "Send app analytics",
-                    description = "This allows us to track metrics e.g. connectivity, so that we can track different types of error and improve reliability",
-                    topLevelType = TopLevelType.Phone,
-                    section = Section.Diagnostics,
-                    checked = enableMixpanel.value,
-                    onCheckChanged = {
-                        enableMixpanel.value = it
-                        settings.set(KEY_ENABLE_MIXPANEL_UPLOADS, it)
-                        if (!it) {
-                            coreAnalytics.logEvent("mixpanel_collection_disabled")
-                        }
-                        analyticsBackend.setEnabled(it)
                     },
                 ),
                 basicSettingsToggleItem(
