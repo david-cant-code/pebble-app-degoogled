@@ -48,7 +48,7 @@ import co.touchlab.kermit.Logger
 import coredevices.database.WeatherLocationDao
 import coredevices.database.WeatherLocationEntity
 import coredevices.pebble.weather.WeatherFetcher
-import coredevices.pebble.weather.coordinateDisplayName
+import coredevices.pebble.weather.manualWeatherLocation
 import coredevices.pebble.weather.parseLatitude
 import coredevices.pebble.weather.parseLongitude
 import coredevices.pebble.weather.usefulName
@@ -111,7 +111,9 @@ fun WeatherScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                 }
             },
             allowCurrentLocation = !locations.any { it.currentLocation },
-            orderIndex = locations.size,
+            // max+1, not size: delete doesn't compact indices, so size can collide
+            // with a surviving row and make the ORDER BY tie-break unspecified.
+            orderIndex = (locations.maxOfOrNull { it.orderIndex } ?: -1) + 1,
         )
     }
 
@@ -243,17 +245,7 @@ private fun AddWeatherLocationDialog(
                     enabled = latitude != null && longitude != null,
                     onClick = {
                         if (latitude == null || longitude == null) return@TextButton
-                        onAddLocation(
-                            WeatherLocationEntity(
-                                key = Uuid.random(),
-                                name = nameText.trim()
-                                    .ifEmpty { coordinateDisplayName(latitude, longitude) },
-                                latitude = latitude,
-                                longitude = longitude,
-                                currentLocation = false,
-                                orderIndex = orderIndex,
-                            )
-                        )
+                        onAddLocation(manualWeatherLocation(latitude, longitude, nameText, orderIndex))
                         onDismiss()
                     },
                 ) { Text("Add") }
