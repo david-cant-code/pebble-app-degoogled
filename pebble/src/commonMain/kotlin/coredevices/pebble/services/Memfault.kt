@@ -3,7 +3,6 @@ package coredevices.pebble.services
 import co.touchlab.kermit.Logger
 import com.russhwolf.settings.Settings
 import coredevices.pebble.Platform
-import coredevices.util.CommonBuildKonfig
 import io.ktor.client.HttpClient
 import io.ktor.client.call.NoTransformationFoundException
 import io.ktor.client.call.body
@@ -24,11 +23,14 @@ class Memfault(
     private val httpClient: HttpClient,
     private val settings: Settings,
     private val platform: Platform,
+    // Injected (DI passes CommonBuildKonfig.MEMFAULT_TOKEN) so tests can pin the
+    // behavior of both token states independently of the build environment.
+    private val memfaultToken: String?,
 ) {
     private val logger = Logger.withTag("Memfault")
 
     suspend fun getLatestFirmware(watch: WatchInfo): FirmwareUpdateCheckResult {
-        val token = CommonBuildKonfig.MEMFAULT_TOKEN
+        val token = memfaultToken
         if (token == null) {
             return FirmwareUpdateCheckResult.UpdateCheckFailed("No Memfault token")
         }

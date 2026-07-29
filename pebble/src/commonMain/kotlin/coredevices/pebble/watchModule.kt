@@ -57,6 +57,7 @@ import coredevices.pebble.ui.WatchSettingsScreenViewModel
 import coredevices.pebble.weather.OpenWeather25Interceptor
 import coredevices.pebble.weather.WeatherFetcher
 import coredevices.pebble.weather.YahooWeatherInterceptor
+import coredevices.util.CommonBuildKonfig
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.jordond.compass.geocoder.Geocoder
@@ -179,7 +180,9 @@ val watchModule = module {
         PebbleHttpClient(pebbleAccount = get(), httpClient = get(), libPebble = lazy { get() })
     } bind PebbleBootConfigService::class
     factoryOf(::LibPebbleConfig)
-    singleOf(::Memfault)
+    // Not singleOf: Koin cannot resolve the nullable token parameter, and passing it
+    // here keeps the class testable with explicit token states.
+    single { Memfault(get(), get(), get(), CommonBuildKonfig.MEMFAULT_TOKEN) }
     singleOf(::MemfaultChunkQueue)
     singleOf(::AnalyticsIngest)
     singleOf(::AnalyticsHeartbeatQueue)

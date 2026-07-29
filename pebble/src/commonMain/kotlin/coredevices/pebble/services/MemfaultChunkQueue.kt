@@ -14,6 +14,9 @@ import kotlin.time.Duration.Companion.seconds
 
 private data class PendingChunk(val serial: String, val bytes: ByteArray)
 
+// In this fork nothing calls enqueue() (the web-services intake drops chunks);
+// the class survives only to drain and delete rows persisted before the telemetry
+// strip, via the always-true uploadChunkBatch stub.
 class MemfaultChunkQueue(
     private val memfault: Memfault,
     private val dao: MemfaultChunkDao,

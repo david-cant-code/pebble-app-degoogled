@@ -47,6 +47,12 @@ lands piece by piece:
 - For a release build signed with the debug key, set
   `LOCAL_RELEASE_BUILD=true` in the root `local.properties`, then
   `./gradlew :composeApp:assembleRelease`.
+- The optional `memfaultToken` Gradle property routes Core-device firmware
+  update checks through Memfault. Those checks periodically send the watch
+  serial number (or a MAC-derived identifier), hardware revision, and
+  firmware version to `api.memfault.com` in the background. Fork builds
+  ship no token and make no Memfault requests; firmware updates still work
+  through the cohorts endpoint.
 
 ## Architecture
 
