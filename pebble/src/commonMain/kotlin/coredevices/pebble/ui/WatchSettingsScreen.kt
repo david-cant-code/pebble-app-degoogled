@@ -88,6 +88,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ClipEntry
@@ -205,7 +206,7 @@ enum class Section(val title: String, val icon: ImageVector) {
     NotificationsWatch("Notifications", Icons.Default.Notifications), // watch only
     General("General", Icons.Default.Settings),
     Apps("Apps", Icons.Default.Apps),
-    Battery("Battery", Icons.Default.BatteryFull),
+    Battery("Battery (Not available without telemetry)", Icons.Default.BatteryFull),
     Calendar("Calendar", Icons.Default.CalendarMonth),
     Health("Health", Icons.AutoMirrored.Filled.DirectionsRun),
     Speech("Speech Recognition", Icons.Default.Mic),
@@ -1989,6 +1990,10 @@ fun WatchSettingsScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                             val sectionBadgeCount = filteredItems
                                 .filter { it.section == section && it.badge != null && it.show() }
                                 .sumOf { it.badge?.toIntOrNull() ?: 0 }
+                            // Battery analytics is upstream's server-rendered page, fed by the
+                            // watch-telemetry relay this fork strips; with no data source left,
+                            // the entry stays visible but disabled.
+                            val sectionEnabled = section != Section.Battery
                             ListItem(
                                 leadingContent = {
                                     Icon(
@@ -2005,7 +2010,9 @@ fun WatchSettingsScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                                     }
                                 } else null,
                                 shadowElevation = ELEVATION,
-                                modifier = Modifier.clickable {
+                                modifier = Modifier
+                                    .alpha(if (sectionEnabled) 1f else 0.38f)
+                                    .clickable(enabled = sectionEnabled) {
                                     val navigateDirectlyTo = section.navigatesDirectlyTo()
                                     if (navigateDirectlyTo != null) {
                                         navBarNav.navigateTo(navigateDirectlyTo)

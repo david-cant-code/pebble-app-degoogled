@@ -13,7 +13,10 @@ similar phones with as little telemetry as technically possible.
 - **No Google Play services / Firebase.** Everything the watch needs must
   work on a de-Googled phone.
 - **No telemetry.** Crash reporting, analytics heartbeats, and the watch
-  firmware-diagnostics relay are removed.
+  firmware-diagnostics relay are removed. Upstream's battery-analytics
+  screen is a server-rendered page fed by that relay, so it has no data
+  source in this fork and its entry points are disabled; usable battery
+  analytics would need a local, on-device reimplementation.
 - **Weather without Play services.** Manual latitude/longitude entry, since
   the stock place search relies on the GMS-backed platform geocoder.
 - **A watch microphone API for third-party applications** documented and
