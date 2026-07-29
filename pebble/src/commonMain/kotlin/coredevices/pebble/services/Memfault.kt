@@ -3,22 +3,15 @@ package coredevices.pebble.services
 import co.touchlab.kermit.Logger
 import com.russhwolf.settings.Settings
 import coredevices.pebble.Platform
-import coredevices.pebble.ui.SettingsKeys.KEY_ENABLE_MEMFAULT_UPLOADS
 import coredevices.util.CommonBuildKonfig
 import io.ktor.client.HttpClient
 import io.ktor.client.call.NoTransformationFoundException
 import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.header
-import io.ktor.client.request.post
-import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
-import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
-import io.ktor.http.content.ByteArrayContent
 import io.ktor.http.encodeURLParameter
-import io.ktor.http.isSuccess
-import io.ktor.http.userAgent
 import io.ktor.serialization.ContentConvertException
 import io.rebble.libpebblecommon.connection.FirmwareUpdateCheckResult
 import io.rebble.libpebblecommon.services.FirmwareVersion
@@ -26,7 +19,6 @@ import io.rebble.libpebblecommon.services.WatchInfo
 import kotlinx.io.IOException
 import kotlinx.serialization.Serializable
 import kotlin.time.Instant
-import kotlin.uuid.Uuid
 
 class Memfault(
     private val httpClient: HttpClient,
@@ -117,65 +109,10 @@ class Memfault(
         }
     }
 
-    suspend fun uploadChunkBatch(chunks: List<ByteArray>, serial: String): Boolean {
-        if (!settings.getBoolean(KEY_ENABLE_MEMFAULT_UPLOADS, true)) {
-            logger.d { "Not uploading Memfault chunks (disabled in settings)" }
-            return true
-        }
-        val token = CommonBuildKonfig.MEMFAULT_TOKEN ?: run {
-            logger.i { "uploadChunkBatch: no memfault token" }
-            return true
-        }
-        logger.d { "Sending ${chunks.size} chunk(s) to Memfault for serial=$serial" }
-        val url = "https://chunks.memfault.com/api/v0/chunks/$serial"
-        val response = try {
-            if (chunks.size == 1) {
-                httpClient.post(url) {
-                    header("Memfault-Project-Key", token)
-                    userAgent(platform.name)
-                    setBody(chunks.first())
-                }
-            } else {
-                val boundary = Uuid.random().toString()
-                httpClient.post(url) {
-                    header("Memfault-Project-Key", token)
-                    userAgent(platform.name)
-                    setBody(ByteArrayContent(
-                        bytes = buildMultipartMixedBody(chunks, boundary),
-                        contentType = ContentType.MultiPart.Mixed.withParameter("boundary", boundary),
-                    ))
-                }
-            }
-        } catch (e: IOException) {
-            logger.w(e) { "Error sending chunks to Memfault: ${e.message}" }
-            return false
-        }
-        return if (!response.status.isSuccess()) {
-            logger.w { "uploadChunkBatch response = ${response.status}" }
-            false
-        } else true
-    }
-
-    /**
-     * Build a multipart/mixed body matching the format the Memfault chunks API expects.
-     * Each part has only a Content-Length header and the raw chunk bytes.
-     */
-    private fun buildMultipartMixedBody(chunks: List<ByteArray>, boundary: String): ByteArray {
-        val parts = mutableListOf<ByteArray>()
-        for (chunk in chunks) {
-            parts.add("--$boundary\r\nContent-Length: ${chunk.size}\r\n\r\n".encodeToByteArray())
-            parts.add(chunk)
-            parts.add("\r\n".encodeToByteArray())
-        }
-        parts.add("--$boundary--\r\n".encodeToByteArray())
-        val result = ByteArray(parts.sumOf { it.size })
-        var offset = 0
-        for (part in parts) {
-            part.copyInto(result, offset)
-            offset += part.size
-        }
-        return result
-    }
+    // This fork never uploads Memfault chunks (fork goal: strip telemetry).
+    // Reporting success makes the queue delete rows enqueued before the fork,
+    // so legacy diagnostics data is drained locally, never transmitted.
+    suspend fun uploadChunkBatch(chunks: List<ByteArray>, serial: String): Boolean = true
 
     private fun ensureVersionPrefix(version: String): String {
         return if (version.startsWith("v")) {

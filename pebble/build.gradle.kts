@@ -129,6 +129,10 @@ kotlin {
         commonTest {
             dependencies {
                 implementation(libs.kotlin.test)
+                // Test-only: MockEngine lets the no-telemetry tests assert that the
+                // gutted upload paths never touch the network (fork goal: strip telemetry).
+                implementation(libs.ktor.client.mock)
+                implementation(libs.coroutines.test)
             }
         }
 

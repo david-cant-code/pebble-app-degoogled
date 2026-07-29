@@ -14,9 +14,6 @@ import coredevices.coreapp.util.FileLogWriter
 import coredevices.coreapp.util.generateDeviceSummary
 import coredevices.coreapp.util.getLogsCacheDir
 import coredevices.pebble.PebbleAppDelegate
-import coredevices.pebble.ui.SettingsKeys.KEY_ENABLE_FIREBASE_UPLOADS
-import coredevices.pebble.ui.SettingsKeys.KEY_ENABLE_MEMFAULT_UPLOADS
-import coredevices.pebble.ui.SettingsKeys.KEY_ENABLE_MIXPANEL_UPLOADS
 import coredevices.ring.util.trace.TraceSessionExporter
 import coredevices.util.CompanionDevice
 import coredevices.util.CoreConfigFlow
@@ -303,10 +300,6 @@ class BugReportProcessor(
                 append("\nAttachment: ${it.fileName}")
             }
             append("\nTime since last full background sync: ${coreBackgroundSync.timeSinceLastSync()}")
-            append("\nAnalytics settings:")
-            append("\nFirebase uploads enabled: ${settings.getBoolean(KEY_ENABLE_FIREBASE_UPLOADS, true)}")
-            append("\nMemfault uploads enabled: ${settings.getBoolean(KEY_ENABLE_MEMFAULT_UPLOADS, true)}")
-            append("\nMixpanel uploads enabled: ${settings.getBoolean(KEY_ENABLE_MIXPANEL_UPLOADS, true)}")
         }
         return summaryWithAttachmentCount
     }

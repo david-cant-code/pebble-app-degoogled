@@ -29,8 +29,8 @@ build due to their heavy reliance on Firebase and other cloud services.
 Early days, the fork currently tracks upstream while the de-Google work
 lands piece by piece:
 
-- [ ] Manual weather location entry
-- [ ] Telemetry strip (Crashlytics, analytics, firmware-diagnostics relay)
+- [x] Manual weather location entry
+- [x] Telemetry strip (Crashlytics, analytics, firmware-diagnostics relay)
 - [ ] Google Play services / Firebase removal
 - [ ] Third-party microphone API
 

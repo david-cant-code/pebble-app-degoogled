@@ -108,7 +108,6 @@ import com.russhwolf.settings.set
 import coredevices.CoreBackgroundSync
 import coredevices.EnableExperimentalDevices
 import coredevices.analytics.AnalyticsBackend
-import coredevices.analytics.CoreAnalytics
 import coredevices.analytics.setUser
 import coredevices.coreapp.util.AppUpdate
 import coredevices.coreapp.util.AppUpdateState
@@ -124,7 +123,6 @@ import coredevices.pebble.ui.SettingsIds.EnableHealthPlatformSync
 import coredevices.pebble.ui.SettingsIds.EnableHealthTracking
 import coredevices.pebble.ui.SettingsIds.EnableSleepInsights
 import coredevices.pebble.ui.SettingsIds.OfflineSpeechRecognition
-import coredevices.pebble.ui.SettingsKeys.KEY_ENABLE_MEMFAULT_UPLOADS
 import coredevices.pebble.weather.WeatherFetcher
 import coredevices.ui.ConfirmDialog
 import coredevices.ui.CoreLinearProgressIndicator
@@ -444,7 +442,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     val missingPermissions by permissionRequester.missingPermissions.collectAsState()
     val uiContext = rememberUiContext()
     val analyticsBackend: AnalyticsBackend = koinInject()
-    val enableMemfault = remember { mutableStateOf(settings.getBoolean(KEY_ENABLE_MEMFAULT_UPLOADS, true)) }
     val enableExperimentalDevices: EnableExperimentalDevices = koinInject()
     val experimentalDevices by enableExperimentalDevices.enabled.collectAsState()
     val appUpdateTracker: AppUpdateTracker = koinInject()
@@ -478,7 +475,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
         }
     }
     val watchPrefs = watchPrefs()
-    val coreAnalytics: CoreAnalytics = koinInject()
     val platformHealthSync: PlatformHealthSync = koinInject()
     val healthSyncTracker: HealthSyncTracker = koinInject()
     val healthPlatformSyncEnabled by healthSyncTracker.enabled.collectAsState()
@@ -489,7 +485,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
             debugOptionsEnabled,
             missingPermissions,
             updateState,
-            enableMemfault,
             coreConfig,
             experimentalDevices,
             loggedIn,
@@ -1510,20 +1505,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                         )
                     },
                     show = { pebbleFeatures.supportsDetectingOtherPebbleApps() },
-                ),
-                basicSettingsToggleItem(
-                    title = "Send watch analytics",
-                    description = "Only for Core Devices watches. This allows us to measure metrics e.g. battery life, and debug watch crashes (otherwise we do not know whether they are regressions in reliability or performance)",
-                    topLevelType = TopLevelType.Phone,
-                    section = Section.Diagnostics,
-                    checked = enableMemfault.value,
-                    onCheckChanged = {
-                        enableMemfault.value = it
-                        if (!it) {
-                            coreAnalytics.logEvent("memfault_collection_disabled")
-                        }
-                        settings.set(KEY_ENABLE_MEMFAULT_UPLOADS, it)
-                    },
                 ),
                 basicSettingsToggleItem(
                     title = "Show notifications in phone logs",
