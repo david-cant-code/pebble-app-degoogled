@@ -19,7 +19,9 @@ option does not apply here.
    documented, permission-gated audio capture API usable by any authorized
    app, rather than locking watch mic audio to first-party features.
 5. Secondary: make battery analytics usable without a sign-in wall, if
-   feasible.
+   feasible. Upstream's battery screen is a server-rendered page fed by the
+   telemetry relay this fork strips (its entry points are disabled here), so
+   this goal now means a local, on-device reimplementation.
 
 ## Fork rules (these override the upstream rules below where they conflict)
 

@@ -11,7 +11,6 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.googleServices)
-    alias(libs.plugins.firebaseCrashlytics)
     alias(libs.plugins.androidVersion)
     alias(libs.plugins.nativeCocoaPods)
     alias(libs.plugins.kotlinx.atomicfu)
@@ -152,7 +151,6 @@ kotlin {
             }
         }
         androidMain.dependencies {
-            implementation(libs.firebase.crashlytics.ndk)
             implementation(compose.preview)
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.credentials)
@@ -212,7 +210,6 @@ kotlin {
 
             implementation(libs.firebase.auth)
             implementation(libs.firebase.firestore)
-            implementation(libs.firebase.crashlytics)
 
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.contentNegotiation)

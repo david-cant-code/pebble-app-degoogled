@@ -23,6 +23,9 @@ private data class PendingHeartbeat(
     val payload: ByteArray,
 )
 
+// In this fork nothing calls enqueue() (the web-services intake drops heartbeats);
+// the class survives only to drain and delete rows persisted before the telemetry
+// strip, via the always-true AnalyticsIngest stub.
 class AnalyticsHeartbeatQueue(
     private val ingest: AnalyticsIngest,
     private val dao: AnalyticsHeartbeatDao,

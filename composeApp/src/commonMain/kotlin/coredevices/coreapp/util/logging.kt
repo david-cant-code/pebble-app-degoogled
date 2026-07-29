@@ -4,8 +4,6 @@ import co.touchlab.kermit.LogWriter
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.Severity
 import coredevices.ExperimentalDevices
-import dev.gitlive.firebase.Firebase
-import dev.gitlive.firebase.crashlytics.crashlytics
 import io.ktor.utils.io.core.append
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,19 +32,6 @@ import okio.use
 import org.koin.mp.KoinPlatform
 
 fun initLogging() {
-    Logger.addLogWriter(object : LogWriter() {
-        override fun log(severity: Severity, message: String, tag: String, throwable: Throwable?) {
-            if (severity != Severity.Verbose) {
-                val log = buildString {
-                    append("[$tag] $message")
-                }
-                Firebase.crashlytics.log(log)
-            }
-            if (severity != Severity.Debug && severity != Severity.Verbose) {
-                throwable?.let { Firebase.crashlytics.recordException(it) }
-            }
-        }
-    })
     Logger.addLogWriter(KoinPlatform.getKoin().get<FileLogWriter>())
     try {
         // Cactus logging is handled natively in the vendored SDK

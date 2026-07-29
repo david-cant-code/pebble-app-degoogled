@@ -88,6 +88,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ClipEntry
@@ -108,7 +109,6 @@ import com.russhwolf.settings.set
 import coredevices.CoreBackgroundSync
 import coredevices.EnableExperimentalDevices
 import coredevices.analytics.AnalyticsBackend
-import coredevices.analytics.CoreAnalytics
 import coredevices.analytics.setUser
 import coredevices.coreapp.util.AppUpdate
 import coredevices.coreapp.util.AppUpdateState
@@ -124,9 +124,6 @@ import coredevices.pebble.ui.SettingsIds.EnableHealthPlatformSync
 import coredevices.pebble.ui.SettingsIds.EnableHealthTracking
 import coredevices.pebble.ui.SettingsIds.EnableSleepInsights
 import coredevices.pebble.ui.SettingsIds.OfflineSpeechRecognition
-import coredevices.pebble.ui.SettingsKeys.KEY_ENABLE_FIREBASE_UPLOADS
-import coredevices.pebble.ui.SettingsKeys.KEY_ENABLE_MEMFAULT_UPLOADS
-import coredevices.pebble.ui.SettingsKeys.KEY_ENABLE_MIXPANEL_UPLOADS
 import coredevices.pebble.weather.WeatherFetcher
 import coredevices.ui.ConfirmDialog
 import coredevices.ui.CoreLinearProgressIndicator
@@ -149,7 +146,6 @@ import coredevices.util.transcription.PlatformSpeechRecognizer
 import coredevices.util.transcription.SpokenLanguageOptions
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
-import dev.gitlive.firebase.crashlytics.crashlytics
 import io.rebble.libpebblecommon.connection.AppContext
 import io.rebble.libpebblecommon.connection.ConnectedPebble
 import io.rebble.libpebblecommon.connection.KnownPebbleDevice
@@ -210,7 +206,7 @@ enum class Section(val title: String, val icon: ImageVector) {
     NotificationsWatch("Notifications", Icons.Default.Notifications), // watch only
     General("General", Icons.Default.Settings),
     Apps("Apps", Icons.Default.Apps),
-    Battery("Battery", Icons.Default.BatteryFull),
+    Battery("Battery (Not available without telemetry)", Icons.Default.BatteryFull),
     Calendar("Calendar", Icons.Default.CalendarMonth),
     Health("Health", Icons.AutoMirrored.Filled.DirectionsRun),
     Speech("Speech Recognition", Icons.Default.Mic),
@@ -447,9 +443,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     val missingPermissions by permissionRequester.missingPermissions.collectAsState()
     val uiContext = rememberUiContext()
     val analyticsBackend: AnalyticsBackend = koinInject()
-    val enableFirebase = remember { mutableStateOf(settings.getBoolean(KEY_ENABLE_FIREBASE_UPLOADS, true)) }
-    val enableMemfault = remember { mutableStateOf(settings.getBoolean(KEY_ENABLE_MEMFAULT_UPLOADS, true)) }
-    val enableMixpanel = remember { mutableStateOf(settings.getBoolean(KEY_ENABLE_MIXPANEL_UPLOADS, true)) }
     val enableExperimentalDevices: EnableExperimentalDevices = koinInject()
     val experimentalDevices by enableExperimentalDevices.enabled.collectAsState()
     val appUpdateTracker: AppUpdateTracker = koinInject()
@@ -483,7 +476,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
         }
     }
     val watchPrefs = watchPrefs()
-    val coreAnalytics: CoreAnalytics = koinInject()
     val platformHealthSync: PlatformHealthSync = koinInject()
     val healthSyncTracker: HealthSyncTracker = koinInject()
     val healthPlatformSyncEnabled by healthSyncTracker.enabled.collectAsState()
@@ -494,9 +486,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
             debugOptionsEnabled,
             missingPermissions,
             updateState,
-            enableFirebase,
-            enableMemfault,
-            enableMixpanel,
             coreConfig,
             experimentalDevices,
             loggedIn,
@@ -1519,50 +1508,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     show = { pebbleFeatures.supportsDetectingOtherPebbleApps() },
                 ),
                 basicSettingsToggleItem(
-                    title = "Send app crashes",
-                    description = "This allows us to fix crashes in the mobile app - otherwise we don't know how often they are happening, or how to fix them",
-                    topLevelType = TopLevelType.Phone,
-                    section = Section.Diagnostics,
-                    checked = enableFirebase.value,
-                    onCheckChanged = {
-                        enableFirebase.value = it
-                        settings.set(KEY_ENABLE_FIREBASE_UPLOADS, it)
-                        if (!it) {
-                            coreAnalytics.logEvent("crashlytics_collection_disabled")
-                        }
-                        Firebase.crashlytics.setCrashlyticsCollectionEnabled(it)
-                    },
-                ),
-                basicSettingsToggleItem(
-                    title = "Send watch analytics",
-                    description = "Only for Core Devices watches. This allows us to measure metrics e.g. battery life, and debug watch crashes (otherwise we do not know whether they are regressions in reliability or performance)",
-                    topLevelType = TopLevelType.Phone,
-                    section = Section.Diagnostics,
-                    checked = enableMemfault.value,
-                    onCheckChanged = {
-                        enableMemfault.value = it
-                        if (!it) {
-                            coreAnalytics.logEvent("memfault_collection_disabled")
-                        }
-                        settings.set(KEY_ENABLE_MEMFAULT_UPLOADS, it)
-                    },
-                ),
-                basicSettingsToggleItem(
-                    title = "Send app analytics",
-                    description = "This allows us to track metrics e.g. connectivity, so that we can track different types of error and improve reliability",
-                    topLevelType = TopLevelType.Phone,
-                    section = Section.Diagnostics,
-                    checked = enableMixpanel.value,
-                    onCheckChanged = {
-                        enableMixpanel.value = it
-                        settings.set(KEY_ENABLE_MIXPANEL_UPLOADS, it)
-                        if (!it) {
-                            coreAnalytics.logEvent("mixpanel_collection_disabled")
-                        }
-                        analyticsBackend.setEnabled(it)
-                    },
-                ),
-                basicSettingsToggleItem(
                     title = "Show notifications in phone logs",
                     description = "Notification logging, to diagnose processing/deduplication issues (does not include any content/app name/personal information unless separately enabled below)",
                     topLevelType = TopLevelType.Phone,
@@ -2045,6 +1990,10 @@ fun WatchSettingsScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                             val sectionBadgeCount = filteredItems
                                 .filter { it.section == section && it.badge != null && it.show() }
                                 .sumOf { it.badge?.toIntOrNull() ?: 0 }
+                            // Battery analytics is upstream's server-rendered page, fed by the
+                            // watch-telemetry relay this fork strips; with no data source left,
+                            // the entry stays visible but disabled.
+                            val sectionEnabled = section != Section.Battery
                             ListItem(
                                 leadingContent = {
                                     Icon(
@@ -2061,7 +2010,9 @@ fun WatchSettingsScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                                     }
                                 } else null,
                                 shadowElevation = ELEVATION,
-                                modifier = Modifier.clickable {
+                                modifier = Modifier
+                                    .alpha(if (sectionEnabled) 1f else 0.38f)
+                                    .clickable(enabled = sectionEnabled) {
                                     val navigateDirectlyTo = section.navigatesDirectlyTo()
                                     if (navigateDirectlyTo != null) {
                                         navBarNav.navigateTo(navigateDirectlyTo)

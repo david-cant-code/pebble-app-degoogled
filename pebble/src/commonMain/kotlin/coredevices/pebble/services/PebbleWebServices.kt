@@ -13,7 +13,6 @@ import coredevices.pebble.account.PebbleAccount
 import coredevices.pebble.account.UsersMeResponse
 import coredevices.pebble.account.compareVersionStrings
 import coredevices.pebble.firmware.FirmwareUpdateCheck
-import coredevices.pebble.services.Memfault.Companion.serialForMemfault
 import coredevices.pebble.services.PebbleHttpClient.Companion.delete
 import coredevices.pebble.services.PebbleHttpClient.Companion.get
 import coredevices.pebble.services.PebbleHttpClient.Companion.put
@@ -373,17 +372,11 @@ class RealPebbleWebServices(
     override suspend fun checkForFirmwareUpdate(watch: WatchInfo, force: Boolean): FirmwareUpdateCheckResult =
         firmwareUpdateCheck.checkForUpdates(watch, force)
 
-    override fun uploadMemfaultChunk(chunk: ByteArray, watchInfo: WatchInfo) {
-        memfaultChunkQueue.enqueue(watchInfo.serialForMemfault(), chunk)
-    }
+    // This fork drops watch coredump chunks instead of queueing them for Memfault (fork goal: strip telemetry).
+    override fun uploadMemfaultChunk(chunk: ByteArray, watchInfo: WatchInfo) {}
 
-    override fun uploadAnalyticsHeartbeat(payload: ByteArray, watchInfo: WatchInfo) {
-        analyticsHeartbeatQueue.enqueue(
-            serial = watchInfo.serial,
-            fwVersion = watchInfo.runningFwVersion.stringVersion,
-            payload = payload,
-        )
-    }
+    // This fork drops watch diagnostics records instead of queueing them for upload (fork goal: strip telemetry).
+    override fun uploadAnalyticsHeartbeat(payload: ByteArray, watchInfo: WatchInfo) {}
 
     override suspend fun addToLegacyLocker(uuid: String): Boolean =
         put({ locker.addEndpoint.replace("\$\$app_uuid\$\$", uuid) }, auth = HttpClientAuthType.Pebble)?.status?.isSuccess() == true

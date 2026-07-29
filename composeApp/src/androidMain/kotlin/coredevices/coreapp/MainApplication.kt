@@ -25,8 +25,6 @@ import coil3.gif.GifDecoder
 import coil3.memory.MemoryCache
 import coil3.request.crossfade
 import coil3.svg.SvgDecoder
-import com.google.firebase.Firebase
-import com.google.firebase.crashlytics.crashlytics
 import com.mmk.kmpnotifier.notification.NotifierManager
 import com.mmk.kmpnotifier.notification.configuration.NotificationPlatformConfiguration
 import coredevices.ExperimentalDevices
@@ -61,9 +59,6 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
-        if (BuildConfig.DEBUG) {
-            Firebase.crashlytics.setCrashlyticsCollectionEnabled(false)
-        }
         startKoin {
             modules(
                 module {
@@ -180,7 +175,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
                 "MainApplication",
                 throwable
             )
-            // Allow Firebase to also handle the exception
+            // Chain to the pre-existing handler (platform default) so the process still dies normally
             existingHandler?.uncaughtException(thread, throwable)
         }
     }

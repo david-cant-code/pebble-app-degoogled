@@ -13,7 +13,10 @@ similar phones with as little telemetry as technically possible.
 - **No Google Play services / Firebase.** Everything the watch needs must
   work on a de-Googled phone.
 - **No telemetry.** Crash reporting, analytics heartbeats, and the watch
-  firmware-diagnostics relay are removed.
+  firmware-diagnostics relay are removed. Upstream's battery-analytics
+  screen is a server-rendered page fed by that relay, so it has no data
+  source in this fork and its entry points are disabled; usable battery
+  analytics would need a local, on-device reimplementation.
 - **Weather without Play services.** Manual latitude/longitude entry, since
   the stock place search relies on the GMS-backed platform geocoder.
 - **A watch microphone API for third-party applications** documented and
@@ -29,8 +32,8 @@ build due to their heavy reliance on Firebase and other cloud services.
 Early days, the fork currently tracks upstream while the de-Google work
 lands piece by piece:
 
-- [ ] Manual weather location entry
-- [ ] Telemetry strip (Crashlytics, analytics, firmware-diagnostics relay)
+- [x] Manual weather location entry
+- [x] Telemetry strip (Crashlytics, analytics, firmware-diagnostics relay)
 - [ ] Google Play services / Firebase removal
 - [ ] Third-party microphone API
 
@@ -44,6 +47,12 @@ lands piece by piece:
 - For a release build signed with the debug key, set
   `LOCAL_RELEASE_BUILD=true` in the root `local.properties`, then
   `./gradlew :composeApp:assembleRelease`.
+- The optional `memfaultToken` Gradle property routes Core-device firmware
+  update checks through Memfault. Those checks periodically send the watch
+  serial number (or a MAC-derived identifier), hardware revision, and
+  firmware version to `api.memfault.com` in the background. Fork builds
+  ship no token and make no Memfault requests; firmware updates still work
+  through the cohorts endpoint.
 
 ## Architecture
 
