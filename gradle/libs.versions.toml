@@ -40,7 +40,6 @@ firebase-kotlin = "2.4.0"
 # APIs auth 24.x removed (updateEmail/fetchSignInMethodsForEmail), so forcing the newer BOM is safe.
 # NEVER downgrade below 34.x - older versions can't read the newer auth persistence, signing everyone out.
 firebase-bom = "34.16.0"
-kmpnotifier = "1.6.1"
 buildkonfig = "0.17.1"
 webview = "2.0.3"
 coil = "3.3.0"
@@ -136,7 +135,6 @@ firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.r
 firebase-auth = { group = "dev.gitlive", name = "firebase-auth", version.ref = "firebase-kotlin" }
 firebase-firestore = { group = "dev.gitlive", name = "firebase-firestore", version.ref = "firebase-kotlin" }
 firebase-storage = { group = "dev.gitlive", name = "firebase-storage", version.ref = "firebase-kotlin" }
-kmpnotifier = { group = "io.github.mirzemehdi", name = "kmpnotifier", version.ref = "kmpnotifier" }
 webview = { module = "io.github.kevinnzou:compose-webview-multiplatform", version.ref = "webview" }
 coil = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-ktor = { module = "io.coil-kt.coil3:coil-network-ktor3", version.ref = "coil" }

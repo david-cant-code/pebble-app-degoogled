@@ -213,7 +213,6 @@ kotlin {
             // :libindex stays because PebbleBackgroundManager and :pebble
             // compile against its types; :index-ai/:mcp remain only as its
             // transitive compile deps, not direct app deps.
-            implementation(libs.kmpnotifier)
             implementation(libs.kmpio)
             implementation(project(":libpebble3"))
             implementation(project(":libindex"))

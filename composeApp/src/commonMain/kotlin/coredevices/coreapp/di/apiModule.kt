@@ -4,7 +4,6 @@ import CommonApiConfig
 import coredevices.coreapp.api.BugApi
 import coredevices.coreapp.api.BugReports
 import coredevices.coreapp.api.BugReportsService
-import coredevices.coreapp.api.PushService
 import coredevices.util.CommonBuildKonfig
 import org.koin.core.module.dsl.singleOf
 import org.koin.dsl.bind
@@ -23,6 +22,5 @@ val apiModule = module {
         BugApi(get())
     }
     singleOf(::BugReportsService)
-    singleOf(::PushService)
     singleOf(::BugReports)
 }
