@@ -12,14 +12,13 @@ import coredevices.coreapp.auth.RealGithubAuthUtil
 import coredevices.coreapp.auth.RealGoogleAuthUtil
 import coredevices.coreapp.util.AndroidAppUpdate
 import coredevices.coreapp.util.AppUpdate
+import coredevices.coreapp.model.CactusModelProvider
 import coredevices.pebble.PebbleAndroidDelegate
-import coredevices.ring.RingDelegate
 import coredevices.util.AndroidCompanionDevice
 import coredevices.util.AndroidPermissionRequester
 import coredevices.util.AndroidPlatform
 import coredevices.util.auth.AppleAuthUtil
 import coredevices.util.CompanionDevice
-import coredevices.util.CoreConfigFlow
 import coredevices.util.auth.GoogleAuthUtil
 import coredevices.util.PermissionRequester
 import coredevices.util.Platform
@@ -29,10 +28,9 @@ import coredevices.util.auth.SilentSignIn
 import coredevices.util.integrations.AndroidOAuthLauncher
 import coredevices.util.integrations.OAuthLauncher
 import coredevices.util.models.ModelDownloadManager
+import coredevices.util.transcription.CactusModelPathProvider
 import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.okhttp.OkHttp
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
 import org.koin.core.module.dsl.singleOf
 import org.koin.dsl.bind
 import org.koin.dsl.binds
@@ -61,16 +59,17 @@ val androidDefaultModule = module {
     singleOf(::AndroidCompanionDevice) bind CompanionDevice::class
     singleOf(::AndroidAppUpdate) bind AppUpdate::class
     single {
+        // Ring support is unplugged in this fork, so the watch delegate's
+        // permissions are the whole set; the upstream version unioned in the
+        // RingDelegate permissions when CoreConfig.enableIndex was on.
         val pebbleDelegate = get<PebbleAndroidDelegate>()
-        val enabledFlow = get<CoreConfigFlow>().flow.map { it.enableIndex }
-        val ringDelegate = get<RingDelegate>()
-        RequiredPermissions(
-            pebbleDelegate.requiredPermissions.combine(enabledFlow) { permissions, enabled ->
-                permissions + if (enabled) ringDelegate.requiredRuntimePermissions() else emptySet()
-            }
-        )
+        RequiredPermissions(pebbleDelegate.requiredPermissions)
     }
     single { createAndroidAnalytics(get()) }
     singleOf(::ModelDownloadManager)
+    // Fork binding: upstream registers its Cactus model provider inside the
+    // unplugged :experimental module; without this, on-device Cactus STT
+    // falls back to a provider that throws (utilModule) and dictation dies.
+    singleOf(::CactusModelProvider) bind CactusModelPathProvider::class
     singleOf(::PebbleBackgroundManager)
 }

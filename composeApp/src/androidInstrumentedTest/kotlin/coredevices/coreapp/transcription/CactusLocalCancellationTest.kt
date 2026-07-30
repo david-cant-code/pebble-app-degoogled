@@ -2,7 +2,7 @@ package coredevices.coreapp.transcription
 
 import androidx.test.platform.app.InstrumentationRegistry
 import coredevices.analytics.CoreAnalytics
-import coredevices.ring.model.CactusModelProvider
+import coredevices.coreapp.model.CactusModelProvider
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigFlow
 import coredevices.util.STTConfig
@@ -89,7 +89,7 @@ class CactusLocalCancellationTest {
                     println("[cactus-cancel] model missing at ${modelDir.absolutePath} — downloading $MODEL_NAME (one-time, hundreds of MB)…")
                     // Only the *production* provider downloads; its delete-then-download is harmless
                     // when there's no valid model to lose.
-                    runBlocking { withTimeout(20.minutes) { CactusModelProvider().getSTTModelPath() } }
+                    runBlocking { withTimeout(20.minutes) { CactusModelProvider(context).getSTTModelPath() } }
                 }
                 modelPresent = provider.isModelDownloaded(MODEL_NAME)
                 println("[cactus-cancel] model dir=${modelDir.absolutePath} present=$modelPresent")

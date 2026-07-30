@@ -35,5 +35,11 @@ include(":index-ai")
 include(":resampler")
 include(":cactus")
 include(":libindex")
-include(":experimental")
+// :experimental (the Ring/Index feature module) is unplugged from the fork's
+// build: it carries firebase-auth/firestore/storage, the googleServices
+// plugin, and Supabase. :libindex/:index-ai/:mcp stay included because the
+// watch UI in :pebble compiles against :libindex, whose Room schema is
+// entangled with :index-ai (which needs :mcp); their runtime is disabled at
+// the Koin seam instead (no-op LibIndex, ring stubs in :composeApp).
+// include(":experimental")
 include(":krisp-stubs")

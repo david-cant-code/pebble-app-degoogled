@@ -30,10 +30,16 @@ option does not apply here.
   must work on both Android and iOS" rule.
 - **De-Google at the DI seam, not by mass deletion.** Swap Firebase/GMS-backed
   implementations for no-op or GMS-free ones at the Koin module level, keeping
-  upstream call sites intact so upstream merges stay cheap. Out-of-scope
-  feature modules (`experimental`, `index-ai`, `mcp`: the Ring/Index AI
-  features) are unplugged from the build (`settings.gradle.kts` + DI wiring)
-  with sources left in place for the same reason.
+  upstream call sites intact so upstream merges stay cheap. The out-of-scope
+  Ring/Index AI feature module (`experimental`) is unplugged from the build
+  (`settings.gradle.kts` + DI wiring) with sources left in place for the same
+  reason. `libindex`, `index-ai`, and `mcp` stay compiled (the watch UI in
+  `pebble` compiles against `libindex`, whose Room schema references
+  `index-ai` entities, which need `mcp`) but their runtime is dead: a no-op
+  `LibIndex` is bound at the Koin seam, fork stubs in `composeApp` replace
+  the `experimental` types the app wiring touches (same fully-qualified
+  names, so re-plugging the module trips duplicate-class errors), and
+  `CoreConfig.enableIndex` has no reachable set-point.
 - **Verify against the artifact.** De-Google changes are confirmed against the
   built APK (no `com.google.firebase`/`com.google.android.gms` classes, no
   unexpected network endpoints), not just against the source tree.

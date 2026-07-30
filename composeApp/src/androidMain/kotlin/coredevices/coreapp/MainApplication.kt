@@ -30,10 +30,10 @@ import com.mmk.kmpnotifier.notification.configuration.NotificationPlatformConfig
 import coredevices.ExperimentalDevices
 import coredevices.coreapp.di.androidDefaultModule
 import coredevices.coreapp.di.apiModule
+import coredevices.coreapp.di.ringStubsModule
 import coredevices.coreapp.di.utilModule
 import coredevices.coreapp.util.FileLogWriter
 import coredevices.coreapp.util.initLogging
-import coredevices.experimentalModule
 import coredevices.pebble.PebbleAppDelegate
 import coredevices.pebble.watchModule
 import coredevices.util.CoreConfig
@@ -65,7 +65,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
                     androidContext(this@MainApplication)
                 },
                 androidDefaultModule,
-                experimentalModule,
+                ringStubsModule,
                 apiModule,
                 utilModule,
                 watchModule,

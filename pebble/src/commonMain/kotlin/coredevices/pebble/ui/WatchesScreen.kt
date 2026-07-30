@@ -362,18 +362,10 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                             )
                         },
                     )
-                    FloatingActionButtonMenuItem(
-                        onClick = {
-                            addFabExpanded = false
-                            if (indexAlreadyPaired) {
-                                showIndexAlreadyPairedDialog = true
-                            } else if (uiContext != null) {
-                                scanIndex(uiContext)
-                            }
-                        },
-                        icon = { Icon(Icons.Default.RadioButtonUnchecked, contentDescription = "Scan") },
-                        text = { Text("Add Index 01") },
-                    )
+                    // Fork: the "Add Index 01" menu item is removed. Ring
+                    // support is unplugged from this build and LibIndex is a
+                    // no-op, so a scan started from here could never find
+                    // anything.
                     if (pebbleFeatures.supportsBtClassic()) {
                         FloatingActionButtonMenuItem(
                             onClick = {

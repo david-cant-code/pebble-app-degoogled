@@ -646,6 +646,10 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     topLevelType = TopLevelType.Phone,
                     section = Section.General,
                     checked = coreConfig.enableIndex,
+                    // Fork: hidden, never removed. The Index feature modules
+                    // are unplugged from this build, and this toggle is one
+                    // of the set-points that could flip enableIndex on.
+                    show = { false },
                     onCheckChanged = {
                         coreConfigHolder.update(
                             coreConfig.copy(
