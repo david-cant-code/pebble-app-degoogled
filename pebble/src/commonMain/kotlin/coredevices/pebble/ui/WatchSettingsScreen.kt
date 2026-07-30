@@ -1745,7 +1745,10 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     action = {
                         navBarNav.navigateTo(CommonRoutes.RingOnboardingRoute)
                     },
-                    show = { debugOptionsEnabled },
+                    // Fork: hidden, never removed. RingOnboardingRoute is no
+                    // longer registered in AppNavHost (ring support is
+                    // unplugged), so this navigation would crash the nav host.
+                    show = { false },
                 ) },
                 basicSettingsToggleItem(
                     title = "Emulate Timeline Webservice",

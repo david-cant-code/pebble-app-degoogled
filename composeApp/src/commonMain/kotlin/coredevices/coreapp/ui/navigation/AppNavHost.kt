@@ -192,8 +192,10 @@ fun AppNavHost(navController: NavHostController, startDestination: Any) {
             }
             // CommonRoutes.RingOnboardingRoute is deliberately not registered:
             // the ring onboarding screens are removed with the unplugged ring
-            // feature, and the only navigation to it (WatchHomeScreen, on a
-            // newly interviewed ring) cannot fire while LibIndex is the no-op.
+            // feature. Both navigations to it are dead: WatchHomeScreen's (on
+            // a newly interviewed ring) cannot fire while LibIndex is the
+            // no-op, and WatchSettingsScreen's "Show Ring Onboarding" debug
+            // item is hidden. Navigating here anyway would crash the nav host.
         }
     }
 }
