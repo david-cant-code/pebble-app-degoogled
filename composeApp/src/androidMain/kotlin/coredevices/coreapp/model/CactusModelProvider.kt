@@ -37,6 +37,14 @@ import java.util.zip.ZipInputStream
  * never configured; a strings sweep of libcactus_engine.so found no
  * endpoints, so this is belt on top of suspenders).
  *
+ * Provenance: copied from the tree as of commit ecdfa123, flattening
+ * experimental/src/commonMain/kotlin/coredevices/ring/model/CactusModelProvider.kt
+ * and its androidMain actual into one class. Those originals stay in-tree (the unplugged
+ * module keeps its sources for cheap merges) and keep receiving upstream
+ * changes that will merge conflict-free WITHOUT touching this copy. After
+ * every upstream merge, re-diff this file against them and port whatever
+ * matters; drift here breaks dictation.
+ *
  * Models are stored at: <filesDir>/models/<modelName>/ with config.txt,
  * vocab.txt, and .weights files, plus a .cactus_version marker.
  */

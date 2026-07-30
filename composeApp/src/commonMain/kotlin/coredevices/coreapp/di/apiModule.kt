@@ -13,6 +13,10 @@ val apiModule = module {
     single { object : CommonApiConfig {
         override val bugUrl: String?
             get() = CommonBuildKonfig.BUG_URL
+        // Fork: dead since the FCM push stack was deleted (PushService's
+        // uploadPushToken was its only reader); the whole tokenUrl chain
+        // (gradle.properties, TOKEN_URL BuildKonfig field, this override)
+        // is retained for cheap upstream merges.
         override val tokenUrl: String?
             get() = CommonBuildKonfig.TOKEN_URL
         override val version: String
