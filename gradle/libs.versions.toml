@@ -30,9 +30,6 @@ androidXRulesVersion = "1.7.0"
 googleServices = "4.4.4"
 androidVersion = "2.4.0"
 androidx-activityCompose = "1.12.4"
-androidx-credentials = "1.5.0"
-gms-auth = "21.5.0"
-googleId = "1.1.1"
 androidxWork = "2.11.2"
 play-update = "2.1.0"
 crashkios = "0.9.0"
@@ -129,10 +126,7 @@ androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx
 androidx-monitor = { group = "androidx.test", name = "monitor", version.ref = "monitorVersion" }
 androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidXTestVersion" }
 androidx-test-rules = { group = "androidx.test", name = "rules", version.ref = "androidXRulesVersion" }
-androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "androidx-credentials" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
-gms-auth = { group = "com.google.android.gms", name = "play-services-auth", version.ref = "gms-auth" }
-identity-google = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleId" }
 androidx-work = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "androidxWork" }
 androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version = "1.0.1" }
 play-update = { group = "com.google.android.play", name = "app-update", version.ref = "play-update" }

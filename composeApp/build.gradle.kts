@@ -153,9 +153,6 @@ kotlin {
         androidMain.dependencies {
             implementation(compose.preview)
             implementation(libs.androidx.activity.compose)
-            implementation(libs.androidx.credentials)
-            implementation(libs.gms.auth)
-            implementation(libs.identity.google)
             implementation(libs.ktor.client.okhttp)
             implementation(libs.coroutines.android)
             implementation(libs.androidx.work)
