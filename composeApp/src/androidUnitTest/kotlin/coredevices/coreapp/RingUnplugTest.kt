@@ -1,11 +1,16 @@
 package coredevices.coreapp
 
 import coredevices.coreapp.di.NoOpLibIndex
+import coredevices.coreapp.di.ringStubsModule
+import coredevices.libindex.LibIndex
+import coredevices.util.CoreConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import org.koin.dsl.koinApplication
 
 class RingUnplugTest {
     // :experimental is unplugged from the build, but its call sites survive
@@ -14,9 +19,15 @@ class RingUnplugTest {
     // app's dependencies would compile the ring feature back in silently if
     // not for the duplicate-class tripwire, and this probe fails the moment
     // any real :experimental class returns to the app classpath, whatever
-    // the source tree looks like.
+    // the source tree looks like. The positive probe on the fork's own
+    // ExperimentalDevices stub proves the probe strings resolve by exact
+    // binary name on this classpath, so a rename cannot quietly turn the
+    // absence assertions into tautologies (the original third probe was
+    // exactly that: "coredevices.experimentalModuleKt" can never exist,
+    // Kotlin capitalizes file facades).
     @Test
     fun experimentalModuleIsAbsentFromTheClasspath() {
+        Class.forName("coredevices.ExperimentalDevices")
         assertFailsWith<ClassNotFoundException> {
             Class.forName("coredevices.ring.service.RingSync")
         }
@@ -24,7 +35,7 @@ class RingUnplugTest {
             Class.forName("coredevices.ring.RingDelegate")
         }
         assertFailsWith<ClassNotFoundException> {
-            Class.forName("coredevices.experimentalModuleKt")
+            Class.forName("coredevices.ExperimentalModuleKt")
         }
     }
 
@@ -54,5 +65,28 @@ class RingUnplugTest {
         assertFalse(libIndex.isScanning.value)
         libIndex.stopScan()
         assertTrue(libIndex.rings.value.isEmpty())
+    }
+
+    // The behavior test above pins the stub class; this pins the seam. The
+    // real RealLibIndex binding survives in the deliberately kept :libindex
+    // (libIndexModule), so a one-line rebinding there or in an upstream
+    // merge would compile clean and pass every other test while quietly
+    // reviving the BLE scanner and Room database. Matches the seam tests
+    // the sibling strips got (GmsAuthUnplugTest, AppUpdateUnplugTest).
+    @Test
+    fun ringSeamResolvesToTheForkNoOpLibIndex() {
+        val koin = koinApplication { modules(ringStubsModule) }.koin
+        assertIs<NoOpLibIndex>(koin.get<LibIndex>())
+    }
+
+    // Kill layer 2 of the ring unplug: enableIndex gates the Index tab and
+    // every Index UI surface, its set-points are suppressed in the fork,
+    // and nothing pins the upstream-owned default. An upstream merge
+    // flipping it to true would merge conflict-free and re-open the gate
+    // even for existing installs (CoreConfigHolder omits defaults from
+    // stored JSON), so the default itself is the invariant to hold.
+    @Test
+    fun enableIndexDefaultsToOff() {
+        assertFalse(CoreConfig().enableIndex)
     }
 }
