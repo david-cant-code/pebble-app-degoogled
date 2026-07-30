@@ -31,7 +31,6 @@ googleServices = "4.4.4"
 androidVersion = "2.4.0"
 androidx-activityCompose = "1.12.4"
 androidxWork = "2.11.2"
-play-update = "2.1.0"
 crashkios = "0.9.0"
 androidx-lifecycle = "2.9.6"
 androidx-navigation = "2.9.2"
@@ -129,8 +128,6 @@ androidx-test-rules = { group = "androidx.test", name = "rules", version.ref = "
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
 androidx-work = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "androidxWork" }
 androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version = "1.0.1" }
-play-update = { group = "com.google.android.play", name = "app-update", version.ref = "play-update" }
-play-update-ktx = { group = "com.google.android.play", name = "app-update-ktx", version.ref = "play-update" }
 crashkios = { module = "co.touchlab.crashkios:crashlytics", version.ref = "crashkios" }
 androidx-lifecycle-viewmodel = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-viewmodel", version.ref = "androidx-lifecycle" }
 androidx-lifecycle-runtime-compose = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "androidx-lifecycle" }

@@ -156,8 +156,6 @@ kotlin {
             implementation(libs.ktor.client.okhttp)
             implementation(libs.coroutines.android)
             implementation(libs.androidx.work)
-            implementation(libs.play.update)
-            implementation(libs.play.update.ktx)
             implementation(libs.coil.gif)
         }
         androidInstrumentedTest.dependencies {

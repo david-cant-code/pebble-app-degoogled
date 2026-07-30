@@ -3,15 +3,14 @@ package coredevices.coreapp.di
 import CoreAppVersion
 import PlatformContext
 import PlatformShareLauncher
-import com.google.android.play.core.appupdate.AppUpdateManagerFactory
 import coredevices.analytics.createAndroidAnalytics
 import coredevices.coreapp.BuildConfig
 import coredevices.coreapp.PebbleBackgroundManager
 import coredevices.coreapp.auth.NoOpGoogleAuthUtil
 import coredevices.coreapp.auth.RealAppleAuthUtil
 import coredevices.coreapp.auth.RealGithubAuthUtil
-import coredevices.coreapp.util.AndroidAppUpdate
 import coredevices.coreapp.util.AppUpdate
+import coredevices.coreapp.util.NoOpAppUpdate
 import coredevices.coreapp.model.CactusModelProvider
 import coredevices.pebble.PebbleAndroidDelegate
 import coredevices.util.AndroidCompanionDevice
@@ -55,11 +54,11 @@ val androidDefaultModule = module {
     singleOf(::AndroidPlatform) bind Platform::class
     singleOf(::AndroidOAuthLauncher) bind OAuthLauncher::class
     single { CoreAppVersion(BuildConfig.VERSION_NAME) }
-    factory { AppUpdateManagerFactory.create(get()) }
     singleOf(::PlatformContext)
     singleOf(::AndroidPermissionRequester) bind PermissionRequester::class
     singleOf(::AndroidCompanionDevice) bind CompanionDevice::class
-    singleOf(::AndroidAppUpdate) bind AppUpdate::class
+    // Fork: Play in-app updates removed; see NoOpAppUpdate.
+    singleOf(::NoOpAppUpdate) bind AppUpdate::class
     single {
         // Ring support is unplugged in this fork, so the watch delegate's
         // permissions are the whole set; the upstream version unioned in the
