@@ -24,7 +24,6 @@ import coredevices.ring.ui.navigation.RingRoute
 import coredevices.coreapp.ui.screens.BugReportScreen
 import coredevices.coreapp.ui.screens.BugReportsListScreen
 import coredevices.coreapp.ui.screens.OnboardingScreen
-import coredevices.coreapp.ui.screens.ringonboarding.RingOnboardingScreen
 import coredevices.coreapp.ui.screens.ViewBugReportScreen
 import coredevices.coreapp.ui.screens.WatchOnboardingScreen
 import coredevices.pebble.PebbleDeepLinkHandler
@@ -191,11 +190,12 @@ fun AppNavHost(navController: NavHostController, startDestination: Any) {
                     coreNav = coreNav,
                 )
             }
-            composable<CommonRoutes.RingOnboardingRoute> {
-                RingOnboardingScreen(
-                    coreNav = coreNav,
-                )
-            }
+            // CommonRoutes.RingOnboardingRoute is deliberately not registered:
+            // the ring onboarding screens are removed with the unplugged ring
+            // feature. Both navigations to it are dead: WatchHomeScreen's (on
+            // a newly interviewed ring) cannot fire while LibIndex is the
+            // no-op, and WatchSettingsScreen's "Show Ring Onboarding" debug
+            // item is hidden. Navigating here anyway would crash the nav host.
         }
     }
 }

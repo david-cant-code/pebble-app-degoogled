@@ -646,6 +646,10 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     topLevelType = TopLevelType.Phone,
                     section = Section.General,
                     checked = coreConfig.enableIndex,
+                    // Fork: hidden, never removed. The Index feature modules
+                    // are unplugged from this build, and this toggle is one
+                    // of the set-points that could flip enableIndex on.
+                    show = { false },
                     onCheckChanged = {
                         coreConfigHolder.update(
                             coreConfig.copy(
@@ -1741,7 +1745,10 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     action = {
                         navBarNav.navigateTo(CommonRoutes.RingOnboardingRoute)
                     },
-                    show = { debugOptionsEnabled },
+                    // Fork: hidden, never removed. RingOnboardingRoute is no
+                    // longer registered in AppNavHost (ring support is
+                    // unplugged), so this navigation would crash the nav host.
+                    show = { false },
                 ) },
                 basicSettingsToggleItem(
                     title = "Emulate Timeline Webservice",

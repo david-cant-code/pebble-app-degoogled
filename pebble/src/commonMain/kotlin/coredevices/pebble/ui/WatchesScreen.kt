@@ -54,7 +54,6 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NetworkPing
 import androidx.compose.material.icons.filled.NotificationAdd
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
@@ -362,18 +361,14 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                             )
                         },
                     )
-                    FloatingActionButtonMenuItem(
-                        onClick = {
-                            addFabExpanded = false
-                            if (indexAlreadyPaired) {
-                                showIndexAlreadyPairedDialog = true
-                            } else if (uiContext != null) {
-                                scanIndex(uiContext)
-                            }
-                        },
-                        icon = { Icon(Icons.Default.RadioButtonUnchecked, contentDescription = "Scan") },
-                        text = { Text("Add Index 01") },
-                    )
+                    // Fork: the "Add Index 01" menu item is removed. Ring
+                    // support is unplugged from this build and LibIndex is a
+                    // no-op, so a scan started from here could never find
+                    // anything. The item's former collaborators stay as
+                    // retained-but-dead upstream code for cheap merges:
+                    // indexAlreadyPaired, showIndexAlreadyPairedDialog (with
+                    // its "already paired" dialog below), and scanIndex have
+                    // no other live user in this file.
                     if (pebbleFeatures.supportsBtClassic()) {
                         FloatingActionButtonMenuItem(
                             onClick = {

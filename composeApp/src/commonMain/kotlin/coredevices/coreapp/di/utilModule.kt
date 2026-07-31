@@ -11,7 +11,6 @@ import coredevices.api.WisprFlowAuth
 import coredevices.coreapp.CommonAppDelegate
 import coredevices.pebble.health.HealthSyncTracker
 import coredevices.pebble.health.PlatformHealthSync
-import coredevices.coreapp.push.PushMessaging
 import coredevices.coreapp.ui.navigation.CoreDeepLinkHandler
 import coredevices.coreapp.ui.screens.BugReportProcessor
 import coredevices.coreapp.ui.screens.OnboardingViewModel
@@ -63,7 +62,6 @@ val utilModule = module {
     singleOf(::BugReportProcessor)
     singleOf(::NextBugReportContext)
     singleOf(::CommonAppDelegate) bind CoreBackgroundSync::class
-    singleOf(::PushMessaging)
     singleOf(::CoreDeepLinkHandler)
     singleOf(::RealThemeProvider) bind ThemeProvider::class
     single { Settings() }

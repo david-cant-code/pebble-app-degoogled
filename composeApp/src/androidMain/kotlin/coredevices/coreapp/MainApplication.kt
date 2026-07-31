@@ -25,20 +25,17 @@ import coil3.gif.GifDecoder
 import coil3.memory.MemoryCache
 import coil3.request.crossfade
 import coil3.svg.SvgDecoder
-import com.mmk.kmpnotifier.notification.NotifierManager
-import com.mmk.kmpnotifier.notification.configuration.NotificationPlatformConfiguration
 import coredevices.ExperimentalDevices
 import coredevices.coreapp.di.androidDefaultModule
 import coredevices.coreapp.di.apiModule
+import coredevices.coreapp.di.ringStubsModule
 import coredevices.coreapp.di.utilModule
 import coredevices.coreapp.util.FileLogWriter
 import coredevices.coreapp.util.initLogging
-import coredevices.experimentalModule
 import coredevices.pebble.PebbleAppDelegate
 import coredevices.pebble.watchModule
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigHolder
-import coredevices.util.R
 import io.rebble.libpebblecommon.connection.AppContext
 import org.koin.android.ext.android.inject
 import org.koin.android.ext.koin.androidContext
@@ -65,7 +62,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
                     androidContext(this@MainApplication)
                 },
                 androidDefaultModule,
-                experimentalModule,
+                ringStubsModule,
                 apiModule,
                 utilModule,
                 watchModule,
@@ -85,12 +82,6 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         // Cactus telemetry is initialized via CommonAppDelegate.initCactus()
         pebbleAppDelegate.init()
         configureStrictMode()
-        NotifierManager.initialize(
-            configuration = NotificationPlatformConfiguration.Android(
-                notificationIconResId = R.mipmap.ic_launcher,
-                showPushNotification = false,
-            )
-        )
         scheduleBackgroundJob(AppContext(this), coreConfigHolder.config.value)
         commonAppDelegate.init()
         pebbleBackgroundManager.monitorToStartBackground()

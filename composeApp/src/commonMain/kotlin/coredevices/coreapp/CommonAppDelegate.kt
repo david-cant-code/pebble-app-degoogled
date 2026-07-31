@@ -1,7 +1,8 @@
 package coredevices.coreapp
 
+import PlatformContext
 import co.touchlab.kermit.Logger
-import com.mmk.kmpnotifier.notification.NotifierManager
+import coredevices.coreapp.util.notifyLocal
 import com.russhwolf.settings.Settings
 import coredevices.CoreBackgroundSync
 import coredevices.ExperimentalDevices
@@ -9,7 +10,6 @@ import coredevices.analytics.AnalyticsBackend
 import coredevices.analytics.CoreAnalytics
 import coredevices.analytics.setUser
 import coredevices.coreapp.api.BugReports
-import coredevices.coreapp.push.PushMessaging
 import coredevices.coreapp.ui.screens.SHOWN_ONBOARDING
 import coredevices.coreapp.util.AppUpdate
 import coredevices.firestore.UsersDao
@@ -45,7 +45,7 @@ internal const val STT_UPDATE_NOTIFIED_VERSION_KEY = "stt_update_notified_versio
 internal const val STT_MODE_BEFORE_UPDATE_KEY = "stt_mode_before_update"
 
 class CommonAppDelegate(
-    private val pushMessaging: PushMessaging,
+    private val platformContext: PlatformContext,
     private val bugReports: BugReports,
     private val settings: Settings,
     private val doneInitialOnboarding: DoneInitialOnboarding,
@@ -105,7 +105,8 @@ class CommonAppDelegate(
                 }
                 if (settings.getStringOrNull(STT_UPDATE_NOTIFIED_VERSION_KEY) != CommonBuildKonfig.CACTUS_WEIGHTS_VERSION) {
                     settings.putString(STT_UPDATE_NOTIFIED_VERSION_KEY, CommonBuildKonfig.CACTUS_WEIGHTS_VERSION)
-                    NotifierManager.getLocalNotifier().notify(
+                    notifyLocal(
+                        platformContext,
                         "Offline voice recognition",
                         "We've improved offline voice recognition. Open the app to update the model."
                     )
@@ -157,7 +158,6 @@ class CommonAppDelegate(
             }
         }
         initCactus()
-        pushMessaging.init()
         bugReports.init()
         GlobalScope.launch(Dispatchers.Default) {
             weatherFetcher.init()

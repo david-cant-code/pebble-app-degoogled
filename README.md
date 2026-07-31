@@ -24,8 +24,12 @@ similar phones with as little telemetry as technically possible.
   features.
 
 Out of scope: iOS (sources remain in-tree but are unmaintained here), and the
-Pebble Index 01 (Ring) / Index AI features, which will be unplugged from the
-build due to their heavy reliance on Firebase and other cloud services.
+Pebble Index 01 (Ring) / Index AI features, due to their heavy reliance on
+Firebase and other cloud services. The Ring feature module (`experimental`)
+is unplugged from the build; the `libindex`/`index-ai`/`mcp` libraries stay
+compiled because the watch UI shares code with them, but their runtime is
+disabled at the dependency-injection seam (verified against the built APK:
+no Ring services, no Ring endpoints, rings can never be scanned or paired).
 
 ## Status
 

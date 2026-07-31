@@ -2,7 +2,6 @@ package coredevices.coreapp.api
 
 import PlatformContext
 import co.touchlab.kermit.Logger
-import coredevices.coreapp.push.AtlasPushMessage
 import coredevices.util.emailOrNull
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
@@ -31,23 +30,9 @@ class BugReports(
         }
     }
 
-    fun handlePushMessage(message: AtlasPushMessage) {
-        GlobalScope.launch {
-            launch(Dispatchers.IO) {
-                refresh()
-            }
-            // TODO check that ticket exists
-            withContext(Dispatchers.Main) {
-                createNotification(
-                    platformContext = platformContext,
-                    title = message.title,
-                    message = message.body,
-                    conversationId = message.conversationId,
-                )
-            }
-        }
-    }
-
+    // The upstream handlePushMessage entry point left with the FCM push
+    // stack; nothing can deliver an atlas_message without it. The
+    // createNotification expect/actual it called stays for cheap merges.
     suspend fun refresh() {
         logger.d { "refresh" }
 

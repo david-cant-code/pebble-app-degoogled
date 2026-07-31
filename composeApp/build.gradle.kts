@@ -153,26 +153,16 @@ kotlin {
         androidMain.dependencies {
             implementation(compose.preview)
             implementation(libs.androidx.activity.compose)
-            implementation(libs.androidx.credentials)
-            implementation(libs.gms.auth)
-            implementation(libs.identity.google)
             implementation(libs.ktor.client.okhttp)
             implementation(libs.coroutines.android)
             implementation(libs.androidx.work)
-            implementation(libs.play.update)
-            implementation(libs.play.update.ktx)
             implementation(libs.coil.gif)
-            implementation(libs.coredevices.haversine)
         }
         androidInstrumentedTest.dependencies {
             implementation(libs.androidx.test.runner)
             implementation(libs.androidx.test.rules)
-            implementation(project.dependencies.platform(libs.firebase.bom))
             implementation(libs.ktor.client.okhttp)
-            implementation(project(":experimental"))
             implementation(project(":util"))
-            implementation(project(":index-ai"))
-            implementation(project(":mcp"))
         }
         androidUnitTest.dependencies {
             implementation(libs.ktor.client.okhttp)
@@ -218,13 +208,14 @@ kotlin {
             implementation(libs.coroutines)
             implementation(project(":pebble"))
             implementation(project(":util"))
-            implementation(project(":experimental"))
-            implementation(libs.kmpnotifier)
+            // :experimental is unplugged from the fork's build (Firebase +
+            // Supabase); ring runtime is stubbed at the Koin seam instead.
+            // :libindex stays because PebbleBackgroundManager and :pebble
+            // compile against its types; :index-ai/:mcp remain only as its
+            // transitive compile deps, not direct app deps.
             implementation(libs.kmpio)
             implementation(project(":libpebble3"))
             implementation(project(":libindex"))
-            implementation(project(":index-ai"))
-            api(project(":mcp"))
             implementation(libs.health.kmp)
         }
     }

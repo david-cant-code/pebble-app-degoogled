@@ -163,8 +163,6 @@ kotlin {
                 implementation(libs.androidx.activity.compose)
                 implementation(libs.ktor.client.okhttp)
                 implementation(compose.uiTooling)
-                implementation(libs.play.update)
-                implementation(libs.play.update.ktx)
             }
         }
 

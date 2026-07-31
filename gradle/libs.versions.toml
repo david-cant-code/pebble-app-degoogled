@@ -30,11 +30,7 @@ androidXRulesVersion = "1.7.0"
 googleServices = "4.4.4"
 androidVersion = "2.4.0"
 androidx-activityCompose = "1.12.4"
-androidx-credentials = "1.5.0"
-gms-auth = "21.5.0"
-googleId = "1.1.1"
 androidxWork = "2.11.2"
-play-update = "2.1.0"
 crashkios = "0.9.0"
 androidx-lifecycle = "2.9.6"
 androidx-navigation = "2.9.2"
@@ -44,7 +40,6 @@ firebase-kotlin = "2.4.0"
 # APIs auth 24.x removed (updateEmail/fetchSignInMethodsForEmail), so forcing the newer BOM is safe.
 # NEVER downgrade below 34.x - older versions can't read the newer auth persistence, signing everyone out.
 firebase-bom = "34.16.0"
-kmpnotifier = "1.6.1"
 buildkonfig = "0.17.1"
 webview = "2.0.3"
 coil = "3.3.0"
@@ -129,14 +124,9 @@ androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx
 androidx-monitor = { group = "androidx.test", name = "monitor", version.ref = "monitorVersion" }
 androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidXTestVersion" }
 androidx-test-rules = { group = "androidx.test", name = "rules", version.ref = "androidXRulesVersion" }
-androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "androidx-credentials" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
-gms-auth = { group = "com.google.android.gms", name = "play-services-auth", version.ref = "gms-auth" }
-identity-google = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleId" }
 androidx-work = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "androidxWork" }
 androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version = "1.0.1" }
-play-update = { group = "com.google.android.play", name = "app-update", version.ref = "play-update" }
-play-update-ktx = { group = "com.google.android.play", name = "app-update-ktx", version.ref = "play-update" }
 crashkios = { module = "co.touchlab.crashkios:crashlytics", version.ref = "crashkios" }
 androidx-lifecycle-viewmodel = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-viewmodel", version.ref = "androidx-lifecycle" }
 androidx-lifecycle-runtime-compose = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "androidx-lifecycle" }
@@ -145,7 +135,6 @@ firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.r
 firebase-auth = { group = "dev.gitlive", name = "firebase-auth", version.ref = "firebase-kotlin" }
 firebase-firestore = { group = "dev.gitlive", name = "firebase-firestore", version.ref = "firebase-kotlin" }
 firebase-storage = { group = "dev.gitlive", name = "firebase-storage", version.ref = "firebase-kotlin" }
-kmpnotifier = { group = "io.github.mirzemehdi", name = "kmpnotifier", version.ref = "kmpnotifier" }
 webview = { module = "io.github.kevinnzou:compose-webview-multiplatform", version.ref = "webview" }
 coil = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-ktor = { module = "io.coil-kt.coil3:coil-network-ktor3", version.ref = "coil" }
