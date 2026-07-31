@@ -40,6 +40,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
@@ -66,6 +67,12 @@ import rememberOpenPhotoLauncher
 private const val MAX_BODY = 5000
 private const val MAX_ATTACHMENTS = 3
 private const val MAX_ATTACHMENT_BYTES = 2L * 1024 * 1024
+
+// Fork: where the permanently-signed-out state sends people instead of the
+// dead sign-in dialog. Issues seen on this unofficial build belong on this
+// fork's tracker, not with watchface developers or upstream support.
+private const val FORK_ISSUE_TRACKER_URL =
+    "https://github.com/david-cant-code/pebble-app-degoogled/issues"
 
 @Composable
 fun ContactDeveloperScreen(
@@ -192,11 +199,16 @@ fun ContactDeveloperScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
-                Text(
-                    "Send a message about $appTitle. The developer will receive it via email and can reply to you. Your email address is not shared with them.",
-                    fontSize = 13.sp,
-                )
-                Spacer(Modifier.height(12.dp))
+                // Fork: the intro only makes sense when a message can actually
+                // be sent, which needs the Core-account sign-in this build
+                // removed; signedIn is permanently false against the auth stub.
+                if (signedIn) {
+                    Text(
+                        "Send a message about $appTitle. The developer will receive it via email and can reply to you. Your email address is not shared with them.",
+                        fontSize = 13.sp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
 
                 when {
                     sent -> {
@@ -215,17 +227,29 @@ fun ContactDeveloperScreen(
                     }
 
                     !signedIn -> {
+                        // Fork: this branch is permanently taken (the auth stub
+                        // never signs in), and upstream's remedy here, a sign-in
+                        // dialog, can only offer disabled providers in this
+                        // build. Point people at this fork's own issue tracker
+                        // instead: a problem seen on this unofficial build
+                        // should not land on the watchface developer or on the
+                        // upstream app's support channels.
+                        val uriHandler = LocalUriHandler.current
                         Text(
-                            "You need to sign in to contact the developer.",
+                            "Contacting developers through a Core account is not available in this unofficial build.",
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Report any problem with $appTitle, or with this app, on this build's issue tracker rather than to the app's developer: this build's changes may be the cause, and the developer should not get reports from an unofficial build they have never seen.",
+                            fontSize = 13.sp,
                         )
                         Spacer(Modifier.height(16.dp))
                         Button(
-                            onClick = { showSignInDialog = true },
+                            onClick = { uriHandler.openUri(FORK_ISSUE_TRACKER_URL) },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Sign in")
+                            Text("Open the issue tracker on GitHub")
                         }
                     }
 

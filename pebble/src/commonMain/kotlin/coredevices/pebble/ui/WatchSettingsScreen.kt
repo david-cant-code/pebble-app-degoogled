@@ -1370,6 +1370,13 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                             CactusSTTMode.RebbleFirst,
                             CactusSTTMode.RebbleFallback -> rebbleVoiceAvailable
                             CactusSTTMode.PlatformOnly -> platformSttAvailable
+                            // Fork: the Core cloud STT modes need a Core-account
+                            // sign-in this build removed (their selection gate
+                            // below could only offer a dialog of disabled
+                            // providers), so they are never offered.
+                            CactusSTTMode.RemoteOnly,
+                            CactusSTTMode.RemoteFirst,
+                            CactusSTTMode.LocalFirst -> false
                             else -> true
                         }
                     },
