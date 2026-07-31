@@ -1884,33 +1884,10 @@ fun ScreenshotDialog(watch: ConnectedPebble.Screenshot, onDismissRequest: () -> 
                         horizontalArrangement = Arrangement.Center,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        PebbleElevatedButton(
-                            text = "Bug Report",
-                            onClick = {
-                                nextBugReportContext.nextContext = null
-                                scope.launch {
-                                    val tempScreenshotFile = withContext(Dispatchers.Default) {
-                                        val file = getTempFilePath(
-                                            appContext,
-                                            "watch-screenshot.png"
-                                        )
-                                        SystemFileSystem.sink(file, append = false).buffered().use { sink ->
-                                            sink.write(screenshot.toPngBytes())
-                                        }
-                                        file
-                                    }
-                                    navBarNav.navigateTo(
-                                        CommonRoutes.BugReport(
-                                            pebble = true,
-                                            screenshotPath = tempScreenshotFile.toString(),
-                                        )
-                                    )
-                                }
-                            },
-                            icon = Icons.Default.BugReport,
-                            primaryColor = false,
-                            modifier = Modifier.padding(5.dp),
-                        )
+                        // Fork: the screenshot sheet's Bug Report button is
+                        // removed; remote bug reporting is gone with the
+                        // Firebase strip (submission needed the bug-reports
+                        // backend and a Firebase ID token). Share remains.
 
                         val platformShareLauncher = koinInject<PlatformShareLauncher>()
                         PebbleElevatedButton(
