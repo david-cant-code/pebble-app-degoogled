@@ -38,7 +38,7 @@ lands piece by piece:
 
 - [x] Manual weather location entry
 - [x] Telemetry strip (Crashlytics, analytics, firmware-diagnostics relay)
-- [ ] Google Play services / Firebase removal
+- [x] Google Play services / Firebase removal
 - [ ] Third-party microphone API
 
 ## Building (Android)

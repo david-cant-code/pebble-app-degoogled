@@ -39,11 +39,23 @@ option does not apply here.
   `LibIndex` is bound at the Koin seam, fork stubs in `composeApp` replace
   the `experimental` types the app wiring touches (same fully-qualified
   names, so re-plugging the module trips duplicate-class errors), and
-  `CoreConfig.enableIndex` has no reachable set-point. The FCM push stack is
+  `CoreConfig.enableIndex` has no reachable set-point. The Firebase SDKs are
+  gone via the same idea at a different seam: the fork module
+  `:firebase-stubs` shadows the gitlive `dev.gitlive.firebase.*` artifacts
+  with inert same-FQN stand-ins (permanently signed out, empty
+  never-authoritative store), so upstream call sites compile unchanged, any
+  new upstream use of gitlive API fails the build until the stub surface is
+  extended, and re-adding the real artifacts trips duplicate classes;
+  `UsersDao` is additionally rebound at the Koin seam to the fork's
+  `SignedOutUsersDao`. The FCM push stack is
   the one deliberate exception to the seam rule: push either registers a
   device token with Google or does not exist, so `PushMessaging`,
   `PushService`, and their call sites were deleted outright rather than
   no-opped; do not read that deletion as precedent for other strips.
+- **No `google-services.json`.** The google-services plugin and the Firebase
+  SDKs are gone, so no config file (dummy or real) is needed or consumed;
+  this supersedes the upstream build instruction below that still asks for
+  `composeApp/src/google-services.json`.
 - **Verify against the artifact.** De-Google changes are confirmed against the
   built APK (no `com.google.firebase`/`com.google.android.gms` classes, no
   unexpected network endpoints), not just against the source tree.

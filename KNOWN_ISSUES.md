@@ -4,6 +4,25 @@ Deliberately deferred issues, each with the rationale and threat-model
 context, per the fork rule that nothing is deferred silently. An entry
 leaves this file when the fix lands.
 
+## Watch health sync not yet exercised end to end after the Firebase strip
+
+**Status: deferred to the first watch-paired e2e pass.**
+
+The Firebase strip excluded the GMS Google Fit transitives from health-kmp
+and rerouted manager creation through a fork seam that pins
+`useGoogleFit=false`, which reshapes the runtime inputs under the live
+Health Connect sync path. Verification so far is static plus test-level:
+APK dex checks show no GMS classes, an instrumented seam test
+(`HealthSeamTest`) resolves the production Koin module in a forced
+Health-Connect-unavailable environment and asserts the Google Fit backend
+is never chosen, and a bytecode scan of health-kmp 1.4.0 found no
+live-path references into the `-dontwarn` namespaces. What has not run is
+an actual watch health sync
+against the built APK, because no watch has been paired to the test device
+yet. Deferred, not skipped: the sync e2e is part of the watch-paired
+verification pass, and this entry leaves the file when that pass is
+recorded.
+
 ## On-device STT model downloads have no integrity verification
 
 **Status: deferred to a dedicated STT hardening branch.**
