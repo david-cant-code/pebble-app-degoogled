@@ -146,4 +146,8 @@ compass-geocoder-mobile = { module = "dev.jordond.compass:geocoder-mobile", vers
 compass-autocomplete = { module = "dev.jordond.compass:autocomplete", version.ref = "compass" }
 compass-autocomplete-mobile = { module = "dev.jordond.compass:autocomplete-mobile", version.ref = "compass" }
 coredevices-krispPrivate = { group = "coredevices.krispkmp", name = "library", version.ref = "coredevices-krisp" }
-health-kmp = { module = "com.viktormykhailiv:health-kmp", version.ref = "health-kmp" }
+# Fork: no health-kmp [libraries] alias on purpose (the [versions] entry
+# stays). The fork's consumers must use string notation so the GMS excludes
+# attach (see the composeApp/pebble build files); an alias would let a
+# merged-in libs.health.kmp resolve the Google Fit transitives silently,
+# while its absence makes that fail at configuration time.

@@ -165,6 +165,7 @@ kotlin {
         }
         androidUnitTest.dependencies {
             implementation(libs.ktor.client.okhttp)
+            implementation(libs.coroutines.test)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
