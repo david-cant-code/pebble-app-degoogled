@@ -113,6 +113,17 @@
             android:name="com.viktormykhailiv.kmp.health.HealthConnectPermissionActivity"
             android:noHistory="true"
             android:excludeFromRecents="true" />
+        <!--
+            Fork: health-kmp's Google Fit backend is excluded from this build
+            (its GMS dependencies are stripped and the factory pins
+            useGoogleFit=false), so its permission activity must not ship.
+            Removing the manifest entry also lets R8 strip the activity class,
+            which would otherwise be kept as a manifest root while referencing
+            GMS classes that do not exist in this APK.
+        -->
+        <activity
+            android:name="com.viktormykhailiv.kmp.health.legacy.GoogleFitPermissionActivity"
+            tools:node="remove" />
         <activity-alias
             android:name="ViewPermissionUsageActivity"
             android:exported="true"

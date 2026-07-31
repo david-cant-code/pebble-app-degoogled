@@ -18,8 +18,8 @@ import coredevices.coreapp.util.FileLogWriter
 import coredevices.database.CoreDatabase
 import coredevices.database.UserConfigDao
 import coredevices.database.getCoreRoomDatabase
+import coredevices.coreapp.account.SignedOutUsersDao
 import coredevices.firestore.UsersDao
-import coredevices.firestore.UsersDaoImpl
 import coredevices.util.AppResumed
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigFlow
@@ -108,7 +108,10 @@ val utilModule = module {
     } bind TranscriptionService::class
     singleOf(::WisprFlowRESTTranscriptionService)
     singleOf(::KirinkiTranscriptionService)
-    single<UsersDao> { UsersDaoImpl({ get() }, get(), get(), get(), get()) }
+    // Fork: permanently signed out. UsersDaoImpl's auth-restoration observer
+    // would loop forever against the Firebase stubs on any install that once
+    // had an account; see SignedOutUsersDao.
+    single<UsersDao> { SignedOutUsersDao }
     singleOf(::HealthSyncTracker)
     singleOf(::PlatformHealthSync)
 }

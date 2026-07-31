@@ -43,3 +43,8 @@ include(":libindex")
 // the Koin seam instead (no-op LibIndex, ring stubs in :composeApp).
 // include(":experimental")
 include(":krisp-stubs")
+// Fork module: inert dev.gitlive.firebase.* stand-ins replacing the real
+// gitlive firebase-auth/firebase-firestore artifacts (see the Firebase
+// strip). Keeps upstream call sites compiling with no Firebase/GMS SDKs
+// in the graph.
+include(":firebase-stubs")

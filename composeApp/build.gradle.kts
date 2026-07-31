@@ -10,7 +10,6 @@ plugins {
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
-    alias(libs.plugins.googleServices)
     alias(libs.plugins.androidVersion)
     alias(libs.plugins.nativeCocoaPods)
     alias(libs.plugins.kotlinx.atomicfu)
@@ -198,8 +197,9 @@ kotlin {
             implementation(libs.coil)
             implementation(libs.coil.svg)
 
-            implementation(libs.firebase.auth)
-            implementation(libs.firebase.firestore)
+            // Fork: inert dev.gitlive.firebase.* stand-ins replacing the real
+            // gitlive firebase-auth/firebase-firestore artifacts.
+            implementation(project(":firebase-stubs"))
 
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.contentNegotiation)
@@ -216,7 +216,17 @@ kotlin {
             implementation(libs.kmpio)
             implementation(project(":libpebble3"))
             implementation(project(":libindex"))
-            implementation(libs.health.kmp)
+            // Fork: health-kmp's Android artifact hard-depends on the Google
+            // Fit backend even though only the Health Connect path is used.
+            // The GMS artifacts are excluded so the APK stays GMS-free;
+            // watchModule additionally pins useGoogleFit=false so the Fit
+            // code path is unreachable on every device (second layer).
+            // String notation because the KMP dependencies DSL has no
+            // configure-lambda overload for version-catalog providers.
+            implementation("com.viktormykhailiv:health-kmp:${libs.versions.health.kmp.get()}") {
+                exclude(group = "com.google.android.gms", module = "play-services-auth")
+                exclude(group = "com.google.android.gms", module = "play-services-fitness")
+            }
         }
     }
     sourceSets.androidInstrumentedTest.dependencies {
