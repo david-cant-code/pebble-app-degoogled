@@ -42,6 +42,9 @@ class GithubReleases(
 ) {
     private val logger = Logger.withTag("GithubReleases")
 
+    /** Current channel value, exposed so the check cache can key on it. */
+    fun currentChannel(): FirmwareUpdateChannel = channel()
+
     suspend fun getLatestFirmware(watch: WatchInfo): FirmwareUpdateCheckResult {
         val runningRaw = watch.runningFwVersion.stringVersion
         val running = ReleaseTagVersion.from(runningRaw)

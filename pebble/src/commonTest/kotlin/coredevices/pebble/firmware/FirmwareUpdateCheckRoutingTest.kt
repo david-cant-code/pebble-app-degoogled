@@ -23,6 +23,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertContains
+import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.fail
 import kotlin.time.Clock
@@ -118,5 +119,79 @@ class FirmwareUpdateCheckRoutingTest {
         )
         val update = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(result)
         assertContains(update.url, "binaries.rebble.io")
+    }
+
+    /** Two main-line releases: v4.31.0 is soaked, v4.32.0 is 2 days old. */
+    private val twoChannelGithubBody = """[{"tag_name":"v4.32.0","prerelease":false,"draft":false,
+        "published_at":"2026-07-29T00:00:00Z","assets":[{"name":"normal_asterix_v4.32.0.pbz",
+        "browser_download_url":"https://github.com/coredevices/PebbleOS/releases/download/v4.32.0/normal_asterix_v4.32.0.pbz",
+        "digest":"sha256:${"c".repeat(64)}","size":100}]},
+        {"tag_name":"v4.31.0","prerelease":false,"draft":false,
+        "published_at":"2026-07-21T00:00:00Z","assets":[{"name":"normal_asterix_v4.31.0.pbz",
+        "browser_download_url":"https://github.com/coredevices/PebbleOS/releases/download/v4.31.0/normal_asterix_v4.31.0.pbz",
+        "digest":"sha256:${"a".repeat(64)}","size":100}]}]""".replace("\n", "")
+
+    @Test
+    fun channelFlipInvalidatesTheCacheWithoutForce() = runTest {
+        // Regression: the cache key must include the channel, or flipping the
+        // Early setting keeps serving the other channel's cached result until
+        // the TTL expires (no UI path forces a check).
+        var channel = FirmwareUpdateChannel.Soaked
+        var githubRequests = 0
+        val expectations = FirmwareArtifactExpectations()
+        val client = HttpClient(MockEngine { _ ->
+            githubRequests++
+            respond(twoChannelGithubBody, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }) {
+            install(ContentNegotiation) { json(testJson) }
+        }
+        val check = FirmwareUpdateCheck(
+            memfault = memfaultNeverContacted(),
+            cohorts = cohorts(failingClient("Cohorts"), expectations),
+            githubReleases = GithubReleases(client, expectations, { channel }, fixedClock),
+            clock = fixedClock,
+        )
+        val watch = testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0")
+
+        val soaked = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(check.checkForUpdates(watch, force = false))
+        assertContains(soaked.url, "v4.31.0")
+        check.checkForUpdates(watch, force = false)
+        assertEquals(1, githubRequests)
+
+        channel = FirmwareUpdateChannel.Early
+        val early = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(check.checkForUpdates(watch, force = false))
+        assertContains(early.url, "v4.32.0")
+        assertEquals(2, githubRequests)
+
+        // Flipping back reuses the still-valid Soaked entry.
+        channel = FirmwareUpdateChannel.Soaked
+        val soakedAgain = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(check.checkForUpdates(watch, force = false))
+        assertContains(soakedAgain.url, "v4.31.0")
+        assertEquals(2, githubRequests)
+    }
+
+    @Test
+    fun channelFlipDoesNotEvictLegacyWatchCache() = runTest {
+        var channel = FirmwareUpdateChannel.Soaked
+        var cohortsRequests = 0
+        val expectations = FirmwareArtifactExpectations()
+        val client = HttpClient(MockEngine { _ ->
+            cohortsRequests++
+            respond(cohortsBody, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }) {
+            install(ContentNegotiation) { json(testJson) }
+        }
+        val check = FirmwareUpdateCheck(
+            memfault = memfaultNeverContacted(),
+            cohorts = cohorts(client, expectations),
+            githubReleases = GithubReleases(failingClient("GitHub"), expectations, { channel }, fixedClock),
+            clock = fixedClock,
+        )
+        val watch = testWatchInfo(WatchHardwarePlatform.PEBBLE_SILK, "v4.0.0")
+
+        assertIs<FirmwareUpdateCheckResult.FoundUpdate>(check.checkForUpdates(watch, force = false))
+        channel = FirmwareUpdateChannel.Early
+        assertIs<FirmwareUpdateCheckResult.FoundUpdate>(check.checkForUpdates(watch, force = false))
+        assertEquals(1, cohortsRequests)
     }
 }

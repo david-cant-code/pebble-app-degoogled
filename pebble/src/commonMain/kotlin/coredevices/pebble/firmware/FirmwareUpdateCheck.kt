@@ -28,6 +28,12 @@ class FirmwareUpdateCheck(
         val serial: String,
         val fwVersion: String,
         val isRecovery: Boolean,
+        // Fork: the channel changes what the GitHub checker returns, so it
+        // must key the cache, or a channel toggle would keep serving the
+        // other channel's cached result until the TTL expires. Null for
+        // non-Core watches: cohorts ignores the channel, so a toggle flip
+        // must not evict their cached result.
+        val channel: FirmwareUpdateChannel?,
     )
 
     private data class CacheEntry(
@@ -44,6 +50,7 @@ class FirmwareUpdateCheck(
             serial = watch.serial,
             fwVersion = watch.runningFwVersion.stringVersion,
             isRecovery = watch.runningFwVersion.isRecovery,
+            channel = if (watch.platform.isCoreDevice()) githubReleases.currentChannel() else null,
         )
         val now = clock.now()
         if (!force) {
