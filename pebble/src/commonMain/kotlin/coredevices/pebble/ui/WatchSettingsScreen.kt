@@ -1686,7 +1686,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                 // Fork: channel toggle for the GitHub-releases update path.
                 basicSettingsToggleItem(
                     title = "Early PebbleOS updates",
-                    description = "Offer the newest PebbleOS release immediately (the tier Core's internal testers run) instead of one that has soaked for a week",
+                    description = "Offer the newest PebbleOS release immediately (the tier Core's internal testers run) instead of one from a release line that has soaked for a week",
                     topLevelType = TopLevelType.Phone,
                     section = Section.Debug,
                     checked = coreConfig.firmwareUpdatesEarlyChannel,

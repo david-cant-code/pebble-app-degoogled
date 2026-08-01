@@ -2046,8 +2046,11 @@ fun WatchDetails(
                     TextButton(onClick = {
                         showFirmwareUpdateConfirmDialog = false
                         // Fork: verified install path (sha256 + manifest checks).
-                        (watch as? CommonConnectedDevice)?.let {
-                            forkInstaller.install(it, firmwareUpdateAvailable)
+                        val device = watch as? CommonConnectedDevice
+                        if (device == null) {
+                            logger.w { "Can't update firmware for $watch" }
+                        } else {
+                            forkInstaller.install(device, firmwareUpdateAvailable)
                         }
                     }) { Text("Install") }
                 },

@@ -59,6 +59,7 @@ import coredevices.pebble.services.PebbleWebServices
 import coredevices.pebble.services.StoreOnboarding
 import coredevices.pebble.ui.CommonAppType
 import coredevices.pebble.ui.LanguageDialog
+import coredevices.pebble.ui.installStateFor
 import coredevices.pebble.ui.NativeLockerAddUtil
 import coredevices.pebble.ui.NativeWatchfaceMainContent
 import coredevices.pebble.ui.SettingsIds.EnableActivityInsights
@@ -206,7 +207,7 @@ fun WatchOnboardingScreen(
                         SectionText("Updating your watch to the latest version of PebbleOS...")
                         // Fork: surface download/verify phases and failures, which
                         // happen before upstream's progress state exists.
-                        val forkInstallState by forkInstaller.stateFor(connectedWatch.identifier).collectAsState()
+                        val forkInstallState by forkInstaller.installStateFor(connectedWatch)
                         forkInstallState.describe()?.let { SectionText(it) }
                         Spacer(modifier = Modifier.height(15.dp))
                         val progress = (connectedWatch.firmwareUpdateState as? FirmwareUpdater.FirmwareUpdateStatus.InProgress)?.progress?.collectAsState()

@@ -229,8 +229,11 @@ fun DebugFirmwareSideload(watchIdentifier: String, coreNav: CoreNav) {
                                         doFirmwareUpdate {
                                             logger.d { "doFirmwareUpdate: $availableUpdate" }
                                             // Fork: verified install path.
-                                            (this as? CommonConnectedDevice)?.let {
-                                                forkInstaller.install(it, availableUpdate)
+                                            val device = this as? CommonConnectedDevice
+                                            if (device == null) {
+                                                logger.w { "Can't update firmware for $this" }
+                                            } else {
+                                                forkInstaller.install(device, availableUpdate)
                                             }
                                         }
                                     } else {

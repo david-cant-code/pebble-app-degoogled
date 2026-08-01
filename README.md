@@ -62,10 +62,11 @@ lands piece by piece:
   request, the firmware asset is picked on the phone, and every download
   is verified against the GitHub-declared SHA-256 digest and size plus the
   firmware bundle's own manifest and CRCs before it is handed to the
-  watch. The default channel offers a release once it has been public for
-  a week; a debug-settings toggle ("Early PebbleOS updates") offers the
-  newest release immediately. Legacy Pebble watches keep using the Rebble
-  cohorts endpoint.
+  watch. The default channel offers a release line once its first release
+  has been public for a week, and picks up later hotfix patches within
+  that line immediately; a debug-settings toggle ("Early PebbleOS
+  updates") offers the newest release immediately. Legacy Pebble watches
+  keep using the Rebble cohorts endpoint.
 
 ## Architecture
 

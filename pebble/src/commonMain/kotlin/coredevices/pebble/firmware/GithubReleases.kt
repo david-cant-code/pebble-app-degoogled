@@ -67,26 +67,31 @@ class GithubReleases(
             logger.w { "No selectable PebbleOS release for '$revision' among ${releases.size} releases" }
             return FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)
         }
-        val chosen = candidates.first { it.selectable === selected }
+        // Structural match: distinct releases cannot produce equal
+        // selectables (tags are unique per release), and equality still
+        // holds if selection ever returns a copy instead of the same
+        // instance.
+        val chosen = candidates.first { it.selectable == selected }
         // Strictly newer only: equality must never re-offer (see
         // ReleaseTagVersion), and a channel switch back from Early must never
         // offer a downgrade.
         if (!watch.runningFwVersion.isRecovery && running != null && chosen.selectable.version <= running) {
             return FirmwareUpdateCheckResult.FoundNoUpdate
         }
+        val chosenTag = chosen.selectable.version.raw
         val displayVersion = FirmwareVersion.from(
-            tag = chosen.tagName,
+            tag = chosenTag,
             isRecovery = false,
             gitHash = "",
             // Display payload only. The offer decision above compares tags;
             // feeding publishedAt into a FirmwareVersion comparison would
             // re-offer equal versions on its timestamp tiebreak.
-            timestamp = chosen.publishedAt,
+            timestamp = chosen.selectable.publishedAt,
             isDualSlot = false, // not used from here
             isSlot0 = false, // not used from here
         )
         if (displayVersion == null) {
-            logger.e { "Couldn't build display version from '${chosen.tagName}'" }
+            logger.e { "Couldn't build display version from '$chosenTag'" }
             return FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)
         }
         expectations.record(
@@ -94,7 +99,7 @@ class GithubReleases(
             ExpectedFirmwareArtifact(
                 sha256Hex = checkNotNull(chosen.digestHex),
                 sizeBytes = checkNotNull(chosen.assetSize),
-                versionTag = chosen.tagName,
+                versionTag = chosenTag,
             ),
         )
         return FirmwareUpdateCheckResult.FoundUpdate(
@@ -159,18 +164,17 @@ class GithubReleases(
         val usable = asset != null && digestHex != null && asset.size > 0
         return Candidate(
             selectable = SelectableRelease(version, published, hasAsset = usable),
-            tagName = tagName,
-            publishedAt = published,
             assetUrl = asset?.browserDownloadUrl,
             assetSize = asset?.size,
             digestHex = digestHex,
         )
     }
 
+    // Only carries what selection cannot: the asset coordinates. The tag and
+    // publish date live in the selectable (version.raw is the trimmed tag),
+    // so there is a single source of truth per release.
     private data class Candidate(
         val selectable: SelectableRelease,
-        val tagName: String,
-        val publishedAt: Instant,
         val assetUrl: String?,
         val assetSize: Long?,
         val digestHex: String?,

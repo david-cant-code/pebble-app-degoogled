@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import coredevices.pebble.firmware.ForkFirmwareInstallState
@@ -18,8 +19,13 @@ import io.rebble.libpebblecommon.connection.PebbleDevice
  * (fewer merge conflicts).
  */
 @Composable
-fun VerifiedFirmwareInstaller.installStateFor(watch: PebbleDevice): State<ForkFirmwareInstallState> =
-    stateFor(watch.identifier).collectAsState()
+fun VerifiedFirmwareInstaller.installStateFor(watch: PebbleDevice): State<ForkFirmwareInstallState> {
+    // stateFor mints a fresh read-only wrapper per call; without remember,
+    // every recomposition would hand collectAsState a new flow identity and
+    // restart its collection coroutine.
+    val flow = remember(this, watch.identifier) { stateFor(watch.identifier) }
+    return flow.collectAsState()
+}
 
 /** Suffix for the watch state line, matching upstream's " - ..." style. */
 fun ForkFirmwareInstallState.stateTextSuffix(): String =
