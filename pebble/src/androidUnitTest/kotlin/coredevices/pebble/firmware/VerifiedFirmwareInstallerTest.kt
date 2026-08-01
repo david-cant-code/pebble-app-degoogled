@@ -17,6 +17,7 @@ import io.rebble.libpebblecommon.metadata.WatchHardwarePlatform
 import io.rebble.libpebblecommon.util.Crc32Calculator
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -27,6 +28,7 @@ import kotlinx.io.readByteArray
 import java.io.ByteArrayOutputStream
 import java.nio.file.Files
 import java.security.MessageDigest
+import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -37,6 +39,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -127,7 +130,6 @@ class VerifiedFirmwareInstallerTest {
     private var sideloadedBytes: ByteArray? = null
     private var sideloadedPath: Path? = null
     private var onSideload: (Path) -> Unit = {}
-    private var updaterState: FirmwareUpdateStatus = FirmwareUpdateStatus.NotInProgress.Idle()
 
     private fun installer(
         scope: CoroutineScope,
@@ -149,7 +151,6 @@ class VerifiedFirmwareInstallerTest {
     ) = VerifiedFirmwareInstaller.InstallTarget(
         identifierKey = key,
         platform = platform,
-        currentUpdateState = { updaterState },
         sideload = { path ->
             sideloadedPath = path
             // Read immediately: the installer deletes the file once the
@@ -236,11 +237,25 @@ class VerifiedFirmwareInstallerTest {
     fun refusesWhenAnUpstreamUpdateIsAlreadyRunning() = runTest {
         val pbz = singleSlotPbz()
         record(pbz)
-        updaterState = FirmwareUpdateStatus.WaitingToStart(update())
+        // The gate reads the live per-watch state flow, so an update that
+        // started after the device snapshot was taken still blocks.
+        watchStates.value = FirmwareUpdateStatus.WaitingToStart(update())
         val installer = installer(backgroundScope, serving(pbz))
         installer.runInstall(target(), update())
         val state = assertIs<ForkFirmwareInstallState.Failed>(installer.stateValueFor("watch1"))
         assertContains(state.reason, "already in progress")
+        assertEquals(0, requests.get())
+    }
+
+    @Test
+    fun vanishedWatchIsRefusedBeforeDownloading() = runTest {
+        val pbz = singleSlotPbz()
+        record(pbz)
+        watchStates.value = null
+        val installer = installer(backgroundScope, serving(pbz))
+        installer.runInstall(target(), update())
+        val state = assertIs<ForkFirmwareInstallState.Failed>(installer.stateValueFor("watch1"))
+        assertContains(state.reason, "not connected")
         assertEquals(0, requests.get())
     }
 
@@ -454,6 +469,93 @@ class VerifiedFirmwareInstallerTest {
         assertEquals(2, requests.get(), "each watch gets its own download")
         first.cancel()
         second.cancel()
+    }
+
+    @Test
+    fun staleErrorStartingFromAPreviousAttemptIsNotReadAsThisInstallsOutcome() = runTest {
+        // Upstream keeps ErrorStarting until the NEXT sideload gets past its
+        // parse, and the state flow replays it to new collectors; the
+        // handoff watcher must not treat the replay as this attempt's
+        // outcome, and must not delete the archive while the freshly
+        // launched sideload coroutine still needs it.
+        val pbz = singleSlotPbz()
+        record(pbz)
+        watchStates.value = FirmwareUpdateStatus.NotInProgress.ErrorStarting(
+            FirmwareUpdateErrorStarting.ErrorParsingPbz,
+        )
+        val sideloadStarted = CompletableDeferred<Unit>()
+        onSideload = { sideloadStarted.complete(Unit) } // upstream parse still running
+        val installer = installer(backgroundScope, serving(pbz))
+        val install = backgroundScope.launch { installer.runInstall(target(), update()) }
+        // The scheduler is single threaded, so once await() resumes here the
+        // install coroutine has already seen the replayed stale value and is
+        // suspended waiting for a genuinely new emission.
+        sideloadStarted.await()
+        assertEquals(1, forkFilesLeft().size, "file must survive while the sideload parse runs")
+        assertEquals(ForkFirmwareInstallState.HandedOff, installer.stateValueFor("watch1"))
+        // The retry's parse succeeds and the transfer runs to completion.
+        watchStates.value = FirmwareUpdateStatus.WaitingToStart(update())
+        watchStates.value = FirmwareUpdateStatus.WaitingForReboot(update())
+        install.join()
+        assertEquals(ForkFirmwareInstallState.Idle, installer.stateValueFor("watch1"))
+        assertTrue(forkFilesLeft().isEmpty())
+    }
+
+    @Test
+    fun staleErrorStartingWithASilentRejectionFailsAsNotStarted() = runTest {
+        // Degraded corner of the stale-state defense: the retry fails with
+        // an identical error, which a StateFlow cannot re-emit, so the only
+        // safe outcome is the start timeout (fail closed, file cleaned up
+        // after the upstream parse window, not during it).
+        val pbz = singleSlotPbz()
+        record(pbz)
+        watchStates.value = FirmwareUpdateStatus.NotInProgress.ErrorStarting(
+            FirmwareUpdateErrorStarting.ErrorParsingPbz,
+        )
+        onSideload = {} // upstream re-fails identically: no state change at all
+        val installer = installer(backgroundScope, serving(pbz))
+        installer.runInstall(target(), update())
+        val state = assertIs<ForkFirmwareInstallState.Failed>(installer.stateValueFor("watch1"))
+        assertContains(state.reason, "did not start")
+        assertTrue(forkFilesLeft().isEmpty())
+    }
+
+    @Test
+    fun timeoutWithTheTransferStillRunningLeavesTheFileAlone() = runTest {
+        // The transfer wait giving up must not delete the zip mid-transfer:
+        // PutBytes lazily re-opens it by path (the resources stream opens
+        // only after the firmware stream completes), so deletion would kill
+        // a slow-but-alive transfer partway. The stale sweep reclaims the
+        // file in the next process instead.
+        val pbz = singleSlotPbz()
+        record(pbz)
+        onSideload = { watchStates.value = FirmwareUpdateStatus.WaitingToStart(update()) }
+        val installer = installer(backgroundScope, serving(pbz))
+        installer.runInstall(target(), update())
+        assertEquals(1, forkFilesLeft().size, "file must outlive a transfer that is still running")
+        assertEquals(ForkFirmwareInstallState.Idle, installer.stateValueFor("watch1"))
+    }
+
+    @Test
+    fun concurrentFirstAccessesShareOneStateFlowInstance() {
+        // Real threads, not runTest: this pins the exact production race
+        // (install coroutine on Dispatchers.Default vs a main-thread Compose
+        // read doing the first access for a watch). Both must get the same
+        // instance, or the UI collects a flow the install never writes to.
+        val installer = installer(CoroutineScope(SupervisorJob()), serving(singleSlotPbz()))
+        repeat(500) { i ->
+            val key = "race-$i"
+            val barrier = CyclicBarrier(2)
+            val results = arrayOfNulls<Any>(2)
+            val threads = (0..1).map { t ->
+                Thread {
+                    barrier.await()
+                    results[t] = installer.stateFlowFor(key)
+                }.apply { start() }
+            }
+            threads.forEach { it.join() }
+            assertSame(results[0], results[1], "both threads must get the same flow for $key")
+        }
     }
 
     @Test

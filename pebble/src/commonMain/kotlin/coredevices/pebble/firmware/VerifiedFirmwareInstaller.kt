@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.dropWhile
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -109,7 +110,10 @@ class VerifiedFirmwareInstaller(
 ) {
     private val logger = Logger.withTag("VerifiedFirmwareInstaller")
     private val stateMutex = Mutex()
-    private val states = mutableMapOf<String, MutableStateFlow<ForkFirmwareInstallState>>()
+    // Immutable map behind a StateFlow so stateFlowFor can be lock-free and
+    // callable from non-suspend contexts (Compose); see that function.
+    private val states =
+        MutableStateFlow(mapOf<String, MutableStateFlow<ForkFirmwareInstallState>>())
     private val activeInstalls = mutableSetOf<String>()
     private var nextFileId = 0
     private var sweptStaleFiles = false
@@ -124,7 +128,6 @@ class VerifiedFirmwareInstaller(
         val target = InstallTarget(
             identifierKey = device.identifier.asString,
             platform = device.watchInfo.platform,
-            currentUpdateState = { device.firmwareUpdateState },
             sideload = device::sideloadFirmware,
         )
         scope.launch { runInstall(target, update) }
@@ -134,7 +137,6 @@ class VerifiedFirmwareInstaller(
     internal data class InstallTarget(
         val identifierKey: String,
         val platform: WatchHardwarePlatform,
-        val currentUpdateState: () -> FirmwareUpdateStatus,
         val sideload: (Path) -> Unit,
     )
 
@@ -161,24 +163,40 @@ class VerifiedFirmwareInstaller(
             if (!update.url.startsWith("https://")) {
                 throw InstallFailure("refusing non-https download")
             }
-            if (target.currentUpdateState() !is FirmwareUpdateStatus.NotInProgress) {
-                throw InstallFailure("an install is already in progress")
+            val updateStates = watchUpdateStates(target.identifierKey)
+            // Gate on the live upstream state, not a snapshot captured when
+            // the device object was created: a snapshot could miss an update
+            // that started since.
+            when (updateStates.first()) {
+                null -> throw InstallFailure("watch is not connected")
+                is FirmwareUpdateStatus.NotInProgress -> Unit
+                else -> throw InstallFailure("an install is already in progress")
             }
-            path = newDownloadPath(target.identifierKey)
-            val actualSha256 = downloadTo(path, update.url, expected) { progress ->
+            val downloaded = newDownloadPath(target.identifierKey)
+            path = downloaded
+            val actualSha256 = downloadTo(downloaded, update.url, expected) { progress ->
                 state.value = ForkFirmwareInstallState.Downloading(progress)
             }
             state.value = ForkFirmwareInstallState.Verifying
             if (actualSha256 != expected.sha256Hex) {
                 throw InstallFailure("checksum mismatch")
             }
-            verifyPbz(path, expected, target.platform)
+            verifyPbz(downloaded, expected, target.platform)
             state.value = ForkFirmwareInstallState.HandedOff
-            target.sideload(path)
-            awaitHandoffOutcome(target, state)
-            // Terminal either way by now (transfer ended, upstream error
-            // shown, or watch gone): the temp file is no longer needed.
-            deleteQuietly(path)
+            // Captured before sideload so the outcome watcher can tell a
+            // state this attempt caused from one left over before it.
+            val preHandoffState = updateStates.first()
+            target.sideload(downloaded)
+            when (awaitHandoffOutcome(updateStates, preHandoffState, state)) {
+                // Transfer ended, upstream error shown, or watch gone: the
+                // temp file is no longer needed.
+                HandoffOutcome.FileReleased -> deleteQuietly(downloaded)
+                // Still transferring when the wait gave up: the file must
+                // outlive the transfer (PutBytes lazily re-reads the zip),
+                // so leave it; the stale sweep reclaims it next process.
+                HandoffOutcome.TransferStillRunning ->
+                    logger.w { "Transfer still running after $TRANSFER_TIMEOUT; leaving ${downloaded.name} to it" }
+            }
         } catch (e: CancellationException) {
             path?.let { deleteQuietly(it) }
             state.value = ForkFirmwareInstallState.Idle
@@ -322,35 +340,51 @@ class VerifiedFirmwareInstaller(
         }
     }
 
+    /** Whether the handoff released the temp file or still needs it. */
+    private enum class HandoffOutcome { FileReleased, TransferStillRunning }
+
     /**
      * The sideload entry point rejects silently when another update holds
      * its mutex and reports parse failures through the upstream state flow,
      * so observe that flow: fail if nothing starts, and once the transfer is
      * running let the upstream states drive the UI (fork state goes Idle).
      * The temp file must outlive the whole transfer because PutBytes lazily
-     * re-reads the zip while streaming.
+     * re-reads the zip while streaming; only [HandoffOutcome.FileReleased]
+     * means it is safe to delete.
+     *
+     * The flow replays its current value to a new collector, so a terminal
+     * state left over from an earlier attempt (upstream never resets
+     * ErrorStarting until the next sideload gets past its parse) would read
+     * as this attempt's outcome, and the archive would be deleted under the
+     * freshly launched sideload coroutine, failing its parse and re-arming
+     * the same misread for every retry on this connection. Dropping values
+     * equal to [preHandoffState] attributes only genuinely new emissions to
+     * this attempt; if upstream re-enters an identical state (which a
+     * StateFlow cannot re-emit anyway), the start timeout reports "did not
+     * start", which is fail-closed and does not delete the file early.
      */
     private suspend fun awaitHandoffOutcome(
-        target: InstallTarget,
+        updateStates: Flow<FirmwareUpdateStatus?>,
+        preHandoffState: FirmwareUpdateStatus?,
         state: MutableStateFlow<ForkFirmwareInstallState>,
-    ) {
-        val updateStates = watchUpdateStates(target.identifierKey)
+    ): HandoffOutcome {
         val started = withTimeoutOrNull(HANDOFF_START_TIMEOUT) {
-            updateStates.first {
+            updateStates.dropWhile { it == preHandoffState }.first {
                 it is FirmwareUpdateStatus.Active || it is FirmwareUpdateStatus.NotInProgress.ErrorStarting
             }
         }
-        when (started) {
+        return when (started) {
             null -> throw InstallFailure("install did not start")
             is FirmwareUpdateStatus.NotInProgress.ErrorStarting -> {
                 // The upstream error state is already user-visible; going
                 // Idle here avoids rendering the failure twice.
                 logger.w { "libpebble3 rejected the sideload: ${started.error}" }
                 state.value = ForkFirmwareInstallState.Idle
+                HandoffOutcome.FileReleased
             }
             else -> {
                 state.value = ForkFirmwareInstallState.Idle
-                withTimeoutOrNull(TRANSFER_TIMEOUT) {
+                val terminal = withTimeoutOrNull(TRANSFER_TIMEOUT) {
                     updateStates.first {
                         // null: the watch vanished from the device list
                         // (disconnect or post-update reboot).
@@ -359,16 +393,31 @@ class VerifiedFirmwareInstaller(
                             it is FirmwareUpdateStatus.WaitingForReboot
                     }
                 }
+                if (terminal == null) {
+                    HandoffOutcome.TransferStillRunning
+                } else {
+                    HandoffOutcome.FileReleased
+                }
             }
         }
     }
 
-    private fun stateFlowFor(identifierKey: String): MutableStateFlow<ForkFirmwareInstallState> {
-        // Plain synchronized access is not available in common code; the map
-        // is only touched from install paths and Compose reads, both of
-        // which tolerate a racy first-creation (worst case an extra flow
-        // instance is briefly created and dropped).
-        return states.getOrPut(identifierKey) { MutableStateFlow(ForkFirmwareInstallState.Idle) }
+    internal fun stateFlowFor(identifierKey: String): MutableStateFlow<ForkFirmwareInstallState> {
+        // First access races between install coroutines (Dispatchers.Default)
+        // and Compose reads on the main thread, and both sides must end up
+        // holding the SAME instance: runInstall captures its flow once for
+        // the whole install, so losing a getOrPut race would leave the UI
+        // collecting a flow nobody writes to (no progress, no failure
+        // rendering). A compare-and-set loop over an immutable map gives an
+        // atomic get-or-create without needing a lock in common code.
+        while (true) {
+            val current = states.value
+            current[identifierKey]?.let { return it }
+            val created = MutableStateFlow<ForkFirmwareInstallState>(ForkFirmwareInstallState.Idle)
+            if (states.compareAndSet(current, current + (identifierKey to created))) {
+                return created
+            }
+        }
     }
 
     private suspend fun newDownloadPath(identifierKey: String): Path {
