@@ -40,9 +40,23 @@ data class ModelPin(
  * itself is driven by the pin (the on-disk marker stops matching), but the
  * system notification in CommonAppDelegate dedupes on the tag string, so
  * without a bump users get the in-app SttModelUpdatePrompt and no
- * notification.
+ * notification. Then record the new tag in [DERIVED_FROM_WEIGHTS_TAG].
+ *
+ * The reverse direction, an upstream bump of CACTUS_WEIGHTS_VERSION, is
+ * otherwise silently inert here (the tag merges conflict-free in
+ * util/build.gradle.kts, but downloads resolve the pinned commits, so
+ * users would keep the old weights with no signal anywhere); the
+ * [DERIVED_FROM_WEIGHTS_TAG] tripwire in CactusModelPinsTest turns that
+ * into a red test naming this re-pin procedure.
  */
 object CactusModelPins {
+    /**
+     * The CACTUS_WEIGHTS_VERSION tag the [PINS] table was derived from.
+     * Exists only for the unit-suite tripwire that catches an upstream tag
+     * bump; nothing at runtime reads it.
+     */
+    const val DERIVED_FROM_WEIGHTS_TAG = "v2.0.1"
+
     /**
      * Marker value written by installs that predate digest pinning, when
      * .cactus_version carried the CACTUS_WEIGHTS_VERSION tag. Grandfathered

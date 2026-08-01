@@ -11,12 +11,15 @@ import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.zip.ZipEntry
@@ -46,7 +49,9 @@ class ModelZipInstallerTest {
 
     private val model = "parakeet-tdt-0.6b-v3"
     private val targetDir: File get() = modelsDir.resolve(model)
-    private val stagingDir: File get() = modelsDir.resolve(".staging").resolve(model)
+    private val stagingDir: File get() = modelsDir.resolve(ModelZipInstaller.STAGING_DIR).resolve(model)
+    private val oldAsideDir: File get() =
+        modelsDir.resolve(ModelZipInstaller.STAGING_DIR).resolve("$model${ModelZipInstaller.OLD_ASIDE_SUFFIX}")
 
     private val requestedUrls = mutableListOf<String>()
 
@@ -111,6 +116,7 @@ class ModelZipInstallerTest {
     private fun assertNothingLeftBehind() {
         assertTrue(cacheFilesLeft().isEmpty(), "temp zip should be deleted")
         assertFalse(stagingDir.exists(), "staging should be cleaned up")
+        assertFalse(oldAsideDir.exists(), "no parked old model should remain")
     }
 
     private fun assertOldModelIntact() {
@@ -131,7 +137,7 @@ class ModelZipInstallerTest {
         )
         assertEquals(
             sha256Hex(bytes),
-            targetDir.resolve(".cactus_version").readText(),
+            targetDir.resolve(ModelZipInstaller.VERSION_MARKER).readText(),
             "marker must carry the pinned digest so a pin change forces reinstall",
         )
         assertNothingLeftBehind()
@@ -161,7 +167,7 @@ class ModelZipInstallerTest {
             dest.writeBytes(bytes)
         })
         assertTrue(targetDir.resolve("config.txt").exists())
-        assertEquals(sha256Hex(bytes), targetDir.resolve(".cactus_version").readText())
+        assertEquals(sha256Hex(bytes), targetDir.resolve(ModelZipInstaller.VERSION_MARKER).readText())
         assertEquals(emptyList(), requestedUrls)
         assertNothingLeftBehind()
     }
@@ -256,7 +262,7 @@ class ModelZipInstallerTest {
         assertFailsWith<SecurityException> {
             installer(serving(evil)).install(model, pinFor(evil), copyBundledZip = null)
         }
-        assertFalse(modelsDir.resolve(".staging").resolve("evil.txt").exists(), "entry must not escape staging")
+        assertFalse(modelsDir.resolve(ModelZipInstaller.STAGING_DIR).resolve("evil.txt").exists(), "entry must not escape staging")
         assertFalse(targetDir.exists(), "a refused install should not leave a model dir")
         assertNothingLeftBehind()
     }
@@ -269,7 +275,7 @@ class ModelZipInstallerTest {
         assertFailsWith<SecurityException> {
             installer(serving(evil)).install(model, pinFor(evil), copyBundledZip = null)
         }
-        assertFalse(modelsDir.resolve(".staging").resolve("$model-evil").exists(), "sibling dir must not be created")
+        assertFalse(modelsDir.resolve(ModelZipInstaller.STAGING_DIR).resolve("$model-evil").exists(), "sibling dir must not be created")
         assertNothingLeftBehind()
     }
 
@@ -355,5 +361,82 @@ class ModelZipInstallerTest {
         job.cancelAndJoin()
         assertOldModelIntact()
         assertNothingLeftBehind()
+    }
+
+    @Test
+    fun failureSurfacingDuringCancellationStillCleansUp() = runTest {
+        val job = launch {
+            installer(serving(modelZip())).install(model, pinFor(modelZip()), copyBundledZip = { dest ->
+                // Stand-in for a transport teardown mid-pipeline: staging
+                // already holds partial output when a plain IOException
+                // surfaces on an already-cancelled coroutine (the
+                // ensureActive re-check rethrows it as cancellation).
+                stagingDir.mkdirs()
+                stagingDir.resolve("partial.weights").writeText("partial")
+                dest.writeBytes(ByteArray(3))
+                currentCoroutineContext().cancel()
+                throw IOException("stream torn down during cancellation")
+            })
+        }
+        job.join()
+        assertNothingLeftBehind()
+    }
+
+    // --- Swap robustness ---
+
+    @Test
+    fun verificationRunsBeforeAnyExtraction() = runTest {
+        seedOldModel()
+        // Non-zip garbage whose digest mismatches its pin: if extraction
+        // ever ran ahead of the digest gate, this would surface as a
+        // ZipException from the garbage instead of the verification
+        // refusal.
+        val garbage = ByteArray(512) { 0x41 }
+        val wrongPin = pinFor(garbage).copy(zipSha256Hex = "ee".repeat(32))
+        val e = assertFailsWith<SecurityException> {
+            installer(serving(garbage)).install(model, wrongPin, copyBundledZip = null)
+        }
+        assertTrue(e.message.orEmpty().contains("failed verification"), "unexpected failure: $e")
+        assertOldModelIntact()
+        assertNothingLeftBehind()
+    }
+
+    @Test
+    fun aParkedInstallFromACrashedSwapIsRestored() = runTest {
+        // The state a process death between the two swap renames leaves:
+        // no live model dir, the old install parked aside.
+        oldAsideDir.mkdirs()
+        oldAsideDir.resolve("config.txt").writeText("old")
+        oldAsideDir.resolve("old.weights").writeText("old-weights")
+        // Even an install attempt that itself fails must first restore it.
+        assertFailsWith<Exception> {
+            installer { respond(ByteReadChannel("gone".encodeToByteArray()), HttpStatusCode.NotFound) }
+                .install(model, pinFor(modelZip()), copyBundledZip = null)
+        }
+        assertOldModelIntact()
+        assertNothingLeftBehind()
+    }
+
+    @Test
+    fun aStaleParkedCopyNextToALiveInstallIsSwept() = runTest {
+        seedOldModel()
+        oldAsideDir.mkdirs()
+        oldAsideDir.resolve("junk.weights").writeText("stale")
+        val bytes = modelZip()
+        installer(serving(bytes)).install(model, pinFor(bytes), copyBundledZip = null)
+        assertEquals("cfg", targetDir.resolve("config.txt").readText())
+        assertNothingLeftBehind()
+    }
+
+    // --- On-disk contract ---
+
+    @Test
+    fun onDiskNamesAreAStableContract() {
+        // Existing installs on user devices carry these exact names; a
+        // rename must be a conscious migration, not a refactor side effect.
+        assertEquals("config.txt", ModelZipInstaller.CONFIG_FILE)
+        assertEquals(".cactus_version", ModelZipInstaller.VERSION_MARKER)
+        assertEquals(".staging", ModelZipInstaller.STAGING_DIR)
+        assertEquals(".old", ModelZipInstaller.OLD_ASIDE_SUFFIX)
     }
 }

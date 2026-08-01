@@ -15,7 +15,9 @@ import kotlin.test.fail
  * Pins the pin table itself: every model the build can request must have
  * well-formed integrity data, the marker semantics must reinstall exactly
  * when the pin moves (grandfathering the pre-pinning tag markers until
- * then), and the bundled LM asset in the repo must match its pin, so a
+ * then), the table must have been derived from the weights tag the build
+ * ships (so an upstream tag bump cannot be silently inert), and the
+ * bundled LM asset at the path the APK packages must match its pin, so a
  * silently swapped or drifted asset fails the suite (the runtime digest
  * gate would refuse it only at install time, on a user's device).
  */
@@ -28,6 +30,19 @@ class CactusModelPinsTest {
     fun everyBuildKonfigModelHasAPin() {
         assertNotNull(CactusModelPins.pinFor(stt), "STT model '$stt' must be pinned")
         assertNotNull(CactusModelPins.pinFor(lm), "LM model '$lm' must be pinned")
+    }
+
+    @Test
+    fun pinsWereDerivedFromTheCurrentWeightsTag() {
+        // An upstream CACTUS_WEIGHTS_VERSION bump merges conflict-free and
+        // changes nothing at runtime here (downloads resolve the pinned
+        // commits, not the tag), so without this tripwire users would just
+        // silently keep the old weights forever.
+        assertEquals(
+            CommonBuildKonfig.CACTUS_WEIGHTS_VERSION,
+            CactusModelPins.DERIVED_FROM_WEIGHTS_TAG,
+            "the weights tag moved; run the re-pin procedure in the CactusModelPins KDoc",
+        )
     }
 
     @Test
@@ -93,13 +108,16 @@ class CactusModelPinsTest {
     @Test
     fun bundledLmAssetMatchesItsPin() {
         val pin = assertNotNull(CactusModelPins.pinFor(lm))
-        // The asset in androidMain/assets/models is a symlink to this file;
-        // walk up from the test working dir so the check is independent of
-        // where Gradle runs it.
+        // Hash the path the APK actually packages (currently a symlink into
+        // the repo-root models/, resolved on read), not its target: this way
+        // a retargeted, replaced, or broken symlink goes red too, not just
+        // an edit to the target file. The walk up from the test working dir
+        // keeps the check independent of where Gradle runs it.
+        val assetPath = "composeApp/src/androidMain/assets/models/${ModelZipInstaller.zipNameFor(lm)}"
         val asset = generateSequence(File(System.getProperty("user.dir")).absoluteFile) { it.parentFile }
-            .map { it.resolve("models/${ModelZipInstaller.zipNameFor(lm)}") }
+            .map { it.resolve(assetPath) }
             .firstOrNull { it.isFile }
-            ?: fail("could not locate the bundled LM asset from ${System.getProperty("user.dir")}")
+            ?: fail("could not locate $assetPath from ${System.getProperty("user.dir")}")
         assertEquals(pin.zipSizeBytes, asset.length(), "bundled LM asset size drifted from its pin")
         val sha = MessageDigest.getInstance("SHA-256")
             .digest(asset.readBytes())

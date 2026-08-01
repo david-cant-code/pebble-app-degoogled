@@ -35,8 +35,9 @@ import java.util.concurrent.ConcurrentHashMap
  * and its androidMain actual into one class. Those originals stay in-tree (the unplugged
  * module keeps its sources for cheap merges) and keep receiving upstream
  * changes that will merge conflict-free WITHOUT touching this copy. After
- * every upstream merge, re-diff this file against them and port whatever
- * matters; drift here breaks dictation.
+ * every upstream merge, re-diff this file AND [ModelZipInstaller] (which
+ * carries the extracted download/extract pipeline) against them and port
+ * whatever matters; drift here breaks dictation.
  *
  * Fork security deviation: installs are verified. Downloads resolve the
  * immutable commit pinned in [CactusModelPins] (upstream downloads a
@@ -72,6 +73,28 @@ class CactusModelProvider(
             versionMatches: Boolean,
             bundledInApp: Boolean,
         ): Boolean = name !in compatibleNames || (!versionMatches && !bundledInApp)
+
+        // Static like modelNeedsReplacement so the file-reading decision
+        // logic stays under JVM tests with temp dirs; a regression here
+        // silently forces a 383 MB re-download for every existing user, or
+        // downgrades them to RemoteOnly STT through the incompatible-model
+        // sweep. The instance methods below just bind the real modelsDir.
+        internal fun versionMatchesIn(modelsDir: File, modelName: String): Boolean {
+            val versionFile = modelsDir.resolve(modelName).resolve(ModelZipInstaller.VERSION_MARKER)
+            val marker = versionFile.takeIf { it.exists() }?.readText()?.trim() ?: return false
+            return CactusModelPins.markerMatches(modelName, marker)
+        }
+
+        internal fun needsInstallIn(modelsDir: File, modelName: String): Boolean =
+            !modelsDir.resolve(modelName).resolve(ModelZipInstaller.CONFIG_FILE).exists() ||
+                !versionMatchesIn(modelsDir, modelName)
+
+        // Fail closed on an unpinned model name: without integrity data
+        // there is no verifiable download, and the native parser must never
+        // see an unverified archive.
+        internal fun requirePin(modelName: String): ModelPin =
+            CactusModelPins.pinFor(modelName)
+                ?: throw IllegalStateException("No integrity pin for model '$modelName'; refusing to download")
     }
 
     private val modelsDir: File get() = context.filesDir.resolve("models").also { it.mkdirs() }
@@ -90,12 +113,12 @@ class CactusModelProvider(
 
     override fun isModelDownloaded(modelName: String): Boolean {
         val modelDir = modelsDir.resolve(modelName)
-        return modelDir.exists() && modelDir.resolve("config.txt").exists()
+        return modelDir.exists() && modelDir.resolve(ModelZipInstaller.CONFIG_FILE).exists()
     }
 
     override fun getDownloadedModels(): List<String> {
         return modelsDir.listFiles()
-            ?.filter { it.isDirectory && it.resolve("config.txt").exists() }
+            ?.filter { it.isDirectory && it.resolve(ModelZipInstaller.CONFIG_FILE).exists() }
             ?.map { it.name }
             ?: emptyList()
     }
@@ -107,11 +130,7 @@ class CactusModelProvider(
         }
     }
 
-    private fun versionMatches(modelName: String): Boolean {
-        val versionFile = modelsDir.resolve(modelName).resolve(ModelZipInstaller.VERSION_MARKER)
-        val marker = versionFile.takeIf { it.exists() }?.readText()?.trim() ?: return false
-        return CactusModelPins.markerMatches(modelName, marker)
-    }
+    private fun versionMatches(modelName: String): Boolean = versionMatchesIn(modelsDir, modelName)
 
     private fun isBundled(modelName: String): Boolean =
         context.assets.list("models")?.contains(ModelZipInstaller.zipNameFor(modelName)) == true
@@ -132,16 +151,8 @@ class CactusModelProvider(
     private suspend fun resolveModelPath(modelName: String): String = mutexFor(modelName).withLock {
         val modelDir = modelsDir.resolve(modelName)
 
-        val needsInstall = !modelDir.resolve(ModelZipInstaller.CONFIG_FILE).exists()
-            || !versionMatches(modelName)
-
-        if (needsInstall) {
-            // Fail closed on an unpinned model name: without integrity data
-            // there is no verifiable download, and the native parser must
-            // never see an unverified archive.
-            val pin = CactusModelPins.pinFor(modelName)
-                ?: throw IllegalStateException("No integrity pin for model '$modelName'; refusing to download")
-            downloadAndExtract(modelName, pin)
+        if (needsInstallIn(modelsDir, modelName)) {
+            downloadAndExtract(modelName, requirePin(modelName))
         }
 
         logger.d { "Model '$modelName' at: ${modelDir.absolutePath}" }
@@ -150,11 +161,10 @@ class CactusModelProvider(
 
     private suspend fun downloadAndExtract(modelName: String, pin: ModelPin) = withContext(Dispatchers.IO) {
         val zipName = ModelZipInstaller.zipNameFor(modelName)
-        val bundled = context.assets.list("models")?.contains(zipName) == true
         installer.install(
             modelName = modelName,
             pin = pin,
-            copyBundledZip = if (bundled) {
+            copyBundledZip = if (isBundled(modelName)) {
                 { dest: File ->
                     logger.i { "Found included model zip in assets: $zipName, extracting..." }
                     context.assets.open("models/$zipName").use { input ->

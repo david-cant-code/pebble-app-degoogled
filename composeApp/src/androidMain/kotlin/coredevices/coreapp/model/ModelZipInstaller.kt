@@ -44,6 +44,14 @@ import kotlin.time.Duration.Companion.seconds
  * handed in from outside, which keeps the whole pipeline under JVM unit
  * tests with a mock HTTP engine and temp directories.
  *
+ * Provenance: the download loop, buffer size, zip naming convention,
+ * extraction loop, and temp-file handling were extracted from the fork's
+ * [CactusModelProvider] copy and so ultimately derive from the unplugged
+ * upstream class (experimental/src/commonMain/kotlin/coredevices/ring/
+ * model/CactusModelProvider.kt). The provider's re-diff-after-upstream-merge
+ * instruction names this file as a porting target; upstream fixes to their
+ * download/extract logic belong here.
+ *
  * Instead of a whole-request read timeout, each individual read gets
  * [READ_STALL_TIMEOUT]: a healthy multi-hundred-MB transfer legitimately
  * takes minutes, while a stalled socket should fail promptly. Coroutine
@@ -72,6 +80,10 @@ class ModelZipInstaller(
         internal const val VERSION_MARKER = ".cactus_version"
         internal const val CONFIG_FILE = "config.txt"
 
+        // Where the live model is parked during the swap; under STAGING_DIR
+        // so it shares the dot-dir invisibility and the same filesystem.
+        internal const val OLD_ASIDE_SUFFIX = ".old"
+
         // Bounds for a hostile archive that somehow passed the digest gate
         // (a wrongly updated pin): real model zips hold a handful of files
         // and the cq4 weights barely compress, so both caps sit far above
@@ -88,9 +100,10 @@ class ModelZipInstaller(
      * it into modelsDir/<model>. [copyBundledZip] is non-null when the zip
      * ships inside the APK; it writes the asset to the given file and skips
      * the network entirely. The existing model directory survives every
-     * failure mode: it is only deleted after the staged replacement passed
-     * all checks, immediately before the rename. The temp zip lives in
-     * [cacheDir] and is removed on every exit path.
+     * failure mode: it is parked aside (never deleted) until the staged
+     * replacement that passed all checks has been renamed into place, and a
+     * failed swap renames it straight back. The temp zip and the staging
+     * directory are removed on every exit path.
      */
     suspend fun install(
         modelName: String,
@@ -99,13 +112,27 @@ class ModelZipInstaller(
     ) {
         val targetDir = modelsDir.resolve(modelName)
         val stagingDir = modelsDir.resolve(STAGING_DIR).resolve(modelName)
+        val oldAsideDir = modelsDir.resolve(STAGING_DIR).resolve("$modelName$OLD_ASIDE_SUFFIX")
         val tempZip = cacheDir.resolve(
             if (copyBundledZip != null) "cactus_asset_$modelName.zip" else "cactus_download_$modelName.zip",
         )
         try {
+            // A process death between the two swap renames below leaves the
+            // working install parked aside and no live model dir; restore it
+            // first so even that crash never costs the install.
+            if (!targetDir.exists() && oldAsideDir.exists()) {
+                oldAsideDir.renameTo(targetDir)
+            }
             // A crashed or cancelled earlier install may have left staging
-            // behind; it was never verified as a whole, so start clean.
+            // or a swapped-out old model behind; neither is trusted as a
+            // whole, so start clean. The parked copy is only swept while a
+            // live install exists: if the restore above failed it is the
+            // sole copy, and deleting it would turn a rename hiccup into a
+            // lost install.
             stagingDir.deleteRecursively()
+            if (targetDir.exists()) {
+                oldAsideDir.deleteRecursively()
+            }
 
             val (obtainedBytes, obtainedSha256) = if (copyBundledZip != null) {
                 copyBundledZip(tempZip)
@@ -136,16 +163,24 @@ class ModelZipInstaller(
             // install or gets reinstalled.
             stagingDir.resolve(VERSION_MARKER).writeText(pin.zipSha256Hex)
 
-            if (targetDir.exists()) {
-                targetDir.deleteRecursively()
+            // Swap by parking the live install aside instead of deleting it:
+            // an I/O failure at any single step leaves either the old or the
+            // new model in place (a delete-then-rename would lose both to a
+            // partial delete), and the recovery at the top of install covers
+            // a process death between the renames.
+            if (targetDir.exists() && !targetDir.renameTo(oldAsideDir)) {
+                throw Exception("Could not move the old model for $modelName aside; keeping it")
             }
             if (!stagingDir.renameTo(targetDir)) {
+                oldAsideDir.renameTo(targetDir)
                 throw Exception("Could not move the verified model for $modelName into place")
+            }
+            if (!oldAsideDir.deleteRecursively()) {
+                logger.w { "Old model for $modelName not fully removed; leftovers are swept on the next install" }
             }
             logger.i { "Installed verified model '$modelName' to ${targetDir.absolutePath}" }
         } catch (e: CancellationException) {
             logger.i { "Model install cancelled for $modelName" }
-            stagingDir.deleteRecursively()
             throw e
         } catch (e: Exception) {
             // Transport failures can surface while the coroutine is being
@@ -153,9 +188,13 @@ class ModelZipInstaller(
             // CancellationException rather than an install error.
             currentCoroutineContext().ensureActive()
             logger.e(e) { "Model install failed for $modelName" }
-            stagingDir.deleteRecursively()
             throw e
         } finally {
+            // Cleanup lives here, not in the catch arms, so it also runs
+            // when ensureActive above rethrows as CancellationException;
+            // after a successful swap the staging dir is already gone and
+            // this is a no-op.
+            stagingDir.deleteRecursively()
             tempZip.delete()
         }
     }

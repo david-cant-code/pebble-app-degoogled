@@ -21,3 +21,28 @@ handoff, past which transfer and install are upstream's unchanged flow,
 and the watch's own bootloader validation with recovery fallback
 backstops a bad install. This entry leaves the file when a single-slot
 watch runs the end-to-end pass.
+
+## Pre-pinning STT/LM model installs are grandfathered without retroactive verification
+
+**Status: accepted until the first model pin bump.**
+
+On-device model archives are now verified before install (immutable-commit
+download URLs, SHA-256 and exact-size gates, bounded staged extraction),
+but that verification is prospective only. Installs made before the
+pinning scheme wrote the release tag (`v2.0.1`) as their
+`.cactus_version` marker after an unverified download from a mutable tag,
+so the marker proves nothing about the installed bytes. `CactusModelPins`
+grandfathers that legacy marker while a model's current pin still names
+the very archive the tag shipped, which means an install that was already
+tampered with under the old scheme (the retargeted-tag or
+compromised-org threats the old entry here described) keeps feeding its
+weights to the native parser until the first real pin bump forces a
+verified reinstall. Retroactive verification is not feasible cheaply:
+only the archive digest is pinned and nothing per-file survives
+extraction, so re-verifying would force every existing user through a
+full re-download (383 MB for STT) after first downgrading them to
+remote-only STT via the incompatible-model sweep, a user-hostile trade
+against a purely historical exposure window. The grandfather clause and
+its frozen anchor digests live in `CactusModelPins.kt`; the first pin
+bump ends the exception automatically, and this entry leaves the file
+with it.
