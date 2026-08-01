@@ -200,10 +200,7 @@ val watchModule = module {
     // Fork: Core-watch updates come from the public PebbleOS GitHub releases
     // (fork builds ship no Memfault token, and cohorts rejects Core hardware).
     singleOf(::FirmwareArtifactExpectations)
-    single {
-        val coreConfig = get<CoreConfigFlow>()
-        GithubReleases(get(), get(), { coreConfig.value.firmwareUpdateChannel() }, get())
-    }
+    singleOf(::GithubReleases)
     single {
         // Fork: download+verify+sideload pipeline for firmware installs. Reuses
         // upstream's firmware cache directory (unique per-install filenames);
@@ -222,7 +219,19 @@ val watchModule = module {
             },
         )
     }
-    singleOf(::FirmwareUpdateCheck)
+    single {
+        // Fork: the channel provider is a live CoreConfig read; the check
+        // reads it exactly once per check so its cache key and the GitHub
+        // release selection always agree.
+        val coreConfig = get<CoreConfigFlow>()
+        FirmwareUpdateCheck(
+            memfault = get(),
+            cohorts = get(),
+            githubReleases = get(),
+            channel = { coreConfig.value.firmwareUpdateChannel() },
+            clock = get(),
+        )
+    }
     factoryOf(::PebbleFeatures)
     factoryOf(::WeatherFetcher)
     factoryOf(::LanguagePackRepository)

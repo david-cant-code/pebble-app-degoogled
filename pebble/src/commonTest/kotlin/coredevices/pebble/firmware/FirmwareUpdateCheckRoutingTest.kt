@@ -18,6 +18,8 @@ import io.ktor.serialization.kotlinx.json.json
 import io.rebble.libpebblecommon.connection.FakeLibPebble
 import io.rebble.libpebblecommon.connection.FirmwareUpdateCheckResult
 import io.rebble.libpebblecommon.metadata.WatchHardwarePlatform
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -89,9 +91,8 @@ class FirmwareUpdateCheckRoutingTest {
         val check = FirmwareUpdateCheck(
             memfault = memfaultNeverContacted(),
             cohorts = cohorts(failingClient("Cohorts"), expectations),
-            githubReleases = GithubReleases(
-                respondingClient(githubBody), expectations, { FirmwareUpdateChannel.Soaked }, fixedClock,
-            ),
+            githubReleases = GithubReleases(respondingClient(githubBody), expectations, fixedClock),
+            channel = { FirmwareUpdateChannel.Soaked },
             clock = fixedClock,
         )
         val result = check.checkForUpdates(
@@ -108,9 +109,8 @@ class FirmwareUpdateCheckRoutingTest {
         val check = FirmwareUpdateCheck(
             memfault = memfaultNeverContacted(),
             cohorts = cohorts(respondingClient(cohortsBody), expectations),
-            githubReleases = GithubReleases(
-                failingClient("GitHub"), expectations, { FirmwareUpdateChannel.Soaked }, fixedClock,
-            ),
+            githubReleases = GithubReleases(failingClient("GitHub"), expectations, fixedClock),
+            channel = { FirmwareUpdateChannel.Soaked },
             clock = fixedClock,
         )
         val result = check.checkForUpdates(
@@ -148,7 +148,8 @@ class FirmwareUpdateCheckRoutingTest {
         val check = FirmwareUpdateCheck(
             memfault = memfaultNeverContacted(),
             cohorts = cohorts(failingClient("Cohorts"), expectations),
-            githubReleases = GithubReleases(client, expectations, { channel }, fixedClock),
+            githubReleases = GithubReleases(client, expectations, fixedClock),
+            channel = { channel },
             clock = fixedClock,
         )
         val watch = testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0")
@@ -171,6 +172,50 @@ class FirmwareUpdateCheckRoutingTest {
     }
 
     @Test
+    fun midFlightChannelFlipDoesNotPoisonTheOtherChannelsCache() = runTest {
+        // Regression: the channel is read exactly once per check and serves
+        // both the cache key and the release selection. A toggle flip while
+        // the fetch is in flight must not cache the new channel's selection
+        // under the old channel's key (background checks overlap freely with
+        // settings visits).
+        var channel = FirmwareUpdateChannel.Soaked
+        var githubRequests = 0
+        val fetchStarted = CompletableDeferred<Unit>()
+        val releaseFetch = CompletableDeferred<Unit>()
+        val expectations = FirmwareArtifactExpectations()
+        val client = HttpClient(MockEngine { _ ->
+            githubRequests++
+            fetchStarted.complete(Unit)
+            releaseFetch.await()
+            respond(twoChannelGithubBody, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }) {
+            install(ContentNegotiation) { json(testJson) }
+        }
+        val check = FirmwareUpdateCheck(
+            memfault = memfaultNeverContacted(),
+            cohorts = cohorts(failingClient("Cohorts"), expectations),
+            githubReleases = GithubReleases(client, expectations, fixedClock),
+            channel = { channel },
+            clock = fixedClock,
+        )
+        val watch = testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0")
+
+        val inFlight = async { check.checkForUpdates(watch, force = false) }
+        fetchStarted.await()
+        channel = FirmwareUpdateChannel.Early // flips while the fetch is in flight
+        releaseFetch.complete(Unit)
+        val first = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(inFlight.await())
+        // The selection must match the channel the check started with.
+        assertContains(first.url, "v4.31.0")
+
+        // And the entry cached for Soaked must be the Soaked result.
+        channel = FirmwareUpdateChannel.Soaked
+        val cached = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(check.checkForUpdates(watch, force = false))
+        assertContains(cached.url, "v4.31.0")
+        assertEquals(1, githubRequests)
+    }
+
+    @Test
     fun channelFlipDoesNotEvictLegacyWatchCache() = runTest {
         var channel = FirmwareUpdateChannel.Soaked
         var cohortsRequests = 0
@@ -184,7 +229,8 @@ class FirmwareUpdateCheckRoutingTest {
         val check = FirmwareUpdateCheck(
             memfault = memfaultNeverContacted(),
             cohorts = cohorts(client, expectations),
-            githubReleases = GithubReleases(failingClient("GitHub"), expectations, { channel }, fixedClock),
+            githubReleases = GithubReleases(failingClient("GitHub"), expectations, fixedClock),
+            channel = { channel },
             clock = fixedClock,
         )
         val watch = testWatchInfo(WatchHardwarePlatform.PEBBLE_SILK, "v4.0.0")

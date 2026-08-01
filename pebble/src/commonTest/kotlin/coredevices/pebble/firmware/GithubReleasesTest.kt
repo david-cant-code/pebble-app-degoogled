@@ -77,8 +77,6 @@ class GithubReleasesTest {
     private fun checker(
         body: String,
         status: HttpStatusCode = HttpStatusCode.OK,
-        channel: FirmwareUpdateChannel = FirmwareUpdateChannel.Soaked,
-        channelProvider: () -> FirmwareUpdateChannel = { channel },
         expectations: FirmwareArtifactExpectations = FirmwareArtifactExpectations(),
         requests: MutableList<HttpRequestData> = mutableListOf(),
     ): GithubReleases {
@@ -90,14 +88,14 @@ class GithubReleasesTest {
                 json(Json { ignoreUnknownKeys = true })
             }
         }
-        return GithubReleases(client, expectations, channelProvider, fixedClock)
+        return GithubReleases(client, expectations, fixedClock)
     }
 
     @Test
     fun soakedOffersSoakedMinorHotfixAndRecordsExpectation() = runTest {
         val expectations = FirmwareArtifactExpectations()
         val checker = checker(standardBody(), expectations = expectations)
-        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"))
+        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"), FirmwareUpdateChannel.Soaked)
         val update = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(result)
         // Minor 4.31 soaked (first release 10 days old), hotfix taken despite
         // being 1 day old; 4.32 (2 days) not soaked; factory tag ignored.
@@ -112,8 +110,8 @@ class GithubReleasesTest {
 
     @Test
     fun earlyOffersNewestMainLineTagNeverTheFactoryTag() = runTest {
-        val checker = checker(standardBody(), channel = FirmwareUpdateChannel.Early)
-        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"))
+        val checker = checker(standardBody())
+        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"), FirmwareUpdateChannel.Early)
         val update = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(result)
         // The factory hotfix v4.9.142.4 is the most recent publish (it would
         // hold GitHub's Latest badge) and has the biggest patch number.
@@ -122,22 +120,29 @@ class GithubReleasesTest {
 
     @Test
     fun earlyChannelSettingSwitchesTheOfferBetweenChecks() = runTest {
-        // The real wiring hands GithubReleases a provider that re-reads
-        // CoreConfig on every check; flipping the setting must change the
-        // offer without recreating the checker.
+        // The channel is read from CoreConfig per check (by
+        // FirmwareUpdateCheck in production) and passed in; flipping the
+        // setting between checks must change the offer without recreating
+        // the checker.
         var config = CoreConfig()
-        val checker = checker(standardBody(), channelProvider = { config.firmwareUpdateChannel() })
+        val checker = checker(standardBody())
         val watch = testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0")
 
-        val soaked = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(checker.getLatestFirmware(watch))
+        val soaked = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(
+            checker.getLatestFirmware(watch, config.firmwareUpdateChannel()),
+        )
         assertEquals("v4.31.1", soaked.version.stringVersion)
 
         config = config.copy(firmwareUpdatesEarlyChannel = true)
-        val early = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(checker.getLatestFirmware(watch))
+        val early = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(
+            checker.getLatestFirmware(watch, config.firmwareUpdateChannel()),
+        )
         assertEquals("v4.32.0", early.version.stringVersion)
 
         config = config.copy(firmwareUpdatesEarlyChannel = false)
-        val backToSoaked = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(checker.getLatestFirmware(watch))
+        val backToSoaked = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(
+            checker.getLatestFirmware(watch, config.firmwareUpdateChannel()),
+        )
         assertEquals("v4.31.1", backToSoaked.version.stringVersion)
     }
 
@@ -148,7 +153,7 @@ class GithubReleasesTest {
         // same version "newer" on its timestamp tiebreak. The checker must
         // compare tags and say no.
         val checker = checker(standardBody())
-        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.31.1"))
+        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.31.1"), FirmwareUpdateChannel.Soaked)
         assertIs<FirmwareUpdateCheckResult.FoundNoUpdate>(result)
     }
 
@@ -157,7 +162,7 @@ class GithubReleasesTest {
         // Running the Early tier, then switching back to Soaked: the soaked
         // candidate is older than the running firmware.
         val checker = checker(standardBody())
-        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.32.0"))
+        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.32.0"), FirmwareUpdateChannel.Soaked)
         assertIs<FirmwareUpdateCheckResult.FoundNoUpdate>(result)
     }
 
@@ -166,10 +171,12 @@ class GithubReleasesTest {
         val checker = checker(standardBody())
         val equalVersion = checker.getLatestFirmware(
             testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.31.1", isRecovery = true),
+            FirmwareUpdateChannel.Soaked,
         )
         assertIs<FirmwareUpdateCheckResult.FoundUpdate>(equalVersion)
         val unparseable = checker.getLatestFirmware(
             testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "unknown", isRecovery = true),
+            FirmwareUpdateChannel.Soaked,
         )
         assertIs<FirmwareUpdateCheckResult.FoundUpdate>(unparseable)
     }
@@ -177,7 +184,7 @@ class GithubReleasesTest {
     @Test
     fun unparseableRunningVersionFailsClosed() = runTest {
         val checker = checker(standardBody())
-        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "unknown"))
+        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "unknown"), FirmwareUpdateChannel.Soaked)
         assertIs<FirmwareUpdateCheckResult.UpdateCheckFailed>(result)
     }
 
@@ -190,7 +197,7 @@ class GithubReleasesTest {
         ).joinToString(",") + "]"
         val expectations = FirmwareArtifactExpectations()
         val checker = checker(body, expectations = expectations)
-        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"))
+        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"), FirmwareUpdateChannel.Soaked)
         val update = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(result)
         // Soaked target is 4.31.1 (digest null) and 4.31.0's digest is
         // malformed; the nearest newer verifiable release wins.
@@ -205,7 +212,7 @@ class GithubReleasesTest {
             listOf(normalAsset("obelix_pvt", "v4.31.0", digest('a'), 111)),
         ) + "]"
         val checker = checker(body)
-        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"))
+        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"), FirmwareUpdateChannel.Soaked)
         assertIs<FirmwareUpdateCheckResult.UpdateCheckFailed>(result)
     }
 
@@ -217,7 +224,7 @@ class GithubReleasesTest {
             releaseJson("v4.31.0", 10, listOf(normalAsset("asterix", "v4.31.0", digest('c'), 333))),
         ).joinToString(",") + "]"
         val checker = checker(body)
-        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"))
+        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"), FirmwareUpdateChannel.Soaked)
         val update = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(result)
         assertEquals("v4.31.0", update.version.stringVersion)
     }
@@ -225,7 +232,7 @@ class GithubReleasesTest {
     @Test
     fun rateLimitFailsWithARetryableMessage() = runTest {
         val checker = checker("""{"message":"API rate limit exceeded"}""", status = HttpStatusCode.Forbidden)
-        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"))
+        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"), FirmwareUpdateChannel.Soaked)
         val failure = assertIs<FirmwareUpdateCheckResult.UpdateCheckFailed>(result)
         assertContains(failure.error, "rate limited")
     }
@@ -233,11 +240,11 @@ class GithubReleasesTest {
     @Test
     fun serverErrorsAndMalformedBodiesFailClosed() = runTest {
         val serverError = checker("oops", status = HttpStatusCode.InternalServerError)
-            .getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"))
+            .getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"), FirmwareUpdateChannel.Soaked)
         assertIs<FirmwareUpdateCheckResult.UpdateCheckFailed>(serverError)
 
         val notJson = checker("this is not json")
-            .getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"))
+            .getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"), FirmwareUpdateChannel.Soaked)
         assertIs<FirmwareUpdateCheckResult.UpdateCheckFailed>(notJson)
     }
 
@@ -246,10 +253,8 @@ class GithubReleasesTest {
         val client = HttpClient(MockEngine { throw IOException("network down") }) {
             install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
         }
-        val checker = GithubReleases(
-            client, FirmwareArtifactExpectations(), { FirmwareUpdateChannel.Soaked }, fixedClock,
-        )
-        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"))
+        val checker = GithubReleases(client, FirmwareArtifactExpectations(), fixedClock)
+        val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"), FirmwareUpdateChannel.Soaked)
         assertIs<FirmwareUpdateCheckResult.UpdateCheckFailed>(result)
     }
 
@@ -257,7 +262,7 @@ class GithubReleasesTest {
     fun requestIsAnonymousAndTargetsTheReleaseList() = runTest {
         val requests = mutableListOf<HttpRequestData>()
         val checker = checker(standardBody(), requests = requests)
-        checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"))
+        checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"), FirmwareUpdateChannel.Soaked)
         assertEquals(1, requests.size)
         val request = requests.single()
         assertEquals("api.github.com", request.url.host)
@@ -278,7 +283,7 @@ class GithubReleasesTest {
     fun nothingIsRecordedWhenNoUpdateIsOffered() = runTest {
         val expectations = FirmwareArtifactExpectations()
         val checker = checker(standardBody(), expectations = expectations)
-        checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.31.1"))
+        checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.31.1"), FirmwareUpdateChannel.Soaked)
         assertNull(expectations.lookup("https://github.com/coredevices/PebbleOS/releases/download/x/normal_asterix_v4.31.1.pbz"))
     }
 }

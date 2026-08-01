@@ -35,17 +35,18 @@ import kotlin.time.Instant
 class GithubReleases(
     private val httpClient: HttpClient,
     private val expectations: FirmwareArtifactExpectations,
-    // Provider, not a value: the channel is user-configurable and must be
-    // re-read on every check.
-    private val channel: () -> FirmwareUpdateChannel,
     private val clock: Clock,
 ) {
     private val logger = Logger.withTag("GithubReleases")
 
-    /** Current channel value, exposed so the check cache can key on it. */
-    fun currentChannel(): FirmwareUpdateChannel = channel()
-
-    suspend fun getLatestFirmware(watch: WatchInfo): FirmwareUpdateCheckResult {
+    // The channel is a parameter, not a constructor dependency, so one check
+    // uses one channel value throughout: the caller keys its result cache on
+    // the same value it passes here, and a mid-check toggle flip cannot make
+    // the selection disagree with the cache key.
+    suspend fun getLatestFirmware(
+        watch: WatchInfo,
+        channel: FirmwareUpdateChannel,
+    ): FirmwareUpdateCheckResult {
         val runningRaw = watch.runningFwVersion.stringVersion
         val running = ReleaseTagVersion.from(runningRaw)
         if (running == null && !watch.runningFwVersion.isRecovery) {
@@ -61,7 +62,7 @@ class GithubReleases(
         }
         val revision = watch.platform.revision
         val candidates = releases.mapNotNull { it.toCandidate(revision) }
-        val selected = selectRelease(candidates.map { it.selectable }, channel(), clock.now())
+        val selected = selectRelease(candidates.map { it.selectable }, channel, clock.now())
         if (selected == null) {
             logger.w { "No selectable PebbleOS release for '$revision' among ${releases.size} releases" }
             return FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)

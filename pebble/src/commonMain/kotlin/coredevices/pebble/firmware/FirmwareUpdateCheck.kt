@@ -19,9 +19,16 @@ class FirmwareUpdateCheck(
     private val cohorts: Cohorts,
     // Fork: GitHub-releases checker for Core watches; see doCheck.
     private val githubReleases: GithubReleases,
+    // Fork: user-configurable channel for the GitHub checker, re-read on
+    // every check, exactly once per check; see checkForUpdates.
+    private val channel: () -> FirmwareUpdateChannel,
     private val clock: Clock = Clock.System,
 ) {
     private val logger = Logger.withTag("FirmwareUpdateCheck")
+
+    // Fork: which source serves this watch. Computed once per check so the
+    // cache key can mirror the routing exactly instead of re-deriving it.
+    private enum class Route { UnknownPlatform, Memfault, GithubReleases, Cohorts }
 
     private data class CacheKey(
         val platform: WatchHardwarePlatform,
@@ -31,8 +38,8 @@ class FirmwareUpdateCheck(
         // Fork: the channel changes what the GitHub checker returns, so it
         // must key the cache, or a channel toggle would keep serving the
         // other channel's cached result until the TTL expires. Null for
-        // non-Core watches: cohorts ignores the channel, so a toggle flip
-        // must not evict their cached result.
+        // every other route: their results ignore the channel, so a toggle
+        // flip must not fragment or evict their cached entries.
         val channel: FirmwareUpdateChannel?,
     )
 
@@ -45,12 +52,18 @@ class FirmwareUpdateCheck(
     private val cache = mutableMapOf<CacheKey, CacheEntry>()
 
     suspend fun checkForUpdates(watch: WatchInfo, force: Boolean): FirmwareUpdateCheckResult {
+        val route = routeFor(watch)
+        // One read serves both the cache key and the release selection: a
+        // toggle flip while a check is in flight must not cache one
+        // channel's selection under the other channel's key.
+        val channelForCheck =
+            if (route == Route.GithubReleases) channel() else null
         val key = CacheKey(
             platform = watch.platform,
             serial = watch.serial,
             fwVersion = watch.runningFwVersion.stringVersion,
             isRecovery = watch.runningFwVersion.isRecovery,
-            channel = if (watch.platform.isCoreDevice()) githubReleases.currentChannel() else null,
+            channel = channelForCheck,
         )
         val now = clock.now()
         if (!force) {
@@ -61,9 +74,9 @@ class FirmwareUpdateCheck(
                 }
             }
         }
-        val result = doCheck(watch)
-        // Only cache definitive answers — transient failures (network, rate limit)
-        // must retry on the next connect, not be locked in for the TTL.
+        val result = doCheck(watch, route, channelForCheck)
+        // Only cache definitive answers: transient failures (network, rate
+        // limit) must retry on the next connect, not be locked in for the TTL.
         if (result !is FirmwareUpdateCheckResult.UpdateCheckFailed) {
             mutex.withLock {
                 cache[key] = CacheEntry(result, now + CACHE_TTL)
@@ -72,15 +85,27 @@ class FirmwareUpdateCheck(
         return result
     }
 
-    private suspend fun doCheck(watch: WatchInfo): FirmwareUpdateCheckResult = when {
-        watch.platform == UNKNOWN -> FirmwareUpdateCheckResult.UpdateCheckFailed("Unknown platform")
-        watch.platform.isCoreDevice() && CommonBuildKonfig.MEMFAULT_TOKEN != null -> memfault.getLatestFirmware(watch)
+    private fun routeFor(watch: WatchInfo): Route = when {
+        watch.platform == UNKNOWN -> Route.UnknownPlatform
+        watch.platform.isCoreDevice() && CommonBuildKonfig.MEMFAULT_TOKEN != null -> Route.Memfault
         // Fork: fork builds ship no Memfault token and cohorts rejects every
         // Core hardware revision, so Core watches check the public PebbleOS
         // GitHub releases instead. Legacy watches keep cohorts, which serves
         // them fine.
-        watch.platform.isCoreDevice() -> githubReleases.getLatestFirmware(watch)
-        else -> cohorts.getLatestFirmware(watch)
+        watch.platform.isCoreDevice() -> Route.GithubReleases
+        else -> Route.Cohorts
+    }
+
+    private suspend fun doCheck(
+        watch: WatchInfo,
+        route: Route,
+        channelForCheck: FirmwareUpdateChannel?,
+    ): FirmwareUpdateCheckResult = when (route) {
+        Route.UnknownPlatform -> FirmwareUpdateCheckResult.UpdateCheckFailed("Unknown platform")
+        Route.Memfault -> memfault.getLatestFirmware(watch)
+        Route.GithubReleases ->
+            githubReleases.getLatestFirmware(watch, checkNotNull(channelForCheck))
+        Route.Cohorts -> cohorts.getLatestFirmware(watch)
     }
 
     companion object {
