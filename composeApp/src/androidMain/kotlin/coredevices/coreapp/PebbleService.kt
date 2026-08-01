@@ -19,7 +19,7 @@ import org.koin.core.component.inject
 class PebbleService: Service(), KoinComponent {
     companion object {
         const val NOTIFICATION_CHANNEL_ID = "pebble"
-        const val NOTIFICATION_CHANNEL_NAME = "Pebble Service"
+        const val NOTIFICATION_CHANNEL_NAME = "Gravel Service"
         const val ACTION_STOP = "STOP"
 
         private val logger = Logger.withTag("PebbleService")
@@ -59,8 +59,8 @@ class PebbleService: Service(), KoinComponent {
         )
 
         val notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-            .setContentTitle("Pebble")
-            .setContentText("Keeping Pebble connection alive")
+            .setContentTitle("Gravel")
+            .setContentText("Keeping watch connection alive")
             .setOngoing(true)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(contentIntent)

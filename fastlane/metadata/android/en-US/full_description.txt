@@ -1,5 +1,9 @@
-Pebble is the official Android app for managing your Pebble and Core Devices smartwatch. Pair your watch, customize your settings, and discover a growing ecosystem of watchfaces, apps, and tools designed for your watch.
+Gravel is an unofficial, de-Googled fork of the Pebble mobile app by Core Devices, for managing Pebble and Core Devices smartwatches without Google Play services or Firebase. Pair your watch, customize your settings, and browse watchfaces and apps on GrapheneOS, LineageOS, and similar phones.
+
+Gravel is not affiliated with or endorsed by Core Devices. "Pebble" and "Core Devices" are trademarks of their respective owners; Gravel is an independent fork of their GPLv3-licensed source code, under its own name and icon to avoid any confusion with the official app.
 
 Features include:
 - Bluetooth pairing and reconnection
 - Watchface and app gallery browsing
+- Works without Google Play services or Firebase
+- No telemetry

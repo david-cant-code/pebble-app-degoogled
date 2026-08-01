@@ -44,7 +44,7 @@ actual fun createNotification(
     platformContext.context.createChannel()
     val builder = NotificationCompat.Builder(platformContext.context, CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)
-        .setContentTitle("Pebble Support message")
+        .setContentTitle("Gravel support message")
         .setContentText(message)
         .setPriority(NotificationCompat.PRIORITY_DEFAULT)
         .setContentIntent(deepLinkPendingIntent)
