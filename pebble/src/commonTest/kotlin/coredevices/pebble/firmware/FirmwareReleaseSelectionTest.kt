@@ -5,7 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.days
-import kotlin.time.Instant
+import kotlin.time.Duration.Companion.hours
 
 /**
  * Locks the two behaviors the GitHub update path depends on and which
@@ -92,7 +92,7 @@ class FirmwareReleaseSelectionTest {
 
     // --- Release selection ---
 
-    private val now = Instant.parse("2026-07-31T00:00:00Z")
+    private val now = TEST_NOW
 
     private fun release(tag: String, ageDays: Int, hasAsset: Boolean = true) = SelectableRelease(
         version = ReleaseTagVersion.from(tag)!!,
@@ -126,6 +126,27 @@ class FirmwareReleaseSelectionTest {
             release("v4.30.0", ageDays = 20),
         )
         assertEquals("v4.31.1", selectRelease(releases, FirmwareUpdateChannel.Soaked, now)!!.version.raw)
+    }
+
+    @Test
+    fun soakBoundaryIsInclusiveAtExactlySevenDays() {
+        // A minor exactly SOAK_WINDOW old counts as soaked: pins the
+        // inclusive comparison so an operator flip cannot pass the suite.
+        val releases = listOf(release("v4.31.0", ageDays = 7))
+        assertEquals("v4.31.0", selectRelease(releases, FirmwareUpdateChannel.Soaked, now)!!.version.raw)
+    }
+
+    @Test
+    fun soakWindowRequiresTheFullSevenDays() {
+        // Pins the window length from below as well: an hour short of seven
+        // days is not soaked, so tuning SOAK_WINDOW fails a test on purpose
+        // instead of drifting silently.
+        val justUnder = SelectableRelease(
+            version = ReleaseTagVersion.from("v4.31.0")!!,
+            publishedAt = now - 7.days + 1.hours,
+            hasAsset = true,
+        )
+        assertNull(selectRelease(listOf(justUnder), FirmwareUpdateChannel.Soaked, now))
     }
 
     @Test

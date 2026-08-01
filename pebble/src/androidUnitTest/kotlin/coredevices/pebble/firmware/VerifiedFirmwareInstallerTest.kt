@@ -18,6 +18,7 @@ import io.rebble.libpebblecommon.util.Crc32Calculator
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -294,6 +295,61 @@ class VerifiedFirmwareInstallerTest {
     }
 
     @Test
+    fun nullSizeExpectationInstallsAndSkipsOnlyTheSizeChecks() = runTest {
+        // Cohorts records no size, so the null-size path is the entire
+        // install path for legacy watches: the cap falls back to the
+        // constant, the exact-size check is skipped, nothing else loosens.
+        val pbz = singleSlotPbz()
+        record(pbz, size = null)
+        handoffSucceeds()
+        val installer = installer(backgroundScope, serving(pbz))
+        installer.runInstall(target(), update())
+        assertNotNull(sideloadedPath)
+        assertContentEquals(pbz, sideloadedBytes)
+        assertEquals(ForkFirmwareInstallState.Idle, installer.stateValueFor("watch1"))
+        assertTrue(forkFilesLeft().isEmpty())
+    }
+
+    @Test
+    fun nullSizeExpectationStillEnforcesTheChecksum() = runTest {
+        val pbz = singleSlotPbz()
+        record(pbz, sha256 = "0".repeat(64), size = null)
+        val installer = installer(backgroundScope, serving(pbz))
+        installer.runInstall(target(), update())
+        val state = assertIs<ForkFirmwareInstallState.Failed>(installer.stateValueFor("watch1"))
+        assertContains(state.reason, "checksum mismatch")
+        assertNull(sideloadedPath)
+        assertTrue(forkFilesLeft().isEmpty())
+    }
+
+    @Test
+    fun nonZipPayloadFailsClosedAndDeletesTheFile() = runTest {
+        // The expectation hash is computed over whatever the source
+        // published, so a garbage artifact passes the transport layer and
+        // only the parse layer can refuse it.
+        val garbage = ByteArray(700) { (it % 31).toByte() }
+        record(garbage)
+        val installer = installer(backgroundScope, serving(garbage))
+        installer.runInstall(target(), update())
+        val state = assertIs<ForkFirmwareInstallState.Failed>(installer.stateValueFor("watch1"))
+        assertContains(state.reason, "could not verify")
+        assertNull(sideloadedPath)
+        assertTrue(forkFilesLeft().isEmpty())
+    }
+
+    @Test
+    fun zipWithoutAManifestFailsClosedAndDeletesTheFile() = runTest {
+        val pbz = zip(mapOf("pebbleos.bin" to firmwareBytes))
+        record(pbz)
+        val installer = installer(backgroundScope, serving(pbz))
+        installer.runInstall(target(), update())
+        val state = assertIs<ForkFirmwareInstallState.Failed>(installer.stateValueFor("watch1"))
+        assertContains(state.reason, "could not verify")
+        assertNull(sideloadedPath)
+        assertTrue(forkFilesLeft().isEmpty())
+    }
+
+    @Test
     fun httpErrorFails() = runTest {
         val pbz = singleSlotPbz()
         record(pbz)
@@ -448,7 +504,11 @@ class VerifiedFirmwareInstallerTest {
         assertEquals(1, requests.get())
         installer.runInstall(target(), update())
         assertEquals(1, requests.get(), "second install must not start a second download")
-        first.cancel()
+        first.cancelAndJoin()
+        // Cancellation cleanup: the partial download is deleted and the fork
+        // state resets, so the UI cannot stay stuck on Downloading.
+        assertTrue(forkFilesLeft().isEmpty(), "cancelled install must not leak its partial file")
+        assertEquals(ForkFirmwareInstallState.Idle, installer.stateValueFor("watch1"))
     }
 
     @Test
@@ -467,8 +527,11 @@ class VerifiedFirmwareInstallerTest {
         val second = backgroundScope.launch { installer.runInstall(target(key = "watchB"), update()) }
         bothRequested.await()
         assertEquals(2, requests.get(), "each watch gets its own download")
-        first.cancel()
-        second.cancel()
+        first.cancelAndJoin()
+        second.cancelAndJoin()
+        assertTrue(forkFilesLeft().isEmpty(), "cancelled installs must not leak partial files")
+        assertEquals(ForkFirmwareInstallState.Idle, installer.stateValueFor("watchA"))
+        assertEquals(ForkFirmwareInstallState.Idle, installer.stateValueFor("watchB"))
     }
 
     @Test

@@ -22,9 +22,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlin.time.Clock
-import kotlin.time.Duration.Companion.days
-import kotlin.time.Instant
 
 /**
  * Pins the GitHub-releases checker against the traps found during research:
@@ -35,35 +32,8 @@ import kotlin.time.Instant
  */
 class GithubReleasesTest {
 
-    private val now = Instant.parse("2026-07-31T00:00:00Z")
-    private val fixedClock = object : Clock {
-        override fun now(): Instant = this@GithubReleasesTest.now
-    }
-
     private fun digest(char: Char) = "sha256:" + char.toString().repeat(64)
     private fun hex(char: Char) = char.toString().repeat(64)
-
-    private fun assetJson(name: String, digestValue: String?, size: Long) = buildString {
-        append("""{"name":"$name",""")
-        append(""""browser_download_url":"https://github.com/coredevices/PebbleOS/releases/download/x/$name",""")
-        append(""""digest":${if (digestValue != null) "\"$digestValue\"" else "null"},""")
-        append(""""size":$size,"content_type":"application/octet-stream"}""")
-    }
-
-    private fun releaseJson(
-        tag: String,
-        ageDays: Int,
-        assets: List<String>,
-        prerelease: Boolean = false,
-        draft: Boolean = false,
-    ) = buildString {
-        append("""{"tag_name":"$tag","html_url":"https://github.com/x","prerelease":$prerelease,"draft":$draft,""")
-        append(""""published_at":"${now - ageDays.days}","body":"",""")
-        append(""""assets":[${assets.joinToString(",")}]}""")
-    }
-
-    private fun normalAsset(revision: String, tag: String, digestValue: String? , size: Long) =
-        assetJson("normal_${revision}_$tag.pbz", digestValue, size)
 
     /** Two main-line minors, one soaked; a factory hotfix is the newest publish. */
     private fun standardBody() = "[" + listOf(
@@ -88,7 +58,7 @@ class GithubReleasesTest {
                 json(Json { ignoreUnknownKeys = true })
             }
         }
-        return GithubReleases(client, expectations, fixedClock)
+        return GithubReleases(client, expectations, fixedTestClock)
     }
 
     @Test
@@ -206,6 +176,42 @@ class GithubReleasesTest {
     }
 
     @Test
+    fun perEntryMalformedReleasesAreSkippedNotFatal() = runTest {
+        // The skip-vs-fail split is deliberate: one odd upstream entry (bad
+        // tag, missing or garbage date) must cost only itself, or a single
+        // unusual tag would break every Core watch's update check.
+        val body = "[" + listOf(
+            """{"tag_name":"totally-unparseable","prerelease":false,"draft":false,""" +
+                """"published_at":"${TEST_NOW}","assets":[]}""",
+            """{"tag_name":"v4.33.0","prerelease":false,"draft":false,""" +
+                """"assets":[${normalAsset("asterix", "v4.33.0", digest('f'), 111)}]}""",
+            """{"tag_name":"v4.34.0","prerelease":false,"draft":false,"published_at":"not-a-date",""" +
+                """"assets":[${normalAsset("asterix", "v4.34.0", digest('f'), 111)}]}""",
+            releaseJson("v4.31.0", 10, listOf(normalAsset("asterix", "v4.31.0", digest('c'), 333))),
+        ).joinToString(",") + "]"
+        val result = checker(body).getLatestFirmware(
+            testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"), FirmwareUpdateChannel.Soaked,
+        )
+        val update = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(result)
+        assertEquals("v4.31.0", update.version.stringVersion)
+    }
+
+    @Test
+    fun zeroSizeAssetIsTreatedAsUnverifiable() = runTest {
+        // A zero-size asset cannot be size-verified, so it counts as absent
+        // and selection moves on, like the null/garbage digest cases.
+        val body = "[" + listOf(
+            releaseJson("v4.32.0", 2, listOf(normalAsset("asterix", "v4.32.0", digest('a'), 0))),
+            releaseJson("v4.31.1", 3, listOf(normalAsset("asterix", "v4.31.1", digest('b'), 222))),
+        ).joinToString(",") + "]"
+        val result = checker(body).getLatestFirmware(
+            testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"), FirmwareUpdateChannel.Early,
+        )
+        val update = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(result)
+        assertEquals("v4.31.1", update.version.stringVersion)
+    }
+
+    @Test
     fun noAssetForThisHardwareFailsClosed() = runTest {
         val body = "[" + releaseJson(
             "v4.31.0", 10,
@@ -253,7 +259,7 @@ class GithubReleasesTest {
         val client = HttpClient(MockEngine { throw IOException("network down") }) {
             install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
         }
-        val checker = GithubReleases(client, FirmwareArtifactExpectations(), fixedClock)
+        val checker = GithubReleases(client, FirmwareArtifactExpectations(), fixedTestClock)
         val result = checker.getLatestFirmware(testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"), FirmwareUpdateChannel.Soaked)
         assertIs<FirmwareUpdateCheckResult.UpdateCheckFailed>(result)
     }

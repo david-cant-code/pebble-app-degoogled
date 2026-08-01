@@ -274,6 +274,10 @@ class VerifiedFirmwareInstaller(
         platform: WatchHardwarePlatform,
     ) {
         val manifests = PbzFirmware(path).manifests
+        // libpebble3's manifest parsing throws on a manifest-less archive
+        // today (that lands in the generic catch as "could not verify
+        // firmware archive"), and never returns an empty list; this guard is
+        // an independent backstop in case that contract ever changes.
         if (manifests.isEmpty()) {
             throw InstallFailure("firmware archive contains no manifest")
         }

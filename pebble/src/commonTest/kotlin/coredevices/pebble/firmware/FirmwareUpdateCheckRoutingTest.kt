@@ -1,12 +1,8 @@
 package coredevices.pebble.firmware
 
-import CoreAppVersion
 import com.russhwolf.settings.MapSettings
 import coredevices.pebble.Platform
-import coredevices.pebble.account.PebbleAccount
 import coredevices.pebble.services.Memfault
-import coredevices.pebble.services.PebbleAccountProvider
-import coredevices.pebble.services.PebbleHttpClient
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -15,12 +11,10 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
-import io.rebble.libpebblecommon.connection.FakeLibPebble
 import io.rebble.libpebblecommon.connection.FirmwareUpdateCheckResult
 import io.rebble.libpebblecommon.metadata.WatchHardwarePlatform
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
@@ -28,8 +22,6 @@ import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.fail
-import kotlin.time.Clock
-import kotlin.time.Instant
 
 /**
  * Pins the fork's doCheck routing: Core watches must use the GitHub checker
@@ -39,11 +31,6 @@ import kotlin.time.Instant
  */
 class FirmwareUpdateCheckRoutingTest {
 
-    private val now = Instant.parse("2026-07-31T00:00:00Z")
-    private val fixedClock = object : Clock {
-        override fun now(): Instant = this@FirmwareUpdateCheckRoutingTest.now
-    }
-
     private val testJson = Json { ignoreUnknownKeys = true }
 
     private fun failingClient(label: String) = HttpClient(MockEngine { request ->
@@ -52,48 +39,22 @@ class FirmwareUpdateCheckRoutingTest {
         install(ContentNegotiation) { json(testJson) }
     }
 
-    private fun respondingClient(body: String) = HttpClient(MockEngine { _ ->
-        respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
-    }) {
-        install(ContentNegotiation) { json(testJson) }
-    }
-
-    private class SignedOutAccounts : PebbleAccountProvider {
-        override fun get(): PebbleAccount = object : PebbleAccount {
-            override val loggedIn = MutableStateFlow<String?>(null)
-            override val devToken = MutableStateFlow<String?>(null)
-            override suspend fun setToken(token: String?, bootUrl: String?) {}
-            override suspend fun setDevPortalId() {}
-        }
-    }
-
-    private fun cohorts(client: HttpClient, expectations: FirmwareArtifactExpectations) = Cohorts(
-        httpClient = PebbleHttpClient(SignedOutAccounts(), client, lazy { FakeLibPebble() }),
-        appVersion = CoreAppVersion("0.0.0"),
-        expectations = expectations,
-    )
-
     private fun memfaultNeverContacted() =
         Memfault(failingClient("Memfault"), MapSettings(), Platform.Android, memfaultToken = null)
 
-    private val githubBody = """[{"tag_name":"v4.31.0","prerelease":false,"draft":false,
-        "published_at":"2026-07-21T00:00:00Z","assets":[{"name":"normal_asterix_v4.31.0.pbz",
-        "browser_download_url":"https://github.com/coredevices/PebbleOS/releases/download/v4.31.0/normal_asterix_v4.31.0.pbz",
-        "digest":"sha256:${"a".repeat(64)}","size":100}]}]""".replace("\n", "")
-
-    private val cohortsBody = """{"fw":{"normal":{"friendlyVersion":"v4.4.3-rbl","notes":"legacy notes",
-        "sha-256":"${"b".repeat(64)}","timestamp":1762930476,
-        "url":"https://binaries.rebble.io/fw/silk/Pebble-4.4.3-rbl-silk.pbz"}}}""".replace("\n", "")
+    private val githubBody = releaseList(
+        releaseJson("v4.31.0", 10, listOf(normalAsset("asterix", "v4.31.0", "sha256:" + "a".repeat(64), 100))),
+    )
 
     @Test
     fun coreWatchRoutesToGithubReleasesOnly() = runTest {
         val expectations = FirmwareArtifactExpectations()
         val check = FirmwareUpdateCheck(
             memfault = memfaultNeverContacted(),
-            cohorts = cohorts(failingClient("Cohorts"), expectations),
-            githubReleases = GithubReleases(respondingClient(githubBody), expectations, fixedClock),
+            cohorts = testCohorts(failingClient("Cohorts"), expectations),
+            githubReleases = GithubReleases(jsonRespondingClient(githubBody), expectations, fixedTestClock),
             channel = { FirmwareUpdateChannel.Soaked },
-            clock = fixedClock,
+            clock = fixedTestClock,
         )
         val result = check.checkForUpdates(
             testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0"),
@@ -108,10 +69,10 @@ class FirmwareUpdateCheckRoutingTest {
         val expectations = FirmwareArtifactExpectations()
         val check = FirmwareUpdateCheck(
             memfault = memfaultNeverContacted(),
-            cohorts = cohorts(respondingClient(cohortsBody), expectations),
-            githubReleases = GithubReleases(failingClient("GitHub"), expectations, fixedClock),
+            cohorts = testCohorts(jsonRespondingClient(cohortsBody()), expectations),
+            githubReleases = GithubReleases(failingClient("GitHub"), expectations, fixedTestClock),
             channel = { FirmwareUpdateChannel.Soaked },
-            clock = fixedClock,
+            clock = fixedTestClock,
         )
         val result = check.checkForUpdates(
             testWatchInfo(WatchHardwarePlatform.PEBBLE_SILK, "v4.0.0"),
@@ -122,14 +83,10 @@ class FirmwareUpdateCheckRoutingTest {
     }
 
     /** Two main-line releases: v4.31.0 is soaked, v4.32.0 is 2 days old. */
-    private val twoChannelGithubBody = """[{"tag_name":"v4.32.0","prerelease":false,"draft":false,
-        "published_at":"2026-07-29T00:00:00Z","assets":[{"name":"normal_asterix_v4.32.0.pbz",
-        "browser_download_url":"https://github.com/coredevices/PebbleOS/releases/download/v4.32.0/normal_asterix_v4.32.0.pbz",
-        "digest":"sha256:${"c".repeat(64)}","size":100}]},
-        {"tag_name":"v4.31.0","prerelease":false,"draft":false,
-        "published_at":"2026-07-21T00:00:00Z","assets":[{"name":"normal_asterix_v4.31.0.pbz",
-        "browser_download_url":"https://github.com/coredevices/PebbleOS/releases/download/v4.31.0/normal_asterix_v4.31.0.pbz",
-        "digest":"sha256:${"a".repeat(64)}","size":100}]}]""".replace("\n", "")
+    private val twoChannelGithubBody = releaseList(
+        releaseJson("v4.32.0", 2, listOf(normalAsset("asterix", "v4.32.0", "sha256:" + "c".repeat(64), 100))),
+        releaseJson("v4.31.0", 10, listOf(normalAsset("asterix", "v4.31.0", "sha256:" + "a".repeat(64), 100))),
+    )
 
     @Test
     fun channelFlipInvalidatesTheCacheWithoutForce() = runTest {
@@ -147,10 +104,10 @@ class FirmwareUpdateCheckRoutingTest {
         }
         val check = FirmwareUpdateCheck(
             memfault = memfaultNeverContacted(),
-            cohorts = cohorts(failingClient("Cohorts"), expectations),
-            githubReleases = GithubReleases(client, expectations, fixedClock),
+            cohorts = testCohorts(failingClient("Cohorts"), expectations),
+            githubReleases = GithubReleases(client, expectations, fixedTestClock),
             channel = { channel },
-            clock = fixedClock,
+            clock = fixedTestClock,
         )
         val watch = testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0")
 
@@ -193,10 +150,10 @@ class FirmwareUpdateCheckRoutingTest {
         }
         val check = FirmwareUpdateCheck(
             memfault = memfaultNeverContacted(),
-            cohorts = cohorts(failingClient("Cohorts"), expectations),
-            githubReleases = GithubReleases(client, expectations, fixedClock),
+            cohorts = testCohorts(failingClient("Cohorts"), expectations),
+            githubReleases = GithubReleases(client, expectations, fixedTestClock),
             channel = { channel },
-            clock = fixedClock,
+            clock = fixedTestClock,
         )
         val watch = testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0")
 
@@ -222,16 +179,16 @@ class FirmwareUpdateCheckRoutingTest {
         val expectations = FirmwareArtifactExpectations()
         val client = HttpClient(MockEngine { _ ->
             cohortsRequests++
-            respond(cohortsBody, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+            respond(cohortsBody(), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
         }) {
             install(ContentNegotiation) { json(testJson) }
         }
         val check = FirmwareUpdateCheck(
             memfault = memfaultNeverContacted(),
-            cohorts = cohorts(client, expectations),
-            githubReleases = GithubReleases(failingClient("GitHub"), expectations, fixedClock),
+            cohorts = testCohorts(client, expectations),
+            githubReleases = GithubReleases(failingClient("GitHub"), expectations, fixedTestClock),
             channel = { channel },
-            clock = fixedClock,
+            clock = fixedTestClock,
         )
         val watch = testWatchInfo(WatchHardwarePlatform.PEBBLE_SILK, "v4.0.0")
 
