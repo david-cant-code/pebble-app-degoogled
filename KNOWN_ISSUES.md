@@ -4,24 +4,23 @@ Deliberately deferred issues, each with the rationale and threat-model
 context, per the fork rule that nothing is deferred silently. An entry
 leaves this file when the fix lands.
 
-## Watch health sync not yet exercised end to end after the Firebase strip
+## GitHub firmware update path not hardware-tested on single-slot watches
 
-**Status: deferred to the first watch-paired e2e pass.**
+**Status: deferred until single-slot Core hardware is available.**
 
-The Firebase strip excluded the GMS Google Fit transitives from health-kmp
-and rerouted manager creation through a fork seam that pins
-`useGoogleFit=false`, which reshapes the runtime inputs under the live
-Health Connect sync path. Verification so far is static plus test-level:
-APK dex checks show no GMS classes, an instrumented seam test
-(`HealthSeamTest`) resolves the production Koin module in a forced
-Health-Connect-unavailable environment and asserts the Google Fit backend
-is never chosen, and a bytecode scan of health-kmp 1.4.0 found no
-live-path references into the `-dontwarn` namespaces. What has not run is
-an actual watch health sync
-against the built APK, because no watch has been paired to the test device
-yet. Deferred, not skipped: the sync e2e is part of the watch-paired
-verification pass, and this entry leaves the file when that pass is
-recorded.
+Core watch firmware updates are checked against the public PebbleOS GitHub
+releases and verified before install (API-declared SHA-256 digest and
+size, manifest hardware/type/version cross-checks, inner CRCs), then
+handed to upstream's existing sideload flow. Unit tests cover both
+firmware bundle layouts, including the single-slot shape, and the
+dual-slot path gets a hardware end-to-end pass on a Core Time 2 as part
+of this branch's verification. No single-slot (asterix-class) watch is
+available, so that hardware pass is deferred. Risk is bounded: the
+phone-side code path is identical for both layouts up to the sideload
+handoff, past which transfer and install are upstream's unchanged flow,
+and the watch's own bootloader validation with recovery fallback
+backstops a bad install. This entry leaves the file when a single-slot
+watch runs the end-to-end pass.
 
 ## On-device STT model downloads have no integrity verification
 

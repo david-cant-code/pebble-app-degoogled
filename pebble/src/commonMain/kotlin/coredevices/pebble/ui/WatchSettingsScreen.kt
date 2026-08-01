@@ -1683,6 +1683,22 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     },
                     isDebugSetting = true,
                 ),
+                // Fork: channel toggle for the GitHub-releases update path.
+                basicSettingsToggleItem(
+                    title = "Early PebbleOS updates",
+                    description = "Offer the newest PebbleOS release immediately (the tier Core's internal testers run) instead of one from a release line that has soaked for a week",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Debug,
+                    checked = coreConfig.firmwareUpdatesEarlyChannel,
+                    onCheckChanged = {
+                        coreConfigHolder.update(
+                            coreConfig.copy(
+                                firmwareUpdatesEarlyChannel = it
+                            )
+                        )
+                    },
+                    isDebugSetting = true,
+                ),
                 basicSettingsActionItem(
                     title = "Do immediate background sync",
                     description = "Sync firmware updates, locker, etc manually now (happens regularly automatically)",

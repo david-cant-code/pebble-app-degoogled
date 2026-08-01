@@ -81,6 +81,10 @@ data class CoreConfig(
     val weatherPinsV2: Boolean = true,
     val fetchWeather: Boolean = true,
     val disableFirmwareUpdateNotifications: Boolean = false,
+    // Fork: opts Core watches into the Early PebbleOS release channel
+    // (newest main-line tag, Core's internal-tester tier) instead of the
+    // soaked default; mapped to FirmwareUpdateChannel in :pebble.
+    val firmwareUpdatesEarlyChannel: Boolean = false,
     val enableIndex: Boolean = false,
     val indexPermissionsConfirmed: Boolean = false,
     val weatherUnits: WeatherUnit = deviceDefaultWeatherUnit(),

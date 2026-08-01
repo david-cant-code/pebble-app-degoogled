@@ -16,9 +16,13 @@ import coredevices.pebble.account.RealFirestoreKnownWatchesSync
 import coredevices.pebble.account.RealFirestoreLocker
 import coredevices.pebble.account.RealPebbleAccount
 import coredevices.pebble.firmware.Cohorts
+import coredevices.pebble.firmware.FirmwareArtifactExpectations
 import coredevices.pebble.firmware.FirmwareUpdateCheck
 import coredevices.pebble.firmware.FirmwareUpdateUiTracker
+import coredevices.pebble.firmware.GithubReleases
+import coredevices.pebble.firmware.firmwareUpdateChannel
 import coredevices.pebble.firmware.RealFirmwareUpdateUiTracker
+import coredevices.pebble.firmware.VerifiedFirmwareInstaller
 import coredevices.pebble.services.AppstoreCache
 import coredevices.pebble.services.AppstoreService
 import coredevices.pebble.services.AppstoreSourceInitializer
@@ -58,6 +62,7 @@ import coredevices.pebble.weather.OpenWeather25Interceptor
 import coredevices.pebble.weather.WeatherFetcher
 import coredevices.pebble.weather.YahooWeatherInterceptor
 import coredevices.util.CommonBuildKonfig
+import coredevices.util.CoreConfigFlow
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.jordond.compass.geocoder.Geocoder
@@ -69,6 +74,8 @@ import io.rebble.libpebblecommon.BleConfig
 import io.rebble.libpebblecommon.LibPebbleConfig
 import io.rebble.libpebblecommon.NotificationConfig
 import io.rebble.libpebblecommon.WatchConfig
+import io.rebble.libpebblecommon.connection.AppContext
+import io.rebble.libpebblecommon.connection.ConnectedPebble
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDevice
 import io.rebble.libpebblecommon.connection.HealthDataApi
 import io.rebble.libpebblecommon.connection.LibPebble
@@ -77,6 +84,7 @@ import io.rebble.libpebblecommon.connection.NotificationApps
 import io.rebble.libpebblecommon.connection.TokenProvider
 import io.rebble.libpebblecommon.connection.WebServices
 import io.rebble.libpebblecommon.js.InjectedPKJSHttpInterceptors
+import io.rebble.libpebblecommon.locker.getLockerPBWCacheDirectory
 import io.rebble.libpebblecommon.util.SystemGeolocation
 import io.rebble.libpebblecommon.voice.TranscriptionProvider
 import io.rebble.libpebblecommon.web.LockerEntry
@@ -189,7 +197,41 @@ val watchModule = module {
     singleOf(::AnalyticsHeartbeatQueue)
     singleOf(::ContactDeveloperApi)
     factoryOf(::Cohorts)
-    singleOf(::FirmwareUpdateCheck)
+    // Fork: Core-watch updates come from the public PebbleOS GitHub releases
+    // (fork builds ship no Memfault token, and cohorts rejects Core hardware).
+    singleOf(::FirmwareArtifactExpectations)
+    singleOf(::GithubReleases)
+    single {
+        // Fork: download+verify+sideload pipeline for firmware installs. Reuses
+        // upstream's firmware cache directory (unique per-install filenames);
+        // LibPebble resolves lazily because it is itself created in this module.
+        val appContext = get<AppContext>()
+        val libPebble = lazy { get<LibPebble>() }
+        VerifiedFirmwareInstaller(
+            httpClient = get(),
+            expectations = get(),
+            downloadDirectory = { getLockerPBWCacheDirectory(appContext) },
+            watchUpdateStates = { identifierKey ->
+                libPebble.value.watches.map { watches ->
+                    val device = watches.firstOrNull { it.identifier.asString == identifierKey }
+                    (device as? ConnectedPebble.Firmware)?.firmwareUpdateState
+                }
+            },
+        )
+    }
+    single {
+        // Fork: the channel provider is a live CoreConfig read; the check
+        // reads it exactly once per check so its cache key and the GitHub
+        // release selection always agree.
+        val coreConfig = get<CoreConfigFlow>()
+        FirmwareUpdateCheck(
+            memfault = get(),
+            cohorts = get(),
+            githubReleases = get(),
+            channel = { coreConfig.value.firmwareUpdateChannel() },
+            clock = get(),
+        )
+    }
     factoryOf(::PebbleFeatures)
     factoryOf(::WeatherFetcher)
     factoryOf(::LanguagePackRepository)

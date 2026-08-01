@@ -9,6 +9,7 @@ import kotlin.time.Clock
 import kotlin.time.Duration.Companion.hours
 
 import coredevices.util.CoreConfigFlow
+import io.rebble.libpebblecommon.connection.CommonConnectedDevice
 import io.rebble.libpebblecommon.connection.ConnectedPebble
 import io.rebble.libpebblecommon.connection.LibPebble
 import kotlin.time.Duration.Companion.seconds
@@ -26,6 +27,8 @@ class RealFirmwareUpdateUiTracker(
     private val clock: Clock,
     private val appContext: AppContext,
     private val coreConfigFlow: CoreConfigFlow,
+    // Fork: notification-triggered installs go through the verified installer.
+    private val installer: VerifiedFirmwareInstaller,
 ) : FirmwareUpdateUiTracker {
     private val logger = Logger.withTag("FirmwareUpdateUiTracker")
     private var lastUiUpdateMs: Long = settings.getLong(KEY_LAST_UI_UPDATE_CHECK_MS, 0)
@@ -94,13 +97,15 @@ class RealFirmwareUpdateUiTracker(
             logger.w { "No update available for $watch" }
             return
         }
-        val updater = watch as? ConnectedPebble.Firmware
-        if (updater == null) {
+        // Fork: verified install path (sha256 + manifest checks) instead of
+        // upstream's unverified download.
+        val device = watch as? CommonConnectedDevice
+        if (device == null) {
             logger.w { "Can't update firmware for $watch" }
             return
         }
         logger.d { "Starting update for $identifier to $update" }
-        updater.updateFirmware(update)
+        installer.install(device, update)
     }
 
     companion object {

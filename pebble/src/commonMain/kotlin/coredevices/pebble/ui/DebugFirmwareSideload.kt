@@ -34,9 +34,11 @@ import androidx.compose.ui.unit.dp
 import co.touchlab.kermit.Logger
 import coreapp.util.generated.resources.Res
 import coreapp.util.generated.resources.back
+import coredevices.pebble.firmware.VerifiedFirmwareInstaller
 import coredevices.pebble.rememberLibPebble
 import coredevices.ui.CoreLinearProgressIndicator
 import io.rebble.libpebblecommon.connection.AppContext
+import io.rebble.libpebblecommon.connection.CommonConnectedDevice
 import io.rebble.libpebblecommon.connection.ConnectedPebble
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDevice
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDeviceInRecovery
@@ -97,6 +99,9 @@ fun DebugFirmwareSideload(watchIdentifier: String, coreNav: CoreNav) {
     Box(modifier = Modifier.background(MaterialTheme.colorScheme.background)) {
         val libPebble = rememberLibPebble()
         val appContext = koinInject<AppContext>()
+        // Fork: the "Update FW" button routes through the verified installer;
+        // the file-picker sideload below stays raw on purpose (developer tool).
+        val forkInstaller = koinInject<VerifiedFirmwareInstaller>()
         val scope = rememberCoroutineScope()
         val watchFlow = remember(watchIdentifier) {
             libPebble.watches
@@ -223,7 +228,13 @@ fun DebugFirmwareSideload(watchIdentifier: String, coreNav: CoreNav) {
                                         setUpdateState(UiFirmwareUpdateStatus.Starting)
                                         doFirmwareUpdate {
                                             logger.d { "doFirmwareUpdate: $availableUpdate" }
-                                            updateFirmware(availableUpdate)
+                                            // Fork: verified install path.
+                                            val device = this as? CommonConnectedDevice
+                                            if (device == null) {
+                                                logger.w { "Can't update firmware for $this" }
+                                            } else {
+                                                forkInstaller.install(device, availableUpdate)
+                                            }
                                         }
                                     } else {
                                         logger.d { "availableUpdate is null" }

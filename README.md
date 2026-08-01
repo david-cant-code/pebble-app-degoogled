@@ -39,6 +39,7 @@ lands piece by piece:
 - [x] Manual weather location entry
 - [x] Telemetry strip (Crashlytics, analytics, firmware-diagnostics relay)
 - [x] Google Play services / Firebase removal
+- [x] Core watch firmware updates from the public PebbleOS GitHub releases
 - [ ] Third-party microphone API
 
 ## Building (Android)
@@ -50,12 +51,22 @@ lands piece by piece:
 - For a release build signed with the debug key, set
   `LOCAL_RELEASE_BUILD=true` in the root `local.properties`, then
   `./gradlew :composeApp:assembleRelease`.
-- The optional `memfaultToken` Gradle property routes Core-device firmware
-  update checks through Memfault. Those checks periodically send the watch
-  serial number (or a MAC-derived identifier), hardware revision, and
-  firmware version to `api.memfault.com` in the background. Fork builds
-  ship no token and make no Memfault requests; firmware updates still work
-  through the cohorts endpoint.
+- Fork builds ship no Memfault token and make no Memfault requests.
+  Upstream's optional `memfaultToken` Gradle property would route Core
+  watch update checks through `api.memfault.com`, periodically sending the
+  watch serial number (or a MAC-derived identifier), hardware revision,
+  and firmware version in the background.
+- Core watch firmware updates come from the official
+  [PebbleOS GitHub releases](https://github.com/coredevices/PebbleOS/releases):
+  the release list is fetched anonymously with no device data in the
+  request, the firmware asset is picked on the phone, and every download
+  is verified against the GitHub-declared SHA-256 digest and size plus the
+  firmware bundle's own manifest and CRCs before it is handed to the
+  watch. The default channel offers a release line once its first release
+  has been public for a week, and picks up later hotfix patches within
+  that line immediately; a debug-settings toggle ("Early PebbleOS
+  updates") offers the newest release immediately. Legacy Pebble watches
+  keep using the Rebble cohorts endpoint.
 
 ## Architecture
 

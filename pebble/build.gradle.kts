@@ -102,6 +102,10 @@ kotlin {
                 implementation(libs.paging.compose)
                 implementation(compose.components.uiToolingPreview)
                 implementation(libs.kotlinx.io.core)
+                // Fork: multiplatform sha256 (HashingSink) for the verified
+                // firmware installer; already in the runtime graph via
+                // libpebble3's zip handling, declared here for direct use.
+                implementation(libs.okio)
                 implementation(libs.kermit)
                 implementation(project(":util"))
                 implementation(libs.serialization)

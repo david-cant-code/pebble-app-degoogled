@@ -16,6 +16,8 @@ import kotlin.time.Instant
 class Cohorts(
     private val httpClient: PebbleHttpClient,
     private val appVersion: CoreAppVersion,
+    // Fork: carries the response's sha-256 to the verified installer.
+    private val expectations: FirmwareArtifactExpectations,
 ) {
     private val logger = Logger.withTag("Cohorts")
 
@@ -58,6 +60,23 @@ class Cohorts(
             return FirmwareUpdateCheckResult.UpdateCheckFailed("Failed to check for PebbleOS update")
         }
         if (watch.runningFwVersion.isRecovery || latestFwVersion > watch.runningFwVersion) {
+            // Fork: upstream parses sha-256 but never consumes it. Record it so
+            // the verified installer holds legacy downloads to it too; if the
+            // server ever stops sending a real sha256 hex the installer will
+            // refuse the download (fail closed) rather than skip verification.
+            val sha256Hex = normalizeSha256Hex(normalFw.sha256)
+            if (sha256Hex != null) {
+                expectations.record(
+                    normalFw.url,
+                    ExpectedFirmwareArtifact(
+                        sha256Hex = sha256Hex,
+                        sizeBytes = null,
+                        versionTag = normalFw.friendlyVersion,
+                    ),
+                )
+            } else {
+                logger.w { "Cohorts sha-256 is not a sha256 hex string; install will be refused" }
+            }
             return FirmwareUpdateCheckResult.FoundUpdate(
                 version = latestFwVersion,
                 url = normalFw.url,
