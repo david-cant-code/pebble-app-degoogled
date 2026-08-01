@@ -136,6 +136,7 @@ import coredevices.pebble.PebbleDeepLinkHandler
 import coredevices.pebble.PebbleFeatures
 import coredevices.pebble.account.PebbleAccount
 import coredevices.pebble.firmware.FirmwareUpdateUiTracker
+import coredevices.pebble.firmware.VerifiedFirmwareInstaller
 import coredevices.pebble.firmware.isCoreDevice
 import coredevices.pebble.rememberLibPebble
 import coredevices.pebble.services.LanguagePack
@@ -1937,12 +1938,19 @@ fun WatchDetails(
             FirmwareUpdater.FirmwareUpdateStatus.NotInProgress.Idle()
         }
     }
+    // Fork: the verified installer downloads and verifies before libpebble3
+    // is involved; merge its phases into the in-progress gate so the Update
+    // button hides and fork failures render in the state line.
+    val forkInstaller = koinInject<VerifiedFirmwareInstaller>()
+    val forkInstallState by forkInstaller.installStateFor(watch)
     val firmwareUpdateInProgress =
-        firmwareUpdateState !is FirmwareUpdater.FirmwareUpdateStatus.NotInProgress
+        firmwareUpdateState !is FirmwareUpdater.FirmwareUpdateStatus.NotInProgress ||
+            forkInstallState.isActive
     val languagePackInstallState = (watch as? ConnectedPebble.LanguageState)?.languagePackInstallState ?: LanguagePackInstallState.Idle()
     Row {
         Text(
-            text = watch.stateText(firmwareUpdateState, languagePackInstallState, coreConfig),
+            text = watch.stateText(firmwareUpdateState, languagePackInstallState, coreConfig) +
+                forkInstallState.stateTextSuffix(),
             fontWeight = when {
                 watch.isActive() -> FontWeight.Bold
                 else -> FontWeight.Normal
@@ -1959,6 +1967,7 @@ fun WatchDetails(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp),
             )
         }
+        ForkInstallProgressBar(forkInstallState)
     } else if (languagePackInstallState is LanguagePackInstallState.Installing) {
         val progress by languagePackInstallState.progress.collectAsState()
         CoreLinearProgressIndicator(
@@ -2036,7 +2045,10 @@ fun WatchDetails(
                 confirmButton = {
                     TextButton(onClick = {
                         showFirmwareUpdateConfirmDialog = false
-                        firmwareUpdater.updateFirmware(firmwareUpdateAvailable)
+                        // Fork: verified install path (sha256 + manifest checks).
+                        (watch as? CommonConnectedDevice)?.let {
+                            forkInstaller.install(it, firmwareUpdateAvailable)
+                        }
                     }) { Text("Install") }
                 },
                 dismissButton = { TextButton(onClick = { showFirmwareUpdateConfirmDialog = false }) { Text("Cancel") } }

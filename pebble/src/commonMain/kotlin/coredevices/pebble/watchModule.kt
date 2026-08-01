@@ -22,6 +22,7 @@ import coredevices.pebble.firmware.FirmwareUpdateCheck
 import coredevices.pebble.firmware.FirmwareUpdateUiTracker
 import coredevices.pebble.firmware.GithubReleases
 import coredevices.pebble.firmware.RealFirmwareUpdateUiTracker
+import coredevices.pebble.firmware.VerifiedFirmwareInstaller
 import coredevices.pebble.services.AppstoreCache
 import coredevices.pebble.services.AppstoreService
 import coredevices.pebble.services.AppstoreSourceInitializer
@@ -72,6 +73,8 @@ import io.rebble.libpebblecommon.BleConfig
 import io.rebble.libpebblecommon.LibPebbleConfig
 import io.rebble.libpebblecommon.NotificationConfig
 import io.rebble.libpebblecommon.WatchConfig
+import io.rebble.libpebblecommon.connection.AppContext
+import io.rebble.libpebblecommon.connection.ConnectedPebble
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDevice
 import io.rebble.libpebblecommon.connection.HealthDataApi
 import io.rebble.libpebblecommon.connection.LibPebble
@@ -80,6 +83,7 @@ import io.rebble.libpebblecommon.connection.NotificationApps
 import io.rebble.libpebblecommon.connection.TokenProvider
 import io.rebble.libpebblecommon.connection.WebServices
 import io.rebble.libpebblecommon.js.InjectedPKJSHttpInterceptors
+import io.rebble.libpebblecommon.locker.getLockerPBWCacheDirectory
 import io.rebble.libpebblecommon.util.SystemGeolocation
 import io.rebble.libpebblecommon.voice.TranscriptionProvider
 import io.rebble.libpebblecommon.web.LockerEntry
@@ -197,6 +201,24 @@ val watchModule = module {
     // The channel provider is pinned to Soaked until the settings toggle lands.
     singleOf(::FirmwareArtifactExpectations)
     single { GithubReleases(get(), get(), { FirmwareUpdateChannel.Soaked }, get()) }
+    single {
+        // Fork: download+verify+sideload pipeline for firmware installs. Reuses
+        // upstream's firmware cache directory (unique per-install filenames);
+        // LibPebble resolves lazily because it is itself created in this module.
+        val appContext = get<AppContext>()
+        val libPebble = lazy { get<LibPebble>() }
+        VerifiedFirmwareInstaller(
+            httpClient = get(),
+            expectations = get(),
+            downloadDirectory = { getLockerPBWCacheDirectory(appContext) },
+            watchUpdateStates = { identifierKey ->
+                libPebble.value.watches.map { watches ->
+                    val device = watches.firstOrNull { it.identifier.asString == identifierKey }
+                    (device as? ConnectedPebble.Firmware)?.firmwareUpdateState
+                }
+            },
+        )
+    }
     singleOf(::FirmwareUpdateCheck)
     factoryOf(::PebbleFeatures)
     factoryOf(::WeatherFetcher)
