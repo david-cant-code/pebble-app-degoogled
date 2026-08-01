@@ -17,10 +17,10 @@ import coredevices.pebble.account.RealFirestoreLocker
 import coredevices.pebble.account.RealPebbleAccount
 import coredevices.pebble.firmware.Cohorts
 import coredevices.pebble.firmware.FirmwareArtifactExpectations
-import coredevices.pebble.firmware.FirmwareUpdateChannel
 import coredevices.pebble.firmware.FirmwareUpdateCheck
 import coredevices.pebble.firmware.FirmwareUpdateUiTracker
 import coredevices.pebble.firmware.GithubReleases
+import coredevices.pebble.firmware.firmwareUpdateChannel
 import coredevices.pebble.firmware.RealFirmwareUpdateUiTracker
 import coredevices.pebble.firmware.VerifiedFirmwareInstaller
 import coredevices.pebble.services.AppstoreCache
@@ -62,6 +62,7 @@ import coredevices.pebble.weather.OpenWeather25Interceptor
 import coredevices.pebble.weather.WeatherFetcher
 import coredevices.pebble.weather.YahooWeatherInterceptor
 import coredevices.util.CommonBuildKonfig
+import coredevices.util.CoreConfigFlow
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.jordond.compass.geocoder.Geocoder
@@ -198,9 +199,11 @@ val watchModule = module {
     factoryOf(::Cohorts)
     // Fork: Core-watch updates come from the public PebbleOS GitHub releases
     // (fork builds ship no Memfault token, and cohorts rejects Core hardware).
-    // The channel provider is pinned to Soaked until the settings toggle lands.
     singleOf(::FirmwareArtifactExpectations)
-    single { GithubReleases(get(), get(), { FirmwareUpdateChannel.Soaked }, get()) }
+    single {
+        val coreConfig = get<CoreConfigFlow>()
+        GithubReleases(get(), get(), { coreConfig.value.firmwareUpdateChannel() }, get())
+    }
     single {
         // Fork: download+verify+sideload pipeline for firmware installs. Reuses
         // upstream's firmware cache directory (unique per-install filenames);

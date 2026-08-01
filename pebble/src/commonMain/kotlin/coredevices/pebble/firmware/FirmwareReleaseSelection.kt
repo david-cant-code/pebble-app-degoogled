@@ -1,5 +1,6 @@
 package coredevices.pebble.firmware
 
+import coredevices.util.CoreConfig
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Instant
@@ -80,6 +81,14 @@ enum class FirmwareUpdateChannel {
     /** Newest main-line tag: the tier Core's internal testers run. */
     Early,
 }
+
+/**
+ * The persisted setting is a plain boolean (a two-state toggle in watch
+ * settings); the mapping lives here so the DI wiring and tests share one
+ * definition of which state means which channel.
+ */
+fun CoreConfig.firmwareUpdateChannel(): FirmwareUpdateChannel =
+    if (firmwareUpdatesEarlyChannel) FirmwareUpdateChannel.Early else FirmwareUpdateChannel.Soaked
 
 /** One GitHub release reduced to what selection needs. */
 data class SelectableRelease(

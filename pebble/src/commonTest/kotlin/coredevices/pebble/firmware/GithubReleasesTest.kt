@@ -1,5 +1,6 @@
 package coredevices.pebble.firmware
 
+import coredevices.util.CoreConfig
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -77,6 +78,7 @@ class GithubReleasesTest {
         body: String,
         status: HttpStatusCode = HttpStatusCode.OK,
         channel: FirmwareUpdateChannel = FirmwareUpdateChannel.Soaked,
+        channelProvider: () -> FirmwareUpdateChannel = { channel },
         expectations: FirmwareArtifactExpectations = FirmwareArtifactExpectations(),
         requests: MutableList<HttpRequestData> = mutableListOf(),
     ): GithubReleases {
@@ -88,7 +90,7 @@ class GithubReleasesTest {
                 json(Json { ignoreUnknownKeys = true })
             }
         }
-        return GithubReleases(client, expectations, { channel }, fixedClock)
+        return GithubReleases(client, expectations, channelProvider, fixedClock)
     }
 
     @Test
@@ -116,6 +118,27 @@ class GithubReleasesTest {
         // The factory hotfix v4.9.142.4 is the most recent publish (it would
         // hold GitHub's Latest badge) and has the biggest patch number.
         assertEquals("v4.32.0", update.version.stringVersion)
+    }
+
+    @Test
+    fun earlyChannelSettingSwitchesTheOfferBetweenChecks() = runTest {
+        // The real wiring hands GithubReleases a provider that re-reads
+        // CoreConfig on every check; flipping the setting must change the
+        // offer without recreating the checker.
+        var config = CoreConfig()
+        val checker = checker(standardBody(), channelProvider = { config.firmwareUpdateChannel() })
+        val watch = testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0")
+
+        val soaked = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(checker.getLatestFirmware(watch))
+        assertEquals("v4.31.1", soaked.version.stringVersion)
+
+        config = config.copy(firmwareUpdatesEarlyChannel = true)
+        val early = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(checker.getLatestFirmware(watch))
+        assertEquals("v4.32.0", early.version.stringVersion)
+
+        config = config.copy(firmwareUpdatesEarlyChannel = false)
+        val backToSoaked = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(checker.getLatestFirmware(watch))
+        assertEquals("v4.31.1", backToSoaked.version.stringVersion)
     }
 
     @Test
