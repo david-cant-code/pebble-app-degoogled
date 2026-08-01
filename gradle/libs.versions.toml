@@ -27,19 +27,12 @@ androidx-core = "1.17.0"
 monitorVersion = "1.8.0"
 androidXTestVersion = "1.7.0"
 androidXRulesVersion = "1.7.0"
-googleServices = "4.4.4"
 androidVersion = "2.4.0"
 androidx-activityCompose = "1.12.4"
 androidxWork = "2.11.2"
 crashkios = "0.9.0"
 androidx-lifecycle = "2.9.6"
 androidx-navigation = "2.9.2"
-firebase-kotlin = "2.4.0"
-# Deliberately ahead of the BOM firebase-kotlin imports (33.15.0): its firebase-auth 23.2.1 has an
-# acknowledged regression that randomly signs users out (firebase-android-sdk#7111). We avoid the
-# APIs auth 24.x removed (updateEmail/fetchSignInMethodsForEmail), so forcing the newer BOM is safe.
-# NEVER downgrade below 34.x - older versions can't read the newer auth persistence, signing everyone out.
-firebase-bom = "34.16.0"
 buildkonfig = "0.17.1"
 webview = "2.0.3"
 coil = "3.3.0"
@@ -71,7 +64,6 @@ composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "k
 nativeCocoaPods = { id = "org.jetbrains.kotlin.native.cocoapods", version.ref = "kotlin" }
 kotlinx-atomicfu = { id = "org.jetbrains.kotlinx.atomicfu", version.ref = "atomicfu" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
-googleServices = { id = "com.google.gms.google-services", version.ref = "googleServices" }
 androidVersion = { id = "de.nanogiants.android-versioning", version.ref = "androidVersion" }
 buildKonfig = { id = "com.codingfeline.buildkonfig", version.ref = "buildkonfig" }
 androidKotlinMultiplatformLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
@@ -131,10 +123,6 @@ crashkios = { module = "co.touchlab.crashkios:crashlytics", version.ref = "crash
 androidx-lifecycle-viewmodel = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-viewmodel", version.ref = "androidx-lifecycle" }
 androidx-lifecycle-runtime-compose = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "androidx-lifecycle" }
 androidx-navigation-compose = { group = "org.jetbrains.androidx.navigation", name = "navigation-compose", version.ref = "androidx-navigation" }
-firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebase-bom" }
-firebase-auth = { group = "dev.gitlive", name = "firebase-auth", version.ref = "firebase-kotlin" }
-firebase-firestore = { group = "dev.gitlive", name = "firebase-firestore", version.ref = "firebase-kotlin" }
-firebase-storage = { group = "dev.gitlive", name = "firebase-storage", version.ref = "firebase-kotlin" }
 webview = { module = "io.github.kevinnzou:compose-webview-multiplatform", version.ref = "webview" }
 coil = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-ktor = { module = "io.coil-kt.coil3:coil-network-ktor3", version.ref = "coil" }
@@ -158,4 +146,8 @@ compass-geocoder-mobile = { module = "dev.jordond.compass:geocoder-mobile", vers
 compass-autocomplete = { module = "dev.jordond.compass:autocomplete", version.ref = "compass" }
 compass-autocomplete-mobile = { module = "dev.jordond.compass:autocomplete-mobile", version.ref = "compass" }
 coredevices-krispPrivate = { group = "coredevices.krispkmp", name = "library", version.ref = "coredevices-krisp" }
-health-kmp = { module = "com.viktormykhailiv:health-kmp", version.ref = "health-kmp" }
+# Fork: no health-kmp [libraries] alias on purpose (the [versions] entry
+# stays). The fork's consumers must use string notation so the GMS excludes
+# attach (see the composeApp/pebble build files); an alias would let a
+# merged-in libs.health.kmp resolve the Google Fit transitives silently,
+# while its absence makes that fail at configuration time.

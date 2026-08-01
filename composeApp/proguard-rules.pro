@@ -7,3 +7,19 @@
 -keepclasseswithmembernames,includedescriptorclasses class * {
     native <methods>;
 }
+# Fork: health-kmp's Google Fit backend (com.viktormykhailiv.kmp.health.legacy)
+# references GMS classes from play-services-auth/-fitness, which this fork
+# excludes from the build (the app pins useGoogleFit=false, so the Fit path
+# is unreachable; see PlatformHealthManager). R8 must tolerate the dangling
+# references in that dead code. The signin and fitness packages exist only in
+# the excluded artifacts, so package rules are safe there; tasks and
+# common.api are GMS-wide shared namespaces, so those rules name the exact
+# classes the dead legacy code dangles into, keeping any other missing GMS
+# reference a loud release-build failure.
+-dontwarn com.google.android.gms.auth.api.signin.**
+-dontwarn com.google.android.gms.fitness.**
+-dontwarn com.google.android.gms.common.api.Scope
+-dontwarn com.google.android.gms.tasks.Task
+-dontwarn com.google.android.gms.tasks.OnSuccessListener
+-dontwarn com.google.android.gms.tasks.OnFailureListener
+-dontwarn com.google.android.gms.tasks.OnCanceledListener

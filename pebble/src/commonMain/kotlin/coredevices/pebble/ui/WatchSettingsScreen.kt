@@ -589,6 +589,10 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                             )
                         )
                     },
+                    // Fork: hidden, never removed. Remote bug reporting is
+                    // gone with the Firebase strip (submission needed the
+                    // bug-reports backend and a Firebase ID token).
+                    show = { false },
                 ) },
                 navBarNav?.let { nav -> basicSettingsActionItem(
                     title = "View My Bug Reports",
@@ -597,6 +601,8 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     action = {
                         nav.navigateTo(CommonRoutes.ViewMyBugReportsRoute)
                     },
+                    // Fork: hidden with New Bug Report above.
+                    show = { false },
                 ) },
                 navBarNav?.let { nav -> basicSettingsActionItem(
                     title = "Configure Appstore Sources",
@@ -1364,6 +1370,13 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                             CactusSTTMode.RebbleFirst,
                             CactusSTTMode.RebbleFallback -> rebbleVoiceAvailable
                             CactusSTTMode.PlatformOnly -> platformSttAvailable
+                            // Fork: the Core cloud STT modes need a Core-account
+                            // sign-in this build removed (their selection gate
+                            // below could only offer a dialog of disabled
+                            // providers), so they are never offered.
+                            CactusSTTMode.RemoteOnly,
+                            CactusSTTMode.RemoteFirst,
+                            CactusSTTMode.LocalFirst -> false
                             else -> true
                         }
                     },
@@ -1715,7 +1728,10 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     topLevelType = TopLevelType.Phone,
                     section = Section.General,
                     action = { showSignInDialog = true },
-                    show = { coreUser == null },
+                    // Fork: hidden, never removed. Core-account sign-in is
+                    // gone with the Firebase strip; the dialog behind this
+                    // item can only offer disabled providers.
+                    show = { false },
                 ),
                 basicSettingsActionItem(
                     title = "Sign Out - Rebble",

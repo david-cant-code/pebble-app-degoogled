@@ -84,7 +84,12 @@ kotlin {
         commonMain {
             dependencies {
                 implementation(project(":libpebble3"))
-                implementation(libs.health.kmp)
+                // Fork: GMS (Google Fit backend) excluded; see the matching
+                // note in composeApp/build.gradle.kts and PlatformHealthManager.
+                implementation("com.viktormykhailiv:health-kmp:${libs.versions.health.kmp.get()}") {
+                    exclude(group = "com.google.android.gms", module = "play-services-auth")
+                    exclude(group = "com.google.android.gms", module = "play-services-fitness")
+                }
                 implementation(compose.runtime)
                 implementation(compose.foundation)
                 implementation(libs.compose.material3)
@@ -112,8 +117,9 @@ kotlin {
                 implementation(libs.webview)
                 implementation(libs.backhandler)
                 api(libs.uri)
-                implementation(libs.firebase.auth)
-                implementation(libs.firebase.firestore)
+                // Fork: inert dev.gitlive.firebase.* stand-ins replacing the
+                // real gitlive firebase-auth/firebase-firestore artifacts.
+                implementation(project(":firebase-stubs"))
                 implementation(libs.coredevices.speex)
                 api(project(":cactus"))
                 api(libs.algolia)

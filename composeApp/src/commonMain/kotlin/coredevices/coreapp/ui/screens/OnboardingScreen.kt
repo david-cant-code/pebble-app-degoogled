@@ -229,7 +229,11 @@ fun OnboardingScreen(
                         }
                         logger.v { "permissionToRequest = $permissionToRequest  /  missingPermissions = $missingPermissions " }
                         if (permissionToRequest == null) {
-                            viewModel.stage.value = OnboardingStage.SignIn
+                            // Fork: Core-account sign-in is removed with the
+                            // Firebase strip, so onboarding skips the SignIn
+                            // stage; the stage and its UI stay compiled for
+                            // cheap upstream merges.
+                            viewModel.stage.value = OnboardingStage.Done
                         } else {
                             val warnBeforeFullScreenRequest = permissionToRequest.requestIsFullScreen()
                             LaunchedEffect(permissionToRequest) {

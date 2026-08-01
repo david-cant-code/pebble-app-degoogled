@@ -31,6 +31,7 @@ import coredevices.coreapp.di.apiModule
 import coredevices.coreapp.di.ringStubsModule
 import coredevices.coreapp.di.utilModule
 import coredevices.coreapp.util.FileLogWriter
+import coredevices.coreapp.util.FirebaseResidueCleanup
 import coredevices.coreapp.util.initLogging
 import coredevices.pebble.PebbleAppDelegate
 import coredevices.pebble.watchModule
@@ -69,6 +70,11 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             )
         }
         initLogging()
+        // Fork: installs upgraded from pre-strip builds still hold the
+        // Firebase SDKs' persisted refresh token and Firestore cache, and the
+        // strip removed every code path that could clear them; see
+        // FirebaseResidueCleanup for the threat model.
+        FirebaseResidueCleanup.launchInBackground(this)
         logger.i { "onCreate() version = ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) ${BuildConfig.BUILD_TYPE}" }
         dumpPreviousExitInfo()
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager

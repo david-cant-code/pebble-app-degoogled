@@ -6,9 +6,9 @@ import PlatformShareLauncher
 import coredevices.analytics.createAndroidAnalytics
 import coredevices.coreapp.BuildConfig
 import coredevices.coreapp.PebbleBackgroundManager
+import coredevices.coreapp.auth.NoOpAppleAuthUtil
+import coredevices.coreapp.auth.NoOpGithubAuthUtil
 import coredevices.coreapp.auth.NoOpGoogleAuthUtil
-import coredevices.coreapp.auth.RealAppleAuthUtil
-import coredevices.coreapp.auth.RealGithubAuthUtil
 import coredevices.coreapp.util.AppUpdate
 import coredevices.coreapp.util.NoOpAppUpdate
 import coredevices.coreapp.model.CactusModelProvider
@@ -41,8 +41,10 @@ val androidDefaultModule = module {
     // Fork: Sign in with Google needs Play services; see NoOpGoogleAuthUtil.
     single<GoogleAuthUtil> { NoOpGoogleAuthUtil }
     single<SilentSignIn> { NoOpSilentSignIn }
-    singleOf(::RealAppleAuthUtil) bind AppleAuthUtil::class
-    singleOf(::RealGithubAuthUtil) bind GitHubAuthUtil::class
+    // Fork: Apple/GitHub sign-in rode the native Firebase Auth OAuth flow,
+    // removed with the Firebase strip; see NoOpAppleAuthUtil/NoOpGithubAuthUtil.
+    single<AppleAuthUtil> { NoOpAppleAuthUtil }
+    single<GitHubAuthUtil> { NoOpGithubAuthUtil }
     factory { params ->
         OkHttp.create {
             config {

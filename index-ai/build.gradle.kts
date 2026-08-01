@@ -80,7 +80,10 @@ kotlin {
                 implementation(libs.room.runtime)
                 implementation(libs.room.paging)
                 implementation(libs.kotlinx.datetime)
-                implementation(libs.firebase.firestore)
+                // Fork: inert dev.gitlive.firebase.* stand-ins replacing the
+                // real gitlive firebase-firestore artifact (used only by the
+                // cold Tolerant* serializers and Document classes here).
+                implementation(project(":firebase-stubs"))
 
                 implementation(project(":mcp"))
             }
@@ -90,20 +93,6 @@ kotlin {
             dependencies {
                 implementation(libs.kotlin.test)
                 implementation(libs.coroutines.test)
-            }
-        }
-
-        androidMain {
-            dependencies {
-                // The Firebase BOM resolves the native Android Firebase
-                // SDK versions that gitlive's `firebase-firestore-android`
-                // pulls in transitively. Without it, gradle can't pick a
-                // version for `com.google.firebase:firebase-firestore`
-                // and the Android compile fails. composeApp configures
-                // the BOM for app-level deps but Gradle doesn't propagate
-                // it back up to library modules that consume gitlive
-                // directly, so we re-declare it here.
-                implementation(project.dependencies.platform(libs.firebase.bom))
             }
         }
 

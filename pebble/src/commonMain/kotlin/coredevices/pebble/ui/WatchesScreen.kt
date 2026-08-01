@@ -1,7 +1,5 @@
 package coredevices.pebble.ui
 
-import CommonRoutes
-import NextBugReportContext
 import PlatformShareLauncher
 import PlatformUiContext
 import androidx.compose.animation.core.LinearEasing
@@ -46,7 +44,6 @@ import androidx.compose.material.icons.filled.Battery5Bar
 import androidx.compose.material.icons.filled.Battery6Bar
 import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.BluetoothDisabled
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
@@ -183,9 +180,7 @@ import io.rebble.libpebblecommon.packets.blobdb.TimelineItem
 import io.rebble.libpebblecommon.services.blobdb.TimelineActionResult
 import io.rebble.libpebblecommon.timeline.TimelineColor
 import io.rebble.libpebblecommon.timeline.toPebbleColor
-import io.rebble.libpebblecommon.util.getTempFilePath
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -193,9 +188,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.io.buffered
-import kotlinx.io.files.SystemFileSystem
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import org.jetbrains.compose.resources.stringResource
@@ -1835,8 +1827,6 @@ fun LanguageDialog(watch: ConnectedPebbleDevice, onDismissRequest: () -> Unit) {
 fun ScreenshotDialog(watch: ConnectedPebble.Screenshot, onDismissRequest: () -> Unit, navBarNav: NavBarNav) {
     var screenshot by remember { mutableStateOf<ImageBitmap?>(null) }
     val scope = rememberCoroutineScope()
-    val nextBugReportContext: NextBugReportContext = koinInject()
-    val appContext: AppContext = koinInject()
 
     suspend fun takeScreenshot() {
         screenshot = null
@@ -1884,33 +1874,10 @@ fun ScreenshotDialog(watch: ConnectedPebble.Screenshot, onDismissRequest: () -> 
                         horizontalArrangement = Arrangement.Center,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        PebbleElevatedButton(
-                            text = "Bug Report",
-                            onClick = {
-                                nextBugReportContext.nextContext = null
-                                scope.launch {
-                                    val tempScreenshotFile = withContext(Dispatchers.Default) {
-                                        val file = getTempFilePath(
-                                            appContext,
-                                            "watch-screenshot.png"
-                                        )
-                                        SystemFileSystem.sink(file, append = false).buffered().use { sink ->
-                                            sink.write(screenshot.toPngBytes())
-                                        }
-                                        file
-                                    }
-                                    navBarNav.navigateTo(
-                                        CommonRoutes.BugReport(
-                                            pebble = true,
-                                            screenshotPath = tempScreenshotFile.toString(),
-                                        )
-                                    )
-                                }
-                            },
-                            icon = Icons.Default.BugReport,
-                            primaryColor = false,
-                            modifier = Modifier.padding(5.dp),
-                        )
+                        // Fork: the screenshot sheet's Bug Report button is
+                        // removed; remote bug reporting is gone with the
+                        // Firebase strip (submission needed the bug-reports
+                        // backend and a Firebase ID token). Share remains.
 
                         val platformShareLauncher = koinInject<PlatformShareLauncher>()
                         PebbleElevatedButton(

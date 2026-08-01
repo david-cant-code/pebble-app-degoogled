@@ -127,8 +127,9 @@ kotlin {
                 implementation(libs.serialization)
                 implementation(libs.koin.core)
                 implementation(libs.koin.compose)
-                implementation(libs.firebase.auth)
-                implementation(libs.firebase.firestore)
+                // Fork: inert dev.gitlive.firebase.* stand-ins replacing the
+                // real gitlive firebase-auth/firebase-firestore artifacts.
+                implementation(project(":firebase-stubs"))
                 implementation(libs.ktor.client.core)
                 implementation(libs.ktor.client.contentNegotiation)
                 implementation(libs.ktor.client.encoding)

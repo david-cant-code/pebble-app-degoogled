@@ -98,7 +98,10 @@ data class CoreConfig(
 
 @Serializable
 data class STTConfig(
-    val mode: CactusSTTMode = CactusSTTMode.RemoteOnly,
+    // Fork: LocalOnly, not upstream's RemoteOnly. The Core cloud modes need
+    // a Core-account sign-in this build removed, so upstream's default can
+    // never work here and the settings dropdown no longer offers it.
+    val mode: CactusSTTMode = CactusSTTMode.LocalOnly,
     val modelName: String? = null,
     /** ISO 639-1 language code. Null means auto-detect. */
     val spokenLanguage: String? = null,

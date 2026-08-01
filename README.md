@@ -38,16 +38,15 @@ lands piece by piece:
 
 - [x] Manual weather location entry
 - [x] Telemetry strip (Crashlytics, analytics, firmware-diagnostics relay)
-- [ ] Google Play services / Firebase removal
+- [x] Google Play services / Firebase removal
 - [ ] Third-party microphone API
 
 ## Building (Android)
 
 - JDK 17; Gradle wrapper included. Debug build:
   `./gradlew :composeApp:assembleDebug`
-- Until the Firebase strip lands, the build still expects a
-  `google-services.json`:
-  `cp composeApp/src/google-services-dummy.json composeApp/src/google-services.json`
+- No `google-services.json` is needed: the google-services plugin is gone
+  along with the Firebase SDKs.
 - For a release build signed with the debug key, set
   `LOCAL_RELEASE_BUILD=true` in the root `local.properties`, then
   `./gradlew :composeApp:assembleRelease`.

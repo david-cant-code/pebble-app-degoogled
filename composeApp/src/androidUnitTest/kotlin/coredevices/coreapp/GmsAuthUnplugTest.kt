@@ -12,15 +12,13 @@ import kotlin.test.assertSame
 import org.koin.dsl.koinApplication
 
 class GmsAuthUnplugTest {
-    // The app no longer declares play-services-auth, googleid, or
-    // androidx-credentials, but the artifacts stay on the classpath as
-    // transitives of firebase-auth (its Android SDK pulls
-    // credentials-play-services-auth), so a classpath-absence probe like
-    // RingUnplugTest's is only possible once the Firebase strip lands.
-    // Until then the enforceable guarantee is the seam itself: whatever
-    // Koin hands out for the auth interfaces must be the fork's no-ops,
-    // which never touch GMS. Definitions resolve lazily, so only the two
-    // probed bindings are instantiated here.
+    // The GMS auth artifacts formerly rode in as firebase-auth transitives;
+    // the Firebase strip removed them, and the classpath-absence probes this
+    // comment once documented as deferred now live in FirebaseUnplugTest.
+    // This test remains the independent seam layer: whatever Koin hands out
+    // for the auth interfaces must be the fork's no-ops, which never touch
+    // GMS. Definitions resolve lazily, so only the two probed bindings are
+    // instantiated here.
     @Test
     fun authSeamResolvesToTheForkNoOps() {
         val koin = koinApplication { modules(androidDefaultModule) }.koin
