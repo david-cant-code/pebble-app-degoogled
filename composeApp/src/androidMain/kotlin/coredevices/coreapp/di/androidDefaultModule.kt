@@ -31,6 +31,7 @@ import coredevices.util.models.ModelDownloadManager
 import coredevices.util.transcription.CactusModelPathProvider
 import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.okhttp.OkHttp
+import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.singleOf
 import org.koin.dsl.bind
 import org.koin.dsl.module
@@ -73,6 +74,8 @@ val androidDefaultModule = module {
     // Fork binding: upstream registers its Cactus model provider inside the
     // unplugged :experimental module; without this, on-device Cactus STT
     // falls back to a provider that throws (utilModule) and dictation dies.
-    singleOf(::CactusModelProvider) bind CactusModelPathProvider::class
+    // The HttpClient is watchModule's shared app-graph single, the same one
+    // the verified firmware installer downloads through.
+    single { CactusModelProvider(androidContext(), get()) } bind CactusModelPathProvider::class
     singleOf(::PebbleBackgroundManager)
 }

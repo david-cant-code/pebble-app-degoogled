@@ -165,6 +165,7 @@ kotlin {
         }
         androidUnitTest.dependencies {
             implementation(libs.ktor.client.okhttp)
+            implementation(libs.ktor.client.mock)
             implementation(libs.coroutines.test)
         }
         iosMain.dependencies {

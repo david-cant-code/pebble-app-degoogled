@@ -10,6 +10,8 @@ import coredevices.util.STTConfig
 import coredevices.util.models.CactusSTTMode
 import coredevices.util.transcription.CactusTranscriptionService
 import coredevices.util.transcription.NoOpInferenceBoost
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -82,7 +84,7 @@ class CactusColdStartRaceTest {
                 val provider = ReadOnlyModelPathProvider(modelsDir, MODEL_NAME)
                 if (!provider.isModelDownloaded(MODEL_NAME)) {
                     println("[cold-start] model missing — downloading $MODEL_NAME (one-time)…")
-                    runBlocking { withTimeout(20.minutes) { CactusModelProvider(context).getSTTModelPath() } }
+                    runBlocking { withTimeout(20.minutes) { CactusModelProvider(context, HttpClient(OkHttp)).getSTTModelPath() } }
                 }
                 modelPresent = provider.isModelDownloaded(MODEL_NAME)
 

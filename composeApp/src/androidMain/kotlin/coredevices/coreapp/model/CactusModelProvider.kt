@@ -3,24 +3,15 @@ package coredevices.coreapp.model
 import android.content.Context
 import co.touchlab.kermit.Logger
 import coredevices.util.CommonBuildKonfig
-import coredevices.util.models.promoteSingleRootDir
 import coredevices.util.transcription.CactusModelPathProvider
-import kotlinx.coroutines.CancellationException
+import io.ktor.client.HttpClient
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.io.files.Path
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
-import java.util.zip.ZipInputStream
 
 /**
  * Fork-owned Cactus model provider: resolves, downloads (Hugging Face), and
@@ -31,11 +22,13 @@ import java.util.zip.ZipInputStream
  * transcription is a core watch feature, and the only alternative STT paths
  * are cloud services or the GMS-backed platform recognizer, both dead on a
  * de-Googled ROM. This copy keeps dictation working. Fork deviations from
- * the upstream class: Context is constructor-injected instead of
- * service-located, the ring-only setCloudApiKey is dropped, and
- * initTelemetry is a no-op (the native cactus lib's telemetry environment is
- * never configured; a strings sweep of libcactus_engine.so found no
- * endpoints, so this is belt on top of suspenders).
+ * the upstream class: Context and the app's shared Ktor HttpClient are
+ * constructor-injected (upstream service-locates the Context and builds a
+ * one-off OkHttpClient per download), the download/extract pipeline lives
+ * in the testable [ModelZipInstaller] core, the ring-only setCloudApiKey is
+ * dropped, and initTelemetry is a no-op (the native cactus lib's telemetry
+ * environment is never configured; a strings sweep of libcactus_engine.so
+ * found no endpoints, so this is belt on top of suspenders).
  *
  * Provenance: copied from the tree as of commit ecdfa123, flattening
  * experimental/src/commonMain/kotlin/coredevices/ring/model/CactusModelProvider.kt
@@ -48,12 +41,12 @@ import java.util.zip.ZipInputStream
  * Models are stored at: <filesDir>/models/<modelName>/ with config.txt,
  * vocab.txt, and .weights files, plus a .cactus_version marker.
  */
-class CactusModelProvider(private val context: Context) : CactusModelPathProvider {
+class CactusModelProvider(
+    private val context: Context,
+    private val httpClient: HttpClient,
+) : CactusModelPathProvider {
     companion object {
         private val logger = Logger.withTag("CactusModelProvider")
-        private const val HF_BASE = "https://huggingface.co/Cactus-Compute"
-        private const val QUANTIZATION = "cq4"
-        private const val DOWNLOAD_BUFFER_SIZE = 256 * 1024
 
         // One mutex per model so an in-progress STT download doesn't head-of-line
         // block an unrelated LM resolve (or vice versa).
@@ -70,6 +63,10 @@ class CactusModelProvider(private val context: Context) : CactusModelPathProvide
     }
 
     private val modelsDir: File get() = context.filesDir.resolve("models").also { it.mkdirs() }
+
+    // Lazy so resolving the provider from the DI graph stays free of
+    // filesystem access; the dirs are only touched once an install runs.
+    private val installer by lazy { ModelZipInstaller(httpClient, context.cacheDir, modelsDir) }
 
     override suspend fun getSTTModelPath(): String = withContext(Dispatchers.IO) {
         val modelName = CommonBuildKonfig.CACTUS_STT_MODEL
@@ -107,7 +104,7 @@ class CactusModelProvider(private val context: Context) : CactusModelPathProvide
     }
 
     private fun isBundled(modelName: String): Boolean =
-        context.assets.list("models")?.contains("${modelName.lowercase()}-$QUANTIZATION.zip") == true
+        context.assets.list("models")?.contains(ModelZipInstaller.zipNameFor(modelName)) == true
 
     override fun deleteModel(modelName: String) {
         modelsDir.resolve(modelName).deleteRecursively()
@@ -132,7 +129,7 @@ class CactusModelProvider(private val context: Context) : CactusModelPathProvide
             || versionFile.readText().trim() != version
 
         if (needsDownload) {
-            downloadAndExtract(modelName, modelDir, version)
+            downloadAndExtract(modelName, version)
             versionFile.writeText(version)
         }
 
@@ -140,129 +137,24 @@ class CactusModelProvider(private val context: Context) : CactusModelPathProvide
         return modelDir.absolutePath
     }
 
-    private suspend fun downloadAndExtract(modelName: String, targetDir: File, version: String) = withContext(Dispatchers.IO) {
-        val zipName = "${modelName.lowercase()}-$QUANTIZATION.zip"
-
-        val tempZip = if (context.assets.list("models")?.contains(zipName) == true) {
-            logger.i { "Found included model zip in assets: $zipName, extracting..." }
-            val tempZip = File(context.cacheDir, "cactus_asset_$modelName.zip")
-            withContext(Dispatchers.IO) {
-                context.assets.open("models/$zipName").use { input ->
-                    FileOutputStream(tempZip).use { output ->
-                        input.copyTo(output)
-                    }
-                }
-            }
-            tempZip
-        } else {
-            val url = "$HF_BASE/$modelName/resolve/$version/$zipName"
-            logger.i { "Downloading model: $url" }
-
-            val tempZip = File(context.cacheDir, "cactus_download_$modelName.zip")
-            // Cancel the in-flight HTTP call if the coroutine is cancelled so a blocked
-            // socket read unblocks promptly instead of hanging until readTimeout.
-            val client = OkHttpClient.Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(60, TimeUnit.SECONDS)
-                .followRedirects(true)
-                .followSslRedirects(true)
-                .build()
-            val call = client.newCall(Request.Builder().url(url).build())
-            val cancelHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
-                if (cause != null) call.cancel()
-            }
-            try {
-                call.execute().use { response ->
-                    if (!response.isSuccessful) {
-                        val errorBody = response.body?.string()?.take(500) ?: "no body"
-                        throw Exception("Download failed: HTTP ${response.code} for $url: $errorBody")
-                    }
-
-                    val body = response.body
-                        ?: throw Exception("Download failed: empty response body for $url")
-                    val totalBytes = body.contentLength()
-                    var downloadedBytes = 0L
-                    var lastLoggedPct = -1
-
-                    body.byteStream().use { input ->
-                        FileOutputStream(tempZip).use { output ->
-                            val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
-                            var bytesRead: Int
-                            while (input.read(buffer).also { bytesRead = it } != -1) {
-                                currentCoroutineContext().ensureActive()
-                                output.write(buffer, 0, bytesRead)
-                                downloadedBytes += bytesRead
-                                if (totalBytes > 0) {
-                                    val pct = (downloadedBytes * 100 / totalBytes).toInt()
-                                    if (pct / 10 > lastLoggedPct / 10) {
-                                        lastLoggedPct = pct
-                                        logger.d { "Download progress: $pct% ($downloadedBytes / $totalBytes)" }
-                                    }
-                                }
-                            }
+    private suspend fun downloadAndExtract(modelName: String, version: String) = withContext(Dispatchers.IO) {
+        val zipName = ModelZipInstaller.zipNameFor(modelName)
+        val bundled = context.assets.list("models")?.contains(zipName) == true
+        installer.install(
+            modelName = modelName,
+            version = version,
+            copyBundledZip = if (bundled) {
+                { dest: File ->
+                    logger.i { "Found included model zip in assets: $zipName, extracting..." }
+                    context.assets.open("models/$zipName").use { input ->
+                        FileOutputStream(dest).use { output ->
+                            input.copyTo(output)
                         }
                     }
                 }
-                logger.i { "Download complete: ${tempZip.length()} bytes" }
-                tempZip
-            } catch (e: CancellationException) {
-                logger.i { "Model download cancelled for $modelName" }
-                throw e
-            } catch (e: Exception) {
-                // A cancelled coroutine cancels the OkHttp call, surfacing as IOException;
-                // re-check liveness so cancellation propagates as CancellationException.
-                currentCoroutineContext().ensureActive()
-                logger.e(e) { "Model download failed for $modelName" }
-                throw e
-            } finally {
-                cancelHandle?.dispose()
-            }
-        }
-
-        try {
-            // Clear old model if present
-            if (targetDir.exists()) {
-                targetDir.deleteRecursively()
-            }
-            targetDir.mkdirs()
-
-            // Extract
-            ZipInputStream(tempZip.inputStream().buffered()).use { zis ->
-                var entry = zis.nextEntry
-                while (entry != null) {
-                    currentCoroutineContext().ensureActive()
-                    val outputFile = File(targetDir, entry.name)
-                    // ZIP Slip protection
-                    if (!outputFile.canonicalPath.startsWith(targetDir.canonicalPath)) {
-                        throw SecurityException("ZIP entry outside target dir: ${entry.name}")
-                    }
-                    if (entry.isDirectory) {
-                        outputFile.mkdirs()
-                    } else {
-                        outputFile.parentFile?.mkdirs()
-                        FileOutputStream(outputFile).use { fos ->
-                            zis.copyTo(fos)
-                        }
-                    }
-                    zis.closeEntry()
-                    entry = zis.nextEntry
-                }
-            }
-            promoteSingleRootDir(Path(targetDir.absolutePath))
-            logger.i { "Extraction complete to ${targetDir.absolutePath}" }
-        } catch (e: CancellationException) {
-            logger.i { "Model download cancelled for $modelName" }
-            targetDir.deleteRecursively()
-            throw e
-        } catch (e: Exception) {
-            // A cancelled coroutine cancels the OkHttp call, surfacing as IOException;
-            // re-check liveness so cancellation propagates as CancellationException.
-            currentCoroutineContext().ensureActive()
-            logger.e(e) { "Model download/extract failed for $modelName" }
-            targetDir.deleteRecursively()
-            throw e
-        } finally {
-            tempZip.delete()
-        }
+            } else {
+                null
+            },
+        )
     }
 }
