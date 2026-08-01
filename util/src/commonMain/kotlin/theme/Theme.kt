@@ -24,21 +24,24 @@ import org.jetbrains.compose.resources.StringResource
 import org.koin.compose.koinInject
 import theme.CoreAppTheme.Companion.asCoreAppTheme
 
-val coreOrange = Color(0xFFFA4A36)
+// Fork brand color, sampled from the Gravel logo artwork (art/gravel-logo.png).
+// Replaces upstream's coreOrange 0xFFFA4A36 everywhere; the launcher background in
+// util res/values/ic_launcher_background.xml is chosen to contrast with this.
+val gravelPurple = Color(0xFF9129DE)
 val coreGrey = Color(0xFF333333)
 val coreDarkGrey = Color(0xFF2B2930)
 val coreDarkGreen = Color(0xFF157a30)
 private val error = Color(0xFFFA6B66)
 val greyScheme = darkColorScheme(
-    primary = coreOrange,
+    primary = gravelPurple,
     onPrimary = Color.White,
-    primaryContainer = coreOrange,
+    primaryContainer = gravelPurple,
     onPrimaryContainer = Color.White,
-    secondary = coreOrange,
+    secondary = gravelPurple,
     onSecondary = Color.White,
-    secondaryContainer = coreOrange,
+    secondaryContainer = gravelPurple,
     onSecondaryContainer = Color.White,
-    tertiary = coreOrange,
+    tertiary = gravelPurple,
     onTertiary = Color.White,
     tertiaryContainer = tertiaryContainerDark,
     onTertiaryContainer = onTertiaryContainerDark,
@@ -80,15 +83,15 @@ val blackScheme = greyScheme.copy(
 )
 
 val lightScheme = lightColorScheme(
-    primary = coreOrange,
+    primary = gravelPurple,
     onPrimary = Color.White,
-    primaryContainer = coreOrange,
+    primaryContainer = gravelPurple,
     onPrimaryContainer = Color.Black,
-    secondary = coreOrange,
+    secondary = gravelPurple,
     onSecondary = Color.Black,
-    secondaryContainer = coreOrange,
+    secondaryContainer = gravelPurple,
     onSecondaryContainer = Color.White,
-    tertiary = coreOrange,
+    tertiary = gravelPurple,
     onTertiary = Color(0xFFFFFFFF),
     tertiaryContainer = tertiaryContainerLight,
     onTertiaryContainer = onTertiaryContainerLight,
@@ -117,23 +120,23 @@ val onboardingScheme = lightColorScheme(
     primary = Color.White,
     onPrimary = Color.Black,
     primaryContainer = Color.White,
-    onPrimaryContainer = coreOrange,
+    onPrimaryContainer = gravelPurple,
     secondary = Color.White,
-    onSecondary = coreOrange,
+    onSecondary = gravelPurple,
     secondaryContainer = Color.White,
-    onSecondaryContainer = coreOrange,
+    onSecondaryContainer = gravelPurple,
     tertiary = Color.White,
-    onTertiary = coreOrange,
-    background = coreOrange,
+    onTertiary = gravelPurple,
+    background = gravelPurple,
     onBackground = Color.White,
-    surface = coreOrange,
+    surface = gravelPurple,
     onSurface = Color.White,
-    surfaceVariant = coreOrange,
+    surfaceVariant = gravelPurple,
     onSurfaceVariant = Color.White.copy(alpha = 0.8f),
     outline = Color.White.copy(alpha = 0.5f),
     outlineVariant = Color.White.copy(alpha = 0.3f),
-    scrim = coreOrange,
-    surfaceContainer = coreOrange,
+    scrim = gravelPurple,
+    surfaceContainer = gravelPurple,
     surfaceContainerHighest = Color.White.copy(alpha = 0.15f),
     error = error,
     onError = Color.White,

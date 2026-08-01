@@ -53,7 +53,7 @@ class InferenceBoostService : Service() {
         // handling is needed here.
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Processing speech…")
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(true)
             .build()
 

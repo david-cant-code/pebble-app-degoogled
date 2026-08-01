@@ -37,7 +37,7 @@ actual fun notifyLocal(platformContext: PlatformContext, title: String, message:
     )
 
     val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-        .setSmallIcon(R.mipmap.ic_launcher)
+        .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(title)
         .setContentText(message)
         .setPriority(NotificationCompat.PRIORITY_DEFAULT)

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon layer for the adaptive launcher icon: one-color silhouette of the
+     Gravel mark (pebble face wearing a tinfoil hat). Same geometry as
+     drawable/ic_notification.xml, scaled so the mark fits the 66dp safe-zone
+     circle of the 108dp adaptive-icon canvas. The launcher tints it, so the
+     fill color here is arbitrary. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <group
+        android:scaleX="0.78"
+        android:scaleY="0.78"
+        android:pivotX="512"
+        android:pivotY="512"
+        android:translateY="-16">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M285,529 C290,440 330,335 445,288 C464,238 492,200 538,168 C572,202 594,242 604,290 C700,334 733,440 739,529 A262,262 0 0 0 285,529 Z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M752,660 A240,240 0 1 1 272,660 A240,240 0 1 1 752,660 Z M617,590 A105,105 0 1 1 407,590 A105,105 0 1 1 617,590 Z M600,590 A88,88 0 1 1 424,590 A88,88 0 1 1 600,590 Z M652,486 A26,26 0 1 1 600,486 A26,26 0 1 1 652,486 Z M432,755 A140,140 0 0 0 592,755 L578,735 A116,116 0 0 1 446,735 Z" />
+    </group>
+</vector>

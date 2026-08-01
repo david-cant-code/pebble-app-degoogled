@@ -57,7 +57,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.ui.tooling.preview.Preview
-import theme.coreOrange
+import theme.gravelPurple
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.Uuid
@@ -187,7 +187,7 @@ fun VibePatternPickerDialog(
                                 onResult(pattern)
                             }).border(
                                 width = 2.dp,
-                                color = if (selectedPattern == pattern.name) coreOrange else Color.Transparent,
+                                color = if (selectedPattern == pattern.name) gravelPurple else Color.Transparent,
                             ),
                         )
                     }
