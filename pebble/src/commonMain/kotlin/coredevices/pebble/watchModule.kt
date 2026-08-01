@@ -16,8 +16,11 @@ import coredevices.pebble.account.RealFirestoreKnownWatchesSync
 import coredevices.pebble.account.RealFirestoreLocker
 import coredevices.pebble.account.RealPebbleAccount
 import coredevices.pebble.firmware.Cohorts
+import coredevices.pebble.firmware.FirmwareArtifactExpectations
+import coredevices.pebble.firmware.FirmwareUpdateChannel
 import coredevices.pebble.firmware.FirmwareUpdateCheck
 import coredevices.pebble.firmware.FirmwareUpdateUiTracker
+import coredevices.pebble.firmware.GithubReleases
 import coredevices.pebble.firmware.RealFirmwareUpdateUiTracker
 import coredevices.pebble.services.AppstoreCache
 import coredevices.pebble.services.AppstoreService
@@ -189,6 +192,11 @@ val watchModule = module {
     singleOf(::AnalyticsHeartbeatQueue)
     singleOf(::ContactDeveloperApi)
     factoryOf(::Cohorts)
+    // Fork: Core-watch updates come from the public PebbleOS GitHub releases
+    // (fork builds ship no Memfault token, and cohorts rejects Core hardware).
+    // The channel provider is pinned to Soaked until the settings toggle lands.
+    singleOf(::FirmwareArtifactExpectations)
+    single { GithubReleases(get(), get(), { FirmwareUpdateChannel.Soaked }, get()) }
     singleOf(::FirmwareUpdateCheck)
     factoryOf(::PebbleFeatures)
     factoryOf(::WeatherFetcher)

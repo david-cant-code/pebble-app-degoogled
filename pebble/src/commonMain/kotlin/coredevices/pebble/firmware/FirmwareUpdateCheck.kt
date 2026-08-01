@@ -17,6 +17,8 @@ import kotlin.time.Instant
 class FirmwareUpdateCheck(
     private val memfault: Memfault,
     private val cohorts: Cohorts,
+    // Fork: GitHub-releases checker for Core watches; see doCheck.
+    private val githubReleases: GithubReleases,
     private val clock: Clock = Clock.System,
 ) {
     private val logger = Logger.withTag("FirmwareUpdateCheck")
@@ -66,6 +68,11 @@ class FirmwareUpdateCheck(
     private suspend fun doCheck(watch: WatchInfo): FirmwareUpdateCheckResult = when {
         watch.platform == UNKNOWN -> FirmwareUpdateCheckResult.UpdateCheckFailed("Unknown platform")
         watch.platform.isCoreDevice() && CommonBuildKonfig.MEMFAULT_TOKEN != null -> memfault.getLatestFirmware(watch)
+        // Fork: fork builds ship no Memfault token and cohorts rejects every
+        // Core hardware revision, so Core watches check the public PebbleOS
+        // GitHub releases instead. Legacy watches keep cohorts, which serves
+        // them fine.
+        watch.platform.isCoreDevice() -> githubReleases.getLatestFirmware(watch)
         else -> cohorts.getLatestFirmware(watch)
     }
 
