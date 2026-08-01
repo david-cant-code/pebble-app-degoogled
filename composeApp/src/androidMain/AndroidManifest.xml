@@ -95,6 +95,16 @@
             android:name=".PebbleService"
             android:foregroundServiceType="connectedDevice"
             android:exported="false" />
+        <!--
+            Fork: holds foreground priority during local Cactus
+            transcription; upstream's equivalent service lives in the
+            unplugged :experimental module. shortService needs no
+            type-specific permission.
+        -->
+        <service
+            android:name=".InferenceBoostService"
+            android:foregroundServiceType="shortService"
+            android:exported="false" />
         <service android:name="coredevices.util.models.ModelDownloadService"
             android:permission="android.permission.BIND_JOB_SERVICE"
             android:exported="false">

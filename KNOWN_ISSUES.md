@@ -22,52 +22,27 @@ and the watch's own bootloader validation with recovery fallback
 backstops a bad install. This entry leaves the file when a single-slot
 watch runs the end-to-end pass.
 
-## On-device STT model downloads have no integrity verification
+## Pre-pinning STT/LM model installs are grandfathered without retroactive verification
 
-**Status: deferred to a dedicated STT hardening branch.**
+**Status: accepted until the first model pin bump.**
 
-The fork-owned `CactusModelProvider`
-(`composeApp/src/androidMain/kotlin/coredevices/coreapp/model/CactusModelProvider.kt`)
-downloads STT/LM model weights from `https://huggingface.co/Cactus-Compute`,
-a third-party Hugging Face org (the Cactus engine vendor, not Core Devices
-and not this fork), pinned only to the mutable git tag in
-`CACTUS_WEIGHTS_VERSION` (currently `v2.0.1`). There is no checksum,
-signature, or immutable-revision pin between download and extraction, and no
-size cap on the extracted output (Zip-Slip is handled). The extracted
-weights are parsed by the bundled native `libcactus_engine.so`.
-
-Threat model: a compromise of the Cactus-Compute account, or a retargeted
-tag, silently swaps the weights on the next download or version bump; a
-native parser consuming attacker-controlled blobs is a memory-corruption
-surface, and swapped weights could also manipulate transcriptions silently.
-The only defensive layer today is TLS with default certificate validation.
-This matches upstream's behavior at the fork point (the Play services strip
-promoted the code into fork-owned surface without widening its exposure),
-which is why it is deferred rather than blocking: the exposure is not new,
-one real layer exists, and exploitation requires compromising the vendor
-org.
-
-Planned resolution, on its own branch: pin an immutable revision (or verify
-a build-time SHA-256 of the downloaded archive), cap extraction size, and
-review the on-device STT verification story end to end.
-
-## Dictation lost the inference-boost foreground service with the Ring unplug
-
-**Status: deferred to the same STT hardening branch.**
-
-Upstream holds foreground-process priority during local Cactus
-transcription via `InferenceForegroundService`, a `shortService`-type
-foreground service hosted in the unplugged `:experimental` module. With the
-module gone, `utilModule`'s `getOrNull<InferenceBoost>()` fallback always
-yields `NoOpInferenceBoost`, so local transcription runs at the priority of
-the app process. This is masked while the watch-connection foreground
-service is active (the `androidForegroundServiceForWatchConnectionV2`
-setting, default on); a user who disables that setting gets
-background-priority inference, which modern Android CPU restrictions can
-slow enough to hit the transcription timeouts.
-
-Deferred because the degradation only manifests in a non-default
-configuration, is a performance regression rather than a correctness or
-security issue, and the fix (a fork-owned minimal boost service, since
-upstream's is pure Android with no GMS dependency) belongs with the rest of
-the STT work rather than in the Play services strip.
+On-device model archives are now verified before install (immutable-commit
+download URLs, SHA-256 and exact-size gates, bounded staged extraction),
+but that verification is prospective only. Installs made before the
+pinning scheme wrote the release tag (`v2.0.1`) as their
+`.cactus_version` marker after an unverified download from a mutable tag,
+so the marker proves nothing about the installed bytes. `CactusModelPins`
+grandfathers that legacy marker while a model's current pin still names
+the very archive the tag shipped, which means an install that was already
+tampered with under the old scheme (the retargeted-tag or
+compromised-org threats the old entry here described) keeps feeding its
+weights to the native parser until the first real pin bump forces a
+verified reinstall. Retroactive verification is not feasible cheaply:
+only the archive digest is pinned and nothing per-file survives
+extraction, so re-verifying would force every existing user through a
+full re-download (383 MB for STT) after first downgrading them to
+remote-only STT via the incompatible-model sweep, a user-hostile trade
+against a purely historical exposure window. The grandfather clause and
+its frozen anchor digests live in `CactusModelPins.kt`; the first pin
+bump ends the exception automatically, and this entry leaves the file
+with it.

@@ -5,7 +5,6 @@ import CommonRoutes
 import CoreAppVersion
 import NextBugReportContext
 import PlatformUiContext
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -161,15 +160,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import coreapp.pebble.generated.resources.Res
-import coreapp.pebble.generated.resources.wispr_flow_logo_black
-import coreapp.pebble.generated.resources.wispr_flow_logo_white
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import theme.CoreAppTheme
 import theme.ThemeProvider
-import theme.currentColorScheme
 import kotlin.math.roundToLong
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
@@ -1483,31 +1478,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     topLevelType = TopLevelType.Phone,
                     section = Section.Speech,
                     action = { showSpokenLanguageDialog = true },
-                ),
-                SettingsItem(
-                    title = "Cloud Recognition Provider",
-                    isDebugSetting = false,
-                    topLevelType = TopLevelType.Phone,
-                    section = Section.Speech,
-                    keywords = "",
-                    item = {
-                        val logo = if (currentColorScheme().isDark) {
-                            Res.drawable.wispr_flow_logo_white
-                        } else {
-                            Res.drawable.wispr_flow_logo_black
-                        }
-                        ListItem(
-                            headlineContent = { Text("Cloud Recognition Provider") },
-                            trailingContent = {
-                                Image(
-                                    painter = painterResource(logo),
-                                    contentDescription = "Wispr Flow",
-                                    modifier = Modifier.height(20.dp),
-                                )
-                            },
-                            shadowElevation = ELEVATION,
-                        )
-                    }
                 ),
                 basicSettingsToggleItem(
                     title = "Ignore other Pebble apps",

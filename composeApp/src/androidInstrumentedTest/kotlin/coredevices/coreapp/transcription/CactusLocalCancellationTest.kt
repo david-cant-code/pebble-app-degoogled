@@ -10,6 +10,8 @@ import coredevices.util.models.CactusSTTMode
 import coredevices.util.transcription.CactusModelPathProvider
 import coredevices.util.transcription.CactusTranscriptionService
 import coredevices.util.transcription.NoOpInferenceBoost
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -89,7 +91,7 @@ class CactusLocalCancellationTest {
                     println("[cactus-cancel] model missing at ${modelDir.absolutePath} — downloading $MODEL_NAME (one-time, hundreds of MB)…")
                     // Only the *production* provider downloads; its delete-then-download is harmless
                     // when there's no valid model to lose.
-                    runBlocking { withTimeout(20.minutes) { CactusModelProvider(context).getSTTModelPath() } }
+                    runBlocking { withTimeout(20.minutes) { CactusModelProvider(context, HttpClient(OkHttp)).getSTTModelPath() } }
                 }
                 modelPresent = provider.isModelDownloaded(MODEL_NAME)
                 println("[cactus-cancel] model dir=${modelDir.absolutePath} present=$modelPresent")

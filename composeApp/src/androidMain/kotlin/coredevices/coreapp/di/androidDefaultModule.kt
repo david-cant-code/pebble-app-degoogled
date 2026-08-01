@@ -9,6 +9,7 @@ import coredevices.coreapp.PebbleBackgroundManager
 import coredevices.coreapp.auth.NoOpAppleAuthUtil
 import coredevices.coreapp.auth.NoOpGithubAuthUtil
 import coredevices.coreapp.auth.NoOpGoogleAuthUtil
+import coredevices.coreapp.AndroidInferenceBoost
 import coredevices.coreapp.util.AppUpdate
 import coredevices.coreapp.util.NoOpAppUpdate
 import coredevices.coreapp.model.CactusModelProvider
@@ -29,8 +30,10 @@ import coredevices.util.integrations.AndroidOAuthLauncher
 import coredevices.util.integrations.OAuthLauncher
 import coredevices.util.models.ModelDownloadManager
 import coredevices.util.transcription.CactusModelPathProvider
+import coredevices.util.transcription.InferenceBoost
 import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.okhttp.OkHttp
+import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.singleOf
 import org.koin.dsl.bind
 import org.koin.dsl.module
@@ -73,6 +76,13 @@ val androidDefaultModule = module {
     // Fork binding: upstream registers its Cactus model provider inside the
     // unplugged :experimental module; without this, on-device Cactus STT
     // falls back to a provider that throws (utilModule) and dictation dies.
-    singleOf(::CactusModelProvider) bind CactusModelPathProvider::class
+    // The HttpClient is watchModule's shared app-graph single, the same one
+    // the verified firmware installer downloads through.
+    single { CactusModelProvider(androidContext(), get()) } bind CactusModelPathProvider::class
+    // Fork binding: upstream's inference boost rides in the unplugged
+    // :experimental module, so utilModule's getOrNull fallback always found
+    // nothing and local transcription ran at background priority whenever
+    // the watch-connection foreground service was off.
+    single { AndroidInferenceBoost(androidContext()) } bind InferenceBoost::class
     singleOf(::PebbleBackgroundManager)
 }
