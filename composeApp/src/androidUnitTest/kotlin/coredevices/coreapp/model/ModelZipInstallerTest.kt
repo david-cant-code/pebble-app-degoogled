@@ -18,6 +18,7 @@ import kotlinx.coroutines.test.runTest
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
+import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.test.Test
@@ -27,13 +28,15 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Pins the extracted model install pipeline against synthetic zips and a
- * mock HTTP engine: the happy path (download, extract, single-root
- * promotion, temp cleanup), the bundled-asset path, and the failure
- * behavior the provider relies on (download failures leave an existing
- * model untouched, Zip-Slip entries refuse the install, a stalled transfer
- * fails instead of hanging). Lives in androidUnitTest because the fixtures
- * are built with java.util.zip.
+ * Pins the verified model install pipeline against synthetic zips and a
+ * mock HTTP engine: the happy path (commit-pinned URL, digest gate, staged
+ * swap, marker content, temp cleanup), the bundled-asset path through the
+ * same gate, and every refusal branch (digest and size mismatches,
+ * mid-stream oversize abort, Zip-Slip in its three shapes, entry-count and
+ * inflation caps, stalls, cancellation). The invariant asserted
+ * throughout: no failure mode ever costs the existing model, and nothing
+ * unverified is left behind in staging or cache. Lives in androidUnitTest
+ * because the fixtures are built with java.util.zip.
  */
 class ModelZipInstallerTest {
 
@@ -43,6 +46,7 @@ class ModelZipInstallerTest {
 
     private val model = "parakeet-tdt-0.6b-v3"
     private val targetDir: File get() = modelsDir.resolve(model)
+    private val stagingDir: File get() = modelsDir.resolve(".staging").resolve(model)
 
     private val requestedUrls = mutableListOf<String>()
 
@@ -58,6 +62,19 @@ class ModelZipInstallerTest {
     )
 
     // --- Fixtures ---
+
+    private fun sha256Hex(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+    private val testCommit = "0123456789abcdef0123456789abcdef01234567"
+
+    /** A pin that genuinely matches [bytes], as a correct pin table would. */
+    private fun pinFor(bytes: ByteArray, sizeBytes: Long = bytes.size.toLong()) = ModelPin(
+        hfRepo = model,
+        commitSha = testCommit,
+        zipSha256Hex = sha256Hex(bytes),
+        zipSizeBytes = sizeBytes,
+    )
 
     private fun zip(entries: Map<String, ByteArray>): ByteArray {
         val out = ByteArrayOutputStream()
@@ -91,22 +108,39 @@ class ModelZipInstallerTest {
 
     private fun cacheFilesLeft(): List<String> = cacheDir.listFiles()?.map { it.name } ?: emptyList()
 
-    // --- Tests ---
+    private fun assertNothingLeftBehind() {
+        assertTrue(cacheFilesLeft().isEmpty(), "temp zip should be deleted")
+        assertFalse(stagingDir.exists(), "staging should be cleaned up")
+    }
+
+    private fun assertOldModelIntact() {
+        assertEquals("old", targetDir.resolve("config.txt").readText(), "existing model must survive a failed install")
+        assertTrue(targetDir.resolve("old.weights").exists())
+    }
+
+    // --- Happy paths ---
 
     @Test
-    fun downloadHappyPathInstallsModel() = runTest {
-        installer(serving(modelZip())).install(model, "v2.0.1", copyBundledZip = null)
+    fun downloadHappyPathInstallsVerifiedModel() = runTest {
+        val bytes = modelZip()
+        installer(serving(bytes)).install(model, pinFor(bytes), copyBundledZip = null)
         assertEquals("cfg", targetDir.resolve("config.txt").readText())
         assertEquals(
-            listOf("https://huggingface.co/Cactus-Compute/$model/resolve/v2.0.1/${model.lowercase()}-cq4.zip"),
+            listOf("https://huggingface.co/Cactus-Compute/$model/resolve/$testCommit/${model.lowercase()}-cq4.zip"),
             requestedUrls,
         )
-        assertTrue(cacheFilesLeft().isEmpty(), "temp zip should be deleted after install")
+        assertEquals(
+            sha256Hex(bytes),
+            targetDir.resolve(".cactus_version").readText(),
+            "marker must carry the pinned digest so a pin change forces reinstall",
+        )
+        assertNothingLeftBehind()
     }
 
     @Test
     fun singleRootDirectoryIsPromoted() = runTest {
-        installer(serving(modelZip(prefix = "$model/"))).install(model, "v2.0.1", copyBundledZip = null)
+        val bytes = modelZip(prefix = "$model/")
+        installer(serving(bytes)).install(model, pinFor(bytes), copyBundledZip = null)
         assertTrue(targetDir.resolve("config.txt").exists(), "contents should be promoted to the model dir")
         assertFalse(targetDir.resolve(model).exists(), "the wrapping root dir should be gone")
     }
@@ -114,43 +148,183 @@ class ModelZipInstallerTest {
     @Test
     fun existingModelIsReplaced() = runTest {
         seedOldModel()
-        installer(serving(modelZip())).install(model, "v2.0.1", copyBundledZip = null)
+        val bytes = modelZip()
+        installer(serving(bytes)).install(model, pinFor(bytes), copyBundledZip = null)
         assertEquals("cfg", targetDir.resolve("config.txt").readText())
         assertFalse(targetDir.resolve("old.weights").exists(), "stale files must not survive a reinstall")
     }
 
     @Test
     fun bundledAssetInstallsWithoutTouchingTheNetwork() = runTest {
-        val zipBytes = modelZip()
-        installer(serving(zipBytes)).install(model, "v2.0.1", copyBundledZip = { dest ->
-            dest.writeBytes(zipBytes)
+        val bytes = modelZip()
+        installer(serving(bytes)).install(model, pinFor(bytes), copyBundledZip = { dest ->
+            dest.writeBytes(bytes)
         })
         assertTrue(targetDir.resolve("config.txt").exists())
+        assertEquals(sha256Hex(bytes), targetDir.resolve(".cactus_version").readText())
         assertEquals(emptyList(), requestedUrls)
-        assertTrue(cacheFilesLeft().isEmpty())
+        assertNothingLeftBehind()
     }
 
     @Test
-    fun httpErrorFailsAndLeavesExistingModelIntact() = runTest {
-        seedOldModel()
-        val e = assertFailsWith<Exception> {
-            installer { respond(ByteReadChannel("gone".encodeToByteArray()), HttpStatusCode.NotFound) }
-                .install(model, "v2.0.1", copyBundledZip = null)
-        }
-        assertTrue(e.message.orEmpty().contains("HTTP 404"), "unexpected failure: $e")
-        assertEquals("old", targetDir.resolve("config.txt").readText())
-        assertTrue(cacheFilesLeft().isEmpty())
+    fun staleStagingIsSweptBeforeInstall() = runTest {
+        stagingDir.mkdirs()
+        stagingDir.resolve("junk.txt").writeText("left by a crashed install")
+        val bytes = modelZip()
+        installer(serving(bytes)).install(model, pinFor(bytes), copyBundledZip = null)
+        assertFalse(targetDir.resolve("junk.txt").exists(), "unverified leftovers must not ride into the model dir")
+        assertNothingLeftBehind()
     }
+
+    // --- Integrity gate ---
+
+    @Test
+    fun digestMismatchRefusesInstall() = runTest {
+        seedOldModel()
+        val served = modelZip()
+        // Same length, different bytes: only the digest can catch it.
+        val expected = served.copyOf().also { it[10] = (it[10] + 1).toByte() }
+        val e = assertFailsWith<SecurityException> {
+            installer(serving(served)).install(model, pinFor(expected), copyBundledZip = null)
+        }
+        assertTrue(e.message.orEmpty().contains("failed verification"), "unexpected failure: $e")
+        assertOldModelIntact()
+        assertNothingLeftBehind()
+    }
+
+    @Test
+    fun shortBodyFailsTheExactSizeCheck() = runTest {
+        seedOldModel()
+        val bytes = modelZip()
+        // Pin expects more bytes than the server delivers; digest of the
+        // truncated body may or may not differ, size alone must refuse.
+        val e = assertFailsWith<SecurityException> {
+            installer(serving(bytes)).install(model, pinFor(bytes, sizeBytes = bytes.size + 5L), copyBundledZip = null)
+        }
+        assertTrue(e.message.orEmpty().contains("failed verification"), "unexpected failure: $e")
+        assertOldModelIntact()
+        assertNothingLeftBehind()
+    }
+
+    @Test
+    fun oversizeStreamIsAbortedMidDownload() = runTest {
+        seedOldModel()
+        val bytes = modelZip()
+        // Server keeps sending past the pinned size: the abort must happen
+        // mid-stream, before the payload is fully consumed.
+        val oversize = bytes + ByteArray(4096)
+        val e = assertFailsWith<SecurityException> {
+            installer(serving(oversize)).install(model, pinFor(bytes), copyBundledZip = null)
+        }
+        assertTrue(e.message.orEmpty().contains("exceeded the pinned"), "unexpected failure: $e")
+        assertOldModelIntact()
+        assertNothingLeftBehind()
+    }
+
+    @Test
+    fun bundledAssetGoesThroughTheSameDigestGate() = runTest {
+        seedOldModel()
+        val genuine = modelZip()
+        val tampered = genuine.copyOf().also { it[10] = (it[10] + 1).toByte() }
+        val e = assertFailsWith<SecurityException> {
+            installer(serving(genuine)).install(model, pinFor(genuine), copyBundledZip = { dest ->
+                dest.writeBytes(tampered)
+            })
+        }
+        assertTrue(e.message.orEmpty().contains("failed verification"), "unexpected failure: $e")
+        assertOldModelIntact()
+        assertNothingLeftBehind()
+    }
+
+    @Test
+    fun archiveWithoutConfigRefusesToReplaceAWorkingModel() = runTest {
+        seedOldModel()
+        val bytes = zip(mapOf("readme.txt" to "not a model".encodeToByteArray()))
+        val e = assertFailsWith<SecurityException> {
+            installer(serving(bytes)).install(model, pinFor(bytes), copyBundledZip = null)
+        }
+        assertTrue(e.message.orEmpty().contains("config.txt"), "unexpected failure: $e")
+        assertOldModelIntact()
+        assertNothingLeftBehind()
+    }
+
+    // --- Extraction confinement ---
 
     @Test
     fun parentTraversalEntryIsRefused() = runTest {
         val evil = zip(mapOf("../evil.txt" to "evil".encodeToByteArray()))
         assertFailsWith<SecurityException> {
-            installer(serving(evil)).install(model, "v2.0.1", copyBundledZip = null)
+            installer(serving(evil)).install(model, pinFor(evil), copyBundledZip = null)
         }
-        assertFalse(modelsDir.resolve("evil.txt").exists(), "entry must not escape the target dir")
-        assertFalse(targetDir.exists(), "a refused install should not leave a partial model dir")
-        assertTrue(cacheFilesLeft().isEmpty())
+        assertFalse(modelsDir.resolve(".staging").resolve("evil.txt").exists(), "entry must not escape staging")
+        assertFalse(targetDir.exists(), "a refused install should not leave a model dir")
+        assertNothingLeftBehind()
+    }
+
+    @Test
+    fun siblingPrefixEntryIsRefused() = runTest {
+        // "../<model>-evil/x" canonicalizes to a sibling whose name starts
+        // with the staging dir's: a bare prefix comparison would accept it.
+        val evil = zip(mapOf("../$model-evil/x.txt" to "evil".encodeToByteArray()))
+        assertFailsWith<SecurityException> {
+            installer(serving(evil)).install(model, pinFor(evil), copyBundledZip = null)
+        }
+        assertFalse(modelsDir.resolve(".staging").resolve("$model-evil").exists(), "sibling dir must not be created")
+        assertNothingLeftBehind()
+    }
+
+    @Test
+    fun absolutePathEntryStaysConfined() = runTest {
+        // java.io.File resolves an absolute child under the parent, so the
+        // entry lands inside the model dir; this pins that containment.
+        val bytes = zip(
+            mapOf(
+                "config.txt" to "cfg".encodeToByteArray(),
+                "/evil.txt" to "evil".encodeToByteArray(),
+            ),
+        )
+        installer(serving(bytes)).install(model, pinFor(bytes), copyBundledZip = null)
+        assertTrue(targetDir.resolve("evil.txt").exists(), "absolute entry should be confined to the model dir")
+        assertFalse(modelsDir.resolve("evil.txt").exists())
+    }
+
+    @Test
+    fun entryCountCapRefusesTheArchive() = runTest {
+        val many = zip(
+            (0..ModelZipInstaller.MAX_ENTRIES).associate { "f$it.txt" to ByteArray(0) },
+        )
+        val e = assertFailsWith<SecurityException> {
+            installer(serving(many)).install(model, pinFor(many), copyBundledZip = null)
+        }
+        assertTrue(e.message.orEmpty().contains("entries"), "unexpected failure: $e")
+        assertNothingLeftBehind()
+    }
+
+    @Test
+    fun inflationCapRefusesAZipBomb() = runTest {
+        // A megabyte of zeros compresses to ~1 KB, so the pinned zip size is
+        // tiny while the inflated output blows past the cap factor.
+        val bomb = zip(mapOf("config.txt" to ByteArray(1024 * 1024)))
+        val e = assertFailsWith<SecurityException> {
+            installer(serving(bomb)).install(model, pinFor(bomb), copyBundledZip = null)
+        }
+        assertTrue(e.message.orEmpty().contains("inflates"), "unexpected failure: $e")
+        assertNothingLeftBehind()
+    }
+
+    // --- Transport failure behavior ---
+
+    @Test
+    fun httpErrorFailsAndLeavesExistingModelIntact() = runTest {
+        seedOldModel()
+        val bytes = modelZip()
+        val e = assertFailsWith<Exception> {
+            installer { respond(ByteReadChannel("gone".encodeToByteArray()), HttpStatusCode.NotFound) }
+                .install(model, pinFor(bytes), copyBundledZip = null)
+        }
+        assertTrue(e.message.orEmpty().contains("HTTP 404"), "unexpected failure: $e")
+        assertOldModelIntact()
+        assertNothingLeftBehind()
     }
 
     @Test
@@ -160,10 +334,10 @@ class ModelZipInstallerTest {
         val stalled = ByteChannel(autoFlush = true)
         stalled.writeFully(ByteArray(10))
         val e = assertFailsWith<Exception> {
-            installer { respond(stalled, HttpStatusCode.OK) }.install(model, "v2.0.1", copyBundledZip = null)
+            installer { respond(stalled, HttpStatusCode.OK) }.install(model, pinFor(modelZip()), copyBundledZip = null)
         }
         assertTrue(e.message.orEmpty().contains("stalled"), "unexpected failure: $e")
-        assertTrue(cacheFilesLeft().isEmpty())
+        assertNothingLeftBehind()
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -173,13 +347,13 @@ class ModelZipInstallerTest {
         val open = ByteChannel(autoFlush = true)
         open.writeFully(ByteArray(1024))
         val job = launch {
-            installer { respond(open, HttpStatusCode.OK) }.install(model, "v2.0.1", copyBundledZip = null)
+            installer { respond(open, HttpStatusCode.OK) }.install(model, pinFor(modelZip(), sizeBytes = 1 shl 20), copyBundledZip = null)
         }
         // Let the download start and suspend on the never-closing channel,
         // then cancel it the way an aborted STT resolve would.
         runCurrent()
         job.cancelAndJoin()
-        assertEquals("old", targetDir.resolve("config.txt").readText())
-        assertTrue(cacheFilesLeft().isEmpty(), "a cancelled download should not leave a temp zip behind")
+        assertOldModelIntact()
+        assertNothingLeftBehind()
     }
 }

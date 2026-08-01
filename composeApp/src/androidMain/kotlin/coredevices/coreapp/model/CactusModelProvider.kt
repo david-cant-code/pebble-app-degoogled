@@ -38,8 +38,20 @@ import java.util.concurrent.ConcurrentHashMap
  * every upstream merge, re-diff this file against them and port whatever
  * matters; drift here breaks dictation.
  *
+ * Fork security deviation: installs are verified. Downloads resolve the
+ * immutable commit pinned in [CactusModelPins] (upstream downloads a
+ * mutable tag), the archive must match its pinned SHA-256 and exact size
+ * before extraction (bundled assets included), and extraction is bounded
+ * and staged so a failed or hostile install never destroys a working
+ * model. The .cactus_version marker holds the pinned archive digest;
+ * installs from before the pinning scheme hold the old release tag, which
+ * [CactusModelPins.markerMatches] grandfathers while the pin still names
+ * the same archive that tag shipped, so existing users are not forced
+ * through a pointless re-download (or silently dropped to RemoteOnly STT
+ * by CommonAppDelegate's incompatible-model sweep in the meantime).
+ *
  * Models are stored at: <filesDir>/models/<modelName>/ with config.txt,
- * vocab.txt, and .weights files, plus a .cactus_version marker.
+ * vocab.txt, and .weights files, plus the .cactus_version marker.
  */
 class CactusModelProvider(
     private val context: Context,
@@ -69,13 +81,11 @@ class CactusModelProvider(
     private val installer by lazy { ModelZipInstaller(httpClient, context.cacheDir, modelsDir) }
 
     override suspend fun getSTTModelPath(): String = withContext(Dispatchers.IO) {
-        val modelName = CommonBuildKonfig.CACTUS_STT_MODEL
-        return@withContext resolveModelPath(modelName, CommonBuildKonfig.CACTUS_WEIGHTS_VERSION)
+        return@withContext resolveModelPath(CommonBuildKonfig.CACTUS_STT_MODEL)
     }
 
     override suspend fun getLMModelPath(): String = withContext(Dispatchers.IO) {
-        val modelName = CommonBuildKonfig.CACTUS_LM_MODEL_NAME
-        return@withContext resolveModelPath(modelName, CommonBuildKonfig.CACTUS_WEIGHTS_VERSION)
+        return@withContext resolveModelPath(CommonBuildKonfig.CACTUS_LM_MODEL_NAME)
     }
 
     override fun isModelDownloaded(modelName: String): Boolean {
@@ -98,9 +108,9 @@ class CactusModelProvider(
     }
 
     private fun versionMatches(modelName: String): Boolean {
-        val versionFile = modelsDir.resolve(modelName).resolve(".cactus_version")
-        return versionFile.exists() &&
-            versionFile.readText().trim() == CommonBuildKonfig.CACTUS_WEIGHTS_VERSION
+        val versionFile = modelsDir.resolve(modelName).resolve(ModelZipInstaller.VERSION_MARKER)
+        val marker = versionFile.takeIf { it.exists() }?.readText()?.trim() ?: return false
+        return CactusModelPins.markerMatches(modelName, marker)
     }
 
     private fun isBundled(modelName: String): Boolean =
@@ -119,30 +129,31 @@ class CactusModelProvider(
         // Fork: never configure the native cactus telemetry environment.
     }
 
-    private suspend fun resolveModelPath(modelName: String, version: String): String = mutexFor(modelName).withLock {
+    private suspend fun resolveModelPath(modelName: String): String = mutexFor(modelName).withLock {
         val modelDir = modelsDir.resolve(modelName)
-        val versionFile = modelDir.resolve(".cactus_version")
 
-        val needsDownload = !modelDir.exists()
-            || !modelDir.resolve("config.txt").exists()
-            || !versionFile.exists()
-            || versionFile.readText().trim() != version
+        val needsInstall = !modelDir.resolve(ModelZipInstaller.CONFIG_FILE).exists()
+            || !versionMatches(modelName)
 
-        if (needsDownload) {
-            downloadAndExtract(modelName, version)
-            versionFile.writeText(version)
+        if (needsInstall) {
+            // Fail closed on an unpinned model name: without integrity data
+            // there is no verifiable download, and the native parser must
+            // never see an unverified archive.
+            val pin = CactusModelPins.pinFor(modelName)
+                ?: throw IllegalStateException("No integrity pin for model '$modelName'; refusing to download")
+            downloadAndExtract(modelName, pin)
         }
 
         logger.d { "Model '$modelName' at: ${modelDir.absolutePath}" }
         return modelDir.absolutePath
     }
 
-    private suspend fun downloadAndExtract(modelName: String, version: String) = withContext(Dispatchers.IO) {
+    private suspend fun downloadAndExtract(modelName: String, pin: ModelPin) = withContext(Dispatchers.IO) {
         val zipName = ModelZipInstaller.zipNameFor(modelName)
         val bundled = context.assets.list("models")?.contains(zipName) == true
         installer.install(
             modelName = modelName,
-            version = version,
+            pin = pin,
             copyBundledZip = if (bundled) {
                 { dest: File ->
                     logger.i { "Found included model zip in assets: $zipName, extracting..." }

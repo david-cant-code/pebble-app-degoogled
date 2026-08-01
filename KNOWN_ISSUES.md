@@ -22,35 +22,6 @@ and the watch's own bootloader validation with recovery fallback
 backstops a bad install. This entry leaves the file when a single-slot
 watch runs the end-to-end pass.
 
-## On-device STT model downloads have no integrity verification
-
-**Status: deferred to a dedicated STT hardening branch.**
-
-The fork-owned `CactusModelProvider`
-(`composeApp/src/androidMain/kotlin/coredevices/coreapp/model/CactusModelProvider.kt`)
-downloads STT/LM model weights from `https://huggingface.co/Cactus-Compute`,
-a third-party Hugging Face org (the Cactus engine vendor, not Core Devices
-and not this fork), pinned only to the mutable git tag in
-`CACTUS_WEIGHTS_VERSION` (currently `v2.0.1`). There is no checksum,
-signature, or immutable-revision pin between download and extraction, and no
-size cap on the extracted output (Zip-Slip is handled). The extracted
-weights are parsed by the bundled native `libcactus_engine.so`.
-
-Threat model: a compromise of the Cactus-Compute account, or a retargeted
-tag, silently swaps the weights on the next download or version bump; a
-native parser consuming attacker-controlled blobs is a memory-corruption
-surface, and swapped weights could also manipulate transcriptions silently.
-The only defensive layer today is TLS with default certificate validation.
-This matches upstream's behavior at the fork point (the Play services strip
-promoted the code into fork-owned surface without widening its exposure),
-which is why it is deferred rather than blocking: the exposure is not new,
-one real layer exists, and exploitation requires compromising the vendor
-org.
-
-Planned resolution, on its own branch: pin an immutable revision (or verify
-a build-time SHA-256 of the downloaded archive), cap extraction size, and
-review the on-device STT verification story end to end.
-
 ## Dictation lost the inference-boost foreground service with the Ring unplug
 
 **Status: deferred to the same STT hardening branch.**

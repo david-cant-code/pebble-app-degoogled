@@ -5,7 +5,6 @@ import coredevices.util.models.promoteSingleRootDir
 import io.ktor.client.HttpClient
 import io.ktor.client.request.prepareGet
 import io.ktor.client.statement.bodyAsChannel
-import io.ktor.http.contentLength
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
@@ -15,26 +14,40 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.files.Path
 import java.io.File
 import java.io.FileOutputStream
+import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Download/extract core behind [CactusModelProvider]: obtains a model zip
- * (bundled asset or Hugging Face download) and installs it under
- * [modelsDir]/<model>.
+ * Verified download/extract core behind [CactusModelProvider]: obtains a
+ * model zip (bundled asset or Hugging Face download), verifies it against
+ * its [ModelPin], and installs it under [modelsDir]/<model>.
  *
- * Extracted from the provider so the whole obtain-and-install pipeline runs
- * under JVM unit tests with a mock HTTP engine and temp directories. The
- * class is deliberately Context-free: everything that needs an Android
+ * The archive feeds the native libcactus_engine.so parser, so nothing
+ * unverified may reach extraction. The layers, each defensible alone:
+ *  - the download URL resolves an immutable commit ([ModelPin.commitSha]),
+ *    so a retargeted release tag cannot swap the archive;
+ *  - the received bytes are hashed while streaming and checked against the
+ *    pinned SHA-256 and exact size before extraction, with a mid-stream
+ *    abort as soon as the pinned size is exceeded; bundled assets are
+ *    hashed through the same gate, so an APK repack cannot sneak weights
+ *    past it either;
+ *  - extraction is bounded (entry count, total uncompressed bytes) and
+ *    confined (separator-boundary Zip-Slip check), limiting even an
+ *    archive that matched a wrongly updated pin;
+ *  - everything lands in a staging directory that only replaces the live
+ *    model after full verification, so no failure mode destroys a working
+ *    install.
+ *
+ * The class is deliberately Context-free: everything that needs an Android
  * Context (asset access, directory roots) stays in the provider and is
- * handed in from outside.
+ * handed in from outside, which keeps the whole pipeline under JVM unit
+ * tests with a mock HTTP engine and temp directories.
  *
- * Transport is the app's shared Ktor [HttpClient] (the same one the
- * verified firmware installer uses). Instead of a whole-request read
- * timeout, each individual read gets [READ_STALL_TIMEOUT]: a healthy
- * multi-hundred-MB transfer legitimately takes minutes, while a stalled
- * socket should fail promptly. Coroutine cancellation aborts the in-flight
- * request through Ktor itself.
+ * Instead of a whole-request read timeout, each individual read gets
+ * [READ_STALL_TIMEOUT]: a healthy multi-hundred-MB transfer legitimately
+ * takes minutes, while a stalled socket should fail promptly. Coroutine
+ * cancellation aborts the in-flight request through Ktor itself.
  *
  * Callers hold the provider's per-model mutex and run [install] on an
  * IO-capable dispatcher; this class stays dispatcher-agnostic so tests can
@@ -52,49 +65,117 @@ class ModelZipInstaller(
         private const val DOWNLOAD_BUFFER_SIZE = 256 * 1024
         private val READ_STALL_TIMEOUT = 30.seconds
 
+        // Staging lives under modelsDir so the final swap is a same-filesystem
+        // rename; the dot name keeps it out of getDownloadedModels, which only
+        // looks at direct children carrying a config.txt.
+        internal const val STAGING_DIR = ".staging"
+        internal const val VERSION_MARKER = ".cactus_version"
+        internal const val CONFIG_FILE = "config.txt"
+
+        // Bounds for a hostile archive that somehow passed the digest gate
+        // (a wrongly updated pin): real model zips hold a handful of files
+        // and the cq4 weights barely compress, so both caps sit far above
+        // anything legitimate while still stopping zip bombs.
+        internal const val MAX_ENTRIES = 10_000
+        internal const val UNCOMPRESSED_CAP_FACTOR = 4L
+
         /** Zip naming convention shared by the HF repos and the bundled assets. */
         fun zipNameFor(modelName: String): String = "${modelName.lowercase()}-$QUANTIZATION.zip"
     }
 
     /**
-     * Obtains the zip for [modelName] and installs it to modelsDir/<model>,
-     * replacing whatever was there. [copyBundledZip] is non-null when the
-     * zip ships inside the APK; it writes the asset to the given file and
-     * skips the network entirely. The temp zip lives in [cacheDir] and is
-     * removed on every exit path, success or failure.
+     * Obtains the zip for [modelName], verifies it against [pin], and swaps
+     * it into modelsDir/<model>. [copyBundledZip] is non-null when the zip
+     * ships inside the APK; it writes the asset to the given file and skips
+     * the network entirely. The existing model directory survives every
+     * failure mode: it is only deleted after the staged replacement passed
+     * all checks, immediately before the rename. The temp zip lives in
+     * [cacheDir] and is removed on every exit path.
      */
     suspend fun install(
         modelName: String,
-        version: String,
+        pin: ModelPin,
         copyBundledZip: (suspend (dest: File) -> Unit)?,
     ) {
         val targetDir = modelsDir.resolve(modelName)
+        val stagingDir = modelsDir.resolve(STAGING_DIR).resolve(modelName)
         val tempZip = cacheDir.resolve(
             if (copyBundledZip != null) "cactus_asset_$modelName.zip" else "cactus_download_$modelName.zip",
         )
         try {
-            if (copyBundledZip != null) {
+            // A crashed or cancelled earlier install may have left staging
+            // behind; it was never verified as a whole, so start clean.
+            stagingDir.deleteRecursively()
+
+            val (obtainedBytes, obtainedSha256) = if (copyBundledZip != null) {
                 copyBundledZip(tempZip)
+                hashFile(tempZip)
             } else {
-                download(modelName, version, tempZip)
+                download(modelName, pin, tempZip)
             }
-            extract(modelName, tempZip, targetDir)
+            if (obtainedBytes != pin.zipSizeBytes || obtainedSha256 != pin.zipSha256Hex) {
+                throw SecurityException(
+                    "Model archive for $modelName failed verification: " +
+                        "got $obtainedBytes bytes / sha256 $obtainedSha256, " +
+                        "pinned ${pin.zipSizeBytes} bytes / sha256 ${pin.zipSha256Hex}",
+                )
+            }
+
+            extractToStaging(tempZip, stagingDir, pin)
+            promoteSingleRootDir(Path(stagingDir.absolutePath))
+            // Structural sanity on top of the digest: a verified archive
+            // that still does not look like a model means the pin itself is
+            // wrong, and must not replace a working install.
+            if (!stagingDir.resolve(CONFIG_FILE).exists()) {
+                throw SecurityException(
+                    "Verified archive for $modelName contains no $CONFIG_FILE; refusing to install it",
+                )
+            }
+            // Written into staging so the swap below is all-or-nothing: a
+            // model directory either carries the marker of a fully verified
+            // install or gets reinstalled.
+            stagingDir.resolve(VERSION_MARKER).writeText(pin.zipSha256Hex)
+
+            if (targetDir.exists()) {
+                targetDir.deleteRecursively()
+            }
+            if (!stagingDir.renameTo(targetDir)) {
+                throw Exception("Could not move the verified model for $modelName into place")
+            }
+            logger.i { "Installed verified model '$modelName' to ${targetDir.absolutePath}" }
+        } catch (e: CancellationException) {
+            logger.i { "Model install cancelled for $modelName" }
+            stagingDir.deleteRecursively()
+            throw e
+        } catch (e: Exception) {
+            // Transport failures can surface while the coroutine is being
+            // cancelled; re-check liveness so cancellation propagates as
+            // CancellationException rather than an install error.
+            currentCoroutineContext().ensureActive()
+            logger.e(e) { "Model install failed for $modelName" }
+            stagingDir.deleteRecursively()
+            throw e
         } finally {
             tempZip.delete()
         }
     }
 
-    private suspend fun download(modelName: String, version: String, tempZip: File) {
-        val url = "$HF_BASE/$modelName/resolve/$version/${zipNameFor(modelName)}"
+    /**
+     * Streams the pinned commit URL to [tempZip] while hashing, aborting as
+     * soon as more than the pinned byte count arrives. Returns received
+     * byte count and lowercase hex SHA-256 for the caller's gate.
+     */
+    private suspend fun download(modelName: String, pin: ModelPin, tempZip: File): Pair<Long, String> {
+        val url = "$HF_BASE/${pin.hfRepo}/resolve/${pin.commitSha}/${zipNameFor(modelName)}"
         logger.i { "Downloading model: $url" }
+        val digest = MessageDigest.getInstance("SHA-256")
+        var received = 0L
         try {
             httpClient.prepareGet(url).execute { response ->
                 if (!response.status.isSuccess()) {
                     throw Exception("Download failed: HTTP ${response.status.value} for $url")
                 }
-                val totalBytes = response.contentLength() ?: -1L
                 val channel = response.bodyAsChannel()
-                var downloadedBytes = 0L
                 var lastLoggedPct = -1
                 FileOutputStream(tempZip).use { output ->
                     val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
@@ -104,72 +185,101 @@ class ModelZipInstaller(
                         } ?: throw Exception("Download stalled for $url")
                         if (read == -1) break
                         if (read == 0) continue
+                        received += read
+                        if (received > pin.zipSizeBytes) {
+                            throw SecurityException(
+                                "Download for $modelName exceeded the pinned ${pin.zipSizeBytes} bytes; aborting",
+                            )
+                        }
                         output.write(buffer, 0, read)
-                        downloadedBytes += read
-                        if (totalBytes > 0) {
-                            val pct = (downloadedBytes * 100 / totalBytes).toInt()
-                            if (pct / 10 > lastLoggedPct / 10) {
-                                lastLoggedPct = pct
-                                logger.d { "Download progress: $pct% ($downloadedBytes / $totalBytes)" }
-                            }
+                        digest.update(buffer, 0, read)
+                        val pct = (received * 100 / pin.zipSizeBytes).toInt()
+                        if (pct / 10 > lastLoggedPct / 10) {
+                            lastLoggedPct = pct
+                            logger.d { "Download progress: $pct% ($received / ${pin.zipSizeBytes})" }
                         }
                     }
                 }
             }
-            logger.i { "Download complete: ${tempZip.length()} bytes" }
         } catch (e: CancellationException) {
             logger.i { "Model download cancelled for $modelName" }
             throw e
         } catch (e: Exception) {
-            // Transport failures can surface while the coroutine is being
-            // cancelled; re-check liveness so cancellation propagates as
-            // CancellationException rather than a download error.
             currentCoroutineContext().ensureActive()
             logger.e(e) { "Model download failed for $modelName" }
             throw e
         }
+        logger.i { "Download complete: $received bytes" }
+        return received to digest.toHexString()
     }
 
-    private suspend fun extract(modelName: String, tempZip: File, targetDir: File) {
-        try {
-            // Clear old model if present
-            if (targetDir.exists()) {
-                targetDir.deleteRecursively()
+    /** Size and SHA-256 of an already-local zip; the bundled-asset gate. */
+    private fun hashFile(file: File): Pair<Long, String> {
+        val digest = MessageDigest.getInstance("SHA-256")
+        var size = 0L
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read == -1) break
+                size += read
+                digest.update(buffer, 0, read)
             }
-            targetDir.mkdirs()
+        }
+        return size to digest.toHexString()
+    }
 
-            ZipInputStream(tempZip.inputStream().buffered()).use { zis ->
-                var entry = zis.nextEntry
-                while (entry != null) {
-                    currentCoroutineContext().ensureActive()
-                    val outputFile = File(targetDir, entry.name)
-                    // ZIP Slip protection
-                    if (!outputFile.canonicalPath.startsWith(targetDir.canonicalPath)) {
-                        throw SecurityException("ZIP entry outside target dir: ${entry.name}")
-                    }
-                    if (entry.isDirectory) {
-                        outputFile.mkdirs()
-                    } else {
-                        outputFile.parentFile?.mkdirs()
-                        FileOutputStream(outputFile).use { fos ->
-                            zis.copyTo(fos)
+    private suspend fun extractToStaging(tempZip: File, stagingDir: File, pin: ModelPin) {
+        stagingDir.mkdirs()
+        // Separator-boundary confinement: comparing against the bare prefix
+        // would accept an escape to a sibling whose name merely starts with
+        // the staging dir's (entry "../<model>-evil/...").
+        val stagingRoot = stagingDir.canonicalPath
+        val stagingPrefix = stagingRoot + File.separator
+        val uncompressedCap = pin.zipSizeBytes * UNCOMPRESSED_CAP_FACTOR
+        var entryCount = 0
+        var totalUncompressed = 0L
+        val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
+        ZipInputStream(tempZip.inputStream().buffered()).use { zis ->
+            var entry = zis.nextEntry
+            while (entry != null) {
+                currentCoroutineContext().ensureActive()
+                entryCount++
+                if (entryCount > MAX_ENTRIES) {
+                    throw SecurityException("Model archive has more than $MAX_ENTRIES entries; refusing to extract")
+                }
+                val outputFile = File(stagingDir, entry.name)
+                val canonical = outputFile.canonicalPath
+                if (canonical != stagingRoot && !canonical.startsWith(stagingPrefix)) {
+                    throw SecurityException("ZIP entry outside target dir: ${entry.name}")
+                }
+                if (entry.isDirectory) {
+                    outputFile.mkdirs()
+                } else {
+                    outputFile.parentFile?.mkdirs()
+                    FileOutputStream(outputFile).use { fos ->
+                        // Count what actually inflates rather than trusting
+                        // the entry's declared size.
+                        while (true) {
+                            val read = zis.read(buffer)
+                            if (read == -1) break
+                            totalUncompressed += read
+                            if (totalUncompressed > uncompressedCap) {
+                                throw SecurityException(
+                                    "Model archive inflates past $uncompressedCap bytes; refusing to extract",
+                                )
+                            }
+                            fos.write(buffer, 0, read)
                         }
                     }
-                    zis.closeEntry()
-                    entry = zis.nextEntry
                 }
+                zis.closeEntry()
+                entry = zis.nextEntry
             }
-            promoteSingleRootDir(Path(targetDir.absolutePath))
-            logger.i { "Extraction complete to ${targetDir.absolutePath}" }
-        } catch (e: CancellationException) {
-            logger.i { "Model install cancelled for $modelName" }
-            targetDir.deleteRecursively()
-            throw e
-        } catch (e: Exception) {
-            currentCoroutineContext().ensureActive()
-            logger.e(e) { "Model extract failed for $modelName" }
-            targetDir.deleteRecursively()
-            throw e
         }
+        logger.i { "Extraction complete to ${stagingDir.absolutePath}" }
     }
+
+    private fun MessageDigest.toHexString(): String =
+        digest().joinToString("") { "%02x".format(it) }
 }
