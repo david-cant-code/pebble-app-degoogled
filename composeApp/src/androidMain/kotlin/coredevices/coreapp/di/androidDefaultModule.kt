@@ -28,6 +28,8 @@ import coredevices.util.auth.NoOpSilentSignIn
 import coredevices.util.auth.SilentSignIn
 import coredevices.util.integrations.AndroidOAuthLauncher
 import coredevices.util.integrations.OAuthLauncher
+import coredevices.util.security.KeystoreSecretCipher
+import coredevices.util.security.SecretCipher
 import coredevices.util.models.ModelDownloadManager
 import coredevices.util.transcription.CactusModelPathProvider
 import coredevices.util.transcription.InferenceBoost
@@ -58,6 +60,7 @@ val androidDefaultModule = module {
     singleOf(::PlatformShareLauncher)
     singleOf(::AndroidPlatform) bind Platform::class
     singleOf(::AndroidOAuthLauncher) bind OAuthLauncher::class
+    singleOf(::KeystoreSecretCipher) bind SecretCipher::class
     single { CoreAppVersion(BuildConfig.VERSION_NAME) }
     singleOf(::PlatformContext)
     singleOf(::AndroidPermissionRequester) bind PermissionRequester::class

@@ -4,6 +4,8 @@ import co.touchlab.kermit.Logger
 import com.russhwolf.settings.Settings
 import coredevices.firestore.UsersDao
 import coredevices.pebble.services.PebbleWebServices
+import coredevices.util.security.EncryptedStringSetting
+import coredevices.util.security.SecretCipher
 import io.rebble.libpebblecommon.connection.TokenProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,8 +27,14 @@ class RealPebbleAccount(
     private val pebbleWebServices: PebbleWebServices,
     private val bootConfigProvider: BootConfigProvider,
     private val usersDao: UsersDao,
+    secretCipher: SecretCipher,
 ) : PebbleAccount {
     private val logger = Logger.withTag("PebbleAccount")
+
+    // The account bearer token is the highest-value secret the app persists, and nothing else in
+    // the app encrypts anything at rest, so it would otherwise sit in plaintext SharedPreferences
+    // and travel in every backup and device transfer.
+    private val tokenSetting = EncryptedStringSetting(settings, secretCipher, TOKEN_KEY)
     private val _loggedIn = MutableStateFlow(getToken())
     override val loggedIn = _loggedIn.asStateFlow()
     private val _devToken = MutableStateFlow(getDevPortalId())
@@ -34,11 +42,7 @@ class RealPebbleAccount(
 
     override suspend fun setToken(token: String?, bootUrl: String?) {
         logger.d("setToken")
-        if (token != null) {
-            settings.putString(TOKEN_KEY, token)
-        } else {
-            settings.remove(TOKEN_KEY)
-        }
+        tokenSetting.set(token)
         _loggedIn.value = token
         bootConfigProvider.setUrl(bootUrl)
         setDevPortalId()
@@ -55,7 +59,7 @@ class RealPebbleAccount(
         _devToken.value = devPortalId
     }
 
-    private fun getToken(): String? = settings.getStringOrNull(TOKEN_KEY)
+    private fun getToken(): String? = tokenSetting.get()
     private fun getDevPortalId(): String? = settings.getStringOrNull(DEV_KEY)
 
     companion object {

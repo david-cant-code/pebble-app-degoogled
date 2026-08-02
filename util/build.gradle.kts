@@ -156,6 +156,9 @@ kotlin {
         commonTest {
             dependencies {
                 implementation(libs.kotlin.test)
+                // MapSettings, so the encrypted-setting storage contract can be tested without
+                // a device. Same artifact family and version as the Settings dep already used.
+                implementation(libs.settings.test)
             }
         }
 
