@@ -151,7 +151,6 @@ kotlin {
                 // Add Android-specific dependencies here. Note that this source set depends on
                 // commonMain by default and will correctly pull the Android artifacts of any KMP
                 // dependencies declared in commonMain.
-                implementation(compose.uiTooling)
             }
         }
 
@@ -166,6 +165,13 @@ kotlin {
         }
     }
 
+}
+
+dependencies {
+    // Debug-only: compose.uiTooling contributes an exported
+    // androidx.compose.ui.tooling.PreviewActivity to the merged manifest, which must not
+    // reach a release APK. Declaring it in androidMain put it in every variant.
+    debugImplementation(compose.uiTooling)
 }
 
 compose.resources {
