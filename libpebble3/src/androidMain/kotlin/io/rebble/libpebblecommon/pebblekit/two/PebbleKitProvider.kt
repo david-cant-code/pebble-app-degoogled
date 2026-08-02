@@ -1,5 +1,8 @@
 package io.rebble.libpebblecommon.pebblekit.two
 
+import android.database.Cursor
+import android.net.Uri
+import co.touchlab.kermit.Logger
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDevice
 import io.rebble.libpebblecommon.connection.LibPebble
 import io.rebble.libpebblecommon.connection.LockerApi
@@ -31,6 +34,32 @@ class PebbleKitProvider : BasePebbleKitProvider(), LibPebbleKoinComponent {
       coroutineScope = getKoin().get()
 
       super.initialize()
+   }
+
+   /**
+    * The provider is exported, so every read is gated on the caller being a companion of an
+    * installed watchapp. Without this any app on the device could read watch state, including
+    * the watch identifier, with no permission and no user-visible prompt.
+    *
+    * Denial returns null rather than an empty cursor because that is already the outcome for an
+    * unrecognised URI, so clients handle it. Failing closed while the registry is still loading
+    * costs a legitimate companion one empty result at cold start; the alternative would leak
+    * watch state during exactly the window before authorization is known.
+    */
+   override fun query(
+      uri: Uri,
+      projection: Array<out String?>?,
+      selection: String?,
+      selectionArgs: Array<out String?>?,
+      sortOrder: String?
+   ): Cursor? {
+      val caller = callingPackage
+      val registry = runCatching { getKoin().getOrNull<PebbleKitCompanionRegistry>() }.getOrNull()
+      if (registry?.isAuthorized(caller) != true) {
+         logger.d { "Denied PebbleKit query from $caller" }
+         return null
+      }
+      return super.query(uri, projection, selection, selectionArgs, sortOrder)
    }
 
    override fun getConnectedWatches(): Flow<List<Map<String, Any?>>> {
@@ -83,5 +112,7 @@ class PebbleKitProvider : BasePebbleKitProvider(), LibPebbleKoinComponent {
 
    companion object {
       var instance: PebbleKitProvider? = null
+
+      private val logger = Logger.withTag("PebbleKitProvider")
    }
 }

@@ -635,6 +635,19 @@ abstract class LockerPBWCache(private val context: AppContext) {
         return Path(cacheDir, "${appId}_${version}.pbw")
     }
 
+    /**
+     * PBWs already on disk. Unlike [getPBWFileForApp] this never falls through to
+     * [handleCacheMiss], so it is safe to call from a binder/IPC entry point where an
+     * untrusted caller must not be able to induce a network fetch.
+     */
+    fun cachedPbwPaths(): List<Path> {
+        if (!SystemFileSystem.exists(cacheDir)) return emptyList()
+        return SystemFileSystem.list(cacheDir).filter { path ->
+            path.name.endsWith(".pbw") &&
+                SystemFileSystem.metadataOrNull(path)?.isRegularFile == true
+        }
+    }
+
     protected fun pkjsPathForApp(appId: Uuid): Path {
         SystemFileSystem.createDirectories(pkjsCacheDir, false)
         return Path(pkjsCacheDir, "$appId.js")
