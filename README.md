@@ -1,8 +1,10 @@
-# Pebble Mobile App (de-Googled fork)
+# Gravel (de-Googled Pebble app fork)
 
-An **unofficial, Android-only fork** of the
+Gravel is an **unofficial, Android-only fork** of the
 [Pebble mobile app by Core Devices](https://github.com/coredevices/mobileapp).
-This fork is not affiliated with or endorsed by Core Devices.
+This fork is not affiliated with or endorsed by Core Devices. It ships under
+its own name, icon, and application id (`com.anopticlabs.gravel`) precisely so
+it cannot be mistaken for the official app.
 
 The goal is a companion app for Pebble watches that runs fully featured
 without Google Play services or Firebase, for GrapheneOS, LineageOS, and
@@ -88,7 +90,10 @@ Upstream code is © Core Devices and contributors, licensed under
 separate commercial licensing (`LICENSE-COMMERCIAL`); that option applies to
 upstream, not to this fork. "Pebble" and "Core Devices" are trademarks of
 their respective owners; this project is an independent fork of their
-GPLv3-licensed source code.
+GPLv3-licensed source code. References to Pebble watches in this app and its
+documentation describe device compatibility, nothing more; the fork's own
+branding (name, icon, colors) is deliberately distinct so users are never
+confused about which app they are running.
 
 Development of this fork uses AI assistance; commits carry `Co-Authored-By`
 trailers accordingly, matching upstream's disclosure practice.

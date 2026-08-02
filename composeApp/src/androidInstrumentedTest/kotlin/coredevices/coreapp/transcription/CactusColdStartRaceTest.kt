@@ -45,7 +45,7 @@ import kotlin.time.Duration.Companion.seconds
  * isn't wiped between runs:
  *   adb shell am instrument -w \
  *     -e class coredevices.coreapp.transcription.CactusColdStartRaceTest \
- *     coredevices.coreapp.test/androidx.test.runner.AndroidJUnitRunner
+ *     com.anopticlabs.gravel.test/androidx.test.runner.AndroidJUnitRunner
  */
 class CactusColdStartRaceTest {
     private companion object {

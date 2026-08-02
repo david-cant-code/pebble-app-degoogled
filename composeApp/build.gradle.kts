@@ -261,7 +261,10 @@ android {
     }
 
     defaultConfig {
-        applicationId = "coredevices.coreapp"
+        // Fork identity: the installed package is Gravel's. The Kotlin namespace above
+        // deliberately stays "coredevices.coreapp" so source packages match upstream and
+        // merges stay cheap; only the applicationId is rebranded.
+        applicationId = "com.anopticlabs.gravel"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         // This uses the number of commits in the git history, so it will always increase on main

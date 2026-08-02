@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#FA4A36</color>
+    <!-- Neutral dark backdrop: the logo foreground is itself brand purple, so the
+         adaptive-icon background must not be, or the mark disappears into it. -->
+    <color name="ic_launcher_background">#333333</color>
 </resources>

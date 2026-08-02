@@ -6,8 +6,12 @@
         <receiver android:name=".ui.TestActionReceiver" android:exported="false" />
         <receiver android:name="coredevices.pebble.firmware.UpdateActionReceiver" android:exported="false" />
 
+        <!-- Derived from the installing app's id so the fork does not squat upstream's
+             authority. The basalt alias below is a PebbleKit ecosystem contract shared
+             by every Pebble companion app and must keep its exact name; it also means
+             two companion apps can never be installed side by side, which is intended. -->
         <provider
-            android:authorities="coredevices.coreapp.pebblekit"
+            android:authorities="${applicationId}.pebblekit"
             android:name="io.rebble.libpebblecommon.pebblekit.two.PebbleKitProvider"
             android:exported="true" />
         <provider

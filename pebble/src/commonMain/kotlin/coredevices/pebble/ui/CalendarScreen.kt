@@ -39,7 +39,7 @@ import coredevices.util.isAndroid
 import coredevices.util.rememberUiContext
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
-import theme.coreOrange
+import theme.gravelPurple
 
 @Composable
 fun CalendarScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
@@ -154,7 +154,7 @@ fun CalendarScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                             Row {
                                 Text(
                                     text = "Not synced by Android - toggle checkbox to ask Android to sync",
-                                    color = coreOrange,
+                                    color = gravelPurple,
                                 )
                             }
                         }

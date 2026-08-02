@@ -31,7 +31,9 @@ class OtherPebbleAndroidApps(
             OtherPebbleApp(pkg = "com.getpebble.android.basalt", name = "Pebble"),
             OtherPebbleApp(pkg = "io.rebble.cobble", name = "Cobble"),
             OtherPebbleApp(pkg = "nodomain.freeyourgadget.gadgetbridge", name = "Gadgetbridge"),
-            OtherPebbleApp(pkg = "coredevices.coreapp", name = "CoreApp"),
+            // In this fork the app's own id differs from upstream's, so upstream's
+            // official app is (correctly) detected as a conflicting companion app.
+            OtherPebbleApp(pkg = "coredevices.coreapp", name = "Pebble (Core Devices)"),
             OtherPebbleApp(pkg = "com.matejdro.micropebble", name = "microPebble"),
         )
     }

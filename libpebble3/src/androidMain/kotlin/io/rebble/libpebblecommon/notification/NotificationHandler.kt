@@ -186,6 +186,7 @@ class NotificationHandler(
             isLocalOnly = sbn.notification.isLocalOnly(),
             isRuleFiltered = { checkRuleFiltered(appEntry, notification) },
             screenIsOnAndUnlocked = ::screenIsOnAndUnlocked,
+            selfPackageName = context.packageName,
         )
         val storeNotification = when {
             notificationConfig.value.storeNotifiationsForDays == 0 -> false
@@ -434,8 +435,8 @@ Processed as:
     }
 }
 
-private fun LibPebbleNotification.isPebbleTestNotification(): Boolean = packageName == "coredevices.coreapp" &&
-        title == "Test Notification"
+private fun LibPebbleNotification.isOwnTestNotification(selfPackageName: String): Boolean =
+    packageName == selfPackageName && title == "Test Notification"
 
 internal suspend fun decideNotification(
     notification: LibPebbleNotification,
@@ -447,6 +448,7 @@ internal suspend fun decideNotification(
     isLocalOnly: Boolean,
     isRuleFiltered: suspend () -> Boolean,
     screenIsOnAndUnlocked: () -> Boolean,
+    selfPackageName: String,
 ): NotificationDecision {
     val anyContactMuted = notification.people.any { it.muteState == MuteState.Always }
     val anyContactStarred = notification.people.any { it.muteState == MuteState.Exempt }
@@ -459,7 +461,7 @@ internal suspend fun decideNotification(
         !anyContactStarred && (channel != null && channel.muteState == MuteState.Always) -> NotSendChannelMuted
         isRuleFiltered() -> NotSentRuleFiltered
         !allowDuplicates && inflightNotifications.any { it.displayDataEquals(notification) } -> NotSentDuplicate
-        !notificationConfig.alwaysSendNotifications && !notification.isPebbleTestNotification() && screenIsOnAndUnlocked() -> NotificationDecision.NotSentScreenOn
+        !notificationConfig.alwaysSendNotifications && !notification.isOwnTestNotification(selfPackageName) && screenIsOnAndUnlocked() -> NotificationDecision.NotSentScreenOn
         else -> SendToWatch
     }
 }
