@@ -35,8 +35,14 @@ class RealPebbleAccount(
     // the app encrypts anything at rest, so it would otherwise sit in plaintext SharedPreferences
     // and travel in every backup and device transfer.
     private val tokenSetting = EncryptedStringSetting(settings, secretCipher, TOKEN_KEY)
-    private val _loggedIn = MutableStateFlow(getToken())
-    override val loggedIn = _loggedIn.asStateFlow()
+
+    // Lazy because getToken() now performs Keystore IPC (decrypting the token), and this class
+    // is constructed on the main thread during DI graph init in Application.onCreate; eager
+    // seeding would block startup on the keystore daemon. Laziness moves that one-time cost to
+    // the first consumer that actually reads the flow, while keeping the value synchronously
+    // available from then on, so no consumer ever observes a transient signed-out state.
+    private val _loggedIn by lazy { MutableStateFlow(getToken()) }
+    override val loggedIn: StateFlow<String?> by lazy { _loggedIn.asStateFlow() }
     private val _devToken = MutableStateFlow(getDevPortalId())
     override val devToken = _devToken.asStateFlow()
 

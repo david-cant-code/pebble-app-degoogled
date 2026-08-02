@@ -14,14 +14,31 @@ package coredevices.util.security
  * with no user present, so the key is not authentication-bound. Claiming otherwise would be the
  * kind of control that looks protective without being so.
  *
- * Both methods return null rather than throwing. A secret that cannot be decrypted (wrong
- * device, key destroyed, corrupt value) is indistinguishable from having no secret, and callers
- * should treat it as absent and re-acquire it.
+ * Neither method throws. Decryption failures are classified rather than collapsed to one
+ * value because callers act on the difference: a value that can never be decrypted here
+ * (wrong device, key destroyed, corrupt value) is safe to discard, while a value the
+ * keystore merely failed to decrypt right now must be kept, since deleting it would turn a
+ * transient provider error into permanent loss of the secret.
  */
 interface SecretCipher {
     /** Returns an opaque encoded ciphertext, or null if the secret could not be encrypted. */
     fun encrypt(plaintext: String): String?
 
-    /** Returns the original plaintext, or null if [stored] could not be decrypted. */
-    fun decrypt(stored: String): String?
+    fun decrypt(stored: String): DecryptResult
+}
+
+sealed interface DecryptResult {
+    data class Success(val plaintext: String) : DecryptResult
+
+    /**
+     * [stored] can never be decrypted here: the key is absent, authentication failed (a
+     * ciphertext written under a different device's key), or the value is malformed.
+     */
+    data object Unrecoverable : DecryptResult
+
+    /**
+     * The keystore failed right now; the same value may decrypt fine on a later attempt, so
+     * the caller must not destroy it.
+     */
+    data object TransientFailure : DecryptResult
 }

@@ -33,14 +33,25 @@ class EncryptedStringSetting(
             return stored
         }
 
-        val plaintext = cipher.decrypt(stored.removePrefix(PREFIX))
-        if (plaintext == null) {
-            // Undecryptable almost always means this value arrived from another device via
-            // backup or transfer. Drop it so it does not sit at rest forever being retried.
-            logger.w { "Discarding undecryptable '$key'" }
-            settings.remove(key)
+        return when (val result = cipher.decrypt(stored.removePrefix(PREFIX))) {
+            is DecryptResult.Success -> result.plaintext
+
+            DecryptResult.Unrecoverable -> {
+                // Undecryptable almost always means this value arrived from another device via
+                // backup or transfer. Drop it so it does not sit at rest forever being retried.
+                logger.w { "Discarding undecryptable '$key'" }
+                settings.remove(key)
+                null
+            }
+
+            DecryptResult.TransientFailure -> {
+                // The ciphertext may be perfectly recoverable, so removing it here would turn
+                // a keystore hiccup into a permanently lost secret (a forced re-login, for the
+                // account token). Keep it and let a later read try again.
+                logger.w { "Temporarily failed to decrypt '$key'; keeping it" }
+                null
+            }
         }
-        return plaintext
     }
 
     fun set(value: String?) {

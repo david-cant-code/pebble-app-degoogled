@@ -4,6 +4,7 @@ import com.russhwolf.settings.MapSettings
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -12,13 +13,13 @@ private const val KEY = "account_token_key"
 /** Reversible stand-in for the Keystore so the storage contract can be tested off-device. */
 private class FakeCipher(
     var failEncrypt: Boolean = false,
-    var failDecrypt: Boolean = false,
+    var decryptFailure: DecryptResult? = null,
 ) : SecretCipher {
     override fun encrypt(plaintext: String): String? =
         if (failEncrypt) null else plaintext.reversed()
 
-    override fun decrypt(stored: String): String? =
-        if (failDecrypt) null else stored.reversed()
+    override fun decrypt(stored: String): DecryptResult =
+        decryptFailure ?: DecryptResult.Success(stored.reversed())
 }
 
 class EncryptedStringSettingTest {
@@ -81,15 +82,35 @@ class EncryptedStringSettingTest {
     }
 
     @Test
-    fun `discards a value it cannot decrypt`() {
+    fun `discards a value it can never decrypt`() {
         // Stands in for a ciphertext restored from a backup onto different hardware.
         val settings = MapSettings()
         EncryptedStringSetting(settings, FakeCipher(), KEY).set("secret-token")
 
-        val onNewDevice = EncryptedStringSetting(settings, FakeCipher(failDecrypt = true), KEY)
+        val onNewDevice = EncryptedStringSetting(
+            settings, FakeCipher(decryptFailure = DecryptResult.Unrecoverable), KEY,
+        )
 
         assertNull(onNewDevice.get())
         assertNull(settings.getStringOrNull(KEY), "undecryptable value was left at rest")
+    }
+
+    @Test
+    fun `keeps a value through a transient decryption failure`() {
+        // A keystore hiccup at startup must cost one read, not the stored secret: deleting
+        // here is what would turn a transient provider error into a forced re-login.
+        val settings = MapSettings()
+        val cipher = FakeCipher()
+        val setting = EncryptedStringSetting(settings, cipher, KEY)
+        setting.set("secret-token")
+
+        cipher.decryptFailure = DecryptResult.TransientFailure
+        assertNull(setting.get())
+        assertNotNull(settings.getStringOrNull(KEY), "recoverable value was destroyed")
+
+        // The next attempt (in production, the next launch) succeeds against the kept value.
+        cipher.decryptFailure = null
+        assertEquals("secret-token", setting.get())
     }
 
     @Test

@@ -20,10 +20,18 @@ import javax.crypto.SecretKey
  * Derived with HMAC-SHA256 under a key that never leaves the Android Keystore, so the mapping is
  * not reversible by a caller and cannot be recomputed off-device even given a full copy of app
  * storage.
+ *
+ * The Keystore access pattern here has a structural twin in the util module's
+ * KeystoreSecretCipher, which this module cannot depend on. A fix to the Keystore handling in
+ * either file almost certainly applies to both.
  */
 class PebbleKitWatchIdentity {
 
     private val keyStore: KeyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+
+    // Key creation is not atomic, and concurrent binder calls from different companions can
+    // reach it together, which would otherwise race two keys into the same alias and change
+    // every previously issued pseudonym.
     private val keyLock = Any()
 
     private fun getOrCreateKey(): SecretKey = synchronized(keyLock) {
