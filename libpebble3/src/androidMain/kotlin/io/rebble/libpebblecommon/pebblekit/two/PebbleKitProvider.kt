@@ -82,10 +82,17 @@ class PebbleKitProvider : BasePebbleKitProvider(), LibPebbleKoinComponent {
             super.query(rebuilt, projection, selection, selectionArgs, sortOrder)
          }
 
-         else -> super.query(uri, projection, selection, selectionArgs, sortOrder)
+         // Fail closed on paths this override does not recognise. The base class serves only
+         // the two paths above today, but a library upgrade could add one that carries watch
+         // data, and delegating would hand it to callers unpseudonymised with no diff here to
+         // review.
+         else -> null
       }
    }
 
+   // Deliberately more defensive than the same helper in PebbleSenderReceiver: a provider can
+   // be queried before initialize() has populated the lateinit fields, so this must resolve
+   // Koin per call, whereas the bound service's constructor-resolved field is always safe.
    private fun connectedSerials(): List<String> =
       runCatching {
          getKoin().getOrNull<LibPebble>()?.watches?.value
@@ -143,7 +150,7 @@ class PebbleKitProvider : BasePebbleKitProvider(), LibPebbleKoinComponent {
 
                mapOf(
                   ConnectedWatch.ID to watchInfo.serial,
-                  ConnectedWatch.NAME to watch.displayName(),
+                  ConnectedWatch.NAME to pebbleKitWatchName(watch.name),
                   ConnectedWatch.PLATFORM to watchInfo.platform.watchType.codename,
                   ConnectedWatch.REVISION to watchInfo.platform.revision,
                   ConnectedWatch.FIRMWARE_VERSION_MAJOR to runningFwVersion.major,
@@ -188,3 +195,18 @@ class PebbleKitProvider : BasePebbleKitProvider(), LibPebbleKoinComponent {
       private val logger = Logger.withTag("PebbleKitProvider")
    }
 }
+
+// "Pebble Time 4F2A": the model prefix plus four hex digits unique to the device.
+private val DEVICE_NAME_SUFFIX = Regex(""" [0-9A-Fa-f]{4}$""")
+
+/**
+ * The watch name served to PebbleKit callers: the BLE-advertised name with the device-unique
+ * suffix stripped.
+ *
+ * The full advertised name, and even more so the user's nickname (which `displayName()` would
+ * prefer), is identical for every caller, so serving either would hand two companions the
+ * shared correlator the per-caller pseudonymous IDs exist to remove. The model prefix keeps the
+ * name informative; nothing more specific than the model is served.
+ */
+internal fun pebbleKitWatchName(advertisedName: String): String =
+    advertisedName.replace(DEVICE_NAME_SUFFIX, "")

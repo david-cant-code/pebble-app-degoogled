@@ -162,6 +162,9 @@ kotlin {
             implementation(libs.androidx.test.rules)
             implementation(libs.ktor.client.okhttp)
             implementation(project(":util"))
+            // Same artifact and version the app already ships via libpebble3; test-scope only,
+            // so the binder test can speak the PebbleKit 2 AIDL types to the exported service.
+            implementation(libs.pebblekit)
         }
         androidUnitTest.dependencies {
             implementation(libs.ktor.client.okhttp)

@@ -77,3 +77,18 @@ authorization-gated there.
 
 This entry leaves the file if a future Android release attaches sender
 identity to broadcasts, or if the classic surface is retired.
+
+## PebbleKit 2 watch metadata is identical across callers at model level
+
+**Status: accepted; the shared columns identify no individual device.**
+
+Each PebbleKit 2 companion sees a per-caller pseudonymous watch identifier,
+and the name column serves the advertised model name with its device-unique
+suffix stripped, never the user's nickname. What remains identical across
+callers is model-level metadata: platform codename, board revision, and the
+running firmware version. Two colluding companions can still narrow "is this
+the same watch" to "same model on the same firmware release", an anonymity
+set of every watch of that model on that release. That residue is accepted:
+those columns exist so companions can do feature detection by model and
+firmware, and serving them per-caller-differently would break that purpose
+without hiding anything a Bluetooth scan does not already reveal.

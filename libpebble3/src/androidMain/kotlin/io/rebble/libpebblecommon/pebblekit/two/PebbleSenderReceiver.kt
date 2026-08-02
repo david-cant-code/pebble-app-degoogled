@@ -4,8 +4,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.IBinder
 import co.touchlab.kermit.Logger
-import io.rebble.pebblekit2.common.SendDataCallback
-import io.rebble.pebblekit2.common.UniversalRequestResponse
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDevice
 import io.rebble.libpebblecommon.connection.LibPebble
 import io.rebble.libpebblecommon.connection.LockerApi
@@ -19,6 +17,8 @@ import io.rebble.libpebblecommon.js.TimelinePinJson
 import io.rebble.libpebblecommon.locker.Locker
 import io.rebble.libpebblecommon.locker.LockerPBWCache
 import io.rebble.libpebblecommon.services.appmessage.AppMessageResult
+import io.rebble.pebblekit2.common.SendDataCallback
+import io.rebble.pebblekit2.common.UniversalRequestResponse
 import io.rebble.pebblekit2.common.model.PebbleDictionary
 import io.rebble.pebblekit2.common.model.TimelinePin
 import io.rebble.pebblekit2.common.model.TimelineResult
@@ -126,17 +126,20 @@ class PebbleSenderReceiver : BasePebbleSenderReceiver(), LibPebbleKoinComponent 
                         callback.onResult(pseudonymiseResults(result, caller, suppliedBySerial))
                     }
                 })
-            }.onFailure { logger.e(it) { "Failed to dispatch PebbleKit request" } }
+            }.onFailure {
+                logger.e(it) { "Failed to dispatch PebbleKit request" }
+                // Same contract as the rejection paths above: the caller always hears back.
+                // Swallowing the failure without replying would leave it blocked on a callback
+                // that will never fire.
+                callback.replyEmpty()
+            }
         }
     }
 
     /**
      * Rewrites the per-watch result keys, which the base class fills in with real serials.
-     *
-     * An identifier the caller supplied is echoed back verbatim so it can still correlate the
-     * result with its request. Anything else, which is the "all connected watches" case where
-     * the base class generated the keys itself, is replaced with this caller's pseudonym, and
-     * dropped outright if none can be derived.
+     * The key translation itself lives in [pseudonymiseTransmissionKeys]; this method is only
+     * the Bundle plumbing around it.
      */
     private fun pseudonymiseResults(
         result: Bundle,
@@ -144,13 +147,13 @@ class PebbleSenderReceiver : BasePebbleSenderReceiver(), LibPebbleKoinComponent 
         suppliedBySerial: Map<String, String>,
     ): Bundle {
         val results = result.getBundle(KEY_TRANSMISSION_RESULTS) ?: return result
+        val identifierBySerial = pseudonymiseTransmissionKeys(
+            serials = results.keySet(),
+            suppliedBySerial = suppliedBySerial,
+        ) { serial -> watchIdentity.pseudonymFor(callingPackage, serial) }
         val mapped = Bundle()
-        results.keySet().forEach { serial ->
-            val value = results.getBundle(serial) ?: return@forEach
-            val identifier = suppliedBySerial[serial]
-                ?: watchIdentity.pseudonymFor(callingPackage, serial)
-                ?: return@forEach
-            mapped.putBundle(identifier, value)
+        identifierBySerial.forEach { (serial, identifier) ->
+            results.getBundle(serial)?.let { mapped.putBundle(identifier, it) }
         }
         return Bundle(result).apply { putBundle(KEY_TRANSMISSION_RESULTS, mapped) }
     }
@@ -282,6 +285,26 @@ class PebbleSenderReceiver : BasePebbleSenderReceiver(), LibPebbleKoinComponent 
         )
 
         return pbwInfo.info.companionApp?.android?.apps.orEmpty().any { it.pkg == pkg }
+    }
+}
+
+/**
+ * Maps each real serial in a result to the identifier the caller should see.
+ *
+ * An identifier the caller supplied is echoed back verbatim so it can still correlate the
+ * result with its request. Anything else, which is the "all connected watches" case where the
+ * base class generated the keys itself, is replaced with this caller's pseudonym, and dropped
+ * outright if none can be derived: a failure in the identity layer must degrade into a missing
+ * row, never into disclosing the serial it was meant to replace.
+ */
+internal fun pseudonymiseTransmissionKeys(
+    serials: Collection<String>,
+    suppliedBySerial: Map<String, String>,
+    pseudonymFor: (String) -> String?,
+): Map<String, String> = buildMap {
+    serials.forEach { serial ->
+        val identifier = suppliedBySerial[serial] ?: pseudonymFor(serial) ?: return@forEach
+        put(serial, identifier)
     }
 }
 
