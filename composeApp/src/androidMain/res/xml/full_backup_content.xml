@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Backup rules for API 26 and 27 only: res/xml-v28 supersedes this from API 28, and
+    backup_rules.xml from API 31.
+
+    Deliberately backs up nothing. The policy is "no backup copy unless it can be client-side
+    encrypted", and Android 8.x has no client-side backup encryption and no requireFlags
+    support to express the condition, so the only policy-compliant behaviour on these API
+    levels is no backup at all. The 8.x parser also rejects any include carrying a third
+    attribute, which would abort backup as a parse failure; this file exists so the no-backup
+    outcome is a deliberate, valid rule set rather than a parser accident.
+
+    Mechanism: naming any include switches Auto Backup into "back up only what is listed", and
+    the one path listed never exists, so nothing matches. The O-era device-to-device transfer
+    path consumes the same rules and is therefore also disabled on 8.x; that trade-off is
+    recorded in KNOWN_ISSUES.md.
+-->
+<full-backup-content>
+    <include domain="file" path="gravel_no_backup_sentinel" />
+</full-backup-content>

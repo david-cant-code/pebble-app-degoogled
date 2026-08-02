@@ -46,3 +46,104 @@ against a purely historical exposure window. The grandfather clause and
 its frozen anchor digests live in `CactusModelPins.kt`; the first pin
 bump ends the exception automatically, and this entry leaves the file
 with it.
+
+## Classic PebbleKit broadcasts cannot be restricted to authorized callers
+
+**Status: accepted, no fix available on Android.**
+
+Classic PebbleKit's cross-app surface is broadcasts, and a
+`BroadcastReceiver` is given no caller identity at all: `onReceive` sees the
+intent and nothing about who sent it, and no platform API recovers it after
+the fact. There is nothing to check. The obvious alternative, requiring a
+permission on the receivers, is not available either: classic PebbleKit has
+never declared one, so every existing third-party watchapp companion would
+break, and a custom permission at `normal` protection level is granted to
+anything that asks for it, which would look protective while stopping
+nobody.
+
+That leaves the following classic entry points open to any installed
+application, deliberately:
+
+- `com.getpebble.action.app.START` and `.STOP` launch or close a watchapp
+  on the connected watch. Nuisance only: they take a watchapp UUID and
+  return nothing to the sender.
+- `com.getpebble.action.app.SEND` injects an app message into a live
+  classic session as if it came from the watchapp's real companion. The
+  session relays a SEND only when it addresses the session's own watchapp,
+  but that filter is routing, not authorization: it exists to stop one
+  watchapp's session relaying another watchapp's messages (and two
+  concurrent sessions each transmitting the same message), and watchapp
+  UUIDs are public, so any installed app that names the running watchapp
+  passes it. A mis-addressed SEND is dropped without a NACK broadcast, so
+  a companion that sent one waits out its own ACK timeout.
+- `com.getpebble.action.app.ACK` and `.NACK` forge acknowledgements for
+  outbound messages; transaction ids are a single byte, so a hostile app
+  can confuse a companion's in-flight sends by guessing.
+
+Watch data flowing out of a classic session is broadcast untargeted in
+practice. `broadcastToCompanions` narrows delivery with `setPackage` when
+the watchapp declares Android companion packages, but a watchapp that
+declares one is routed to PebbleKit 2 instead of a classic session, so a
+classic session never has a declared companion to narrow to; the targeted
+branch is kept as future-proofing should that routing change. Any installed
+app can therefore read what a classic watchapp sends out, and combined with
+SEND injection can prompt a running classic watchapp and read its reply.
+
+The PebbleKit 2 surface does not share this hole: it travels over a bound
+service and a ContentProvider, where the caller is authoritative, and every
+entry point there is gated on the caller being a declared companion of the
+watchapp it addresses.
+
+This entry leaves the file if a future Android release attaches sender
+identity to broadcasts, or if the classic surface is retired.
+
+## Classic PebbleKit content provider stays exported without a caller gate
+
+**Status: accepted for compatibility; revisit if its exposure grows.**
+
+`content://com.getpebble.android.provider.basalt` serves whether a watch is
+connected, whether it supports AppMessage, and the running firmware version
+to any installed application, with no permission and no caller check. Unlike
+the classic broadcasts above, a ContentProvider does receive the caller's
+identity, so the companion-registry gate that protects the PebbleKit 2
+provider is technically possible here. It is deliberately not applied:
+classic-era companions predate companion declarations, so the registry would
+have nothing to authorize most of them against, and classic clients poll
+this provider before any watchapp relationship exists, typically to show
+connection state up front. Gating it would break every classic companion
+while protecting little: the provider serves no identifier of any kind, and
+connection state already leaks through the untargeted classic broadcasts
+described above. This entry leaves the file if the provider ever grows a
+column beyond connection state and firmware version, at which point it gets
+the registry gate regardless of the compatibility cost.
+
+## PebbleKit 2 watch metadata is identical across callers at model level
+
+**Status: accepted; the shared columns identify no individual device.**
+
+Each PebbleKit 2 companion sees a per-caller pseudonymous watch identifier,
+and the name column serves the advertised model name with its device-unique
+suffix stripped, never the user's nickname. What remains identical across
+callers is model-level metadata: platform codename, board revision, and the
+running firmware version. Two colluding companions can still narrow "is this
+the same watch" to "same model on the same firmware release", an anonymity
+set of every watch of that model on that release. That residue is accepted:
+those columns exist so companions can do feature detection by model and
+firmware, and serving them per-caller-differently would break that purpose
+without hiding anything a Bluetooth scan does not already reveal.
+
+## No backups at all on Android 8.0 and 8.1
+
+**Status: accepted; these API levels cannot encrypt backups client-side.**
+
+The backup policy is that no copy of app data leaves the device unless it
+can be client-side encrypted (`backup_rules.xml` on API 31 and above,
+`requireFlags` in `res/xml-v28/full_backup_content.xml` on API 28 to 30).
+Android 8.x has no client-side backup encryption, and its rule parser has no
+`requireFlags` to express the condition (it rejects the attribute outright),
+so the only policy-compliant behaviour there is no backup at all:
+`res/xml/full_backup_content.xml` deliberately allowlists a single path that
+never exists, which disables Auto Backup, the O-era device-to-device
+transfer path, and `adb backup` alike on those devices. `BackupRulesTest`
+pins the shape of all three rule files. This entry leaves the file when
+minSdk reaches 28.

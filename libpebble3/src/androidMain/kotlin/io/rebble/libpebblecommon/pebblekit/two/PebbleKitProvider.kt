@@ -1,5 +1,9 @@
 package io.rebble.libpebblecommon.pebblekit.two
 
+import android.database.Cursor
+import android.database.MatrixCursor
+import android.net.Uri
+import co.touchlab.kermit.Logger
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDevice
 import io.rebble.libpebblecommon.connection.LibPebble
 import io.rebble.libpebblecommon.connection.LockerApi
@@ -33,6 +37,110 @@ class PebbleKitProvider : BasePebbleKitProvider(), LibPebbleKoinComponent {
       super.initialize()
    }
 
+   /**
+    * The provider is exported, so every read is gated on the caller being a companion of an
+    * installed watchapp. Without this any app on the device could read watch state, including
+    * the watch identifier, with no permission and no user-visible prompt.
+    *
+    * Denial returns null rather than an empty cursor because that is already the outcome for an
+    * unrecognised URI, so clients handle it. Failing closed while the registry is still loading
+    * costs a legitimate companion one empty result at cold start; the alternative would leak
+    * watch state during exactly the window before authorization is known.
+    */
+   override fun query(
+      uri: Uri,
+      projection: Array<out String?>?,
+      selection: String?,
+      selectionArgs: Array<out String?>?,
+      sortOrder: String?
+   ): Cursor? {
+      val caller = callingPackage ?: return null
+      val registry = runCatching { getKoin().getOrNull<PebbleKitCompanionRegistry>() }.getOrNull()
+      if (registry?.isAuthorized(caller) != true) {
+         logger.d { "Denied PebbleKit query from $caller" }
+         return null
+      }
+      val identity = runCatching { getKoin().getOrNull<PebbleKitWatchIdentity>() }.getOrNull()
+         ?: return null
+
+      return when (uri.pathSegments.firstOrNull()) {
+         ConnectedWatch.CONTENT_PATH ->
+            super.query(uri, projection, selection, selectionArgs, sortOrder)
+               ?.let { pseudonymiseWatchIds(it, caller, identity) }
+
+         // The watch is addressed by a path segment, and the caller only ever saw a pseudonym,
+         // so translate it back before the base class tries to match it against a real serial.
+         ActiveApp.CONTENT_PATH -> {
+            val supplied = uri.pathSegments.getOrNull(1) ?: return null
+            val serial = identity.resolveSerial(caller, supplied, connectedSerials())
+               ?: return null
+            val rebuilt = uri.buildUpon()
+               .path(null)
+               .appendPath(ActiveApp.CONTENT_PATH)
+               .appendPath(serial)
+               .build()
+            super.query(rebuilt, projection, selection, selectionArgs, sortOrder)
+         }
+
+         // Fail closed on paths this override does not recognise. The base class serves only
+         // the two paths above today, but a library upgrade could add one that carries watch
+         // data, and delegating would hand it to callers unpseudonymised with no diff here to
+         // review.
+         else -> null
+      }
+   }
+
+   // Deliberately more defensive than the same helper in PebbleSenderReceiver: a provider can
+   // be queried before initialize() has populated the lateinit fields, so this must resolve
+   // Koin per call, whereas the bound service's constructor-resolved field is always safe.
+   private fun connectedSerials(): List<String> =
+      runCatching {
+         getKoin().getOrNull<LibPebble>()?.watches?.value
+            ?.filterIsInstance<ConnectedPebbleDevice>()
+            ?.map { it.watchInfo.serial }
+      }.getOrNull().orEmpty()
+
+   /**
+    * Rebuilds the connected-watch rows with the serial replaced by this caller's pseudonym.
+    *
+    * A row whose identifier cannot be derived is dropped rather than passed through, so a
+    * failure in the identity layer cannot degrade into disclosing the serial it was meant to
+    * replace.
+    */
+   private fun pseudonymiseWatchIds(
+      cursor: Cursor,
+      callingPackage: String,
+      identity: PebbleKitWatchIdentity,
+   ): Cursor {
+      val columns = cursor.columnNames
+      val idIndex = columns.indexOf(ConnectedWatch.ID)
+      if (idIndex < 0) return cursor
+
+      val out = MatrixCursor(columns, cursor.count)
+      cursor.use { source ->
+         while (source.moveToNext()) {
+            val serial = source.getString(idIndex) ?: continue
+            val pseudonym = identity.pseudonymFor(callingPackage, serial) ?: continue
+            val row = arrayOfNulls<Any>(columns.size)
+            for (index in columns.indices) {
+               row[index] = if (index == idIndex) {
+                  pseudonym
+               } else {
+                  when (source.getType(index)) {
+                     Cursor.FIELD_TYPE_NULL -> null
+                     Cursor.FIELD_TYPE_INTEGER -> source.getLong(index)
+                     Cursor.FIELD_TYPE_FLOAT -> source.getDouble(index)
+                     Cursor.FIELD_TYPE_BLOB -> source.getBlob(index)
+                     else -> source.getString(index)
+                  }
+               }
+            }
+            out.addRow(row)
+         }
+      }
+      return out
+   }
+
    override fun getConnectedWatches(): Flow<List<Map<String, Any?>>> {
       return watchManager.watches.map { watches ->
          watches.filterIsInstance<ConnectedPebbleDevice>()
@@ -42,7 +150,7 @@ class PebbleKitProvider : BasePebbleKitProvider(), LibPebbleKoinComponent {
 
                mapOf(
                   ConnectedWatch.ID to watchInfo.serial,
-                  ConnectedWatch.NAME to watch.displayName(),
+                  ConnectedWatch.NAME to pebbleKitWatchName(watch.name),
                   ConnectedWatch.PLATFORM to watchInfo.platform.watchType.codename,
                   ConnectedWatch.REVISION to watchInfo.platform.revision,
                   ConnectedWatch.FIRMWARE_VERSION_MAJOR to runningFwVersion.major,
@@ -83,5 +191,22 @@ class PebbleKitProvider : BasePebbleKitProvider(), LibPebbleKoinComponent {
 
    companion object {
       var instance: PebbleKitProvider? = null
+
+      private val logger = Logger.withTag("PebbleKitProvider")
    }
 }
+
+// "Pebble Time 4F2A": the model prefix plus four hex digits unique to the device.
+private val DEVICE_NAME_SUFFIX = Regex(""" [0-9A-Fa-f]{4}$""")
+
+/**
+ * The watch name served to PebbleKit callers: the BLE-advertised name with the device-unique
+ * suffix stripped.
+ *
+ * The full advertised name, and even more so the user's nickname (which `displayName()` would
+ * prefer), is identical for every caller, so serving either would hand two companions the
+ * shared correlator the per-caller pseudonymous IDs exist to remove. The model prefix keeps the
+ * name informative; nothing more specific than the model is served.
+ */
+internal fun pebbleKitWatchName(advertisedName: String): String =
+    advertisedName.replace(DEVICE_NAME_SUFFIX, "")

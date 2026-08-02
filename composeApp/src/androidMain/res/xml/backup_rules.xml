@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Backup rules for Android 12 (API 31) and above. See full_backup_content.xml for the
+    equivalent on API 26 to 30.
+
+    Backups stay enabled deliberately. The data here is worth being able to restore, and the
+    account token, the one credential the app controls, is encrypted at rest under a key that
+    never leaves the device, so a backup copy of it is inert on any other hardware.
+
+    disableIfNoEncryptionCapabilities stops a cloud backup happening at all unless it can be
+    client-side encrypted, which in practice means the user has a screen lock. Everything else
+    in the app's storage is plaintext, including notification bodies, health samples, calendar
+    and contact names, and whatever third-party watchapps have parked in their PebbleKit JS
+    localStorage, so shipping an unencrypted copy off the device is the case worth refusing.
+    Per Android's documentation this constrains cloud backup only; device-to-device transfer is
+    never sent to a server and keeps working regardless.
+
+    Only exclude elements are used. Adding a single include would switch these rules to
+    allowlist mode and silently stop backing up every domain not named, which is exactly the
+    "backups quietly stopped working" failure this file must not cause.
+-->
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <!-- Re-downloadable model weights, hundreds of megabytes against a 25 MB per-app
+             quota. Over quota the system calls onQuotaExceeded() and stops backing the app up
+             altogether, so leaving these in would cost the backup of everything else. -->
+        <exclude domain="file" path="models" />
+    </cloud-backup>
+    <device-transfer>
+        <!-- No quota applies here, but the weights are re-downloadable and would only slow a
+             migration down. -->
+        <exclude domain="file" path="models" />
+    </device-transfer>
+</data-extraction-rules>

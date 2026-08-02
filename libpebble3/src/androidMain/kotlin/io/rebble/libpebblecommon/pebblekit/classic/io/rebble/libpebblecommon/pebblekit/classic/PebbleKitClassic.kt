@@ -46,6 +46,30 @@ class PebbleKitClassic(
 
     private val context: Context = getKoin().get()
 
+    private val companionPackages: List<String> by lazy { appInfo.androidCompanionPackages() }
+
+    /**
+     * Delivers watch data to the watchapp's declared companion apps rather than to every app on
+     * the device.
+     *
+     * Classic PebbleKit has no permission and never has, so an untargeted broadcast hands the
+     * contents of every message the watch sends to any app that registers a receiver. Watchapps
+     * predating companion declarations have nobody to target, so those keep broadcasting as
+     * before: narrowing where the declaration exists costs nothing, whereas dropping the
+     * fallback would break apps that still work today.
+     */
+    private fun broadcastToCompanions(intent: Intent) {
+        if (companionPackages.isEmpty()) {
+            // Regular broadcasts are sometimes delayed on Android 14+. Use ordered ones instead.
+            // https://stackoverflow.com/questions/77842817/slow-intent-broadcast-delivery-on-android-14
+            context.sendOrderedBroadcast(intent, null)
+            return
+        }
+        companionPackages.forEach { pkg ->
+            context.sendOrderedBroadcast(Intent(intent).setPackage(pkg), null)
+        }
+    }
+
     private suspend fun replyNACK(id: UByte) {
         withTimeoutOrNull(1000) {
             device.sendAppMessageResult(AppMessageResult.ACK(id))
@@ -70,9 +94,7 @@ class PebbleKitClassic(
                 putExtra(MSG_DATA, pebbleDictionary.toJsonString())
             }
 
-            // Regular broadcasts are sometimes delayed on Android 14+. Use ordered ones instead.
-            // https://stackoverflow.com/questions/77842817/slow-intent-broadcast-delivery-on-android-14
-            context.sendOrderedBroadcast(intent, null)
+            broadcastToCompanions(intent)
         }.catch {
             logger.e(it) { "Error receiving app message: ${it.message}" }
         }.launchIn(scope)
@@ -103,6 +125,14 @@ class PebbleKitClassic(
                 val uuid = (intent.getSerializableExtra(APP_UUID) as? UUID?)?.toKotlinUuid() ?:
                     // Fallback to string
                     intent.getStringExtra(APP_UUID)?.let { Uuid.parseOrNull(it) } ?: return@collect
+
+                // These receivers are exported and every live session sees every SEND broadcast,
+                // so without this a session would relay messages addressed to a different
+                // watchapp, and two concurrent sessions would each send the same message once.
+                if (uuid != this@PebbleKitClassic.uuid) {
+                    return@collect
+                }
+
                 val dictionary: PebbleClassicDictionary = PebbleClassicDictionary.fromJson(
                     intent.getStringExtra(MSG_DATA)
                 )
@@ -120,9 +150,7 @@ class PebbleKitClassic(
                     putExtra(TRANSACTION_ID, result.transactionId.toInt())
                 }
 
-                // Regular broadcasts are sometimes delayed on Android 14+. Use ordered ones instead.
-                // https://stackoverflow.com/questions/77842817/slow-intent-broadcast-delivery-on-android-14
-                context.sendOrderedBroadcast(intent, null)
+                broadcastToCompanions(intent)
             }
         }
     }
@@ -141,6 +169,15 @@ class PebbleKitClassic(
         runningScope?.cancel()
     }
 }
+
+/**
+ * Android packages the watchapp declares as its companions, deduplicated.
+ *
+ * An empty result means "no declaration to narrow to", which callers treat as the pre-existing
+ * untargeted broadcast rather than as "send to nobody".
+ */
+internal fun PbwAppInfo.androidCompanionPackages(): List<String> =
+    companionApp?.android?.apps.orEmpty().mapNotNull { it.pkg }.distinct()
 
 private fun PebbleClassicDictionary.toAppMessageDict(): AppMessageDictionary {
     return tuples.mapValues {

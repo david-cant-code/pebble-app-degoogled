@@ -35,7 +35,9 @@ import io.rebble.libpebblecommon.web.WebSyncManager
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -554,6 +556,17 @@ abstract class LockerPBWCache(private val context: AppContext) {
     private val cacheDir = getLockerPBWCacheDirectory(context)
     private val pkjsCacheDir = Path(cacheDir, "pkjs")
 
+    // A store install writes its locker row first and the PBW arrives later as a file-only
+    // write, which no database flow ever surfaces, so consumers of the cached PBWs (the
+    // PebbleKit companion registry) need this signal to know the set of files changed.
+    private val _pbwFilesChanged = MutableSharedFlow<Unit>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** Emits after a PBW file is added to or removed from the cache. */
+    val pbwFilesChanged: Flow<Unit> = _pbwFilesChanged
+
     fun init() {
         migrateFromLegacyIfNeeded(context)
     }
@@ -635,6 +648,19 @@ abstract class LockerPBWCache(private val context: AppContext) {
         return Path(cacheDir, "${appId}_${version}.pbw")
     }
 
+    /**
+     * PBWs already on disk. Unlike [getPBWFileForApp] this never falls through to
+     * [handleCacheMiss], so it is safe to call from a binder/IPC entry point where an
+     * untrusted caller must not be able to induce a network fetch.
+     */
+    fun cachedPbwPaths(): List<Path> {
+        if (!SystemFileSystem.exists(cacheDir)) return emptyList()
+        return SystemFileSystem.list(cacheDir).filter { path ->
+            path.name.endsWith(".pbw") &&
+                SystemFileSystem.metadataOrNull(path)?.isRegularFile == true
+        }
+    }
+
     protected fun pkjsPathForApp(appId: Uuid): Path {
         SystemFileSystem.createDirectories(pkjsCacheDir, false)
         return Path(pkjsCacheDir, "$appId.js")
@@ -649,7 +675,10 @@ abstract class LockerPBWCache(private val context: AppContext) {
         } else {
             // Delete any other cached versions for this app
             deleteApp(appId)
-            handleCacheMiss(appId, version, locker) ?: error("Failed to find PBW file for app $appId")
+            val fetched = handleCacheMiss(appId, version, locker)
+                ?: error("Failed to find PBW file for app $appId")
+            _pbwFilesChanged.tryEmit(Unit)
+            fetched
         }
     }
 
@@ -658,6 +687,7 @@ abstract class LockerPBWCache(private val context: AppContext) {
         SystemFileSystem.sink(targetPath).use { sink ->
             source.transferTo(sink)
         }
+        _pbwFilesChanged.tryEmit(Unit)
     }
 
     private fun sanitizeJS(js: String): String {
@@ -703,6 +733,7 @@ abstract class LockerPBWCache(private val context: AppContext) {
                 }
             }
         }
+        _pbwFilesChanged.tryEmit(Unit)
     }
 }
 

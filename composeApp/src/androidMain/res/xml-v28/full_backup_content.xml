@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Backup rules for API 28 to 30: superseded by backup_rules.xml from API 31, and preceded by
+    the no-backup res/xml variant on API 26 and 27, whose parsers reject the requireFlags
+    attribute used here (they allow only domain and path) and have no client-side backup
+    encryption to require anyway.
+
+    requireFlags="clientSideEncryption" is the older spelling of the same intent: no backup
+    unless it can be client-side encrypted. It is an attribute of include rather than a
+    property of the whole file, which forces the shape below, because naming even one include
+    switches Auto Backup out of "back up almost everything" and into "back up only what is
+    listed". Every domain the app actually uses therefore has to be named explicitly, and
+    omitting one would silently stop backing that data up rather than fail loudly.
+
+    Device-protected storage domains (device_root, device_file, device_database,
+    device_sharedpref) are deliberately absent: nothing here is direct-boot aware, so they hold
+    no data. Anything that starts using them must be added here.
+
+    Cache and no-backup directories never need excluding; the platform always leaves them out.
+-->
+<full-backup-content>
+    <include domain="root" path="." requireFlags="clientSideEncryption" />
+    <include domain="file" path="." requireFlags="clientSideEncryption" />
+    <include domain="database" path="." requireFlags="clientSideEncryption" />
+    <include domain="sharedpref" path="." requireFlags="clientSideEncryption" />
+    <include domain="external" path="." requireFlags="clientSideEncryption" />
+
+    <!-- Re-downloadable model weights, hundreds of megabytes against a 25 MB per-app quota.
+         Over quota the system stops backing the app up altogether, so leaving these in would
+         cost the backup of everything else. Exclude takes precedence over include. -->
+    <exclude domain="file" path="models" />
+</full-backup-content>

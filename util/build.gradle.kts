@@ -156,6 +156,9 @@ kotlin {
         commonTest {
             dependencies {
                 implementation(libs.kotlin.test)
+                // MapSettings, so the encrypted-setting storage contract can be tested without
+                // a device. Same artifact family and version as the Settings dep already used.
+                implementation(libs.settings.test)
             }
         }
 
@@ -163,7 +166,6 @@ kotlin {
             dependencies {
                 implementation(libs.androidx.activity.compose)
                 implementation(libs.ktor.client.okhttp)
-                implementation(compose.uiTooling)
             }
         }
 
@@ -180,6 +182,11 @@ dependencies {
     add("kspAndroid", libs.room.compiler)
     add("kspIosArm64", libs.room.compiler)
     add("kspIosSimulatorArm64", libs.room.compiler)
+
+    // Debug-only: compose.uiTooling contributes an exported
+    // androidx.compose.ui.tooling.PreviewActivity to the merged manifest, which must not
+    // reach a release APK. Declaring it in androidMain put it in every variant.
+    debugImplementation(compose.uiTooling)
 }
 
 val headSha by lazy {
