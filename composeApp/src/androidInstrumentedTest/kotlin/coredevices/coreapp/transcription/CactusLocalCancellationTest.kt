@@ -47,7 +47,7 @@ import kotlin.time.TimeSource
  * run — run via `adb shell am instrument` against a persistent install to avoid that:
  *   adb shell am instrument -w \
  *     -e class coredevices.coreapp.transcription.CactusLocalCancellationTest \
- *     coredevices.coreapp.test/androidx.test.runner.AndroidJUnitRunner
+ *     com.anopticlabs.gravel.test/androidx.test.runner.AndroidJUnitRunner
  */
 class CactusLocalCancellationTest {
     private companion object {

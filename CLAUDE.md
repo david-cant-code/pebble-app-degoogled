@@ -1,9 +1,9 @@
-# CoreApp (de-Googled fork)
+# Gravel (de-Googled CoreApp fork)
 
-This is an **unofficial, Android-only fork** of the Core Devices Pebble mobile
-app. It is not affiliated with or endorsed by Core Devices. The fork is
-distributed under GPLv3 (see `LICENSE`); upstream's commercial licensing
-option does not apply here.
+Gravel is an **unofficial, Android-only fork** of the Core Devices Pebble
+mobile app (upstream name: CoreApp). It is not affiliated with or endorsed
+by Core Devices. The fork is distributed under GPLv3 (see `LICENSE`);
+upstream's commercial licensing option does not apply here.
 
 ## Fork goals
 
@@ -61,14 +61,14 @@ option does not apply here.
   graphics come from `art/gravel-logo.png`; the brand color is `gravelPurple`
   (0xFF9129DE in `util` `theme/Theme.kt`), while the adaptive-icon background
   (`util .../res/values/ic_launcher_background.xml`) is a neutral dark so the
-  purple mark stays visible against it. The Kotlin
-  `namespace` and source packages deliberately stay `coredevices.coreapp` so
-  upstream merges stay cheap; only the applicationId and user-facing branding
-  are renamed. Where upstream docs below reference `coredevices.coreapp` as
-  the installed package (for example the adb launch and verify commands),
-  substitute `com.anopticlabs.gravel`. Nominative references to Pebble
-  watches and Core Devices stay (they state compatibility and attribution);
-  using their branding as ours does not.
+  purple mark stays visible against it. The Kotlin `namespace` and source
+  packages deliberately stay `coredevices.coreapp` so upstream merges stay
+  cheap; only the applicationId and user-facing branding are renamed. Where
+  docs reference `coredevices.coreapp` as the installed package (for example
+  the adb launch and verify commands, and the adb instrumentation component
+  in test KDocs), substitute `com.anopticlabs.gravel`. Nominative references
+  to Pebble watches and Core Devices stay (they state compatibility and
+  attribution); using their branding as ours does not.
 - **Verify against the artifact.** De-Google changes are confirmed against the
   built APK (no `com.google.firebase`/`com.google.android.gms` classes, no
   unexpected network endpoints), not just against the source tree.

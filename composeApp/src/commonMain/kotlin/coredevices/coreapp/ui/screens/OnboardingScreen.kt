@@ -148,7 +148,7 @@ fun OnboardingScreen(
                     ) {
                         Image(
                             painter = painterResource(Res.drawable.gravel_logo),
-                            contentDescription = "description",
+                            contentDescription = "Gravel logo",
                             colorFilter = ColorFilter.tint(Color.White),
                             modifier = Modifier.height(50.dp),
                         )

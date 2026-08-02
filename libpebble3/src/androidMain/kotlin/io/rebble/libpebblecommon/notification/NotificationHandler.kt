@@ -435,7 +435,7 @@ Processed as:
     }
 }
 
-private fun LibPebbleNotification.isPebbleTestNotification(selfPackageName: String): Boolean =
+private fun LibPebbleNotification.isOwnTestNotification(selfPackageName: String): Boolean =
     packageName == selfPackageName && title == "Test Notification"
 
 internal suspend fun decideNotification(
@@ -461,7 +461,7 @@ internal suspend fun decideNotification(
         !anyContactStarred && (channel != null && channel.muteState == MuteState.Always) -> NotSendChannelMuted
         isRuleFiltered() -> NotSentRuleFiltered
         !allowDuplicates && inflightNotifications.any { it.displayDataEquals(notification) } -> NotSentDuplicate
-        !notificationConfig.alwaysSendNotifications && !notification.isPebbleTestNotification(selfPackageName) && screenIsOnAndUnlocked() -> NotificationDecision.NotSentScreenOn
+        !notificationConfig.alwaysSendNotifications && !notification.isOwnTestNotification(selfPackageName) && screenIsOnAndUnlocked() -> NotificationDecision.NotSentScreenOn
         else -> SendToWatch
     }
 }
