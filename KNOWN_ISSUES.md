@@ -47,36 +47,75 @@ its frozen anchor digests live in `CactusModelPins.kt`; the first pin
 bump ends the exception automatically, and this entry leaves the file
 with it.
 
-## Classic PebbleKit app start and stop cannot be restricted to authorized callers
+## Classic PebbleKit broadcasts cannot be restricted to authorized callers
 
 **Status: accepted, no fix available on Android.**
 
-`com.getpebble.action.app.START` and `.STOP` are ordered broadcasts that any
-installed application can send, and acting on one launches or stops a
-watchapp on the connected watch. Every other cross-app entry point in this
-fork is gated on the caller being a declared companion of the watchapp it is
-addressing, but a `BroadcastReceiver` is given no caller identity at all:
-`onReceive` sees the intent and nothing about who sent it, and no platform
-API recovers it after the fact. There is nothing to check.
+Classic PebbleKit's cross-app surface is broadcasts, and a
+`BroadcastReceiver` is given no caller identity at all: `onReceive` sees the
+intent and nothing about who sent it, and no platform API recovers it after
+the fact. There is nothing to check. The obvious alternative, requiring a
+permission on the receivers, is not available either: classic PebbleKit has
+never declared one, so every existing third-party watchapp companion would
+break, and a custom permission at `normal` protection level is granted to
+anything that asks for it, which would look protective while stopping
+nobody.
 
-The obvious alternative, requiring a permission on the receiver, is not
-available either. Classic PebbleKit has never declared a permission, so every
-existing third-party watchapp companion would break, and a custom permission
-at `normal` protection level is granted to anything that asks for it, which
-would look protective while stopping nobody.
+That leaves the following classic entry points open to any installed
+application, deliberately:
 
-Impact is bounded to nuisance rather than disclosure: start and stop take a
-watchapp UUID and return nothing to the sender, so an app abusing them can
-launch or close watchapps but learns nothing about the watch or its data. The
-adjacent leaks have been closed separately: the classic provider exposes no
-serial, watch data broadcast back out is narrowed to the watchapp's declared
-companions where one is declared, and a message send is ignored unless it
-addresses the session's own watchapp. The equivalent PebbleKit 2 operations
-travel over a bound service, where the caller is authoritative, and are
-authorization-gated there.
+- `com.getpebble.action.app.START` and `.STOP` launch or close a watchapp
+  on the connected watch. Nuisance only: they take a watchapp UUID and
+  return nothing to the sender.
+- `com.getpebble.action.app.SEND` injects an app message into a live
+  classic session as if it came from the watchapp's real companion. The
+  session relays a SEND only when it addresses the session's own watchapp,
+  but that filter is routing, not authorization: it exists to stop one
+  watchapp's session relaying another watchapp's messages (and two
+  concurrent sessions each transmitting the same message), and watchapp
+  UUIDs are public, so any installed app that names the running watchapp
+  passes it. A mis-addressed SEND is dropped without a NACK broadcast, so
+  a companion that sent one waits out its own ACK timeout.
+- `com.getpebble.action.app.ACK` and `.NACK` forge acknowledgements for
+  outbound messages; transaction ids are a single byte, so a hostile app
+  can confuse a companion's in-flight sends by guessing.
+
+Watch data flowing out of a classic session is broadcast untargeted in
+practice. `broadcastToCompanions` narrows delivery with `setPackage` when
+the watchapp declares Android companion packages, but a watchapp that
+declares one is routed to PebbleKit 2 instead of a classic session, so a
+classic session never has a declared companion to narrow to; the targeted
+branch is kept as future-proofing should that routing change. Any installed
+app can therefore read what a classic watchapp sends out, and combined with
+SEND injection can prompt a running classic watchapp and read its reply.
+
+The PebbleKit 2 surface does not share this hole: it travels over a bound
+service and a ContentProvider, where the caller is authoritative, and every
+entry point there is gated on the caller being a declared companion of the
+watchapp it addresses.
 
 This entry leaves the file if a future Android release attaches sender
 identity to broadcasts, or if the classic surface is retired.
+
+## Classic PebbleKit content provider stays exported without a caller gate
+
+**Status: accepted for compatibility; revisit if its exposure grows.**
+
+`content://com.getpebble.android.provider.basalt` serves whether a watch is
+connected, whether it supports AppMessage, and the running firmware version
+to any installed application, with no permission and no caller check. Unlike
+the classic broadcasts above, a ContentProvider does receive the caller's
+identity, so the companion-registry gate that protects the PebbleKit 2
+provider is technically possible here. It is deliberately not applied:
+classic-era companions predate companion declarations, so the registry would
+have nothing to authorize most of them against, and classic clients poll
+this provider before any watchapp relationship exists, typically to show
+connection state up front. Gating it would break every classic companion
+while protecting little: the provider serves no identifier of any kind, and
+connection state already leaks through the untargeted classic broadcasts
+described above. This entry leaves the file if the provider ever grows a
+column beyond connection state and firmware version, at which point it gets
+the registry gate regardless of the compatibility cost.
 
 ## PebbleKit 2 watch metadata is identical across callers at model level
 
