@@ -1,6 +1,7 @@
 package io.rebble.libpebblecommon.pebblekit.two
 
 import android.database.Cursor
+import android.database.MatrixCursor
 import android.net.Uri
 import co.touchlab.kermit.Logger
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDevice
@@ -53,13 +54,84 @@ class PebbleKitProvider : BasePebbleKitProvider(), LibPebbleKoinComponent {
       selectionArgs: Array<out String?>?,
       sortOrder: String?
    ): Cursor? {
-      val caller = callingPackage
+      val caller = callingPackage ?: return null
       val registry = runCatching { getKoin().getOrNull<PebbleKitCompanionRegistry>() }.getOrNull()
       if (registry?.isAuthorized(caller) != true) {
          logger.d { "Denied PebbleKit query from $caller" }
          return null
       }
-      return super.query(uri, projection, selection, selectionArgs, sortOrder)
+      val identity = runCatching { getKoin().getOrNull<PebbleKitWatchIdentity>() }.getOrNull()
+         ?: return null
+
+      return when (uri.pathSegments.firstOrNull()) {
+         ConnectedWatch.CONTENT_PATH ->
+            super.query(uri, projection, selection, selectionArgs, sortOrder)
+               ?.let { pseudonymiseWatchIds(it, caller, identity) }
+
+         // The watch is addressed by a path segment, and the caller only ever saw a pseudonym,
+         // so translate it back before the base class tries to match it against a real serial.
+         ActiveApp.CONTENT_PATH -> {
+            val supplied = uri.pathSegments.getOrNull(1) ?: return null
+            val serial = identity.resolveSerial(caller, supplied, connectedSerials())
+               ?: return null
+            val rebuilt = uri.buildUpon()
+               .path(null)
+               .appendPath(ActiveApp.CONTENT_PATH)
+               .appendPath(serial)
+               .build()
+            super.query(rebuilt, projection, selection, selectionArgs, sortOrder)
+         }
+
+         else -> super.query(uri, projection, selection, selectionArgs, sortOrder)
+      }
+   }
+
+   private fun connectedSerials(): List<String> =
+      runCatching {
+         getKoin().getOrNull<LibPebble>()?.watches?.value
+            ?.filterIsInstance<ConnectedPebbleDevice>()
+            ?.map { it.watchInfo.serial }
+      }.getOrNull().orEmpty()
+
+   /**
+    * Rebuilds the connected-watch rows with the serial replaced by this caller's pseudonym.
+    *
+    * A row whose identifier cannot be derived is dropped rather than passed through, so a
+    * failure in the identity layer cannot degrade into disclosing the serial it was meant to
+    * replace.
+    */
+   private fun pseudonymiseWatchIds(
+      cursor: Cursor,
+      callingPackage: String,
+      identity: PebbleKitWatchIdentity,
+   ): Cursor {
+      val columns = cursor.columnNames
+      val idIndex = columns.indexOf(ConnectedWatch.ID)
+      if (idIndex < 0) return cursor
+
+      val out = MatrixCursor(columns, cursor.count)
+      cursor.use { source ->
+         while (source.moveToNext()) {
+            val serial = source.getString(idIndex) ?: continue
+            val pseudonym = identity.pseudonymFor(callingPackage, serial) ?: continue
+            val row = arrayOfNulls<Any>(columns.size)
+            for (index in columns.indices) {
+               row[index] = if (index == idIndex) {
+                  pseudonym
+               } else {
+                  when (source.getType(index)) {
+                     Cursor.FIELD_TYPE_NULL -> null
+                     Cursor.FIELD_TYPE_INTEGER -> source.getLong(index)
+                     Cursor.FIELD_TYPE_FLOAT -> source.getDouble(index)
+                     Cursor.FIELD_TYPE_BLOB -> source.getBlob(index)
+                     else -> source.getString(index)
+                  }
+               }
+            }
+            out.addRow(row)
+         }
+      }
+      return out
    }
 
    override fun getConnectedWatches(): Flow<List<Map<String, Any?>>> {

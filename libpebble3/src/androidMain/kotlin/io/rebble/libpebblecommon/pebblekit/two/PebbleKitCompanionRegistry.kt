@@ -34,12 +34,18 @@ class PebbleKitCompanionRegistry(
     private val scope: LibPebbleCoroutineScope,
 ) {
     /**
+     * Companion packages keyed by the lowercase watchapp UUID that declares them.
+     *
      * Null until the first scan completes, which is deliberately distinct from "scanned, found
      * nothing": callers are denied in both cases, so a query arriving before the locker has been
      * read fails closed instead of briefly exposing watch state.
+     *
+     * Keyed by watchapp rather than flattened because the sender surface has to answer "may this
+     * package drive *this* watchapp", and it has to answer it while holding a binder thread, so
+     * the per-watchapp breakdown cannot be recomputed on demand.
      */
     @Volatile
-    private var authorizedPackages: Set<String>? = null
+    private var companionsByApp: Map<String, Set<String>>? = null
 
     fun init() {
         scope.launch(CoroutineName("PebbleKitCompanionRegistry")) {
@@ -47,25 +53,37 @@ class PebbleKitCompanionRegistry(
             // what grants or revokes a companion package's access.
             locker.getAllLockerUuids().collectLatest {
                 val scanned = withContext(Dispatchers.IO) { scanCachedPbws() }
-                authorizedPackages = scanned
-                logger.d { "Authorized PebbleKit companion packages: ${scanned.size}" }
+                companionsByApp = scanned
+                logger.d { "Companion packages across ${scanned.size} watchapps" }
             }
         }
     }
 
+    /** Whether [callingPackage] is a declared companion of any installed watchapp. */
     fun isAuthorized(callingPackage: String?): Boolean {
         if (callingPackage == null) return false
-        return authorizedPackages?.contains(callingPackage) == true
+        return companionsByApp?.values?.any { callingPackage in it } == true
     }
 
-    private fun scanCachedPbws(): Set<String> = buildSet {
+    /** Whether [callingPackage] is a declared companion of the watchapp [watchappUuid]. */
+    fun isAuthorizedFor(callingPackage: String?, watchappUuid: String?): Boolean {
+        if (callingPackage == null || watchappUuid == null) return false
+        return companionsByApp?.get(watchappUuid.lowercase())?.contains(callingPackage) == true
+    }
+
+    private fun scanCachedPbws(): Map<String, Set<String>> = buildMap {
         pbwCache.cachedPbwPaths().forEach { path ->
             // A corrupt or partially written PBW must not take down the whole scan, which would
             // revoke access for every other companion app on the device.
-            runCatching { PbwApp(path).info.companionApp?.android?.apps.orEmpty() }
+            val info = runCatching { PbwApp(path).info }
                 .onFailure { logger.w(it) { "Skipping unreadable PBW ${path.name}" } }
-                .getOrNull()
-                ?.forEach { app -> app.pkg?.let(::add) }
+                .getOrNull() ?: return@forEach
+
+            val packages = info.companionApp?.android?.apps.orEmpty().mapNotNull { it.pkg }.toSet()
+            if (packages.isEmpty()) return@forEach
+
+            // The cache can hold several versions of one watchapp, so merge rather than replace.
+            merge(info.uuid.lowercase(), packages) { existing, new -> existing + new }
         }
     }
 }
