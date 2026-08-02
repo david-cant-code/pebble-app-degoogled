@@ -92,3 +92,19 @@ set of every watch of that model on that release. That residue is accepted:
 those columns exist so companions can do feature detection by model and
 firmware, and serving them per-caller-differently would break that purpose
 without hiding anything a Bluetooth scan does not already reveal.
+
+## No backups at all on Android 8.0 and 8.1
+
+**Status: accepted; these API levels cannot encrypt backups client-side.**
+
+The backup policy is that no copy of app data leaves the device unless it
+can be client-side encrypted (`backup_rules.xml` on API 31 and above,
+`requireFlags` in `res/xml-v28/full_backup_content.xml` on API 28 to 30).
+Android 8.x has no client-side backup encryption, and its rule parser has no
+`requireFlags` to express the condition (it rejects the attribute outright),
+so the only policy-compliant behaviour there is no backup at all:
+`res/xml/full_backup_content.xml` deliberately allowlists a single path that
+never exists, which disables Auto Backup, the O-era device-to-device
+transfer path, and `adb backup` alike on those devices. `BackupRulesTest`
+pins the shape of all three rule files. This entry leaves the file when
+minSdk reaches 28.
