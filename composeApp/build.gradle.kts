@@ -403,17 +403,44 @@ abstract class VerifyExportedComponents : DefaultTask() {
 
 androidComponents {
     onVariants(selector().withBuildType("release")) { variant ->
-        val verify = tasks.register<VerifyExportedComponents>(
-            "verify${variant.name.replaceFirstChar { it.uppercase() }}ExportedComponents"
-        ) {
+        val verifyName = "verify${variant.name.replaceFirstChar { it.uppercase() }}ExportedComponents"
+        val verify = tasks.register<VerifyExportedComponents>(verifyName) {
             group = "verification"
             description = "Fails if the release manifest exports anything not on the allowlist."
             mergedManifest.set(variant.artifacts.get(com.android.build.api.artifact.SingleArtifact.MERGED_MANIFEST))
             allowed.set(allowedExportedComponents)
         }
-        // Matched lazily rather than looked up: in this Kotlin Multiplatform project the
-        // assemble tasks do not exist yet while onVariants is running.
-        val assembleName = "assemble${variant.name.replaceFirstChar { it.uppercase() }}"
-        tasks.matching { it.name == assembleName }.configureEach { dependsOn(verify) }
+        // Attached to the packaging tasks rather than the assemble lifecycle anchor: every
+        // path that produces or deploys a release artifact (assembleRelease, installRelease,
+        // bundleRelease) runs through packageRelease or packageReleaseBundle, whereas only
+        // assembleRelease runs through the anchor, so anchoring there let an AAB or a direct
+        // install ship with the check never executing. Matched lazily rather than looked up:
+        // in this Kotlin Multiplatform project the packaging tasks do not exist yet while
+        // onVariants is running.
+        val variantName = variant.name.replaceFirstChar { it.uppercase() }
+        val packageNames = setOf("package$variantName", "package${variantName}Bundle")
+        tasks.matching { it.name in packageNames }.configureEach { dependsOn(verify) }
+
+        // tasks.matching is silent when nothing matches, which is the same silent-failure
+        // shape the verification exists to prevent, so assert the wiring itself: a release
+        // packaging task in the executed graph without its verify task means the name-based
+        // attachment above has rotted (an AGP task rename, most likely) and must fail loudly
+        // rather than ship an unchecked artifact.
+        gradle.taskGraph.whenReady {
+            val projectPath = project.path
+            val packaging = allTasks.any {
+                it.name in packageNames && it.project.path == projectPath
+            }
+            val verifying = allTasks.any {
+                it.name == verifyName && it.project.path == projectPath
+            }
+            if (packaging && !verifying) {
+                throw GradleException(
+                    "$verifyName is not in the task graph although a $variantName packaging " +
+                        "task is. The exported-component check has silently detached; fix the " +
+                        "wiring in composeApp/build.gradle.kts before building a release."
+                )
+            }
+        }
     }
 }
