@@ -16,12 +16,24 @@ import kotlin.concurrent.thread
  * ever touch that material again: the SDKs are off the classpath, the stub
  * signOut() is a no-op, and the sign-out UI is unreachable. Left alone, a
  * still-valid Core-account credential would sit at rest forever, riding
- * along in Auto Backup and device-to-device transfers (backup restore also
- * matches on package name, not signing certificate, so restored official-app
- * data can land in a fresh install of this fork). Deleting the residue at
- * startup closes that at-rest exposure; it runs every launch because the
- * checks are a few directory listings and idempotency beats a marker flag
- * that backup restore could carry separately from the data it describes.
+ * along in Auto Backup and device-to-device transfers.
+ *
+ * Two things have since narrowed this, and the original rationale here
+ * overstated what remains. It also argued that backup restore matches on
+ * package name rather than signing certificate, so restored official-app
+ * data could land in a fresh install of this fork; the rebrand moved the
+ * applicationId to com.anopticlabs.gravel, which no longer collides with
+ * upstream's, so that route is closed. And because the SDKs were removed
+ * before that rename, no build carrying Firebase ever ran under the current
+ * applicationId, so a data directory this cleanup can reach should never
+ * contain the residue in the first place.
+ *
+ * It is kept as a standing guard rather than because a path to it is known:
+ * the cost is a few directory listings on a background thread at startup,
+ * and it would cover a future build that reintroduced the SDKs, or a data
+ * directory arriving from somewhere not anticipated here. It runs every
+ * launch because idempotency beats a marker flag that backup restore could
+ * carry separately from the data it describes.
  */
 object FirebaseResidueCleanup {
 
