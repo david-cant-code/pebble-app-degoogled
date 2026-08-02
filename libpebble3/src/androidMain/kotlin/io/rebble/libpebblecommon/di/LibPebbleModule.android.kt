@@ -96,6 +96,6 @@ actual val platformModule: Module = module {
 
     single { PebbleKitClassicStartListeners(get(), get(), get()) }
     single { PebbleKitProviderNotifier(get<LibPebble>(), get(), get()) }
-    single { PebbleKitCompanionRegistry(get<LibPebble>(), get(), get()) }
+    single { PebbleKitCompanionRegistry.create(get<LibPebble>(), get(), get()) }
     single { PebbleKitWatchIdentity() }
 }

@@ -5,11 +5,18 @@ import io.rebble.libpebblecommon.connection.LockerApi
 import io.rebble.libpebblecommon.di.LibPebbleCoroutineScope
 import io.rebble.libpebblecommon.disk.pbw.PbwApp
 import io.rebble.libpebblecommon.locker.LockerPBWCache
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.io.files.Path
+import kotlin.uuid.Uuid
 
 private val logger = Logger.withTag("PebbleKitCompanionRegistry")
 
@@ -27,11 +34,17 @@ private val logger = Logger.withTag("PebbleKitCompanionRegistry")
  * locating a PBW ([LockerPBWCache.getPBWFileForApp]) falls through to a network fetch on a cache
  * miss, which would let an unauthorized caller drive traffic just by querying. Only
  * already-cached PBWs are consulted here.
+ *
+ * The constructor takes the narrow seams (a locker UUID flow, a cached-path lookup, a
+ * cache-change signal) rather than the services that provide them so unit tests can drive
+ * scans directly; [create] does the production wiring.
  */
 class PebbleKitCompanionRegistry(
-    private val locker: LockerApi,
-    private val pbwCache: LockerPBWCache,
-    private val scope: LibPebbleCoroutineScope,
+    private val lockerUuids: Flow<List<Uuid>>,
+    private val cachedPbws: () -> List<Path>,
+    private val pbwFilesChanged: Flow<Unit>,
+    private val scope: CoroutineScope,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     /**
      * Companion packages keyed by the lowercase watchapp UUID that declares them.
@@ -49,10 +62,16 @@ class PebbleKitCompanionRegistry(
 
     fun init() {
         scope.launch(CoroutineName("PebbleKitCompanionRegistry")) {
-            // Rebuild whenever the locker changes: installing or removing a watchapp is exactly
-            // what grants or revokes a companion package's access.
-            locker.getAllLockerUuids().collectLatest {
-                val scanned = withContext(Dispatchers.IO) { scanCachedPbws() }
+            // Rebuild on either signal. The locker flow covers install and removal, which is
+            // what grants or revokes a companion package's access. The cache signal covers a
+            // store install's PBW arriving after its locker row: the download is a file-only
+            // write that no database flow surfaces, and it is the event that makes the
+            // declaration readable at all.
+            combine(
+                lockerUuids,
+                pbwFilesChanged.onStart { emit(Unit) },
+            ) { uuids, _ -> uuids }.collectLatest { uuids ->
+                val scanned = withContext(ioDispatcher) { scanCachedPbws(uuids.toSet()) }
                 companionsByApp = scanned
                 logger.d { "Companion packages across ${scanned.size} watchapps" }
             }
@@ -71,13 +90,19 @@ class PebbleKitCompanionRegistry(
         return companionsByApp?.get(watchappUuid.lowercase())?.contains(callingPackage) == true
     }
 
-    private fun scanCachedPbws(): Map<String, Set<String>> = buildMap {
-        pbwCache.cachedPbwPaths().forEach { path ->
+    private fun scanCachedPbws(installed: Set<Uuid>): Map<String, Set<String>> = buildMap {
+        cachedPbws().forEach { path ->
             // A corrupt or partially written PBW must not take down the whole scan, which would
             // revoke access for every other companion app on the device.
             val info = runCatching { PbwApp(path).info }
                 .onFailure { logger.w(it) { "Skipping unreadable PBW ${path.name}" } }
                 .getOrNull() ?: return@forEach
+
+            // A cached file whose watchapp is not in the locker grants nothing: web-sync
+            // removal marks the row deleted without deleting the file, so membership has to be
+            // enforced here rather than assumed from cache hygiene.
+            val uuid = Uuid.parseOrNull(info.uuid) ?: return@forEach
+            if (uuid !in installed) return@forEach
 
             val packages = info.companionApp?.android?.apps.orEmpty().mapNotNull { it.pkg }.toSet()
             if (packages.isEmpty()) return@forEach
@@ -85,5 +110,18 @@ class PebbleKitCompanionRegistry(
             // The cache can hold several versions of one watchapp, so merge rather than replace.
             merge(info.uuid.lowercase(), packages) { existing, new -> existing + new }
         }
+    }
+
+    companion object {
+        fun create(
+            locker: LockerApi,
+            pbwCache: LockerPBWCache,
+            scope: LibPebbleCoroutineScope,
+        ) = PebbleKitCompanionRegistry(
+            lockerUuids = locker.getAllLockerUuids(),
+            cachedPbws = pbwCache::cachedPbwPaths,
+            pbwFilesChanged = pbwCache.pbwFilesChanged,
+            scope = scope,
+        )
     }
 }
