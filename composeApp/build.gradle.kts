@@ -303,3 +303,114 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
+/**
+ * Components this app is allowed to export, pinned including whatever permission protects each
+ * one. Anything exported and absent from this set fails the release build.
+ *
+ * The exported surface is what any other app on the device can reach, and it grows silently: a
+ * dependency can contribute a component through manifest merging without a line of app code
+ * changing, which is how an exported Compose preview activity once reached a release build. It
+ * also survives review, because a branch diff shows no manifest change to notice.
+ *
+ * Deliberately checked against the merged manifest at build time rather than from an
+ * instrumentation test. A release variant cannot be instrumented at all (R8 renames the classes
+ * the test APK refers to), so a runtime test could only ever have pinned the debug surface,
+ * which is exactly where the preview activity looked harmless.
+ *
+ * Note this cannot see receivers registered at runtime with RECEIVER_EXPORTED, which are
+ * invisible to every manifest-based check. Classic PebbleKit registers several.
+ */
+val allowedExportedComponents = setOf(
+    "activity|coredevices.coreapp.MainActivity|perm=|read=|write=",
+    "activity-alias|coredevices.coreapp.HealthPermissionsRationaleActivity|perm=|read=|write=",
+    "activity-alias|coredevices.coreapp.ViewPermissionUsageActivity|perm=android.permission.START_VIEW_PERMISSION_USAGE|read=|write=",
+    "service|androidx.health.platform.client.impl.sdkservice.HealthDataSdkService|perm=|read=|write=",
+    "service|io.rebble.libpebblecommon.notification.LibPebbleNotificationListener|perm=android.permission.BIND_NOTIFICATION_LISTENER_SERVICE|read=|write=",
+    "service|io.rebble.libpebblecommon.calls.LibPebbleInCallService|perm=android.permission.BIND_INCALL_SERVICE|read=|write=",
+    "service|io.rebble.libpebblecommon.pebblekit.two.PebbleSenderReceiver|perm=|read=|write=",
+    "service|androidx.work.impl.background.systemjob.SystemJobService|perm=android.permission.BIND_JOB_SERVICE|read=|write=",
+    "receiver|androidx.work.impl.diagnostics.DiagnosticsReceiver|perm=android.permission.DUMP|read=|write=",
+    "receiver|androidx.profileinstaller.ProfileInstallReceiver|perm=android.permission.DUMP|read=|write=",
+    "provider|io.rebble.libpebblecommon.pebblekit.two.PebbleKitProvider|perm=|read=|write=",
+    "provider|io.rebble.libpebblecommon.pebblekit.classic.PebbleKitProvider|perm=|read=|write=",
+)
+
+abstract class VerifyExportedComponents : DefaultTask() {
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val mergedManifest: RegularFileProperty
+
+    @get:Input
+    abstract val allowed: SetProperty<String>
+
+    @TaskAction
+    fun verify() {
+        val android = "http://schemas.android.com/apk/res/android"
+        val document = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+            .apply { isNamespaceAware = true }
+            .newDocumentBuilder()
+            .parse(mergedManifest.get().asFile)
+
+        val found = mutableSetOf<String>()
+        listOf("activity", "activity-alias", "service", "receiver", "provider").forEach { tag ->
+            val nodes = document.getElementsByTagName(tag)
+            for (index in 0 until nodes.length) {
+                val element = nodes.item(index) as org.w3c.dom.Element
+                if (element.getAttributeNS(android, "exported") != "true") continue
+                val name = element.getAttributeNS(android, "name")
+                val permission = element.getAttributeNS(android, "permission")
+                val read = element.getAttributeNS(android, "readPermission")
+                val write = element.getAttributeNS(android, "writePermission")
+                found += "$tag|$name|perm=$permission|read=$read|write=$write"
+            }
+        }
+
+        val allowedSet = allowed.get()
+        val unexpected = (found - allowedSet).sorted()
+        // A stale entry is reported too: it usually means a component was renamed or its
+        // permission changed, and the matching new entry is sitting in `unexpected`.
+        val stale = (allowedSet - found).sorted()
+
+        if (unexpected.isEmpty() && stale.isEmpty()) {
+            logger.lifecycle("Exported components verified: ${found.size}, all allowlisted.")
+            return
+        }
+
+        val report = buildString {
+            appendLine("Exported component surface changed.")
+            if (unexpected.isNotEmpty()) {
+                appendLine()
+                appendLine("Exported but NOT allowlisted:")
+                unexpected.forEach { appendLine("  $it") }
+                appendLine()
+                appendLine("Each of these is reachable by any app on the device. Confirm it is")
+                appendLine("meant to be, and that the permission shown actually protects it,")
+                appendLine("before adding it to allowedExportedComponents.")
+            }
+            if (stale.isNotEmpty()) {
+                appendLine()
+                appendLine("Allowlisted but no longer exported as described:")
+                stale.forEach { appendLine("  $it") }
+            }
+        }
+        throw GradleException(report)
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        val verify = tasks.register<VerifyExportedComponents>(
+            "verify${variant.name.replaceFirstChar { it.uppercase() }}ExportedComponents"
+        ) {
+            group = "verification"
+            description = "Fails if the release manifest exports anything not on the allowlist."
+            mergedManifest.set(variant.artifacts.get(com.android.build.api.artifact.SingleArtifact.MERGED_MANIFEST))
+            allowed.set(allowedExportedComponents)
+        }
+        // Matched lazily rather than looked up: in this Kotlin Multiplatform project the
+        // assemble tasks do not exist yet while onVariants is running.
+        val assembleName = "assemble${variant.name.replaceFirstChar { it.uppercase() }}"
+        tasks.matching { it.name == assembleName }.configureEach { dependsOn(verify) }
+    }
+}
