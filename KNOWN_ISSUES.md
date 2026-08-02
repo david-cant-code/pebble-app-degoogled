@@ -46,3 +46,34 @@ against a purely historical exposure window. The grandfather clause and
 its frozen anchor digests live in `CactusModelPins.kt`; the first pin
 bump ends the exception automatically, and this entry leaves the file
 with it.
+
+## Classic PebbleKit app start and stop cannot be restricted to authorized callers
+
+**Status: accepted, no fix available on Android.**
+
+`com.getpebble.action.app.START` and `.STOP` are ordered broadcasts that any
+installed application can send, and acting on one launches or stops a
+watchapp on the connected watch. Every other cross-app entry point in this
+fork is gated on the caller being a declared companion of the watchapp it is
+addressing, but a `BroadcastReceiver` is given no caller identity at all:
+`onReceive` sees the intent and nothing about who sent it, and no platform
+API recovers it after the fact. There is nothing to check.
+
+The obvious alternative, requiring a permission on the receiver, is not
+available either. Classic PebbleKit has never declared a permission, so every
+existing third-party watchapp companion would break, and a custom permission
+at `normal` protection level is granted to anything that asks for it, which
+would look protective while stopping nobody.
+
+Impact is bounded to nuisance rather than disclosure: start and stop take a
+watchapp UUID and return nothing to the sender, so an app abusing them can
+launch or close watchapps but learns nothing about the watch or its data. The
+adjacent leaks have been closed separately: the classic provider exposes no
+serial, watch data broadcast back out is narrowed to the watchapp's declared
+companions where one is declared, and a message send is ignored unless it
+addresses the session's own watchapp. The equivalent PebbleKit 2 operations
+travel over a bound service, where the caller is authoritative, and are
+authorization-gated there.
+
+This entry leaves the file if a future Android release attaches sender
+identity to broadcasts, or if the classic surface is retired.
