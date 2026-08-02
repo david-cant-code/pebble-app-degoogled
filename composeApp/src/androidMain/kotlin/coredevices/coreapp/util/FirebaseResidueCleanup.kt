@@ -18,15 +18,13 @@ import kotlin.concurrent.thread
  * still-valid Core-account credential would sit at rest forever, riding
  * along in Auto Backup and device-to-device transfers.
  *
- * Two things have since narrowed this, and the original rationale here
- * overstated what remains. It also argued that backup restore matches on
- * package name rather than signing certificate, so restored official-app
- * data could land in a fresh install of this fork; the rebrand moved the
- * applicationId to com.anopticlabs.gravel, which no longer collides with
- * upstream's, so that route is closed. And because the SDKs were removed
- * before that rename, no build carrying Firebase ever ran under the current
- * applicationId, so a data directory this cleanup can reach should never
- * contain the residue in the first place.
+ * Two facts narrow what this can ever find. The applicationId is
+ * com.anopticlabs.gravel, which does not collide with upstream's, so a
+ * backup of the official app cannot restore into this fork's data
+ * directory (restore matches on package name). And the SDKs were removed
+ * before that rename, so no build carrying Firebase ever ran under the
+ * current applicationId, meaning a data directory this cleanup can reach
+ * should never contain the residue in the first place.
  *
  * It is kept as a standing guard rather than because a path to it is known:
  * the cost is a few directory listings on a background thread at startup,
