@@ -1,27 +1,11 @@
 # Gravel (de-Googled CoreApp fork)
 
 Gravel is an **unofficial, Android-only fork** of the Core Devices Pebble
-mobile app (upstream name: CoreApp). It is not affiliated with or endorsed
-by Core Devices. The fork is distributed under GPLv3 (see `LICENSE`);
-upstream's commercial licensing option does not apply here.
-
-## Fork goals
-
-1. **Run fully featured without Google Play services or Firebase.** The app
-   must work on de-Googled Android (GrapheneOS, LineageOS, and similar).
-2. **Strip telemetry.** Crashlytics, analytics heartbeats, and the Memfault
-   firmware-diagnostics relay.
-3. **Weather without Play services.** Manual latitude/longitude entry. The
-   place search uses the platform Geocoder, which is GMS-backed and
-   non-functional on de-Googled ROMs; current-location weather already works
-   via `LocationManager`.
-4. **Open the watch microphone API to third-party applications.** A
-   documented, permission-gated audio capture API usable by any authorized
-   app, rather than locking watch mic audio to first-party features.
-5. Secondary: make battery analytics usable without a sign-in wall, if
-   feasible. Upstream's battery screen is a server-rendered page fed by the
-   telemetry relay this fork strips (its entry points are disabled here), so
-   this goal now means a local, on-device reimplementation.
+mobile app (upstream name: CoreApp), not affiliated with or endorsed by
+Core Devices, distributed under GPLv3 (see `LICENSE`). What the fork is,
+its goals, status, and scope live in `README.md`; this file is the rules
+for changing it. How the de-Googling is implemented (the DI seams, the
+Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
 
 ## Fork rules (these override the upstream rules below where they conflict)
 
@@ -30,43 +14,26 @@ upstream's commercial licensing option does not apply here.
   must work on both Android and iOS" rule.
 - **De-Google at the DI seam, not by mass deletion.** Swap Firebase/GMS-backed
   implementations for no-op or GMS-free ones at the Koin module level, keeping
-  upstream call sites intact so upstream merges stay cheap. The out-of-scope
-  Ring/Index AI feature module (`experimental`) is unplugged from the build
-  (`settings.gradle.kts` + DI wiring) with sources left in place for the same
-  reason. `libindex`, `index-ai`, and `mcp` stay compiled (the watch UI in
-  `pebble` compiles against `libindex`, whose Room schema references
-  `index-ai` entities, which need `mcp`) but their runtime is dead: a no-op
-  `LibIndex` is bound at the Koin seam, fork stubs in `composeApp` replace
-  the `experimental` types the app wiring touches (same fully-qualified
-  names, so re-plugging the module trips duplicate-class errors), and
-  `CoreConfig.enableIndex` has no reachable set-point. The Firebase SDKs are
-  gone via the same idea at a different seam: the fork module
-  `:firebase-stubs` shadows the gitlive `dev.gitlive.firebase.*` artifacts
-  with inert same-FQN stand-ins (permanently signed out, empty
-  never-authoritative store), so upstream call sites compile unchanged, any
-  new upstream use of gitlive API fails the build until the stub surface is
-  extended, and re-adding the real artifacts trips duplicate classes;
-  `UsersDao` is additionally rebound at the Koin seam to the fork's
-  `SignedOutUsersDao`. The FCM push stack is
-  the one deliberate exception to the seam rule: push either registers a
-  device token with Google or does not exist, so `PushMessaging`,
-  `PushService`, and their call sites were deleted outright rather than
-  no-opped; do not read that deletion as precedent for other strips.
+  upstream call sites intact so upstream merges stay cheap. `DESIGN_NOTES.md`
+  maps the existing seams (the `:firebase-stubs` module, the unplugged
+  `experimental` module, the no-op `LibIndex`); extend those seams rather
+  than deleting upstream code. The FCM push stack is the one deliberate
+  exception to the seam rule: push either registers a device token with
+  Google or does not exist, so `PushMessaging`, `PushService`, and their
+  call sites were deleted outright rather than no-opped; do not read that
+  deletion as precedent for other strips.
 - **No `google-services.json`.** The google-services plugin and the Firebase
   SDKs are gone, so no config file (dummy or real) is needed or consumed;
   this supersedes the upstream build instruction below that still asks for
   `composeApp/src/google-services.json`.
 - **Distinct branding: the fork is Gravel.** applicationId is
-  `com.anopticlabs.gravel`; the launcher icon, in-app wordmark, and fastlane
-  graphics come from `art/gravel-logo.png`; the brand color is `gravelPurple`
-  (0xFF9129DE in `util` `theme/Theme.kt`), while the adaptive-icon background
-  (`util .../res/values/ic_launcher_background.xml`) is a neutral dark so the
-  purple mark stays visible against it. The Kotlin `namespace` and source
-  packages deliberately stay `coredevices.coreapp` so upstream merges stay
-  cheap; only the applicationId and user-facing branding are renamed. Where
-  docs reference `coredevices.coreapp` as the installed package (for example
-  the adb launch and verify commands, and the adb instrumentation component
-  in test KDocs), substitute `com.anopticlabs.gravel`. Nominative references
+  `com.anopticlabs.gravel`; the Kotlin `namespace` and source packages
+  deliberately stay `coredevices.coreapp` so upstream merges stay cheap;
+  only the applicationId and user-facing branding are renamed (asset and
+  color details in `DESIGN_NOTES.md`). Where docs reference
+  `coredevices.coreapp` as the installed package (for example the adb
+  launch and verify commands, and the adb instrumentation component in
+  test KDocs), substitute `com.anopticlabs.gravel`. Nominative references
   to Pebble watches and Core Devices stay (they state compatibility and
   attribution); using their branding as ours does not.
 - **Verify against the artifact.** De-Google changes are confirmed against the
@@ -81,14 +48,22 @@ upstream's commercial licensing option does not apply here.
   cross-app interface (e.g. the third-party mic API) must be explicitly
   authorization-gated (signature/knownSigner-level permissions or equivalent),
   never openly exported.
+- **Comment density: this fork comments far more heavily than upstream, by
+  choice.** This overrides the upstream comment guidance below on density
+  only; upstream's other comment rules (no ticket references, no comments
+  defending why a change is correct) still apply. New and changed code gets
+  comments stating intent, constraints, and trade-offs, even where the why
+  seems obvious at the time of writing. The reason is working conditions:
+  this fork is one person's free-time project, worked on AI-assisted, mostly
+  at weekends around a demanding day job, so whoever picks the code up next
+  (the maintainer after a week of unrelated work, or an agent with no
+  session history) starts cold, and most fork changes remove or substitute
+  code the fork did not write.
 - **License compliance.** Keep `LICENSE` and copyright notices intact; changes
   are tracked through git history per GPLv3 §5.
 - **Branch discipline.** Feature work happens on branches, each reviewed
   before merging to master. Commits are logical units that build and pass
   tests, with an imperative subject and a body explaining what and why.
-- **House style: no em dashes** in anything committed to this fork (docs,
-  comments, commit messages). Use commas, colons, semicolons, or parentheses
-  instead. Upstream text kept verbatim (like the section below) is exempt.
 
 ---
 

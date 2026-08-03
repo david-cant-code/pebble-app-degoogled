@@ -43,6 +43,7 @@ lands piece by piece:
 - [x] Google Play services / Firebase removal
 - [x] Core watch firmware updates from the public PebbleOS GitHub releases
 - [ ] Third-party microphone API
+- [ ] Local on-device battery analytics (secondary goal, feasibility open)
 
 ## Building (Android)
 
@@ -81,7 +82,9 @@ protocol, services, BlobDB sync).
 
 For the full architecture write-up, module map, and developer documentation,
 see the [upstream README](https://github.com/coredevices/mobileapp#readme),
-which applies to this fork aside from the removals above.
+which applies to this fork aside from the removals above. The fork-specific
+de-Googling architecture (the DI seams, the Firebase stubs, the unplugged
+Ring module) is described in [DESIGN_NOTES.md](DESIGN_NOTES.md).
 
 ## License and attribution
 
