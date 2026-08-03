@@ -43,6 +43,11 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   before code is written against it: actively maintained, current stable
   version, no known advisories, non-deprecated API surface, and a real need
   that the standard library or existing deps cannot meet.
+- **Stay F-Droid deliverable.** The fork targets inclusion in F-Droid's
+  main repository, so a change must not add non-free dependencies,
+  dependencies from repositories F-Droid does not allow, or prebuilt
+  binaries in the tree. The pre-existing violations are recorded in
+  `KNOWN_ISSUES.md`; do not add new ones.
 - **Security first.** No known security flaw ships, however small; genuinely
   deferred issues are documented in `KNOWN_ISSUES.md` with rationale. Any
   cross-app interface (e.g. the third-party mic API) must be explicitly

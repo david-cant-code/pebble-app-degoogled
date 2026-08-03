@@ -24,6 +24,9 @@ similar phones with as little telemetry as technically possible.
 - **A watch microphone API for third-party applications** documented and
   authorization-gated, rather than locking watch mic audio to first-party
   features.
+- **Distribution through F-Droid.** The fork targets inclusion in F-Droid's
+  main repository; the blockers still standing are tracked in
+  [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
 
 Out of scope: iOS (sources remain in-tree but are unmaintained here), and the
 Pebble Index 01 (Ring) / Index AI features, due to their heavy reliance on
@@ -44,6 +47,7 @@ lands piece by piece:
 - [x] Core watch firmware updates from the public PebbleOS GitHub releases
 - [ ] Third-party microphone API
 - [ ] Local on-device battery analytics (secondary goal, feasibility open)
+- [ ] F-Droid inclusion (blockers tracked in KNOWN_ISSUES.md)
 
 ## Building (Android)
 

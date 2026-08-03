@@ -147,3 +147,37 @@ never exists, which disables Auto Backup, the O-era device-to-device
 transfer path, and `adb backup` alike on those devices. `BackupRulesTest`
 pins the shape of all three rule files. This entry leaves the file when
 minSdk reaches 28.
+
+## The bundled speech stack blocks F-Droid inclusion
+
+**Status: open; which way to resolve it is not yet decided.**
+
+The fork targets inclusion in F-Droid's main repository. The de-Google
+work itself passes F-Droid's checks: the fdroidserver scanner flags real
+Google dependency coordinates and class paths, not mere names like the
+`firebase-stubs` module, and the built release APK carries no Firebase,
+GMS, or tracker classes. What fails is the on-device speech stack, which
+is prebuilt binary code that F-Droid's scanner rejects and its inclusion
+policy disallows (dependencies must be free software, built from source
+or served from trusted repositories):
+
+- `cactus/src/androidMain/jniLibs/arm64-v8a/libcactus_engine.so`, the
+  dictation engine, is a 57 MB prebuilt native library checked into git
+  with no source or license in the tree, and it ships in the APK. The
+  missing license is a problem beyond F-Droid: the app links it while
+  shipping under GPLv3.
+- `models/needle-pebble-ft-cq4.zip` (13.7 MB) is bundled into APK assets
+  via a symlink, and the main STT weights (383 MB) are downloaded at
+  runtime from Hugging Face; neither carries a license statement in the
+  tree, and both would draw non-free-assets objections.
+- The `io.github.coredevices.haversine` AAR ships prebuilt satellite
+  `.so` libraries into the APK, even though the Ring runtime they serve
+  is disabled at the DI seam in this fork.
+
+Resolving this means building the engine from source (upstream has not
+published it), dropping the speech stack from an F-Droid build, or
+replacing it with a free engine; each option costs something real, so
+the choice is recorded here rather than made silently. Routine
+submission work (build recipe, signing, versioning) is not tracked
+here. This entry leaves the file when an F-Droid submission is accepted
+or the target is dropped.
