@@ -97,20 +97,39 @@ socket type):
    http/https (XHR, fetch, subresources, navigations). WebSocket
    handshakes do not pass through this callback (a documented WebView
    limitation), which is why layer 3 exists.
-2. `startup.js` replaces `XMLHttpRequest`/`fetch`/`WebSocket`/
-   `EventSource`/`sendBeacon` with failing stubs before the app bundle
-   loads, gated on a synchronous `_Pebble.isNetworkAllowed()` bridge call.
-   Best-effort (same-realm JS a hostile bundle could try to work around),
-   so it never stands alone.
+2. `startup.js` wraps `XMLHttpRequest`/`fetch`/`WebSocket`/
+   `EventSource`/`sendBeacon` in failing guards when the app loads while
+   denied, gated on a synchronous `_Pebble.isNetworkAllowed()` bridge
+   call. The guards re-read the live grant on every use and restore the
+   original entry points the moment access is granted, so granting a
+   running app takes effect without a session restart (the page loads
+   only once per session, so a load-time-only stub would freeze the deny
+   until the app restarts). They do not reinstall on a later revoke; the
+   native layers enforce that direction live. Best-effort (same-realm JS
+   a hostile bundle could try to work around), so it never stands alone.
 3. `ProxyController` (androidx.webkit) sets a process-wide WebView proxy
    override that black-holes all egress (every scheme, including ws/wss)
    to an unroutable address while a network-denied app runs, and clears it
-   otherwise. Applied and awaited before the app page loads, kept in sync
-   with live toggles, and cleared on stop. Process-global is inherent to
-   the API, but only one PKJS WebView runs at a time and the config page
-   (below) is gated for denied apps, so nothing legitimate needs the
-   network while it is set. Requires the `PROXY_OVERRIDE` feature; the
-   degraded case is in `KNOWN_ISSUES.md`.
+   otherwise. Chromium's implicit proxy-bypass rules are removed so
+   localhost and link-local destinations are black-holed too; both are
+   real egress (other apps' local socket servers, hosts on the same
+   network segment). Applied and awaited before the app page loads and
+   kept in sync with live toggles; on stop, the live-toggle collector is
+   cancelled first and the override is cleared only after the WebView is
+   destroyed, so a denied app's scripts never run without the black-hole
+   and nothing can re-install it once teardown has cleared it.
+   Process-global is inherent to the API, but only one PKJS WebView runs
+   at a time and the config page (below) is gated for denied apps, so
+   nothing legitimate needs the network while it is set. Requires the
+   `PROXY_OVERRIDE` feature; the degraded case is in `KNOWN_ISSUES.md`.
+
+A deny-to-allow flip while the app is running also restarts its PKJS
+session (`CompanionAppLifecycleManager` funnels the restart through the
+same serially processed stream as watch-side app switches): an app that
+fetches only at launch never touches the network again after its first
+attempt fails, so without the restart a mid-session grant would take
+visible effect only at the next app switch. Allow-to-deny needs no
+restart; the enforcement layers apply it live.
 
 The phone-side interceptor path (`PrivatePKJSInterface.onIntercepted`,
 which the weather interceptors use to fetch on the app's behalf) is gated

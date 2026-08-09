@@ -10,10 +10,12 @@ import io.rebble.libpebblecommon.database.entity.LockerEntry
 import io.rebble.libpebblecommon.di.ConnectionCoroutineScope
 import io.rebble.libpebblecommon.di.LibPebbleCoroutineScope
 import io.rebble.libpebblecommon.disk.pbw.PbwApp
+import io.rebble.libpebblecommon.database.entity.LockerAppPermissionType
 import io.rebble.libpebblecommon.js.CompanionAppDevice
 import io.rebble.libpebblecommon.js.PKJSApp
 import io.rebble.libpebblecommon.locker.Locker
 import io.rebble.libpebblecommon.locker.LockerPBWCache
+import io.rebble.libpebblecommon.locker.WatchappPermissionResolver
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.PbwAppInfo
 import io.rebble.libpebblecommon.services.WatchInfo
 import io.rebble.libpebblecommon.services.app.AppRunStateService
@@ -25,19 +27,24 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.uuid.Uuid
 
 class CompanionAppLifecycleManager(
     private val lockerPBWCache: LockerPBWCache,
@@ -47,7 +54,8 @@ class CompanionAppLifecycleManager(
     private val locker: Locker,
     private val connectionScope: ConnectionCoroutineScope,
     private val libPebbleConfigFlow: LibPebbleConfigFlow,
-    private val libpebbleCoroutineScope: LibPebbleCoroutineScope
+    private val libpebbleCoroutineScope: LibPebbleCoroutineScope,
+    private val watchappPermissions: WatchappPermissionResolver,
 ): ConnectedPebble.PKJS, ConnectedPebble.CompanionAppControl {
     companion object {
         private val logger = Logger.withTag(CompanionAppLifecycleManager::class.simpleName!!)
@@ -56,6 +64,20 @@ class CompanionAppLifecycleManager(
     private lateinit var device: CompanionAppDevice
 
     private var activeAppScope: CoroutineScope = CoroutineScope(Job().also { it.cancel() })
+
+    // Fork: the locker entry whose companion apps are currently running, kept so a
+    // permission-triggered restart can verify the request still targets the live
+    // session before acting on it.
+    private var currentEntry: LockerEntry? = null
+
+    // Fork: restart requests raised by the network-grant watcher. Funnelled through
+    // the same serially processed event stream as watch-side app changes (see init),
+    // so a restart can never interleave with a genuine app switch; both mutate the
+    // same session state. DROP_OLDEST because restart requests are idempotent.
+    private val restartRequests = MutableSharedFlow<Uuid>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
 
     private val runningApps: MutableStateFlow<List<CompanionApp>> = MutableStateFlow(emptyList())
     @Deprecated("Use more generic currentCompanionAppSession instead and cast if necessary")
@@ -66,6 +88,7 @@ class CompanionAppLifecycleManager(
 
     private suspend fun handleAppStop() {
         activeAppScope.cancel()
+        currentEntry = null
         runningApps.value.forEach { app ->
             // Don't error out if one app fails to stop
             try {
@@ -79,6 +102,7 @@ class CompanionAppLifecycleManager(
 
     private suspend fun handleNewRunningApp(lockerEntry: LockerEntry) {
         try {
+            currentEntry = lockerEntry
             val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
                 logger.e(throwable) { "Unhandled exception in CompanionAppLifecycleManager-${lockerEntry.id}: ${throwable.message}" }
             }
@@ -107,6 +131,33 @@ class CompanionAppLifecycleManager(
                     for (channel in appIncomingChannels) {
                         channel.trySend(message)
                     }
+                }
+            }
+
+            // Fork: restart the session when the app's Network grant flips from deny
+            // to allow. A PKJS session that loaded while denied had its JS network
+            // entry points guarded from page load, and an app that only fetches at
+            // launch never touches the network again after that first attempt throws,
+            // so a mid-session grant would otherwise take visible effect only at the
+            // next app switch. Restarting re-runs the app's JS with the grant in
+            // place, which is the same transition apps already handle when the watch
+            // switches away and back. The allow-to-deny direction needs no restart:
+            // the enforcement layers apply it live. The watcher dies with
+            // activeAppScope, and a fresh session's watcher starts with a clean
+            // transition history, so a restart cannot retrigger itself.
+            if (newApps.any { it is PKJSApp }) {
+                activeAppScope.launch {
+                    var previous: Boolean? = null
+                    watchappPermissions
+                        .watchappPermissionGranted(lockerEntry.id, LockerAppPermissionType.Network)
+                        .distinctUntilChanged()
+                        .collect { allowed ->
+                            if (previous == false && allowed) {
+                                logger.d { "Network grant for ${lockerEntry.id} allowed mid-session; requesting restart" }
+                                restartRequests.tryEmit(lockerEntry.id)
+                            }
+                            previous = allowed
+                        }
                 }
             }
         } catch (e: CancellationException) {
@@ -154,13 +205,35 @@ class CompanionAppLifecycleManager(
             watchInfo,
             appMessagesService
         )
-        appRunStateService.runningApp.onEach {
-            handleAppStop()
-            if (it != null) {
-                val lockerEntry = lockerEntryDao.getEntry(it)
-                lockerEntry?.let {
-                    if (!it.systemApp) {
-                        handleNewRunningApp(lockerEntry)
+        // Fork: watch-side app changes and permission-triggered restart requests are
+        // merged into one serially collected stream, so the two kinds of event can
+        // never interleave; both tear down and rebuild the same session state. A
+        // restart request is only honoured if it still targets the entry that is
+        // currently running (the running app may have changed between the request
+        // being raised and processed).
+        merge(
+            appRunStateService.runningApp.map { SessionEvent.AppChanged(it) },
+            restartRequests.map { SessionEvent.RestartRequested(it) },
+        ).onEach { event ->
+            when (event) {
+                is SessionEvent.AppChanged -> {
+                    handleAppStop()
+                    if (event.uuid != null) {
+                        val lockerEntry = lockerEntryDao.getEntry(event.uuid)
+                        lockerEntry?.let {
+                            if (!it.systemApp) {
+                                handleNewRunningApp(lockerEntry)
+                            }
+                        }
+                    }
+                }
+
+                is SessionEvent.RestartRequested -> {
+                    val entry = currentEntry
+                    if (entry != null && entry.id == event.uuid) {
+                        logger.d { "Restarting companion apps for ${event.uuid} after network grant" }
+                        handleAppStop()
+                        handleNewRunningApp(entry)
                     }
                 }
             }
@@ -169,6 +242,13 @@ class CompanionAppLifecycleManager(
             handleAppStop()
         }.launchIn(connectionScope)
     }
+}
+
+// Fork: event vocabulary for the serialized session stream in
+// CompanionAppLifecycleManager.init.
+private sealed class SessionEvent {
+    data class AppChanged(val uuid: Uuid?) : SessionEvent()
+    data class RestartRequested(val uuid: Uuid) : SessionEvent()
 }
 
 /**

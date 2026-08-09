@@ -37,7 +37,9 @@ import io.rebble.libpebblecommon.locker.WatchappPermissionResolver
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.PbwAppInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -93,6 +95,10 @@ class WebViewJsRunner(
     }
 
     private var webView: WebView? = null
+
+    // The live-toggle collector launched in start(); stop() cancels it before any
+    // proxy teardown so the two can never interleave on the process-global override.
+    private var networkPermissionCollector: Job? = null
     private var restoreCompleted: Boolean = false
     private val initializedLock = Object()
     private val publicJsInterface = WebViewPKJSInterface(this, device, context, libPebble, jsTokenUtil)
@@ -319,8 +325,12 @@ class WebViewJsRunner(
         applyNetworkProxy(networkAllowed)
         // Track live toggles: a change in the resolved grant (per-app override or the
         // global default) re-caches the value and re-applies/clears the proxy while the
-        // app keeps running. Runs on the runner scope so it dies with the session.
-        scope.launch {
+        // app keeps running. The job is kept so stop() can cancel it FIRST, before it
+        // touches the proxy itself: the runner scope outlives stop()'s suspension
+        // points (PKJSApp cancels it only after stop() returns), so an emission landing
+        // mid-teardown would otherwise re-install the process-wide black-hole after
+        // stop() cleared it, with nothing left alive to ever clear it again.
+        networkPermissionCollector = scope.launch {
             watchappPermissions.watchappPermissionGranted(uuid, LockerAppPermissionType.Network)
                 .collect { allowed ->
                     if (allowed != networkAllowed) {
@@ -358,10 +368,17 @@ class WebViewJsRunner(
             if (allowed) {
                 controller.clearProxyOverride(executor) { if (cont.isActive) cont.resume(Unit) }
             } else {
-                // Route everything to an unroutable address (RFC 5737 TEST-NET-1) with
-                // no bypass rules, so every connection attempt fails fast.
+                // Route everything to an unroutable address (RFC 5737 TEST-NET-1), so
+                // every connection attempt fails fast. removeImplicitRules() matters:
+                // without it Chromium exempts localhost and link-local destinations
+                // from any proxy override, which would leave a denied app's WebSocket
+                // reachable to other apps' local socket servers and to link-local
+                // hosts on the same network segment. Those destinations are egress
+                // too; the black-hole has to cover them for this layer to be the
+                // deterministic WebSocket cover it claims to be.
                 val config = ProxyConfig.Builder()
                     .addProxyRule("192.0.2.1:1")
+                    .removeImplicitRules()
                     .build()
                 controller.setProxyOverride(config, executor) { if (cont.isActive) cont.resume(Unit) }
             }
@@ -395,11 +412,15 @@ class WebViewJsRunner(
         // connection scope — e.g. on watch disconnect.
         withContext(NonCancellable + Dispatchers.Main) {
             try {
-                // Clear any black-hole proxy this app set, so the process-global override
-                // never outlives the session and starves a later WebView (config page or
-                // the next app). No-op if this app was network-allowed.
-                runCatching { applyNetworkProxy(allowed = true) }
-                    .onFailure { logger.w(it) { "Failed to clear network proxy on stop" } }
+                // Stop the live-toggle collector before anything else so a grant-flow
+                // emission (the combined flow re-emits on any permission-table or
+                // config write) cannot re-install the process-global black-hole while
+                // teardown is mid-flight; the clear at the end of this block must be
+                // the last word on the override. cancelAndJoin, not just cancel: the
+                // collector may be suspended inside a proxy call of its own, and it
+                // must have fully wound down before the teardown sequence proceeds.
+                networkPermissionCollector?.cancelAndJoin()
+                networkPermissionCollector = null
                 // Save final state of localStorage to our scoped storage, to catch any
                 // property-accessor changes (not caught by our shim).
                 // Skip if restoreLocalStorage() never completed: window.localStorage is
@@ -423,6 +444,16 @@ class WebViewJsRunner(
             } finally {
                 // destroy() must always run, even if the pre-destroy teardown fails
                 webView?.destroy()
+                // Clear any black-hole proxy this app set, so the process-global
+                // override never outlives the session and starves a later WebView
+                // (config page or the next app). Deliberately the LAST teardown step,
+                // after destroy(): the page's JS stays live through the earlier steps
+                // (persistLocalStorage even evaluates into it), and clearing the
+                // proxy any sooner would hand a denied app's still-running scripts a
+                // WebSocket-egress window on every stop. No-op if this app was
+                // network-allowed.
+                runCatching { applyNetworkProxy(allowed = true) }
+                    .onFailure { logger.w(it) { "Failed to clear network proxy on stop" } }
             }
         }
         synchronized(initializedLock) {
