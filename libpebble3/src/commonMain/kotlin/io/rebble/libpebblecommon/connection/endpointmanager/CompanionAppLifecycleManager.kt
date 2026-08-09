@@ -27,19 +27,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.FlowCollector
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
-import kotlinx.coroutines.flow.onCompletion
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
@@ -70,13 +63,22 @@ class CompanionAppLifecycleManager(
     // session before acting on it.
     private var currentEntry: LockerEntry? = null
 
-    // Fork: restart requests raised by the network-grant watcher. Funnelled through
-    // the same serially processed event stream as watch-side app changes (see init),
-    // so a restart can never interleave with a genuine app switch; both mutate the
-    // same session state. DROP_OLDEST because restart requests are idempotent.
-    private val restartRequests = MutableSharedFlow<Uuid>(
-        extraBufferCapacity = 1,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    // Fork: every decision about when sessions stop, start, and restart lives in
+    // the coordinator (see its KDoc for the model); this class only supplies the
+    // effects, which need the locker DAO, PBW cache, and WebView machinery that
+    // unit tests cannot construct.
+    private val sessionCoordinator = CompanionSessionCoordinator(
+        latestRunningApp = { appRunStateService.runningApp.value },
+        currentSessionApp = { currentEntry?.id },
+        stopSession = { handleAppStop() },
+        startSession = { uuid ->
+            // Fresh lookup on every start so a permission restart also picks up the
+            // newest locker entry for the app.
+            val lockerEntry = lockerEntryDao.getEntry(uuid)
+            if (lockerEntry != null && !lockerEntry.systemApp) {
+                handleNewRunningApp(lockerEntry)
+            }
+        },
     )
 
     private val runningApps: MutableStateFlow<List<CompanionApp>> = MutableStateFlow(emptyList())
@@ -146,17 +148,18 @@ class CompanionAppLifecycleManager(
             // activeAppScope, and a fresh session's watcher starts with a clean
             // transition history, so a restart cannot retrigger itself.
             if (newApps.any { it is PKJSApp }) {
+                // Read here, where the coordinator has already counted this
+                // session's start, so the request stays pinned to THIS session; a
+                // read at emission time could adopt a successor session's
+                // generation and defeat the coordinator's staleness check.
+                val sessionGeneration = sessionCoordinator.currentGeneration
                 activeAppScope.launch {
-                    var previous: Boolean? = null
                     watchappPermissions
                         .watchappPermissionGranted(lockerEntry.id, LockerAppPermissionType.Network)
-                        .distinctUntilChanged()
-                        .collect { allowed ->
-                            if (previous == false && allowed) {
-                                logger.d { "Network grant for ${lockerEntry.id} allowed mid-session; requesting restart" }
-                                restartRequests.tryEmit(lockerEntry.id)
-                            }
-                            previous = allowed
+                        .denyToAllowTransitions()
+                        .collect {
+                            logger.d { "Network grant for ${lockerEntry.id} allowed mid-session; requesting restart" }
+                            sessionCoordinator.requestRestart(lockerEntry.id, sessionGeneration)
                         }
                 }
             }
@@ -205,50 +208,12 @@ class CompanionAppLifecycleManager(
             watchInfo,
             appMessagesService
         )
-        // Fork: watch-side app changes and permission-triggered restart requests are
-        // merged into one serially collected stream, so the two kinds of event can
-        // never interleave; both tear down and rebuild the same session state. A
-        // restart request is only honoured if it still targets the entry that is
-        // currently running (the running app may have changed between the request
-        // being raised and processed).
-        merge(
-            appRunStateService.runningApp.map { SessionEvent.AppChanged(it) },
-            restartRequests.map { SessionEvent.RestartRequested(it) },
-        ).onEach { event ->
-            when (event) {
-                is SessionEvent.AppChanged -> {
-                    handleAppStop()
-                    if (event.uuid != null) {
-                        val lockerEntry = lockerEntryDao.getEntry(event.uuid)
-                        lockerEntry?.let {
-                            if (!it.systemApp) {
-                                handleNewRunningApp(lockerEntry)
-                            }
-                        }
-                    }
-                }
-
-                is SessionEvent.RestartRequested -> {
-                    val entry = currentEntry
-                    if (entry != null && entry.id == event.uuid) {
-                        logger.d { "Restarting companion apps for ${event.uuid} after network grant" }
-                        handleAppStop()
-                        handleNewRunningApp(entry)
-                    }
-                }
-            }
-        }.onCompletion {
-            // Unsure if this is needed
-            handleAppStop()
-        }.launchIn(connectionScope)
+        // Fork: session decisions live in CompanionSessionCoordinator; this wiring
+        // stays thin so upstream merges only touch the effect lambdas above.
+        connectionScope.launch {
+            sessionCoordinator.run(appRunStateService.runningApp)
+        }
     }
-}
-
-// Fork: event vocabulary for the serialized session stream in
-// CompanionAppLifecycleManager.init.
-private sealed class SessionEvent {
-    data class AppChanged(val uuid: Uuid?) : SessionEvent()
-    data class RestartRequested(val uuid: Uuid) : SessionEvent()
 }
 
 /**
