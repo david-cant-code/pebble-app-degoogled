@@ -108,6 +108,27 @@ class WatchappPermissionResolverTest {
     }
 
     @Test
+    fun globalDefaultFlowReEmitsOnLiveToggle() = runTest {
+        // The per-app selector keeps a collection of this flow open to label its
+        // "Default" choice and relies on a toggle re-emitting while it is visible;
+        // a snapshot implementation would pass the fresh-collection assertions
+        // above while freezing the label at its first-composition value.
+        val f = fixture(networkDefault = false)
+        val emissions = mutableListOf<Boolean>()
+        backgroundScope.launch {
+            f.resolver.globalDefault(LockerAppPermissionType.Network).collect { emissions += it }
+        }
+        runCurrent()
+        assertEquals(listOf(false), emissions)
+
+        f.config.value = f.config.value.copy(
+            watchConfig = f.config.value.watchConfig.copy(watchappDefaultNetworkAllowed = true),
+        )
+        runCurrent()
+        assertEquals(listOf(false, true), emissions, "a live default toggle must reach open collections")
+    }
+
+    @Test
     fun perAppAllowOverridesDenyGlobal() = runTest {
         val f = fixture(networkDefault = false)
         f.resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.Allow)
