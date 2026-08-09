@@ -90,6 +90,7 @@ import io.ktor.http.parseUrl
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDevice
 import io.rebble.libpebblecommon.connection.LibPebble
 import io.rebble.libpebblecommon.connection.PebbleIdentifier
+import io.rebble.libpebblecommon.database.entity.LockerAppPermissionType
 import io.rebble.libpebblecommon.locker.AppCapability
 import io.rebble.libpebblecommon.locker.AppType
 import io.rebble.libpebblecommon.locker.orderIndexForInsert
@@ -468,13 +469,28 @@ fun LockerAppScreen(topBarParams: TopBarParams, uuid: Uuid?, navBarNav: NavBarNa
                             modifier = Modifier.padding(5.dp),
                         )
                     }
-                    // Only show for store, right now (until we figure out populating data or locker)
-                    if (storeEntry?.capabilities?.isNotEmpty() == true) {
-                        FlowRow(modifier = Modifier.padding(5.dp)) {
-                            storeEntry.capabilities.forEach { permission ->
-                                PermissionItem(permission, entry, topBarParams)
-                            }
+                    // Fork: phone-side permission surface. For an installed (locker) app,
+                    // show the real per-app controls (internet + location tri-state). For a
+                    // store listing not yet installed, show what it declares plus an honest
+                    // note that phone-side JS means internet access; the appstore capability
+                    // vocabulary can't express "network", so upstream never disclosed it.
+                    when (entry.commonAppType) {
+                        is CommonAppType.Locker -> {
+                            WatchappPermissionControls(
+                                uuid = entry.uuid,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            )
                         }
+
+                        is CommonAppType.Store -> {
+                            StoreCapabilityDisclosure(
+                                capabilities = storeEntry?.capabilities.orEmpty(),
+                                entry = entry,
+                                topBarParams = topBarParams,
+                            )
+                        }
+
+                        is CommonAppType.System -> Unit
                     }
                     if (entry.commonAppType is CommonAppType.Store && !viewModel.addedToLocker) {
 //                    val hasUuidConflict = remember(viewModel.storeEntries) { // One store has multiple entries with same uuid
@@ -884,7 +900,8 @@ private fun PropertyRow(
 @Composable
 fun PermissionItem(permission: AppCapability, entry: CommonApp, topBarParams: TopBarParams) {
     if (entry.commonAppType is CommonAppType.Locker) {
-        // TODO
+        // Installed apps render the functional controls (WatchappPermissionControls)
+        // instead of these informational chips.
     } else {
         AssistChip(
             onClick = {
@@ -893,6 +910,38 @@ fun PermissionItem(permission: AppCapability, entry: CommonApp, topBarParams: To
             label = { Text(permission.name()) },
             leadingIcon = { Icon(permission.icon(), null) },
             modifier = Modifier.padding(horizontal = 6.dp)
+        )
+    }
+}
+
+/**
+ * Fork: honest capability disclosure for a store listing that isn't installed yet.
+ * Shows the capabilities the listing declares (location/health/timeline) and, crucially,
+ * states plainly that apps can also reach the internet through phone-side code (a fact the
+ * appstore metadata cannot express and upstream never surfaced), and points to where that
+ * can be controlled once installed.
+ */
+@Composable
+fun StoreCapabilityDisclosure(
+    capabilities: List<AppCapability>,
+    entry: CommonApp,
+    topBarParams: TopBarParams,
+) {
+    Column(modifier = Modifier.padding(horizontal = 5.dp)) {
+        if (capabilities.isNotEmpty()) {
+            FlowRow(modifier = Modifier.padding(5.dp)) {
+                capabilities.forEach { permission ->
+                    PermissionItem(permission, entry, topBarParams)
+                }
+            }
+        }
+        Text(
+            "Apps can also use the internet through code that runs on your phone (for example " +
+                "to fetch weather). After installing, control internet and location for this app " +
+                "in Settings > Apps > Watch App Permissions.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
         )
     }
 }
@@ -911,7 +960,9 @@ fun AppCapability.name(): String = when (this) {
 
 fun AppCapability.description(): String = when (this) {
     AppCapability.Health -> "Can access health data"
-    AppCapability.Location -> "Can access location"
+    // Fork: state the real flow. A watchface asking for location almost always feeds it
+    // to a phone-side network call (e.g. weather), so "access location" understates it.
+    AppCapability.Location -> "Can read your phone's location, and may send it to outside servers over the internet"
     AppCapability.Timeline -> "Can create timeline pins"
 }
 
@@ -976,6 +1027,20 @@ suspend fun CommonApp.showSettings(
 ) {
     when (commonAppType) {
         is CommonAppType.Locker -> {
+            // Fork: the developer settings page URL is built by the app's own PKJS and
+            // loaded in a WebView, so opening it is an app-controlled network request to
+            // a developer-chosen server, and the app can pack anything it has gathered
+            // (location included) into that URL. If the user has denied this app's
+            // internet access, honour that here rather than loading the page; otherwise
+            // the config page would be a hole exactly the size of the thing we closed.
+            if (!libPebble.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network)) {
+                logger.d { "Config page blocked for $uuid: network denied" }
+                topBarParams.showSnackbar(
+                    "This app's settings page needs internet, which is turned off for it. " +
+                        "Enable it in Settings > Apps > Watch App Permissions."
+                )
+                return
+            }
             val watch = libPebble.watches.value.filterIsInstance<ConnectedPebbleDevice>()
                 .firstOrNull()
             //TODO: Handle multiple watches connected, selector?
