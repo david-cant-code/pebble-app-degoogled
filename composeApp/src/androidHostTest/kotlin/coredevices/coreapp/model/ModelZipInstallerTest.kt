@@ -17,6 +17,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.test.runTest
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -65,7 +66,9 @@ class ModelZipInstallerTest {
         }),
         // Infinite: the MockEngine body writer runs on a real dispatcher while
         // runTest's clock is virtual, so any multi-chunk read would lose the
-        // race against the 30s production stall timeout spuriously.
+        // race against the 30s production stall timeout spuriously. The one
+        // test of the stall branch itself builds its own installer with a
+        // finite timeout instead of using this helper.
         readStallTimeout = Duration.INFINITE,
         cacheDir = cacheDir,
         modelsDir = modelsDir,
@@ -344,8 +347,22 @@ class ModelZipInstallerTest {
         // socket the peer never closes.
         val stalled = ByteChannel(autoFlush = true)
         stalled.writeFully(ByteArray(10))
+        // Built without the installer() helper: this test verifies the stall
+        // branch itself, so it needs a finite timeout where every other test
+        // injects INFINITE to opt out (an infinite timeout now bypasses the
+        // timer entirely, so with the helper this read would suspend forever
+        // and trip runTest's watchdog). The finite timer runs on runTest's
+        // virtual clock, which fast-forwards to it as soon as the quiet
+        // channel leaves the dispatcher idle: deterministic, and the 30
+        // virtual seconds cost no real time.
+        val stallInstaller = ModelZipInstaller(
+            httpClient = HttpClient(MockEngine { respond(stalled, HttpStatusCode.OK) }),
+            readStallTimeout = 30.seconds,
+            cacheDir = cacheDir,
+            modelsDir = modelsDir,
+        )
         val e = assertFailsWith<Exception> {
-            installer { respond(stalled, HttpStatusCode.OK) }.install(model, pinFor(modelZip()), copyBundledZip = null)
+            stallInstaller.install(model, pinFor(modelZip()), copyBundledZip = null)
         }
         assertTrue(e.message.orEmpty().contains("stalled"), "unexpected failure: $e")
         assertNothingLeftBehind()

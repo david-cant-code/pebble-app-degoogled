@@ -225,9 +225,22 @@ class ModelZipInstaller(
                 FileOutputStream(tempZip).use { output ->
                     val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
                     while (true) {
-                        val read = withTimeoutOrNull(readStallTimeout) {
+                        // An infinite timeout must bypass withTimeoutOrNull
+                        // entirely, not just never expire: Duration.INFINITE
+                        // still schedules a Long.MAX_VALUE timer, and the
+                        // kotlinx-coroutines-test scheduler fast-forwards
+                        // virtual time to the next scheduled event whenever
+                        // the test dispatcher idles while MockEngine's body
+                        // writer is still delivering chunks on a real
+                        // dispatcher. That fired the stall branch spuriously
+                        // in the very tests that pass INFINITE to disable it.
+                        val read = if (readStallTimeout.isInfinite()) {
                             channel.readAvailable(buffer, 0, buffer.size)
-                        } ?: throw Exception("Download stalled for $url")
+                        } else {
+                            withTimeoutOrNull(readStallTimeout) {
+                                channel.readAvailable(buffer, 0, buffer.size)
+                            } ?: throw Exception("Download stalled for $url")
+                        }
                         if (read == -1) break
                         if (read == 0) continue
                         received += read
