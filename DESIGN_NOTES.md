@@ -82,11 +82,15 @@ install inherits deny because the fields deserialize to their defaults;
 a fresh install is offered the choice during onboarding. The resolver is
 exposed on `LibPebble` via the `WatchappPermissions` interface for the UI.
 
-**Location enforcement** is a single deterministic gate:
-`GeolocationInterface.geolocationPermissionGranted()` now asks the
-resolver (upstream read a row nothing ever wrote and defaulted to
-"granted", so the gate was inert). Denial is reported to the JS callback
-as a geolocation error.
+**Location enforcement** is a single deterministic gate resolved through
+the resolver (upstream read a row nothing ever wrote and defaulted to
+"granted", so the gate was inert). One-shot requests
+(`getCurrentPosition`) check the grant per call; continuous
+subscriptions (`watchPosition`) collect the resolved grant as a live
+flow, so revoking Location mid-session cancels the running GPS stream
+immediately (a watchface can hold a watch for days) and re-granting
+restarts it. Denial is reported to the JS callback as a geolocation
+error in both cases.
 
 **Network enforcement is layered** (three independent layers, per the
 defence-in-depth rule, with at least one deterministic cover for every

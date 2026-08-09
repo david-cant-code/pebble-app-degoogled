@@ -10,6 +10,8 @@ import io.rebble.libpebblecommon.util.SystemGeolocation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import org.koin.core.component.inject
 import kotlin.time.Duration
@@ -109,13 +111,29 @@ abstract class GeolocationInterface(
         logger.d { "watchPosition(highAccuracy=$highAccuracy)" }
         val highAccuracyBool = highAccuracy > 0
         val job = scope.launch {
-            if (!geolocationPermissionGranted()) {
-                triggerPositionResultWatch(id.toInt(), GeolocationPositionResult.Error("Location permission not granted"))
-                return@launch
-            }
-            systemGeolocation.watchPosition(interval.coerceAtLeast(200.0).milliseconds, highAccuracyBool).collect { result ->
-                triggerPositionResultWatch(id.toInt(), result)
-            }
+            // The grant is enforced for the life of the watch, not only at
+            // subscription time: a watchface can hold a subscription for days, so a
+            // one-shot check would keep streaming phone GPS long after the user
+            // revoked access. collectLatest on the resolved grant cancels the
+            // in-flight GPS stream the moment the grant flips to deny (per-app
+            // override or global default) and restarts it if the grant returns.
+            // Denial is reported to the JS callback each time it takes effect; the
+            // watch itself stays registered until the app clears it, matching
+            // geolocation-spec behaviour for a watch awaiting permission.
+            watchappPermissions.watchappPermissionGranted(
+                Uuid.parse(jsRunner.appInfo.uuid),
+                LockerAppPermissionType.Location,
+            )
+                .distinctUntilChanged()
+                .collectLatest { granted ->
+                    if (!granted) {
+                        triggerPositionResultWatch(id.toInt(), GeolocationPositionResult.Error("Location permission not granted"))
+                    } else {
+                        systemGeolocation.watchPosition(interval.coerceAtLeast(200.0).milliseconds, highAccuracyBool).collect { result ->
+                            triggerPositionResultWatch(id.toInt(), result)
+                        }
+                    }
+                }
         }
         watchJobs[id.toInt()] = job
         return id.toInt()
