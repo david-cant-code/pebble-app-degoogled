@@ -21,24 +21,34 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.core.net.toUri
+import androidx.webkit.ProxyConfig
+import androidx.webkit.ProxyController
+import androidx.webkit.WebViewFeature
 import co.touchlab.kermit.Logger
 import io.rebble.libpebblecommon.NotificationConfigFlow
 import io.rebble.libpebblecommon.connection.AppContext
 import io.rebble.libpebblecommon.connection.LibPebble
+import io.rebble.libpebblecommon.database.entity.LockerAppPermissionType
 import io.rebble.libpebblecommon.database.entity.LockerEntry
 import io.rebble.libpebblecommon.di.LibPebbleKoinComponent
 import io.rebble.libpebblecommon.io.rebble.libpebblecommon.js.WebViewGeolocationInterface
 import io.rebble.libpebblecommon.io.rebble.libpebblecommon.js.WebViewJSLocalStorageInterface
+import io.rebble.libpebblecommon.locker.WatchappPermissionResolver
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.PbwAppInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
+import java.util.concurrent.Executor
+import kotlin.uuid.Uuid
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -62,8 +72,21 @@ class WebViewJsRunner(
     remoteTimelineEmulator: RemoteTimelineEmulator,
     httpInterceptorManager: HttpInterceptorManager,
     notificationConfigFlow: NotificationConfigFlow,
+    private val watchappPermissions: WatchappPermissionResolver,
 ): JsRunner(appInfo, lockerEntry, jsPath, device, urlOpenRequests), LibPebbleKoinComponent {
     private val context = appContext.context
+
+    // Fork network gate, cached snapshot. Defaults to false so that during the brief
+    // window between WebView creation and the first permission resolve, requests are
+    // blocked rather than leaked. Updated synchronously in start() before any app code
+    // runs, then kept live by a collector on the resolved grant flow. Read from the
+    // WebView client thread (shouldInterceptRequest) and the JS bridge thread, hence
+    // @Volatile.
+    @Volatile
+    private var networkAllowed: Boolean = false
+
+    // Read by startup.js (via the _Pebble bridge) to install the JS-shim layer.
+    fun isNetworkAllowedForJs(): Boolean = networkAllowed
     companion object {
         const val API_NAMESPACE = "Pebble"
         const val PRIVATE_API_NAMESPACE = "_$API_NAMESPACE"
@@ -72,10 +95,14 @@ class WebViewJsRunner(
     }
 
     private var webView: WebView? = null
+
+    // The live-toggle collector launched in start(); stop() cancels it before any
+    // proxy teardown so the two can never interleave on the process-global override.
+    private var networkPermissionCollector: Job? = null
     private var restoreCompleted: Boolean = false
     private val initializedLock = Object()
     private val publicJsInterface = WebViewPKJSInterface(this, device, context, libPebble, jsTokenUtil)
-    private val privateJsInterface = WebViewPrivatePKJSInterface(this, device, scope, _outgoingAppMessages, logMessages, jsTokenUtil, remoteTimelineEmulator, httpInterceptorManager, notificationConfigFlow)
+    private val privateJsInterface = WebViewPrivatePKJSInterface(this, device, scope, _outgoingAppMessages, logMessages, jsTokenUtil, remoteTimelineEmulator, httpInterceptorManager, notificationConfigFlow, watchappPermissions)
     private val localStorageInterface = WebViewJSLocalStorageInterface(appInfo.uuid, appContext) {
         runBlocking(Dispatchers.Main) {
             webView?.evaluateJavascript(
@@ -124,21 +151,28 @@ class WebViewJsRunner(
         }
 
         override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-            if (isForbidden(request?.url)) {
-                return object : WebResourceResponse("text/plain", "utf-8", null) {
-                    override fun getStatusCode(): Int {
-                        return 403
-                    }
-
-                    override fun getReasonPhrase(): String {
-                        return "Forbidden"
-                    }
-                }
-            } else {
-                return super.shouldInterceptRequest(view, request)
+            val url = request?.url
+            if (isForbidden(url)) {
+                return blockedResponse("Forbidden")
             }
+            // Fork network gate (layer 1, deterministic for http/https). When the app's
+            // Network permission is denied, refuse every non-file request so no XHR,
+            // fetch, page subresource or navigation reaches the network. WebSocket
+            // handshakes do NOT pass through this callback (a documented WebView
+            // limitation); the proxy override layer is what covers those.
+            if (!networkAllowed && url != null && url.scheme?.uppercase() != "FILE") {
+                logger.d { "Network denied; blocking ${url.scheme} request to ${url.host}" }
+                return blockedResponse("Network access denied for this app")
+            }
+            return super.shouldInterceptRequest(view, request)
         }
     }
+
+    private fun blockedResponse(reason: String): WebResourceResponse =
+        object : WebResourceResponse("text/plain", "utf-8", null) {
+            override fun getStatusCode(): Int = 403
+            override fun getReasonPhrase(): String = reason
+        }
 
     private fun isForbidden(url: Uri?): Boolean {
         return if (url == null) {
@@ -281,7 +315,74 @@ class WebViewJsRunner(
         }
         check(webView != null) { "WebView not initialized" }
         logger.d { "WebView initialized" }
+
+        // Resolve the app's Network grant and put the enforcement layers in place
+        // BEFORE any app page/script loads, so there is no window in which a denied
+        // app can reach the network. The initial value gates layers 1 (intercept) and
+        // 2 (JS shim); the proxy (layer 3) is applied and awaited here too.
+        val uuid = Uuid.parse(appInfo.uuid)
+        networkAllowed = watchappPermissions.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network)
+        applyNetworkProxy(networkAllowed)
+        // Track live toggles: a change in the resolved grant (per-app override or the
+        // global default) re-caches the value and re-applies/clears the proxy while the
+        // app keeps running. The job is kept so stop() can cancel it FIRST, before it
+        // touches the proxy itself: the runner scope outlives stop()'s suspension
+        // points (PKJSApp cancels it only after stop() returns), so an emission landing
+        // mid-teardown would otherwise re-install the process-wide black-hole after
+        // stop() cleared it, with nothing left alive to ever clear it again.
+        networkPermissionCollector = scope.launch {
+            watchappPermissions.watchappPermissionGranted(uuid, LockerAppPermissionType.Network)
+                .collect { allowed ->
+                    if (allowed != networkAllowed) {
+                        logger.d { "Network grant for $uuid changed -> $allowed" }
+                    }
+                    networkAllowed = allowed
+                    applyNetworkProxy(allowed)
+                }
+        }
+
         loadApp(jsPath.toString())
+    }
+
+    /**
+     * Layer 3 of the network gate: a process-wide WebView proxy override that
+     * black-holes all egress (every scheme, including ws/wss that shouldInterceptRequest
+     * cannot see) when the running app's network is denied, and is cleared when allowed.
+     *
+     * Process-global is inherent to the ProxyController API, but only one PKJS WebView
+     * runs at a time and the developer config page is gated for network-denied apps, so
+     * nothing legitimate needs the network while the black-hole is active. Requires the
+     * PROXY_OVERRIDE WebView feature; when unsupported, layers 1 and 2 still apply and
+     * only the WebSocket-deny corner degrades to best-effort (recorded in KNOWN_ISSUES).
+     */
+    private suspend fun applyNetworkProxy(allowed: Boolean) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
+            if (!allowed) {
+                logger.w { "PROXY_OVERRIDE unsupported; WebSocket deny is best-effort for this app" }
+            }
+            return
+        }
+        val controller = ProxyController.getInstance()
+        val executor = Executor { it.run() }
+        suspendCancellableCoroutine { cont ->
+            if (allowed) {
+                controller.clearProxyOverride(executor) { if (cont.isActive) cont.resume(Unit) }
+            } else {
+                // Route everything to an unroutable address (RFC 5737 TEST-NET-1), so
+                // every connection attempt fails fast. removeImplicitRules() matters:
+                // without it Chromium exempts localhost and link-local destinations
+                // from any proxy override, which would leave a denied app's WebSocket
+                // reachable to other apps' local socket servers and to link-local
+                // hosts on the same network segment. Those destinations are egress
+                // too; the black-hole has to cover them for this layer to be the
+                // deterministic WebSocket cover it claims to be.
+                val config = ProxyConfig.Builder()
+                    .addProxyRule("192.0.2.1:1")
+                    .removeImplicitRules()
+                    .build()
+                controller.setProxyOverride(config, executor) { if (cont.isActive) cont.resume(Unit) }
+            }
+        }
     }
 
     private suspend fun persistLocalStorage() {
@@ -311,6 +412,15 @@ class WebViewJsRunner(
         // connection scope — e.g. on watch disconnect.
         withContext(NonCancellable + Dispatchers.Main) {
             try {
+                // Stop the live-toggle collector before anything else so a grant-flow
+                // emission (the combined flow re-emits on any permission-table or
+                // config write) cannot re-install the process-global black-hole while
+                // teardown is mid-flight; the clear at the end of this block must be
+                // the last word on the override. cancelAndJoin, not just cancel: the
+                // collector may be suspended inside a proxy call of its own, and it
+                // must have fully wound down before the teardown sequence proceeds.
+                networkPermissionCollector?.cancelAndJoin()
+                networkPermissionCollector = null
                 // Save final state of localStorage to our scoped storage, to catch any
                 // property-accessor changes (not caught by our shim).
                 // Skip if restoreLocalStorage() never completed: window.localStorage is
@@ -334,6 +444,16 @@ class WebViewJsRunner(
             } finally {
                 // destroy() must always run, even if the pre-destroy teardown fails
                 webView?.destroy()
+                // Clear any black-hole proxy this app set, so the process-global
+                // override never outlives the session and starves a later WebView
+                // (config page or the next app). Deliberately the LAST teardown step,
+                // after destroy(): the page's JS stays live through the earlier steps
+                // (persistLocalStorage even evaluates into it), and clearing the
+                // proxy any sooner would hand a denied app's still-running scripts a
+                // WebSocket-egress window on every stop. No-op if this app was
+                // network-allowed.
+                runCatching { applyNetworkProxy(allowed = true) }
+                    .onFailure { logger.w(it) { "Failed to clear network proxy on stop" } }
             }
         }
         synchronized(initializedLock) {

@@ -487,5 +487,102 @@ navigator.geolocation.clearWatch = (id) => {
         xhr.originalSend(body);
     };
 
+    // Fork network gate (JS-shim layer). When this app's Network permission is denied
+    // at page load, wrap the network entry points in guards that fail cleanly. This is
+    // best-effort defence in depth layered on top of the native shouldInterceptRequest
+    // and proxy-override layers: it gives a well-behaved app a clean, synchronous
+    // failure instead of a hung request, but a hostile bundle could try to recover
+    // fresh natives (e.g. from an about:blank iframe), which is exactly why the
+    // deterministic native layers below it exist. Installed last so it wins over the
+    // interception overrides above. Wrapped in try/catch because the bridge method
+    // only exists on Android; iOS falls through and leaves the network APIs intact.
+    //
+    // The guards re-read the live grant (a synchronous bridge call into the runner's
+    // cached permission state) on every use: the page loads exactly once per session,
+    // so a load-time-only check would freeze the deny for the whole session and a
+    // user granting access to a running app (the normal "watchface weather is broken,
+    // let me allow it" flow, and watchfaces run indefinitely) would see no effect
+    // until the app restarts. Once the grant is seen, the guards restore the saved
+    // originals and get out of the way entirely; they do not reinstall on a later
+    // revoke. Revoking mid-session is enforced by the native layers, which act on the
+    // live value: the shim only exists to make load-time denial fail cleanly.
+    try {
+        if (_Pebble.isNetworkAllowed && _Pebble.isNetworkAllowed() === false) {
+            // Saved AFTER the interception wrappers above are installed, so restoring
+            // puts back the interception-aware versions, not the raw natives.
+            const original = {
+                xhrOpen: XMLHttpRequest.prototype.open,
+                xhrSend: XMLHttpRequest.prototype.send,
+                fetch: typeof global.fetch !== 'undefined' ? global.fetch : undefined,
+                webSocket: typeof global.WebSocket !== 'undefined' ? global.WebSocket : undefined,
+                eventSource: typeof global.EventSource !== 'undefined' ? global.EventSource : undefined,
+                sendBeacon: (global.navigator && typeof global.navigator.sendBeacon !== 'undefined')
+                    ? global.navigator.sendBeacon.bind(global.navigator) : undefined,
+            };
+            const restoreNetworkApis = () => {
+                XMLHttpRequest.prototype.open = original.xhrOpen;
+                XMLHttpRequest.prototype.send = original.xhrSend;
+                if (original.fetch) global.fetch = original.fetch;
+                if (original.webSocket) global.WebSocket = original.webSocket;
+                if (original.eventSource) global.EventSource = original.eventSource;
+                if (original.sendBeacon) global.navigator.sendBeacon = original.sendBeacon;
+                console.warn("Pebble JS Bridge: network access granted; network APIs restored.");
+            };
+            // Returns true while the app is still denied; on the first call after a
+            // grant it restores the originals (all of them, so later calls skip the
+            // guards completely) and returns false.
+            const stillDenied = () => {
+                if (_Pebble.isNetworkAllowed() === true) {
+                    restoreNetworkApis();
+                    return false;
+                }
+                return true;
+            };
+            const denyNetwork = (what) => {
+                throw new Error("Network access denied for this watchapp (" + what + ")");
+            };
+            // Fail XHR at open(), so neither the real request nor the interception path runs.
+            XMLHttpRequest.prototype.open = function() {
+                if (stillDenied()) denyNetwork("XMLHttpRequest");
+                return original.xhrOpen.apply(this, arguments);
+            };
+            XMLHttpRequest.prototype.send = function() {
+                if (stillDenied()) denyNetwork("XMLHttpRequest");
+                return original.xhrSend.apply(this, arguments);
+            };
+            if (original.fetch) {
+                global.fetch = function() {
+                    if (stillDenied()) {
+                        return Promise.reject(
+                            new Error("Network access denied for this watchapp (fetch)")
+                        );
+                    }
+                    return original.fetch.apply(global, arguments);
+                };
+            }
+            if (original.webSocket) {
+                global.WebSocket = function() {
+                    if (stillDenied()) denyNetwork("WebSocket");
+                    return new original.webSocket(...arguments);
+                };
+            }
+            if (original.eventSource) {
+                global.EventSource = function() {
+                    if (stillDenied()) denyNetwork("EventSource");
+                    return new original.eventSource(...arguments);
+                };
+            }
+            if (original.sendBeacon) {
+                global.navigator.sendBeacon = function() {
+                    if (stillDenied()) return false;
+                    return original.sendBeacon.apply(global.navigator, arguments);
+                };
+            }
+            console.warn("Pebble JS Bridge: network access is denied for this app; network APIs are disabled.");
+        }
+    } catch (e) {
+        // No _Pebble.isNetworkAllowed (iOS): leave the network APIs untouched.
+    }
+
     console.log("Pebble JS Bridge initialized.");
 })(_global);

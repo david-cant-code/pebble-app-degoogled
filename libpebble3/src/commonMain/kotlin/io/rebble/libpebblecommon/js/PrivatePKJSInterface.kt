@@ -4,6 +4,8 @@ import co.touchlab.kermit.Logger
 import io.rebble.cobble.shared.data.js.ActivePebbleWatchInfo
 import io.rebble.cobble.shared.data.js.fromWatchInfo
 import io.rebble.libpebblecommon.NotificationConfigFlow
+import io.rebble.libpebblecommon.database.entity.LockerAppPermissionType
+import io.rebble.libpebblecommon.locker.WatchappPermissionResolver
 import io.rebble.libpebblecommon.services.appmessage.AppMessageResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +35,7 @@ abstract class PrivatePKJSInterface(
     private val remoteTimelineEmulator: RemoteTimelineEmulator,
     private val httpInterceptorManager: HttpInterceptorManager,
     private val notificationConfigFlow: NotificationConfigFlow,
+    private val watchappPermissions: WatchappPermissionResolver,
 ) {
     companion object {
         private val logger = Logger.withTag("PrivatePKJSInterface")
@@ -88,6 +91,18 @@ abstract class PrivatePKJSInterface(
     open fun onIntercepted(callbackId: String, url: String, method: String, body: String?) {
         val uuid = Uuid.parse(jsRunner.appInfo.uuid)
         scope.launch {
+            // Fork network gate (deterministic, phone-side-egress layer). The phone-side
+            // interceptors (weather) fetch from the network on the app's behalf, so a
+            // network-denied app must not be able to reach them. This bridge method is
+            // exposed directly on `_Pebble`, so a hostile bundle can call it without
+            // going through the XHR shim; gating here (not only in JS) is what actually
+            // closes that vector. Denial surfaces to the app as a 500, i.e. a failed
+            // request, mirroring genuine offline behaviour.
+            if (!watchappPermissions.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network)) {
+                logger.d { "Network denied for $uuid; refusing intercepted request to $url" }
+                jsRunner.signalInterceptResponse(callbackId, InterceptResponse.ERROR)
+                return@launch
+            }
             val result = httpInterceptorManager.onIntercepted(url, method, body, uuid)
             jsRunner.signalInterceptResponse(callbackId, result)
         }

@@ -55,6 +55,114 @@ either registers a device token with Google or does not exist, so
 rather than no-opped. That deletion is not precedent for other strips; the
 seam rule stands everywhere else.
 
+## Watchapp permissions (phone-side network and location)
+
+Third-party watchapps and watchfaces ship companion JavaScript (PebbleKit
+JS) that upstream runs on the phone inside a per-app `WebView`
+(`WebViewJsRunner`, one at a time, started when the watch launches that
+app). Through it the app's JS gets `navigator.geolocation` (bridged to real
+phone GPS) and unrestricted network (XHR/fetch/WebSocket go straight out
+Chromium's stack; the phone-side weather interceptors also egress on the
+app's behalf). Upstream gated none of this and disclosed none of it: the
+appstore capability vocabulary (`location`/`health`/`timeline`) has no
+"network" entry, so an app that used location to call a weather API only
+ever showed "location". This fork adds a per-app, tri-state permission
+system over those two capabilities, denied by default.
+
+**Decision authority.** `WatchappPermissionResolver`
+(`locker/WatchappPermissions.kt`) is the single place that resolves a
+grant. A capability is stored per app in the existing
+`LockerAppPermission` Room table as tri-state: no row = FollowGlobal
+(inherit the global default), `granted=true` = Allow, `granted=false` =
+Deny. Per-app rows win over the global default in either direction.
+"Reset to default" is a row delete, not a third stored state. The global
+defaults are `WatchConfig.watchappDefaultNetworkAllowed` /
+`watchappDefaultLocationAllowed`, both shipping `false`. An upgrading
+install inherits deny because the fields deserialize to their defaults;
+a fresh install is offered the choice during onboarding. The resolver is
+exposed on `LibPebble` via the `WatchappPermissions` interface for the UI.
+
+**Location enforcement** is a single deterministic gate resolved through
+the resolver (upstream read a row nothing ever wrote and defaulted to
+"granted", so the gate was inert). One-shot requests
+(`getCurrentPosition`) check the grant per call; continuous
+subscriptions (`watchPosition`) collect the resolved grant as a live
+flow, so revoking Location mid-session cancels the running GPS stream
+immediately (a watchface can hold a watch for days) and re-granting
+restarts it. Denial is reported to the JS callback as a geolocation
+error in both cases.
+
+**Network enforcement is layered** (three independent layers, per the
+defence-in-depth rule, with at least one deterministic cover for every
+socket type):
+
+1. `WebViewJsRunner.shouldInterceptRequest` returns a 403 for every
+   non-`file://` request when the app is network-denied. Deterministic for
+   http/https (XHR, fetch, subresources, navigations). WebSocket
+   handshakes do not pass through this callback (a documented WebView
+   limitation), which is why layer 3 exists.
+2. `startup.js` wraps `XMLHttpRequest`/`fetch`/`WebSocket`/
+   `EventSource`/`sendBeacon` in failing guards when the app loads while
+   denied, gated on a synchronous `_Pebble.isNetworkAllowed()` bridge
+   call. The guards re-read the live grant on every use and restore the
+   original entry points the moment access is granted, so granting a
+   running app takes effect without a session restart (the page loads
+   only once per session, so a load-time-only stub would freeze the deny
+   until the app restarts). They do not reinstall on a later revoke; the
+   native layers enforce that direction live. Best-effort (same-realm JS
+   a hostile bundle could try to work around), so it never stands alone.
+3. `ProxyController` (androidx.webkit) sets a process-wide WebView proxy
+   override that black-holes all egress (every scheme, including ws/wss)
+   to an unroutable address while a network-denied app runs, and clears it
+   otherwise. Chromium's implicit proxy-bypass rules are removed so
+   localhost and link-local destinations are black-holed too; both are
+   real egress (other apps' local socket servers, hosts on the same
+   network segment). Applied and awaited before the app page loads and
+   kept in sync with live toggles; on stop, the live-toggle collector is
+   cancelled first and the override is cleared only after the WebView is
+   destroyed, so a denied app's scripts never run without the black-hole
+   and nothing can re-install it once teardown has cleared it.
+   Process-global is inherent to the API, but only one PKJS WebView runs
+   at a time and the config page (below) is gated for denied apps, so
+   nothing legitimate needs the network while it is set. Requires the
+   `PROXY_OVERRIDE` feature; the degraded case is in `KNOWN_ISSUES.md`.
+
+A deny-to-allow flip while the app is running also restarts its PKJS
+session (`CompanionAppLifecycleManager` funnels the restart through the
+same serially processed stream as watch-side app switches): an app that
+fetches only at launch never touches the network again after its first
+attempt fails, so without the restart a mid-session grant would take
+visible effect only at the next app switch. Allow-to-deny needs no
+restart; the enforcement layers apply it live.
+
+The phone-side interceptor path (`PrivatePKJSInterface.onIntercepted`,
+which the weather interceptors use to fetch on the app's behalf) is gated
+separately and deterministically: it is exposed directly on the `_Pebble`
+bridge, so a hostile bundle could call it without going through the XHR
+shim, and gating it in Kotlin, not only in JS, is what actually closes
+the egress-on-behalf vector.
+
+**Config page.** A `configurable` app's developer settings page URL is
+built by the app's own JS and loaded in a WebView, so opening it is an
+app-controlled network request to a developer-chosen server that can carry
+anything the app gathered (location included). `CommonApp.showSettings`
+therefore refuses to open it when the app is network-denied and points the
+user at the settings screen, rather than leaving a hole the size of the
+control.
+
+**Surfaces.** Settings > Apps > Watch App Permissions
+(`WatchappPermissionsScreen`) holds the global defaults and an app list;
+the per-app tri-state controls live on each app's detail page
+(`WatchappPermissionControls`, reused by the list). Store listings gain an
+honest disclosure that phone-side code can reach the internet, and the
+location capability description states the real "may send it to outside
+servers" flow. A one-time "What's New" dialog announces the deny-by-default
+change to existing users (`WhatsNewDialog`).
+
+**Dependency.** `androidx.webkit` (1.16.0) is added for `ProxyController`
+only: current stable, Apache-2.0, on Google's Maven (F-Droid
+deliverable), no known advisories, non-deprecated API surface.
+
 ## Branding assets
 
 applicationId is `com.anopticlabs.gravel`; the Kotlin `namespace` and

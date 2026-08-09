@@ -11,6 +11,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import com.russhwolf.settings.Settings
 import coreapp.util.generated.resources.Res
 import coreapp.util.generated.resources.black
@@ -28,6 +29,11 @@ import theme.CoreAppTheme.Companion.asCoreAppTheme
 // Replaces upstream's coreOrange 0xFFFA4A36 everywhere; the launcher background in
 // util res/values/ic_launcher_background.xml is chosen to contrast with this.
 val gravelPurple = Color(0xFF9129DE)
+
+// Deepened brand purple for dialog surfaces under the onboarding scheme: white
+// and 80 percent white body text clear the 4.5:1 AA contrast floor against this,
+// which they do not against a whitened purple. See onboardingScheme.
+val gravelPurpleDeep = lerp(gravelPurple, Color.Black, 0.2f)
 val coreGrey = Color(0xFF333333)
 val coreDarkGrey = Color(0xFF2B2930)
 val coreDarkGreen = Color(0xFF157a30)
@@ -138,6 +144,14 @@ val onboardingScheme = lightColorScheme(
     scrim = gravelPurple,
     surfaceContainer = gravelPurple,
     surfaceContainerHighest = Color.White.copy(alpha = 0.15f),
+    // Material3 components draw on the container tiers (dialogs use
+    // surfaceContainerHigh), and any tier left unset falls back to
+    // lightColorScheme's near-white default, which renders this scheme's white
+    // content colors invisible. Every tier must stay in the purple family;
+    // legibility is pinned by OnboardingSchemeContrastTest.
+    surfaceContainerHigh = gravelPurpleDeep,
+    surfaceContainerLow = gravelPurple,
+    surfaceContainerLowest = gravelPurple,
     error = error,
     onError = Color.White,
     errorContainer = error,

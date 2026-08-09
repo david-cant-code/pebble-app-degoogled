@@ -5,6 +5,7 @@ import android.webkit.JavascriptInterface
 import androidx.core.net.toUri
 import co.touchlab.kermit.Logger
 import io.rebble.libpebblecommon.NotificationConfigFlow
+import io.rebble.libpebblecommon.locker.WatchappPermissionResolver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -12,7 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 
 class WebViewPrivatePKJSInterface(
-    jsRunner: WebViewJsRunner,
+    private val webViewJsRunner: WebViewJsRunner,
     device: CompanionAppDevice,
     scope: CoroutineScope,
     outgoingAppMessages: MutableSharedFlow<AppMessageRequest>,
@@ -21,11 +22,20 @@ class WebViewPrivatePKJSInterface(
     remoteTimelineEmulator: RemoteTimelineEmulator,
     httpInterceptorManager: HttpInterceptorManager,
     notificationConfigFlow: NotificationConfigFlow,
-): PrivatePKJSInterface(jsRunner, device, scope, outgoingAppMessages, logMessages, jsTokenUtil, remoteTimelineEmulator, httpInterceptorManager, notificationConfigFlow) {
+    watchappPermissions: WatchappPermissionResolver,
+): PrivatePKJSInterface(webViewJsRunner, device, scope, outgoingAppMessages, logMessages, jsTokenUtil, remoteTimelineEmulator, httpInterceptorManager, notificationConfigFlow, watchappPermissions) {
 
     companion object {
         private val logger = Logger.withTag(WebViewPrivatePKJSInterface::class.simpleName!!)
     }
+
+    // Fork network gate (JS-shim layer). startup.js reads this synchronously before
+    // the app bundle loads and, when denied, replaces XHR/fetch/WebSocket/etc with
+    // failing stubs. Best-effort by nature (same-realm JS the app could try to work
+    // around), so it sits on top of the deterministic shouldInterceptRequest + proxy
+    // layers, never alone. Cached boolean lives on the runner (see its collector).
+    @JavascriptInterface
+    fun isNetworkAllowed(): Boolean = webViewJsRunner.isNetworkAllowedForJs()
 
     @JavascriptInterface
     fun startupScriptHasLoaded(data: String?) {

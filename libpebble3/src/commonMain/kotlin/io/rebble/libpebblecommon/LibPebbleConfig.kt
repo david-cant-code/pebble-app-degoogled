@@ -91,6 +91,27 @@ data class WatchConfig(
      * Intended to be a debug option to dsiable watch settings sync.
      */
     val enableWatchSettingsSync: Boolean = true,
+    /**
+     * Fork: global default grant for a watchapp/watchface's phone-side PebbleKit JS
+     * network access (XHR/fetch/WebSocket and the phone-side weather interceptors).
+     *
+     * This is the value applied to any app that has no explicit per-app override in
+     * the LockerAppPermission table. It ships DENY (false) on purpose: upstream let
+     * third-party watchface JS reach arbitrary servers with zero disclosure or
+     * control, so the fork's baseline is no access until the user opts in. Onboarding
+     * lets a new user flip this to allow; an upgrading user keeps the deny baseline
+     * (the field simply deserializes to its default for configs written before it
+     * existed). Per-app grants override this in either direction.
+     */
+    val watchappDefaultNetworkAllowed: Boolean = false,
+    /**
+     * Fork: global default grant for a watchapp/watchface's phone-side geolocation
+     * (navigator.geolocation, bridged to real phone GPS). Same deny-by-default
+     * rationale and override semantics as [watchappDefaultNetworkAllowed]. Upstream
+     * modelled a per-app Location permission but never wrote it, so the gate was
+     * inert and everything was effectively allowed; this restores a real default.
+     */
+    val watchappDefaultLocationAllowed: Boolean = false,
 )
 
 class WatchConfigFlow(val flow: StateFlow<LibPebbleConfig>) {

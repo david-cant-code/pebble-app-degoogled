@@ -184,6 +184,8 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.androidx.core.ktx)
             implementation(libs.pebblekit)
+            // Fork: ProxyController for the watchapp network black-hole (layer 3).
+            implementation(libs.androidx.webkit)
         }
 
         iosMain.dependencies {

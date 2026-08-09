@@ -29,6 +29,7 @@ import io.rebble.libpebblecommon.database.entity.HRMonitoringInterval
 import io.rebble.libpebblecommon.database.entity.HealthDataEntity
 import io.rebble.libpebblecommon.database.entity.HealthGender
 import io.rebble.libpebblecommon.database.entity.MuteState
+import io.rebble.libpebblecommon.database.entity.LockerAppPermissionType
 import io.rebble.libpebblecommon.database.entity.NotificationAppItem
 import io.rebble.libpebblecommon.database.entity.NotificationEntity
 import io.rebble.libpebblecommon.database.entity.NotificationRuleEntity
@@ -44,6 +45,7 @@ import io.rebble.libpebblecommon.locker.AppPlatform
 import io.rebble.libpebblecommon.locker.AppProperties
 import io.rebble.libpebblecommon.locker.AppType
 import io.rebble.libpebblecommon.locker.LockerWrapper
+import io.rebble.libpebblecommon.locker.PermissionSetting
 import io.rebble.libpebblecommon.metadata.WatchColor
 import io.rebble.libpebblecommon.metadata.WatchHardwarePlatform
 import io.rebble.libpebblecommon.metadata.WatchType
@@ -65,6 +67,7 @@ import io.rebble.libpebblecommon.web.LockerEntry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -85,7 +88,9 @@ class FakeLibPebble : LibPebble {
         // No-op
     }
 
-    override val watches: PebbleDevices = MutableStateFlow(fakeWatches())
+    // Declared as the mutable type so tests can install a deterministic watch list
+    // instead of the random preview population.
+    override val watches: MutableStateFlow<List<PebbleDevice>> = MutableStateFlow(fakeWatches())
     override val connectionEvents: Flow<PebbleConnectionEvent> = MutableSharedFlow()
 
     override fun watchesDebugState(): String {
@@ -214,6 +219,62 @@ class FakeLibPebble : LibPebble {
 
     override fun notificationApps(): Flow<List<AppWithCount>> =
         _notificationApps.map { it.map { AppWithCount(it, 44) } }
+
+    // Fork: in-memory per-app permission rows (null entry = FollowGlobal), with the
+    // global defaults starting at deny. An untouched fake therefore resolves
+    // everything to denied, matching the shipped deny-by-default baseline for
+    // previews, while tests can grant or deny through setWatchappPermission exactly
+    // like the UI does.
+    val watchappPermissionRows =
+        MutableStateFlow<Map<Pair<Uuid, LockerAppPermissionType>, Boolean>>(emptyMap())
+
+    // The globalDefault contract is a live flow (the per-app selector labels its
+    // "Default" choice from it and tracks toggles while visible), so the fake backs
+    // it with state instead of a one-shot value, and FollowGlobal rows resolve
+    // against the same state so the fake cannot contradict itself. A missing entry
+    // is deny, keeping untouched fakes on the shipped baseline.
+    val watchappGlobalDefaults =
+        MutableStateFlow<Map<LockerAppPermissionType, Boolean>>(emptyMap())
+
+    override fun watchappPermissionSetting(
+        uuid: Uuid,
+        type: LockerAppPermissionType,
+    ): Flow<PermissionSetting> = watchappPermissionRows.map { rows ->
+        when (rows[uuid to type]) {
+            null -> PermissionSetting.FollowGlobal
+            true -> PermissionSetting.Allow
+            false -> PermissionSetting.Deny
+        }
+    }
+
+    override fun watchappPermissionGranted(
+        uuid: Uuid,
+        type: LockerAppPermissionType,
+    ): Flow<Boolean> =
+        combine(watchappPermissionRows, watchappGlobalDefaults) { rows, defaults ->
+            rows[uuid to type] ?: defaults[type] ?: false
+        }
+
+    override suspend fun isWatchappPermissionGranted(
+        uuid: Uuid,
+        type: LockerAppPermissionType,
+    ): Boolean = watchappPermissionRows.value[uuid to type]
+        ?: watchappGlobalDefaults.value[type] ?: false
+
+    override fun globalDefault(type: LockerAppPermissionType): Flow<Boolean> =
+        watchappGlobalDefaults.map { it[type] ?: false }
+
+    override suspend fun setWatchappPermission(
+        uuid: Uuid,
+        type: LockerAppPermissionType,
+        setting: PermissionSetting,
+    ) {
+        watchappPermissionRows.value = when (setting) {
+            PermissionSetting.FollowGlobal -> watchappPermissionRows.value - (uuid to type)
+            PermissionSetting.Allow -> watchappPermissionRows.value + ((uuid to type) to true)
+            PermissionSetting.Deny -> watchappPermissionRows.value + ((uuid to type) to false)
+        }
+    }
 
     override fun notificationAppChannelCounts(packageName: String): Flow<List<ChannelAndCount>> =
         MutableStateFlow(emptyList())

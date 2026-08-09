@@ -91,6 +91,10 @@ object PebbleNavBarRoutes {
     @Serializable
     data object PermissionsRoute : NavBarRoute
 
+    // Fork: Settings > Apps > Watch App Permissions (global defaults + per-app list).
+    @Serializable
+    data object WatchappPermissionsRoute : NavBarRoute
+
     @Serializable
     data object CalendarsRoute : NavBarRoute
 
@@ -207,6 +211,9 @@ fun NavGraphBuilder.addNavBarRoutes(
     }
     composableWithAnimations<PebbleNavBarRoutes.PermissionsRoute>(viewModel) {
         PermissionsScreen(nav, topBarParams)
+    }
+    composableWithAnimations<PebbleNavBarRoutes.WatchappPermissionsRoute>(viewModel) {
+        WatchappPermissionsScreen(nav, topBarParams)
     }
     composableWithAnimations<PebbleNavBarRoutes.AppNotificationViewerRoute>(viewModel) {
         val route: PebbleNavBarRoutes.AppNotificationViewerRoute = it.toRoute()

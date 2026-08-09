@@ -115,6 +115,8 @@ import io.rebble.libpebblecommon.js.RemoteTimelineEmulator
 import io.rebble.libpebblecommon.locker.Locker
 import io.rebble.libpebblecommon.locker.LockerPBWCache
 import io.rebble.libpebblecommon.locker.StaticLockerPBWCache
+import io.rebble.libpebblecommon.locker.WatchappPermissionResolver
+import io.rebble.libpebblecommon.locker.WatchappPermissions
 import io.rebble.libpebblecommon.locker.WebSyncManagerProvider
 import io.rebble.libpebblecommon.metadata.WatchColor
 import io.rebble.libpebblecommon.notification.ContactsApi
@@ -370,6 +372,11 @@ fun initKoin(
                 singleOf(::RemoteTimelineEmulator)
                 singleOf(::WeatherManager)
                 singleOf(::HttpInterceptorManager)
+                // Fork: owns the tri-state per-app watchapp permission resolution.
+                // Bound to the interface for LibPebble/UI, and also resolvable as the
+                // concrete type for the JS enforcement sites that inject it directly.
+                single { WatchappPermissionResolver(get(), get()) } binds
+                        arrayOf(WatchappPermissionResolver::class, WatchappPermissions::class)
                 singleOf(::RealWatchPrefs) bind WatchPrefs::class
                 singleOf(::WebSyncManager) bind RequestSync::class
                 singleOf(::TimelineApi) bind Timeline::class
@@ -405,6 +412,8 @@ fun initKoin(
                         get(),
                         get(),
                         get(),
+                        get(),
+                        // watchappPermissions
                         get(),
                     )
                 } bind LibPebble::class
