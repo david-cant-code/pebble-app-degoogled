@@ -135,6 +135,15 @@ dependencies {
         exclude(group = "com.google.android.gms", module = "play-services-fitness")
     }
 
+    // Fork: host-side sentinels (classpath-absence probes, network security
+    // config pins) run against this module because it owns the shipping
+    // dependency graph after the AGP 9 split; see AppClasspathSentinelTest.
+    // This must stay the junit binding: in a plain android module nothing
+    // wires a kotlin-test framework capability the way the KMP plugin does
+    // in the library modules, so bare kotlin-test resolves to the
+    // framework-agnostic jar, which has no kotlin.test.Test annotation.
+    testImplementation(libs.kotlin.test.junit)
+
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.ktor.client.okhttp)
