@@ -251,6 +251,13 @@ class Locker(
         logger.d { "deleting: $toDelete" }
         lockerEntryDao.markAllForDeletion(toDelete)
         timelinePinDao.markAllForDeletionByParentIdsWithReminders(toDelete, timelineReminderDao)
+        // Same invariant as removeApp: an app's explicit permission grants must not
+        // outlive its locker entry, because PBW UUIDs are self-declared and a later
+        // install claiming a departed app's UUID would inherit them without fresh
+        // consent. This sync path is unreachable while the fork is permanently
+        // signed out (fetchLocker always returns null), but it must stay safe if an
+        // upstream merge or a future sync backend ever revives it.
+        toDelete.forEach { lockerAppPermissionDao.deleteByAppUuid(it) }
         performCacheCleanup()
     }
 
