@@ -81,6 +81,7 @@ class Locker(
     private val lockerEntryDao = database.lockerEntryDao()
     private val timelinePinDao = database.timelinePinDao()
     private val timelineReminderDao = database.timelineReminderDao()
+    private val lockerAppPermissionDao = database.lockerAppPermissionDao()
 
     companion object {
         private val logger = Logger.withTag("Locker")
@@ -183,6 +184,12 @@ class Locker(
         }
         lockerEntryDao.markForDeletion(id)
         timelinePinDao.markAllForDeletionByParentIdsWithReminders(listOf(id), timelineReminderDao)
+        // A removed app's explicit permission grants must not outlive it. PBW UUIDs are
+        // self-declared, so a row left behind would be inherited by any later install
+        // claiming the same UUID (sideloads included), silently bypassing the
+        // deny-by-default baseline without fresh consent. Deleting here also matches
+        // the platform convention that uninstalling an app forfeits its grants.
+        lockerAppPermissionDao.deleteByAppUuid(id)
         if (lockerEntry.sideloaded) {
             logger.d { "Requesting locker sync after removing sideloaded app" }
             // If it was sideloaded, trigger a resync (in case the same app is in the locker).
