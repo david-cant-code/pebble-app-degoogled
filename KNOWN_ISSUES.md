@@ -180,18 +180,24 @@ Watchapps whose developer config pages or PebbleKit JS requests use plain
 config page shows a load error and JS requests fail with
 `ERR_CLEARTEXT_NOT_PERMITTED`. `https://` is unaffected.
 
-The block began as an upstream accident this fork keeps on purpose.
-Upstream's manifest declares `android:usesCleartextTraffic="true"`, but
-Android ignores that attribute whenever an `android:networkSecurityConfig`
-is declared, which upstream later added to trust user-installed CAs
-(upstream commit `7549c661`, "Android: trust user-installed CA certs via
-Network Security Config"), and with targetSdk 28+ the config's base
-default is cleartext off. The
-fork keeps the block because a config page is remote code executed in a
-WebView on the phone: fetched over cleartext, it hands any
-network-position attacker script injection into that WebView, plus
-whatever app state rides in the config URL. Legacy http-only watchapps
-break, and that is the accepted cost.
+The block began as an upstream accident, and is now an active fork
+divergence held on purpose. Upstream's manifest declares
+`android:usesCleartextTraffic="true"`, but Android ignores that attribute
+whenever an `android:networkSecurityConfig` is declared, which upstream
+added to trust user-installed CAs (upstream commit `7549c661`); with
+targetSdk 28+ the config's base default is cleartext off, so the config
+silently blocked cleartext for upstream too. Upstream then restored
+cleartext by setting `cleartextTrafficPermitted="true"` in that config
+(upstream commit `44a15ce5`, taken up in the 2026-08 sync); the fork
+declines exactly that attribute, so the deliberate absence of
+`cleartextTrafficPermitted` in
+`androidApp/src/main/res/xml/network_security_config.xml` is now the
+entire control, re-asserted against upstream at every merge and pinned by
+`NetworkSecurityConfigTest`. The fork keeps the block because a config
+page is remote code executed in a WebView on the phone: fetched over
+cleartext, it hands any network-position attacker script injection into
+that WebView, plus whatever app state rides in the config URL. Legacy
+http-only watchapps break, and that is the accepted cost.
 
 A possible future resolution is a per-app "allow insecure HTTP" toggle in
 the watchapp permission controls, default off and gated behind an
@@ -216,14 +222,13 @@ policy disallows (dependencies must be free software, built from source
 or served from trusted repositories):
 
 - `cactus-native/src/main/jniLibs/arm64-v8a/libcactus_engine.so`, the
-  dictation engine, is a 55 MB prebuilt native library checked into git
+  dictation engine, is a 57.7 MB prebuilt native library checked into git
   with no source or license in the tree, and it ships in the APK. The
   missing license is a problem beyond F-Droid: the app links it while
-  shipping under GPLv3. (Upstream moved it from
-  `cactus/src/androidMain/jniLibs/` into the `:cactus-native` module and
-  updated the binary; the module's CMake build only compiles a small
-  CPU-capability shim, `cactus_cpu.c`, so the engine itself is still
-  sourceless.)
+  shipping under GPLv3. (Upstream moved the file, bit-identical, from
+  `cactus/src/androidMain/jniLibs/` into the `:cactus-native` module; the
+  module's CMake build only compiles a small CPU-capability shim,
+  `cactus_cpu.c`, so the engine itself is still sourceless.)
 - `models/needle-pebble-ft-cq4.zip` (13.7 MB) is bundled into APK assets
   via a symlink, and the main STT weights (383 MB) are downloaded at
   runtime from Hugging Face; neither carries a license statement in the
@@ -239,3 +244,123 @@ the choice is recorded here rather than made silently. Routine
 submission work (build recipe, signing, versioning) is not tracked
 here. This entry leaves the file when an F-Droid submission is accepted
 or the target is dropped.
+
+## Sleep blob mixes epoch timestamps with seconds-of-day typicals
+
+**Status: deferred; upstream-inherited display defect, no data at risk.**
+
+Upstream's typical-sleep feature (2026-08 sync) fills the
+`typical_fall_asleep_time` and `typical_wakeup_time` fields of the
+per-weekday sleep blob with circular-mean local seconds-of-day values
+(0..86399), while the `fall_asleep_time` and `wakeup_time` fields sitting
+immediately before them in the same struct carry absolute epoch seconds.
+The watch's sleep summary card compares exactly these fields, so one of
+the two units must be wrong, and nothing in this repository pins which:
+no firmware source is in tree, while the app's own debug UI and unit
+tests treat seconds-of-day as the intended unit, which would make the
+pre-existing epoch fields the wrong ones and the new code correct. Until
+this range the typical fields were hardcoded zero, so the inconsistency
+was inert; the feature activates it. Worst case under either reading is
+a wrong wall-clock time on the watch's sleep display: no crash, no data
+corruption, and no regression relative to the fork's previous state,
+which is why this is deferred rather than patched on a guess. This entry
+leaves the file when upstream clarifies or fixes the expected unit and
+the fork syncs the resolution.
+
+## Auto-resume of interrupted firmware updates is inert in this fork
+
+**Status: accepted; the fork's own update path never arms it.**
+
+Upstream (2026-08 sync) records an in-progress firmware update and
+resumes it on reconnection, controlled by a user-facing "Auto-Resume
+Firmware Updates" toggle. The record that arms the resume is written only
+inside upstream's own `updateFirmware()` entry point, which this fork
+does not call: fork firmware updates run through the verified
+GitHub-release flow and enter libpebble3 as a sideload, so no interrupted
+update is ever recorded and the resume machinery never triggers. The
+toggle still renders and saves its preference, advertising behavior the
+fork does not deliver. Hiding it means diverging in upstream settings UI
+for cosmetic gain, so the mismatch is recorded here instead. This entry
+leaves the file if the fork adopts the resume machinery for its verified
+flow (plausible follow-up: writing the interrupted-update record at the
+sideload boundary) or upstream's toggle becomes conditional on the
+feature being armable.
+
+## The Haversine AAR embeds an inert debug telemetry endpoint
+
+**Status: accepted; the code is unreachable, the artifact is unchanged.**
+
+The prebuilt `haversine` satellite library AAR (kept on the classpath as
+a compile-time dependency of the deliberately retained `:libindex`) ships
+a default debug-log delegate class containing a hardcoded MongoDB Atlas
+Data API write endpoint and a hardcoded firmware-release URL. The class
+is present in the APK's dex but nothing in this fork constructs it: the
+Ring runtime that would use Haversine is disabled at the DI seam
+(`NoOpLibIndex` never scans, no ring can pair), so no code path reaches
+the delegate. This is the same acceptance already recorded for the
+Haversine prebuilts in the F-Droid entry above, extended to name the
+endpoint explicitly so artifact-level endpoint scans have a documented
+match. This entry leaves the file when Haversine leaves the classpath or
+ships without the debug delegate.
+
+## The "Use Core OTA service" debug toggle is inert in fork builds
+
+**Status: accepted; this documented awareness is the resolution.**
+
+Upstream's watch-settings debug section (2026-08 sync) gained a "Use Core
+OTA service" toggle that routes firmware checks to a Core Devices OTA
+service. The routing requires a bug-endpoint build config value that this
+fork never sets, a fact the fork's own routing test asserts, so the
+toggle changes nothing on any fork build while its description names a
+firmware source the fork does not use. The toggle stays as upstream
+ships it; hiding it behind the same predicate that makes it functional
+remains open as a follow-up, and renaming it would keep an inert control
+under a different label. This entry leaves the file if the toggle is
+hidden behind that predicate or the fork ever sets the endpoint that
+makes it functional.
+
+## Hardware BLE scan filter can hide nonstandard watch advertisements
+
+**Status: accepted; upstream product decision, escape hatch exists.**
+
+Upstream (2026-08 sync) attaches an OS-level scan filter on the Pebble
+pairing service UUID (0xFED9) to every watch scan, on by default. A watch
+or clone that advertises Pebble manufacturer data without listing that
+service UUID in its advertisement is no longer surfaced by the hardware
+scan, where the previous software-only filtering would have found it. The
+only escape hatch is the scan-filter toggle in the debug options. No
+affected device is currently known; if pairing reports surface for older
+or third-party hardware, the toggle default is the first thing to
+revisit. This entry leaves the file if the default changes or the filter
+gains a fallback pass.
+
+## Notification mute carry-over can mismatch duplicate channel names
+
+**Status: accepted; upstream-inherited, narrow trigger, worth upstreaming.**
+
+Upstream's channel-ID-change handling (2026-08 sync) carries a channel's
+mute state over to its replacement by matching group name plus channel
+name when the ID changed. Android does not require channel names to be
+unique within a group, and the match takes the first same-named channel,
+so an app that recreates channels with duplicate names inside one group
+can have a mute state land on the wrong channel. The trigger is narrow
+(an app must both rotate channel IDs and hold duplicate names in one
+group) and the damage is a misplaced mute, fixable in the notification
+settings UI. Inherited unmodified from upstream and a candidate to fix
+there rather than diverge here. This entry leaves the file when upstream
+disambiguates the match (channel id first, then position-stable matching)
+and the fork syncs it.
+
+## gradle-wrapper.jar lags the declared Gradle version
+
+**Status: accepted; cosmetic, self-correcting at the next upstream bump.**
+
+Upstream's wrapper bump to Gradle 9.6.1 updated `distributionUrl` but
+committed the wrapper jar regenerated by the still-running 8.14.4
+distribution (the classic single-run wrapper update). The jar is only the
+launcher that downloads the declared distribution, so builds correctly
+run 9.6.1; the stale jar costs nothing at runtime. Regenerating locally
+would diverge a binary file from upstream for zero functional gain, so
+this waits for upstream's next wrapper update (or any local wrapper task
+run that lands with other build changes). This entry leaves the file when
+the committed jar matches the declared distribution.
