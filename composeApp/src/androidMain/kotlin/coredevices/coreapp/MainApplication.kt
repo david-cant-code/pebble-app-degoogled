@@ -84,7 +84,14 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
                 logger.i { "Power state changed: isPowerSaveMode=${powerManager.isPowerSaveMode}" }
             }
         }, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED))
-        registerBluetoothPairingDebugLogger(this)
+        // Fork: upstream registers this pairing diagnostic unconditionally,
+        // but it records every Bluetooth pairing on the phone into the
+        // persisted log that bug reports upload. Debuggable builds only here;
+        // the receiver additionally redacts the passkey extra as a second,
+        // independent layer.
+        if (isDebuggableBuild) {
+            registerBluetoothPairingDebugLogger(this)
+        }
         setupExceptionHandler()
         experimentalDevices.appInit()
         // Cactus telemetry is initialized via CommonAppDelegate.initCactus()

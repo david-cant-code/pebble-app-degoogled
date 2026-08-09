@@ -36,8 +36,17 @@ fun registerBluetoothPairingDebugLogger(context: Context) {
     ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
 }
 
+// Fork: EXTRA_PAIRING_KEY carries the numeric pairing passkey/PIN, and the
+// system broadcasts ACTION_PAIRING_REQUEST for every Bluetooth device the
+// phone pairs with (headphones, car, keyboard), not just watches. Kermit's
+// file writer persists Info logs into files the bug-report flow uploads, so
+// the raw code must never reach the log line. The rest of the bundle is
+// device metadata the diagnostic exists to capture, so it stays.
+internal fun describePairingExtra(key: String, value: Any?): String =
+    if (key == BluetoothDevice.EXTRA_PAIRING_KEY) "$key=<redacted>" else "$key=$value"
+
 private fun Intent.describeExtras(): String {
     val extras = extras ?: return ""
     @Suppress("DEPRECATION")
-    return extras.keySet().joinToString { key -> "$key=${extras.get(key)}" }
+    return extras.keySet().joinToString { key -> describePairingExtra(key, extras.get(key)) }
 }
