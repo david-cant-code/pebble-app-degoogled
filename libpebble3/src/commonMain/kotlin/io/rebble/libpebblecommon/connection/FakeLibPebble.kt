@@ -29,6 +29,7 @@ import io.rebble.libpebblecommon.database.entity.HRMonitoringInterval
 import io.rebble.libpebblecommon.database.entity.HealthDataEntity
 import io.rebble.libpebblecommon.database.entity.HealthGender
 import io.rebble.libpebblecommon.database.entity.MuteState
+import io.rebble.libpebblecommon.database.entity.LockerAppPermissionType
 import io.rebble.libpebblecommon.database.entity.NotificationAppItem
 import io.rebble.libpebblecommon.database.entity.NotificationEntity
 import io.rebble.libpebblecommon.database.entity.NotificationRuleEntity
@@ -44,6 +45,7 @@ import io.rebble.libpebblecommon.locker.AppPlatform
 import io.rebble.libpebblecommon.locker.AppProperties
 import io.rebble.libpebblecommon.locker.AppType
 import io.rebble.libpebblecommon.locker.LockerWrapper
+import io.rebble.libpebblecommon.locker.PermissionSetting
 import io.rebble.libpebblecommon.metadata.WatchColor
 import io.rebble.libpebblecommon.metadata.WatchHardwarePlatform
 import io.rebble.libpebblecommon.metadata.WatchType
@@ -65,6 +67,7 @@ import io.rebble.libpebblecommon.web.LockerEntry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -214,6 +217,32 @@ class FakeLibPebble : LibPebble {
 
     override fun notificationApps(): Flow<List<AppWithCount>> =
         _notificationApps.map { it.map { AppWithCount(it, 44) } }
+
+    // Fork: previews/tests report every watchapp permission as denied by default,
+    // matching the shipped deny-by-default global defaults.
+    override fun watchappPermissionSetting(
+        uuid: Uuid,
+        type: LockerAppPermissionType,
+    ): Flow<PermissionSetting> = flowOf(PermissionSetting.FollowGlobal)
+
+    override fun watchappPermissionGranted(
+        uuid: Uuid,
+        type: LockerAppPermissionType,
+    ): Flow<Boolean> = flowOf(false)
+
+    override suspend fun isWatchappPermissionGranted(
+        uuid: Uuid,
+        type: LockerAppPermissionType,
+    ): Boolean = false
+
+    override fun globalDefault(type: LockerAppPermissionType): Boolean = false
+
+    override suspend fun setWatchappPermission(
+        uuid: Uuid,
+        type: LockerAppPermissionType,
+        setting: PermissionSetting,
+    ) {
+    }
 
     override fun notificationAppChannelCounts(packageName: String): Flow<List<ChannelAndCount>> =
         MutableStateFlow(emptyList())
