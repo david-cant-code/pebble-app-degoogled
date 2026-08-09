@@ -98,6 +98,15 @@ data class CoreConfig(
     val hidePermissionWarningBadges: Boolean = false,
     val androidForegroundServiceForWatchConnectionV2: Boolean = true,
     val showWatchConnectionDebugInfo: Boolean = false,
+    /**
+     * Fork: highest "What's New" changelog revision the user has already seen. Compared
+     * against WHATS_NEW_VERSION to decide whether to show the one-time update dialog.
+     * Defaults to 0 so an existing install upgrading into this build (whose stored config
+     * predates the field) is shown the current entries once; fresh installs stamp it to
+     * the current version at the end of onboarding so they are not shown what they just
+     * chose during setup.
+     */
+    val lastSeenWhatsNewVersion: Int = 0,
 )
 
 @Serializable

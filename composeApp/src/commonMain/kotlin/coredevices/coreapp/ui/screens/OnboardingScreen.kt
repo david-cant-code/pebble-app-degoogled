@@ -21,18 +21,23 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Watch
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -51,6 +56,7 @@ import com.russhwolf.settings.Settings
 import com.russhwolf.settings.set
 import coreapp.composeapp.generated.resources.Res
 import coreapp.composeapp.generated.resources.gravel_logo
+import io.rebble.libpebblecommon.connection.LibPebble
 import coredevices.pebble.ui.PebbleRoutes
 import coredevices.pebble.ui.PreviewWrapper
 import coredevices.ui.PebbleElevatedButton
@@ -77,6 +83,11 @@ enum class OnboardingStage {
     Welcome,
     DeviceSelection,
     Permissions,
+    // Fork: the user's one-time choice for whether watchfaces/apps may reach the
+    // internet and location by default. Placed just before Done so it is the last
+    // thing set during onboarding; existing installs (which never re-run onboarding)
+    // keep the deny-by-default baseline.
+    WatchappPrivacy,
     SignIn,
     Done,
 }
@@ -94,6 +105,13 @@ class OnboardingViewModel(private val config: CoreConfigHolder) : ViewModel() {
     val coreConfig = config.config
     fun setIndexEnabled(enabled: Boolean) {
         config.update(config.config.value.copy(enableIndex = enabled))
+    }
+
+    // Fork: stamp the current changelog revision as seen (see WhatsNewDialog). Called on
+    // onboarding exit so a fresh install is not shown the update dialog for changes it was
+    // just walked through during setup.
+    fun markWhatsNewSeen() {
+        config.update(config.config.value.copy(lastSeenWhatsNewVersion = WHATS_NEW_VERSION))
     }
 }
 
@@ -127,6 +145,10 @@ fun OnboardingScreen(
     fun exitOnboarding() {
         logger.v { "exitOnboarding" }
         settings[SHOWN_ONBOARDING] = true
+        // Fork: a fresh install has just made its watchapp privacy choice during
+        // onboarding, so mark the current "What's New" as seen, otherwise the update
+        // dialog would immediately re-announce what the user just set.
+        viewModel.markWhatsNewSeen()
         doneInitialOnboarding.onDoneInitialOnboarding()
         coreNav.navigateTo(PebbleRoutes.WatchHomeRoute)
     }
@@ -232,8 +254,9 @@ fun OnboardingScreen(
                             // Fork: Core-account sign-in is removed with the
                             // Firebase strip, so onboarding skips the SignIn
                             // stage; the stage and its UI stay compiled for
-                            // cheap upstream merges.
-                            viewModel.stage.value = OnboardingStage.Done
+                            // cheap upstream merges. Route through the watchapp
+                            // privacy choice before finishing.
+                            viewModel.stage.value = OnboardingStage.WatchappPrivacy
                         } else {
                             val warnBeforeFullScreenRequest = permissionToRequest.requestIsFullScreen()
                             LaunchedEffect(permissionToRequest) {
@@ -279,6 +302,12 @@ fun OnboardingScreen(
                             }
                         }
                     }
+                }
+
+                OnboardingStage.WatchappPrivacy -> {
+                    WatchappPrivacyStage(
+                        onDone = { viewModel.stage.value = OnboardingStage.Done },
+                    )
                 }
 
                 OnboardingStage.SignIn -> {
@@ -330,6 +359,130 @@ fun OnboardingScreen(
     }
     }
 }
+
+/**
+ * Fork: one-time onboarding choice for the global watchapp/watchface phone-side
+ * permission defaults (internet + location). Both default to off (deny) here: the user
+ * opts in rather than out. The choice is confirmed via a dialog, then written to
+ * WatchConfig, then acknowledged with a note pointing at the settings screen where it can
+ * be changed later, per David's requested flow.
+ */
+@Composable
+private fun WatchappPrivacyStage(onDone: () -> Unit) {
+    val libPebble: LibPebble = koinInject()
+    var allowInternet by remember { mutableStateOf(false) }
+    var allowLocation by remember { mutableStateOf(false) }
+    var showConfirm by remember { mutableStateOf(false) }
+    var saved by remember { mutableStateOf(false) }
+
+    if (saved) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = "You're all set",
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Watchfaces and apps will have internet ${onOff(allowInternet)} and " +
+                    "location ${onOff(allowLocation)} by default. You can change this any time, " +
+                    "for all apps or one at a time, in Settings > Apps > Watch App Permissions.",
+                textAlign = TextAlign.Center,
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+            PebbleElevatedButton(
+                text = "Continue",
+                onClick = onDone,
+                primaryColor = true,
+            )
+        }
+        return
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = "Privacy",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = "Some watchfaces and apps run code on your phone to fetch things like " +
+                "weather, which can use your internet connection and location. Choose what " +
+                "they're allowed to do by default. Off is the safer choice, but can stop " +
+                "features that need it, such as third-party weather, from working; you can " +
+                "allow individual apps later.",
+            textAlign = TextAlign.Center,
+        )
+        Spacer(modifier = Modifier.height(20.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Allow internet access", modifier = Modifier.weight(1f))
+            Switch(checked = allowInternet, onCheckedChange = { allowInternet = it })
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Allow location", modifier = Modifier.weight(1f))
+            Switch(checked = allowLocation, onCheckedChange = { allowLocation = it })
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+        PebbleElevatedButton(
+            text = "Finish setup",
+            onClick = { showConfirm = true },
+            primaryColor = true,
+        )
+    }
+
+    if (showConfirm) {
+        AlertDialog(
+            onDismissRequest = { showConfirm = false },
+            title = { Text("Confirm your choice") },
+            text = {
+                Text(
+                    "By default, watchfaces and apps will have:\n\n" +
+                        "Internet: ${allowedBlocked(allowInternet)}\n" +
+                        "Location: ${allowedBlocked(allowLocation)}\n\n" +
+                        "You can change this any time in Settings.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val cfg = libPebble.config.value
+                    libPebble.updateConfig(
+                        cfg.copy(
+                            watchConfig = cfg.watchConfig.copy(
+                                watchappDefaultNetworkAllowed = allowInternet,
+                                watchappDefaultLocationAllowed = allowLocation,
+                            ),
+                        ),
+                    )
+                    showConfirm = false
+                    saved = true
+                }) { Text("Confirm") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirm = false }) { Text("Back") }
+            },
+        )
+    }
+}
+
+private fun onOff(value: Boolean): String = if (value) "on" else "off"
+
+private fun allowedBlocked(value: Boolean): String = if (value) "Allowed" else "Blocked"
 
 @Composable
 private fun DeviceChoiceCard(
