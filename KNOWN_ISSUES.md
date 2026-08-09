@@ -148,6 +148,29 @@ transfer path, and `adb backup` alike on those devices. `BackupRulesTest`
 pins the shape of all three rule files. This entry leaves the file when
 minSdk reaches 28.
 
+## Watchapp WebSocket deny is best-effort on WebViews without proxy override
+
+**Status: accepted; degrades safely and is rare in practice.**
+
+The watchapp network gate (see `DESIGN_NOTES.md`) enforces a denied app's
+network block in three layers. Two of them, the `shouldInterceptRequest`
+403 and the `startup.js` API stubs, always apply, but only the third, the
+`ProxyController` black-hole, deterministically covers WebSocket, because
+`ws`/`wss` handshakes never reach `shouldInterceptRequest` (a documented
+WebView limitation) and the JS stub is same-realm best-effort a hostile
+bundle could try to bypass. `ProxyController` needs the `PROXY_OVERRIDE`
+WebView feature, which is present on the updatable WebView shipped by every
+current Android version but can be absent on very old or stripped WebView
+builds. Where it is absent, a network-denied app's http/https egress is
+still deterministically blocked (layer 1) and its JS network APIs are
+stubbed (layer 2), but a hostile bundle that recovers a fresh `WebSocket`
+constructor could open a WebSocket. The exposure is narrow: it needs a
+`PROXY_OVERRIDE`-less WebView and a deliberately hostile watchapp, and it
+is limited to WebSocket only. `WebViewJsRunner.applyNetworkProxy` logs a
+warning when the feature is unavailable. This entry leaves the file if
+minSdk/WebView baseline guarantees `PROXY_OVERRIDE`, or if a WebView-level
+WebSocket intercept becomes available.
+
 ## The bundled speech stack blocks F-Droid inclusion
 
 **Status: open; which way to resolve it is not yet decided.**

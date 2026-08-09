@@ -2,9 +2,9 @@ package io.rebble.libpebblecommon.js
 
 import co.touchlab.kermit.Logger
 import io.ktor.http.quote
-import io.rebble.libpebblecommon.database.dao.LockerAppPermissionDao
 import io.rebble.libpebblecommon.database.entity.LockerAppPermissionType
 import io.rebble.libpebblecommon.di.LibPebbleKoinComponent
+import io.rebble.libpebblecommon.locker.WatchappPermissionResolver
 import io.rebble.libpebblecommon.util.GeolocationPositionResult
 import io.rebble.libpebblecommon.util.SystemGeolocation
 import kotlinx.coroutines.CoroutineScope
@@ -21,7 +21,7 @@ abstract class GeolocationInterface(
     private val jsRunner: JsRunner,
 ): LibPebbleKoinComponent {
     private val logger = Logger.withTag("GeolocationInterface")
-    private val permissionDao: LockerAppPermissionDao by inject()
+    private val watchappPermissions: WatchappPermissionResolver by inject()
     private val systemGeolocation: SystemGeolocation by inject()
     private var requestIDs = (1..Int.MAX_VALUE).iterator()
     private var watchIDs = (1..Int.MAX_VALUE).iterator()
@@ -69,11 +69,17 @@ abstract class GeolocationInterface(
         }
     }
 
+    // Fork: resolve the app's Location grant through the tri-state model (per-app
+    // override, else the global default). Upstream read a per-app row that nothing
+    // ever wrote and treated a missing row as "granted", so the gate was inert and
+    // every watchapp got phone GPS silently. Now a missing/FollowGlobal app inherits
+    // the deny-by-default global, and denial is reported back to the JS callback as a
+    // geolocation error rather than being swallowed.
     private suspend fun geolocationPermissionGranted(): Boolean =
-        permissionDao.getByAppUuidAndPermission(
+        watchappPermissions.isWatchappPermissionGranted(
             Uuid.parse(jsRunner.appInfo.uuid),
-            LockerAppPermissionType.Location
-        )?.granted != false //TODO: deny by default?
+            LockerAppPermissionType.Location,
+        )
 
     open fun getRequestCallbackID() = getNextRequestID()
     open fun getWatchCallbackID() = getNextWatchID()

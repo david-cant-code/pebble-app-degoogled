@@ -487,5 +487,42 @@ navigator.geolocation.clearWatch = (id) => {
         xhr.originalSend(body);
     };
 
+    // Fork network gate (JS-shim layer). When this app's Network permission is denied,
+    // replace the network entry points with failing stubs before the app bundle loads.
+    // This is best-effort defence in depth layered on top of the native
+    // shouldInterceptRequest and proxy-override layers: it gives a well-behaved app a
+    // clean, synchronous failure instead of a hung request, but a hostile bundle could
+    // try to recover fresh natives (e.g. from an about:blank iframe), which is exactly
+    // why the deterministic native layers below it exist. Installed last so it wins over
+    // the interception overrides above. Wrapped in try/catch because the bridge method
+    // only exists on Android; iOS falls through and leaves the network APIs intact.
+    try {
+        if (_Pebble.isNetworkAllowed && _Pebble.isNetworkAllowed() === false) {
+            const denyNetwork = (what) => {
+                throw new Error("Network access denied for this watchapp (" + what + ")");
+            };
+            // Fail XHR at open(), so neither the real request nor the interception path runs.
+            XMLHttpRequest.prototype.open = function() { denyNetwork("XMLHttpRequest"); };
+            XMLHttpRequest.prototype.send = function() { denyNetwork("XMLHttpRequest"); };
+            if (typeof global.fetch !== 'undefined') {
+                global.fetch = () => Promise.reject(
+                    new Error("Network access denied for this watchapp (fetch)")
+                );
+            }
+            if (typeof global.WebSocket !== 'undefined') {
+                global.WebSocket = function() { denyNetwork("WebSocket"); };
+            }
+            if (typeof global.EventSource !== 'undefined') {
+                global.EventSource = function() { denyNetwork("EventSource"); };
+            }
+            if (global.navigator && typeof global.navigator.sendBeacon !== 'undefined') {
+                global.navigator.sendBeacon = () => false;
+            }
+            console.warn("Pebble JS Bridge: network access is denied for this app; network APIs are disabled.");
+        }
+    } catch (e) {
+        // No _Pebble.isNetworkAllowed (iOS): leave the network APIs untouched.
+    }
+
     console.log("Pebble JS Bridge initialized.");
 })(_global);
