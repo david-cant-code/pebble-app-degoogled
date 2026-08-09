@@ -151,6 +151,7 @@ kotlin {
 
         androidMain {
             dependencies {
+                implementation(compose.uiTooling)
                 implementation(libs.androidx.activity.compose)
                 implementation(libs.ktor.client.okhttp)
             }

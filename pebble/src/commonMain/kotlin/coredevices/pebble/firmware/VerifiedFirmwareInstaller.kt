@@ -89,10 +89,12 @@ sealed class ForkFirmwareInstallState {
  *     firmware type is "normal", version tag matches the release the checker
  *     selected (skipped when a manifest carries no tag).
  *  3. Pebble-CRC32 and size of the firmware and resources streams inside the
- *     zip against the manifest's own values. Upstream streams these to the
- *     watch without ever comparing them (its transfer CRC is computed over
- *     whatever bytes it reads), so a source-corrupt archive would otherwise
- *     install garbage.
+ *     zip against the manifest's own values. Upstream's performSafetyChecks
+ *     runs the same stream-vs-manifest comparison at install time (added in
+ *     the 2026-08 upstream sync); this copy runs earlier, at acquisition, so
+ *     a source-corrupt archive is refused and deleted before it is ever
+ *     stored as verified or offered to an install path, independent of that
+ *     path exercising performSafetyChecks.
  * The verified file stays in app-private storage between verification and
  * transfer; anything able to rewrite it there already controls the app.
  *

@@ -48,7 +48,7 @@ import kotlin.test.assertTrue
  * archives: every fail-closed branch (missing expectation, https, checksum,
  * size, stall, manifest hardware/tag/type, inner CRC) must refuse the
  * install, never call sideload, and leave no file behind; the happy path
- * must hand libpebble3 the exact verified bytes. Lives in androidUnitTest
+ * must hand libpebble3 the exact verified bytes. Lives in androidHostTest
  * because the fixtures are built with java.util.zip.
  */
 class VerifiedFirmwareInstallerTest {

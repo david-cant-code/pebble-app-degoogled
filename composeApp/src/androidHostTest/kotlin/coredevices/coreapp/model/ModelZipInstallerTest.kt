@@ -40,7 +40,7 @@ import kotlin.test.assertTrue
  * mid-stream oversize abort, Zip-Slip in its three shapes, entry-count and
  * inflation caps, stalls, cancellation). The invariant asserted
  * throughout: no failure mode ever costs the existing model, and nothing
- * unverified is left behind in staging or cache. Lives in androidUnitTest
+ * unverified is left behind in staging or cache. Lives in androidHostTest
  * because the fixtures are built with java.util.zip.
  */
 class ModelZipInstallerTest {
