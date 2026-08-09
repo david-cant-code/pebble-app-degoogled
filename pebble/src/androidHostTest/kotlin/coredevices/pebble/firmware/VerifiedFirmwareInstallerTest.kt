@@ -35,6 +35,8 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertContains
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -144,6 +146,14 @@ class VerifiedFirmwareInstallerTest {
         downloadDirectory = { tempDir },
         watchUpdateStates = { watchStates },
         scope = scope,
+        // Infinite: the MockEngine body writer runs on a real dispatcher while
+        // runTest's clock is virtual, so any multi-chunk read would lose the
+        // race against the 30s production stall timeout spuriously (single
+        // reads only escape it while the machine is fast enough; a loaded
+        // runner splits the body and loses). The one test of the stall branch
+        // itself builds its own installer with a finite timeout instead of
+        // using this helper.
+        readStallTimeout = Duration.INFINITE,
     )
 
     private fun target(
@@ -363,15 +373,30 @@ class VerifiedFirmwareInstallerTest {
     fun stalledDownloadFails() = runTest {
         val pbz = singleSlotPbz()
         record(pbz)
-        val installer = installer(backgroundScope) {
-            val channel = ByteChannel()
-            channel.writeFully(pbz, 0, 16)
-            channel.flush()
-            // Never closed: the per-read stall timeout must fire.
-            respond(channel, HttpStatusCode.OK)
-        }
-        installer.runInstall(target(), update())
-        val state = assertIs<ForkFirmwareInstallState.Failed>(installer.stateValueFor("watch1"))
+        // Built without the installer() helper: this test verifies the stall
+        // branch itself, so it needs a finite timeout where every other test
+        // injects INFINITE to opt out (an infinite timeout bypasses the timer
+        // entirely, so with the helper this read would suspend forever and
+        // trip runTest's watchdog). The finite timer runs on runTest's
+        // virtual clock, which fast-forwards to it as soon as the quiet
+        // channel leaves the dispatcher idle: deterministic, and the 30
+        // virtual seconds cost no real time.
+        val stallInstaller = VerifiedFirmwareInstaller(
+            httpClient = HttpClient(MockEngine {
+                val channel = ByteChannel()
+                channel.writeFully(pbz, 0, 16)
+                channel.flush()
+                // Never closed: the per-read stall timeout must fire.
+                respond(channel, HttpStatusCode.OK)
+            }),
+            expectations = expectations,
+            downloadDirectory = { tempDir },
+            watchUpdateStates = { watchStates },
+            scope = backgroundScope,
+            readStallTimeout = 30.seconds,
+        )
+        stallInstaller.runInstall(target(), update())
+        val state = assertIs<ForkFirmwareInstallState.Failed>(stallInstaller.stateValueFor("watch1"))
         assertContains(state.reason, "stalled")
         assertTrue(forkFilesLeft().isEmpty())
     }

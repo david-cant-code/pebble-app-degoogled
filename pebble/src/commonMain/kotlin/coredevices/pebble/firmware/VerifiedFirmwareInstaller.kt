@@ -37,6 +37,7 @@ import kotlinx.io.readAtMostTo
 import okio.Buffer
 import okio.HashingSink
 import okio.blackholeSink
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -109,6 +110,11 @@ class VerifiedFirmwareInstaller(
     private val downloadDirectory: () -> Path,
     private val watchUpdateStates: (identifierKey: String) -> Flow<FirmwareUpdateStatus?>,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    // Injected so tests can disable it: under runTest's virtual clock the
+    // MockEngine body writer races this timeout (Ktor delivers the body on a
+    // real dispatcher since 3.5), and multi-chunk transfers lose spuriously.
+    // Production always uses the default. Same seam as ModelZipInstaller's.
+    private val readStallTimeout: Duration = READ_STALL_TIMEOUT,
 ) {
     private val logger = Logger.withTag("VerifiedFirmwareInstaller")
     private val stateMutex = Mutex()
@@ -244,9 +250,22 @@ class VerifiedFirmwareInstaller(
                 SystemFileSystem.sink(path).buffered().use { fileSink ->
                     val buffer = ByteArray(DOWNLOAD_CHUNK_BYTES)
                     while (true) {
-                        val read = withTimeoutOrNull(READ_STALL_TIMEOUT) {
+                        // An infinite timeout must bypass withTimeoutOrNull
+                        // entirely, not just never expire: Duration.INFINITE
+                        // still schedules a Long.MAX_VALUE timer, and the
+                        // kotlinx-coroutines-test scheduler fast-forwards
+                        // virtual time to the next scheduled event whenever
+                        // the test dispatcher idles while MockEngine's body
+                        // writer is still delivering chunks on a real
+                        // dispatcher. That fired the stall branch spuriously
+                        // in the very tests that pass INFINITE to disable it.
+                        val read = if (readStallTimeout.isInfinite()) {
                             channel.readAvailable(buffer, 0, buffer.size)
-                        } ?: throw InstallFailure("download stalled")
+                        } else {
+                            withTimeoutOrNull(readStallTimeout) {
+                                channel.readAvailable(buffer, 0, buffer.size)
+                            } ?: throw InstallFailure("download stalled")
+                        }
                         if (read == -1) break
                         if (read == 0) continue
                         received += read
