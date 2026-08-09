@@ -88,7 +88,9 @@ class FakeLibPebble : LibPebble {
         // No-op
     }
 
-    override val watches: PebbleDevices = MutableStateFlow(fakeWatches())
+    // Declared as the mutable type so tests can install a deterministic watch list
+    // instead of the random preview population.
+    override val watches: MutableStateFlow<List<PebbleDevice>> = MutableStateFlow(fakeWatches())
     override val connectionEvents: Flow<PebbleConnectionEvent> = MutableSharedFlow()
 
     override fun watchesDebugState(): String {
@@ -218,22 +220,33 @@ class FakeLibPebble : LibPebble {
     override fun notificationApps(): Flow<List<AppWithCount>> =
         _notificationApps.map { it.map { AppWithCount(it, 44) } }
 
-    // Fork: previews/tests report every watchapp permission as denied by default,
-    // matching the shipped deny-by-default global defaults.
+    // Fork: in-memory per-app permission rows (null entry = FollowGlobal), with the
+    // global default pinned to deny. An untouched fake therefore resolves everything
+    // to denied, matching the shipped deny-by-default baseline for previews, while
+    // tests can grant or deny through setWatchappPermission exactly like the UI does.
+    val watchappPermissionRows =
+        MutableStateFlow<Map<Pair<Uuid, LockerAppPermissionType>, Boolean>>(emptyMap())
+
     override fun watchappPermissionSetting(
         uuid: Uuid,
         type: LockerAppPermissionType,
-    ): Flow<PermissionSetting> = flowOf(PermissionSetting.FollowGlobal)
+    ): Flow<PermissionSetting> = watchappPermissionRows.map { rows ->
+        when (rows[uuid to type]) {
+            null -> PermissionSetting.FollowGlobal
+            true -> PermissionSetting.Allow
+            false -> PermissionSetting.Deny
+        }
+    }
 
     override fun watchappPermissionGranted(
         uuid: Uuid,
         type: LockerAppPermissionType,
-    ): Flow<Boolean> = flowOf(false)
+    ): Flow<Boolean> = watchappPermissionRows.map { it[uuid to type] ?: false }
 
     override suspend fun isWatchappPermissionGranted(
         uuid: Uuid,
         type: LockerAppPermissionType,
-    ): Boolean = false
+    ): Boolean = watchappPermissionRows.value[uuid to type] ?: false
 
     override fun globalDefault(type: LockerAppPermissionType): Flow<Boolean> = flowOf(false)
 
@@ -242,6 +255,11 @@ class FakeLibPebble : LibPebble {
         type: LockerAppPermissionType,
         setting: PermissionSetting,
     ) {
+        watchappPermissionRows.value = when (setting) {
+            PermissionSetting.FollowGlobal -> watchappPermissionRows.value - (uuid to type)
+            PermissionSetting.Allow -> watchappPermissionRows.value + ((uuid to type) to true)
+            PermissionSetting.Deny -> watchappPermissionRows.value + ((uuid to type) to false)
+        }
     }
 
     override fun notificationAppChannelCounts(packageName: String): Flow<List<ChannelAndCount>> =

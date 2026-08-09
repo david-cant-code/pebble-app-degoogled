@@ -3,13 +3,12 @@ package io.rebble.libpebblecommon.locker
 import io.rebble.libpebblecommon.LibPebbleConfig
 import io.rebble.libpebblecommon.LibPebbleConfigFlow
 import io.rebble.libpebblecommon.WatchConfig
-import io.rebble.libpebblecommon.database.dao.LockerAppPermissionDao
-import io.rebble.libpebblecommon.database.entity.LockerAppPermission
+import io.rebble.libpebblecommon.database.dao.FakeLockerAppPermissionDao
 import io.rebble.libpebblecommon.database.entity.LockerAppPermissionType
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -20,31 +19,38 @@ import kotlin.uuid.Uuid
 
 /**
  * Covers the security-critical decision logic: deny-by-default, per-app overrides winning
- * over the global default in both directions, and FollowGlobal being represented as the
- * absence of a stored row. Every enforcement site (geolocation bridge, WebView network
- * gate, phone-side interceptor) resolves through this, so this is where the "network/
- * location off by default" guarantee is actually proven.
+ * over the global default in both directions, FollowGlobal being represented as the
+ * absence of a stored row, each capability mapping to its own global default, and the
+ * resolved-grant flow re-emitting on live default/row changes (which the running-app
+ * enforcement collectors depend on). Every enforcement site (geolocation bridge, WebView
+ * network gate, phone-side interceptor) resolves through this, so this is where the
+ * "network/location off by default" guarantee is actually proven.
  */
 class WatchappPermissionResolverTest {
     private val uuid = Uuid.parse("00000000-0000-0000-0000-0000000000aa")
     private val other = Uuid.parse("00000000-0000-0000-0000-0000000000bb")
 
-    private fun resolver(
+    /** The config flow is exposed so tests can flip a global default mid-collection. */
+    private class Fixture(
+        val resolver: WatchappPermissionResolver,
+        val dao: FakeLockerAppPermissionDao,
+        val config: MutableStateFlow<LibPebbleConfig>,
+    )
+
+    private fun fixture(
         networkDefault: Boolean = false,
         locationDefault: Boolean = false,
-    ): Pair<WatchappPermissionResolver, FakeLockerAppPermissionDao> {
+    ): Fixture {
         val dao = FakeLockerAppPermissionDao()
-        val configFlow = LibPebbleConfigFlow(
-            MutableStateFlow(
-                LibPebbleConfig(
-                    watchConfig = WatchConfig(
-                        watchappDefaultNetworkAllowed = networkDefault,
-                        watchappDefaultLocationAllowed = locationDefault,
-                    ),
+        val config = MutableStateFlow(
+            LibPebbleConfig(
+                watchConfig = WatchConfig(
+                    watchappDefaultNetworkAllowed = networkDefault,
+                    watchappDefaultLocationAllowed = locationDefault,
                 ),
             ),
         )
-        return WatchappPermissionResolver(dao, configFlow) to dao
+        return Fixture(WatchappPermissionResolver(dao, LibPebbleConfigFlow(config)), dao, config)
     }
 
     @Test
@@ -57,116 +63,157 @@ class WatchappPermissionResolverTest {
 
     @Test
     fun noRowFollowsGlobalDefault() = runTest {
-        val (denyResolver, _) = resolver(networkDefault = false, locationDefault = false)
-        assertFalse(denyResolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network))
-        assertFalse(denyResolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Location))
+        val deny = fixture(networkDefault = false, locationDefault = false)
+        assertFalse(deny.resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network))
+        assertFalse(deny.resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Location))
 
-        val (allowResolver, _) = resolver(networkDefault = true, locationDefault = true)
-        assertTrue(allowResolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network))
-        assertTrue(allowResolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Location))
+        val allow = fixture(networkDefault = true, locationDefault = true)
+        assertTrue(allow.resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network))
+        assertTrue(allow.resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Location))
+    }
+
+    @Test
+    fun asymmetricDefaultsResolvePerCapability() = runTest {
+        // Symmetric defaults cannot tell the two capability-to-config-field mappings
+        // apart, so a cross-wire (Location reading the network default, or the
+        // reverse) would pass every symmetric test while granting the wrong
+        // capability globally. Pin each direction with the defaults split.
+        val networkOnly = fixture(networkDefault = true, locationDefault = false)
+        assertTrue(networkOnly.resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network))
+        assertFalse(
+            networkOnly.resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Location),
+            "location must not inherit the network default",
+        )
+
+        val locationOnly = fixture(networkDefault = false, locationDefault = true)
+        assertFalse(
+            locationOnly.resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network),
+            "network must not inherit the location default",
+        )
+        assertTrue(locationOnly.resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Location))
+    }
+
+    @Test
+    fun globalDefaultFlowTracksItsOwnCapability() = runTest {
+        val f = fixture(networkDefault = true, locationDefault = false)
+        assertTrue(f.resolver.globalDefault(LockerAppPermissionType.Network).first())
+        assertFalse(f.resolver.globalDefault(LockerAppPermissionType.Location).first())
+
+        // Flipping one default must be visible on that capability's flow only.
+        f.config.value = f.config.value.copy(
+            watchConfig = f.config.value.watchConfig.copy(watchappDefaultLocationAllowed = true),
+        )
+        assertTrue(f.resolver.globalDefault(LockerAppPermissionType.Location).first())
+        assertTrue(f.resolver.globalDefault(LockerAppPermissionType.Network).first())
     }
 
     @Test
     fun perAppAllowOverridesDenyGlobal() = runTest {
-        val (resolver, _) = resolver(networkDefault = false)
-        resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.Allow)
-        assertTrue(resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network))
+        val f = fixture(networkDefault = false)
+        f.resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.Allow)
+        assertTrue(f.resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network))
         // A different app is unaffected and still follows the deny default.
-        assertFalse(resolver.isWatchappPermissionGranted(other, LockerAppPermissionType.Network))
+        assertFalse(f.resolver.isWatchappPermissionGranted(other, LockerAppPermissionType.Network))
     }
 
     @Test
     fun perAppDenyOverridesAllowGlobal() = runTest {
-        val (resolver, _) = resolver(networkDefault = true)
-        resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.Deny)
-        assertFalse(resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network))
+        val f = fixture(networkDefault = true)
+        f.resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.Deny)
+        assertFalse(f.resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network))
     }
 
     @Test
     fun followGlobalDeletesRowAndReinheritsDefault() = runTest {
-        val (resolver, dao) = resolver(networkDefault = true)
-        resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.Deny)
-        assertFalse(resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network))
+        val f = fixture(networkDefault = true)
+        f.resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.Deny)
+        assertFalse(f.resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network))
 
-        resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.FollowGlobal)
+        f.resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.FollowGlobal)
         assertNull(
-            dao.getByAppUuidAndPermission(uuid, LockerAppPermissionType.Network),
+            f.dao.getByAppUuidAndPermission(uuid, LockerAppPermissionType.Network),
             "FollowGlobal must remove the row, not store a third state",
         )
         // Now re-inherits the (allow) global default.
-        assertTrue(resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network))
+        assertTrue(f.resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network))
     }
 
     @Test
     fun networkAndLocationAreIndependent() = runTest {
-        val (resolver, _) = resolver(networkDefault = false, locationDefault = false)
-        resolver.setWatchappPermission(uuid, LockerAppPermissionType.Location, PermissionSetting.Allow)
-        assertTrue(resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Location))
+        val f = fixture(networkDefault = false, locationDefault = false)
+        f.resolver.setWatchappPermission(uuid, LockerAppPermissionType.Location, PermissionSetting.Allow)
+        assertTrue(f.resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Location))
         assertFalse(
-            resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network),
+            f.resolver.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network),
             "granting Location must not grant Network",
         )
     }
 
     @Test
     fun settingFlowReflectsStoredTriState() = runTest {
-        val (resolver, _) = resolver()
+        val f = fixture()
         assertEquals(
             PermissionSetting.FollowGlobal,
-            resolver.watchappPermissionSetting(uuid, LockerAppPermissionType.Network).first(),
+            f.resolver.watchappPermissionSetting(uuid, LockerAppPermissionType.Network).first(),
         )
-        resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.Allow)
+        f.resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.Allow)
         assertEquals(
             PermissionSetting.Allow,
-            resolver.watchappPermissionSetting(uuid, LockerAppPermissionType.Network).first(),
+            f.resolver.watchappPermissionSetting(uuid, LockerAppPermissionType.Network).first(),
         )
-        resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.Deny)
+        f.resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.Deny)
         assertEquals(
             PermissionSetting.Deny,
-            resolver.watchappPermissionSetting(uuid, LockerAppPermissionType.Network).first(),
+            f.resolver.watchappPermissionSetting(uuid, LockerAppPermissionType.Network).first(),
         )
     }
 
     @Test
     fun grantedFlowResolvesRowThenDefault() = runTest {
-        val (resolver, _) = resolver(networkDefault = false)
+        val f = fixture(networkDefault = false)
         // No row -> follows deny default.
-        assertFalse(resolver.watchappPermissionGranted(uuid, LockerAppPermissionType.Network).first())
+        assertFalse(f.resolver.watchappPermissionGranted(uuid, LockerAppPermissionType.Network).first())
         // Explicit allow -> granted.
-        resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.Allow)
-        assertTrue(resolver.watchappPermissionGranted(uuid, LockerAppPermissionType.Network).first())
-    }
-}
-
-/**
- * In-memory stand-in for the Room DAO, backed by a single state flow so the reactive
- * queries used by the resolver emit on change.
- */
-private class FakeLockerAppPermissionDao : LockerAppPermissionDao {
-    private val rows = MutableStateFlow<Map<Pair<Uuid, LockerAppPermissionType>, LockerAppPermission>>(emptyMap())
-
-    override suspend fun insertOrReplace(permission: LockerAppPermission) {
-        rows.value = rows.value + ((permission.appUuid to permission.permission) to permission)
+        f.resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.Allow)
+        assertTrue(f.resolver.watchappPermissionGranted(uuid, LockerAppPermissionType.Network).first())
     }
 
-    override suspend fun deleteByAppUuid(appUuid: Uuid) {
-        rows.value = rows.value.filterKeys { it.first != appUuid }
+    @Test
+    fun grantedFlowReEmitsOnLiveGlobalDefaultChange() = runTest {
+        // The running-app enforcement (the WebView network collector) keeps a
+        // collection of this flow open for the whole session and relies on a
+        // global-default toggle producing a fresh emission; a resolver that read the
+        // default once per collection would pass every one-shot test in this suite
+        // and silently break live enforcement.
+        val f = fixture(networkDefault = false)
+        val emissions = mutableListOf<Boolean>()
+        backgroundScope.launch {
+            f.resolver.watchappPermissionGranted(uuid, LockerAppPermissionType.Network)
+                .collect { emissions += it }
+        }
+        runCurrent()
+        assertEquals(listOf(false), emissions)
+
+        f.config.value = f.config.value.copy(
+            watchConfig = f.config.value.watchConfig.copy(watchappDefaultNetworkAllowed = true),
+        )
+        runCurrent()
+        assertEquals(listOf(false, true), emissions, "a live default flip must re-resolve FollowGlobal apps")
     }
 
-    override suspend fun deleteByAppUuidAndPermission(appUuid: Uuid, permission: LockerAppPermissionType) {
-        rows.value = rows.value - (appUuid to permission)
+    @Test
+    fun grantedFlowReEmitsOnLivePerAppRowChange() = runTest {
+        val f = fixture(networkDefault = true)
+        val emissions = mutableListOf<Boolean>()
+        backgroundScope.launch {
+            f.resolver.watchappPermissionGranted(uuid, LockerAppPermissionType.Network)
+                .collect { emissions += it }
+        }
+        runCurrent()
+        assertEquals(listOf(true), emissions)
+
+        f.resolver.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.Deny)
+        runCurrent()
+        assertEquals(listOf(true, false), emissions, "a live per-app deny must reach open collections")
     }
-
-    override suspend fun getByAppUuid(appUuid: Uuid): List<LockerAppPermission> =
-        rows.value.values.filter { it.appUuid == appUuid }
-
-    override suspend fun getByAppUuidAndPermission(
-        appUuid: Uuid,
-        permission: LockerAppPermissionType,
-    ): LockerAppPermission? = rows.value[appUuid to permission]
-
-    override fun getByAppUuidAndPermissionFlow(
-        appUuid: Uuid,
-        permission: LockerAppPermissionType,
-    ): Flow<LockerAppPermission?> = rows.map { it[appUuid to permission] }
 }
