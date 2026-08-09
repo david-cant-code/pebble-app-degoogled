@@ -8,7 +8,8 @@ it cannot be mistaken for the official app.
 
 The goal is a companion app for Pebble watches that runs fully featured
 without Google Play services or Firebase, for GrapheneOS, LineageOS, and
-similar phones with as little telemetry as technically possible.
+similar phones with as little telemetry as technically possible, and with
+a security posture tightened beyond upstream's defaults.
 
 ## Fork goals
 
@@ -19,6 +20,13 @@ similar phones with as little telemetry as technically possible.
   screen is a server-rendered page fed by that relay, so it has no data
   source in this fork and its entry points are disabled; usable battery
   analytics would need a local, on-device reimplementation.
+- **Hardening beyond the de-Googling.** The app's own attack surface is in
+  scope, not just its Google dependencies. Landed so far: third-party
+  watchapps' phone-side code gets no internet or location access unless
+  granted (deny by default, per-app controls, revocation applies to running
+  apps), the app's exported Android interfaces are authorization-gated or
+  removed, and plain-HTTP (cleartext) traffic is blocked app-wide
+  ([KNOWN_ISSUES.md](KNOWN_ISSUES.md) records the trade-offs).
 - **Weather without Play services.** Manual latitude/longitude entry, since
   the stock place search relies on the GMS-backed platform geocoder.
 - **A watch microphone API for third-party applications** documented and
@@ -45,6 +53,7 @@ lands piece by piece:
 - [x] Telemetry strip (Crashlytics, analytics, firmware-diagnostics relay)
 - [x] Google Play services / Firebase removal
 - [x] Core watch firmware updates from the public PebbleOS GitHub releases
+- [x] Per-app watchapp permissions (internet + location, deny by default)
 - [ ] Third-party microphone API
 - [ ] Local on-device battery analytics (secondary goal, feasibility open)
 - [ ] F-Droid inclusion (blockers tracked in KNOWN_ISSUES.md)

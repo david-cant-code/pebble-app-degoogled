@@ -171,6 +171,37 @@ warning when the feature is unavailable. This entry leaves the file if
 minSdk/WebView baseline guarantees `PROXY_OVERRIDE`, or if a WebView-level
 WebSocket intercept becomes available.
 
+## Cleartext HTTP is blocked app-wide, breaking http-only watchapps
+
+**Status: deliberate; a guarded per-app opt-in may lift it later.**
+
+Watchapps whose developer config pages or PebbleKit JS requests use plain
+`http://` fail even when the app's Network permission is granted: the
+config page shows a load error and JS requests fail with
+`ERR_CLEARTEXT_NOT_PERMITTED`. `https://` is unaffected.
+
+The block began as an upstream accident this fork keeps on purpose.
+Upstream's manifest declares `android:usesCleartextTraffic="true"`, but
+Android ignores that attribute whenever an `android:networkSecurityConfig`
+is declared, which upstream later added to trust user-installed CAs
+(upstream commit `7549c661`, "Android: trust user-installed CA certs via
+Network Security Config"), and with targetSdk 28+ the config's base
+default is cleartext off. The
+fork keeps the block because a config page is remote code executed in a
+WebView on the phone: fetched over cleartext, it hands any
+network-position attacker script injection into that WebView, plus
+whatever app state rides in the config URL. Legacy http-only watchapps
+break, and that is the accepted cost.
+
+A possible future resolution is a per-app "allow insecure HTTP" toggle in
+the watchapp permission controls, default off and gated behind an
+explicit warning, enforced through the same layered gate as the Network
+permission: the request interceptor and the config-page WebView can
+refuse the scheme per app, and the proxy layer supports scheme-filtered
+rules that would keep insecure WebSocket covered deterministically. This
+entry leaves the file if that ships, or if the ecosystem's http-only
+apps age out.
+
 ## The bundled speech stack blocks F-Droid inclusion
 
 **Status: open; which way to resolve it is not yet decided.**
