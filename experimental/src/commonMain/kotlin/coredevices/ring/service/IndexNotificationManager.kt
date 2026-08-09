@@ -573,6 +573,7 @@ class IndexNotificationManager(
                             inProgress = NotificationProgress.Indeterminate,
                             localOnly = false
                         )
+                        inProgressUpdate = notif
                         platformIndexNotificationManager.notify(notif)
                     }
                     is RingEvent.FirmwareUpdate.Success -> {
@@ -596,6 +597,11 @@ class IndexNotificationManager(
                             deepLink = "pebblecore://deep-link/bug-report?pebble=false"
                         )
                         platformIndexNotificationManager.notify(notif)
+                        inProgressUpdate = null
+                    }
+                    is RingEvent.FirmwareUpdate.NotStarted -> {
+                        logger.d { "Firmware update to ${it.newVersion} did not start, dropping update notification" }
+                        inProgressUpdate?.let { notif -> platformIndexNotificationManager.cancel(notif.id) }
                         inProgressUpdate = null
                     }
                 }

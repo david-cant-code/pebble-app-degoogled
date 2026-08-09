@@ -72,6 +72,7 @@ private class FakeLocalReminderDao(private val reminder: LocalReminderData?) : L
     override fun getAllRemindersFlow(): Flow<List<LocalReminderData>> = error("unused")
     override suspend fun setRecordingId(id: Int, recordingId: String) = error("unused")
     override suspend fun clearNotifyBefore(id: Int) = error("unused")
+    override suspend fun setTime(id: Int, time: kotlin.time.Instant?) = error("unused")
 
     override suspend fun deleteReminder(id: Int) = error("unused")
 }

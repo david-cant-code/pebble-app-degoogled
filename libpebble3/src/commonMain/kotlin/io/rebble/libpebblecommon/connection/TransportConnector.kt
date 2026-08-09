@@ -221,6 +221,8 @@ class RealPebbleConnector(
         firmwareUpdater.init(
             watchPlatform = watchInfo.platform,
             runningSlot = watchInfo.runningFwVersion.slot(),
+            supportsResume = watchInfo.capabilities.contains(ProtocolCapsFlag.SupportsFwUpdateAcrossDisconnection),
+            runningFwVersion = watchInfo.runningFwVersion,
         )
         firmwareUpdateManager.init(watchInfo)
         logDumpService.init(watchInfo.capabilities.contains(ProtocolCapsFlag.SupportsInfiniteLogDump))

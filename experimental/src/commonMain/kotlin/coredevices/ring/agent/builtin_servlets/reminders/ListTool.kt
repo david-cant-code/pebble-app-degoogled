@@ -9,6 +9,8 @@ import coredevices.mcp.SessionContext
 import coredevices.mcp.asFrozenClock
 import coredevices.mcp.data.SemanticResult
 import coredevices.mcp.data.ToolCallResult
+import coredevices.ring.agent.integrations.ReminderListEntry
+import coredevices.ring.agent.integrations.fuzzyFilter
 import coredevices.ring.agent.integrations.itemSource
 import coredevices.ring.data.entity.room.indexfeed.CachedList
 import coredevices.ring.database.room.repository.ListRepository
@@ -83,10 +85,13 @@ class ListTool: BuiltInMcpTool(
          * but does match its unchanged seed ("todos").
          */
         fun matchListIdByHint(lists: List<CachedList>, hint: String): String? {
-            val normalized = hint.trim().lowercase()
-            if (normalized.isEmpty()) return null
-            return lists.firstOrNull { it.title.lowercase().contains(normalized) }?.firestoreId
-                ?: lists.firstOrNull { it.seed?.lowercase()?.contains(normalized) == true }?.firestoreId
+            if (hint.isBlank()) return null
+            fun bestMatchOn(key: (CachedList) -> String?): String? = lists
+                .mapNotNull { list -> key(list)?.let { ReminderListEntry(list.firestoreId, it) } }
+                .fuzzyFilter(hint)
+                .firstOrNull()
+                ?.id
+            return bestMatchOn { it.title } ?: bestMatchOn { it.seed }
         }
     }
 

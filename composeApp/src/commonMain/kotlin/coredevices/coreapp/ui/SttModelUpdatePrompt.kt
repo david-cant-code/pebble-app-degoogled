@@ -20,8 +20,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import PlatformContext
 import com.russhwolf.settings.Settings
 import coredevices.coreapp.STT_MODE_BEFORE_UPDATE_KEY
+import coredevices.coreapp.STT_UPDATE_NOTIFICATION_ID
+import coredevices.coreapp.util.cancelNotifyLocal
 import coredevices.ui.M3Dialog
 import coredevices.util.CommonBuildKonfig
 import coredevices.util.CoreConfigHolder
@@ -41,6 +44,7 @@ fun SttModelUpdatePrompt() {
     val modelManager: ModelManager = koinInject()
     val configHolder: CoreConfigHolder = koinInject()
     val settings: Settings = koinInject()
+    val platformContext: PlatformContext = koinInject()
     val scope = rememberCoroutineScope()
     val sttModel = CommonBuildKonfig.CACTUS_STT_MODEL
 
@@ -89,6 +93,9 @@ fun SttModelUpdatePrompt() {
 
     fun startDownload() {
         failed = false
+        // Upstream dismisses the "model update available" nag once the user
+        // starts the download; same behavior via the fork's notification seam.
+        cancelNotifyLocal(platformContext, STT_UPDATE_NOTIFICATION_ID)
         scope.launch {
             val info = modelManager.getAvailableSTTModels().firstOrNull { it.slug == sttModel }
             if (info != null && modelManager.downloadSTTModel(info, allowMetered = true)) {

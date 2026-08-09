@@ -2,8 +2,11 @@
 
 package coredevices.ring.ui.viewmodel
 
+import coredevices.indexai.data.entity.ItemDocument
 import coredevices.indexai.data.entity.LocalRecording
 import coredevices.mcp.data.SemanticResult
+import coredevices.ring.data.entity.room.indexfeed.CachedItem
+import coredevices.ring.data.entity.room.indexfeed.CachedList
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -69,6 +72,35 @@ class IndexFeedViewModelComputeTest {
             semanticResults = mapOf(1L to SemanticResult.GenericFailure(null)),
         )
         assertNull(state.recordings.single().actionError)
+    }
+
+    @Test
+    fun doneChecklistItemsAreLeftOutOfTheListCardPreview() {
+        val list = CachedList(firestoreId = "list-1", title = "Groceries", listKind = "checklist")
+        fun item(id: String, title: String, done: Boolean) = CachedItem(
+            firestoreId = id,
+            title = title,
+            done = done,
+            parentListIdsCsv = list.firestoreId,
+            metadata = ItemDocument.ItemMetadata.Checklist,
+        )
+        val state = IndexFeedViewModel.compute(
+            recordings = emptyList(),
+            items = listOf(item("i-1", "Milk", done = true), item("i-2", "Onions", done = false)),
+            lists = listOf(list),
+            entries = emptyList(),
+            query = "",
+        )
+        assertEquals(listOf("Onions"), state.notesLists.single().items.map { it.title })
+
+        val searched = IndexFeedViewModel.compute(
+            recordings = emptyList(),
+            items = listOf(item("i-1", "Milk", done = true), item("i-2", "Onions", done = false)),
+            lists = listOf(list),
+            entries = emptyList(),
+            query = "milk",
+        )
+        assertEquals(listOf("Milk"), searched.notesLists.single().items.map { it.title })
     }
 
     @Test

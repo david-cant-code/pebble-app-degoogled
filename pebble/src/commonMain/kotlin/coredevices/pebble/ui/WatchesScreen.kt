@@ -241,8 +241,6 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
 
     val bluetoothEnabled by libPebble.bluetoothEnabled.collectAsState()
     var addFabExpanded by remember { mutableStateOf(false) }
-    val indexAlreadyPaired by libIndex.rings.map { rings -> rings.any { it !is DiscoveredIndexDevice } }
-        .collectAsState(initial = false)
     var showIndexAlreadyPairedDialog by remember { mutableStateOf(false) }
     var fabInfoDialog by remember { mutableStateOf<FabInfo?>(null) }
     var showRingWakeHint by remember { mutableStateOf(false) }
@@ -293,13 +291,6 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
         scope.launch {
             if (!ensureScanPermission(uiContext)) return@launch
             libPebble.startClassicScan()
-        }
-    }
-
-    fun scanIndex(uiContext: PlatformUiContext) {
-        scope.launch {
-            if (!ensureScanPermission(uiContext)) return@launch
-            libIndex.startScan()
         }
     }
 
@@ -357,11 +348,12 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                     // Fork: the "Add Index 01" menu item is removed. Ring
                     // support is unplugged from this build and LibIndex is a
                     // no-op, so a scan started from here could never find
-                    // anything. The item's former collaborators stay as
-                    // retained-but-dead upstream code for cheap merges:
-                    // indexAlreadyPaired, showIndexAlreadyPairedDialog (with
-                    // its "already paired" dialog below), and scanIndex have
-                    // no other live user in this file.
+                    // anything. The item's former collaborator
+                    // showIndexAlreadyPairedDialog (with its "already paired"
+                    // dialog below) stays as retained-but-dead upstream code
+                    // for cheap merges; the 2026-08 upstream sync deleted its
+                    // other collaborators (indexAlreadyPaired, scanIndex)
+                    // upstream-side and inlined their logic here.
                     if (pebbleFeatures.supportsBtClassic()) {
                         FloatingActionButtonMenuItem(
                             onClick = {

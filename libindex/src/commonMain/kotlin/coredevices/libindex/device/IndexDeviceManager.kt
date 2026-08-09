@@ -90,33 +90,41 @@ class IndexDeviceManager(
 
     fun init() {
         scope.launch {
-            // Only reconcile the stored paired ring once associations have actually been
-            // loaded. (e.g. after bt enabled/permitted)
-            associations?.associationsReady?.await()
-            val decision = resolvePairedRing(
-                storedPairedId = prefs.ringPaired.value,
-                storedPairedName = prefs.ringPairedName.value,
-                associations = associations?.associations?.value,
-            )
-            when (decision) {
-                PairedRingDecision.Keep -> {}
-                PairedRingDecision.Clear -> {
-                    logger.d { "Paired ring ${prefs.ringPaired.value} not found in loaded bt associations, clearing paired state" }
-                    prefs.setRingPaired(null)
-                    prefs.setRingPairedName(null)
+            // Re-reconcile on every change so the stored ring can't get stuck out of sync
+            // with the platform bond list (e.g. unbonded while BLUETOOTH_CONNECT was denied).
+            var warned = false
+            associations?.associations?.collect { loaded ->
+                val current = StoredPairing(prefs.ringPaired.value, prefs.ringPairedName.value)
+                val decision = resolvePairedRing(
+                    storedPairedId = current.id,
+                    storedPairedName = current.name,
+                    associations = loaded,
+                )
+                when (decision) {
+                    PairedRingDecision.Clear ->
+                        logger.d { "Paired ring ${current.id} not found in loaded bt associations, clearing paired state" }
+                    is PairedRingDecision.Adopt ->
+                        logger.d { "Found candidate ${decision.name} (${decision.identifier}) in bt associations, setting as paired ring" }
+                    else -> {}
                 }
-                is PairedRingDecision.UpdateName -> prefs.setRingPairedName(decision.name)
-                is PairedRingDecision.Adopt -> {
-                    logger.d { "Found candidate ${decision.name} (${decision.identifier}) in bt associations, setting as paired ring" }
-                    prefs.setRingPaired(decision.identifier)
-                    prefs.setRingPairedName(decision.name)
+                val next = current.applyDecision(decision)
+                if (next != current) {
+                    prefs.setRingPaired(next.id)
+                    prefs.setRingPairedName(next.name)
+                }
+                if (decision is PairedRingDecision.Adopt) {
+                    // Runs after the prefs write above, so a later emission resolves to Keep
+                    // instead of wiping again.
                     scope.launch(Dispatchers.IO) {
                         indexStorage.setLastSuccessfulCollectionIndex(null)
                         transferRepo.markTransfersAsPreviousIndexIteration()
                     }
                 }
+                if (loaded != null && !warned) {
+                    warned = true
+                    warnIfNotCompanionAssociated()
+                }
             }
-            warnIfNotCompanionAssociated()
         }
         associations?.bondStateChanges?.onEach { evt ->
             if (evt.state == IndexBondState.NotBonded && evt.identifier.asString == prefs.ringPaired.value) {
@@ -244,6 +252,17 @@ data class IndexScanResult(
     val isFailsafe: Boolean
 )
 
+internal data class StoredPairing(val id: String?, val name: String?)
+
+/** Pure state transition; the caller keeps the side effects (collection wipe, logging). */
+internal fun StoredPairing.applyDecision(decision: PairedRingDecision): StoredPairing =
+    when (decision) {
+        PairedRingDecision.Keep -> this
+        PairedRingDecision.Clear -> StoredPairing(null, null)
+        is PairedRingDecision.UpdateName -> copy(name = decision.name)
+        is PairedRingDecision.Adopt -> StoredPairing(decision.identifier, decision.name)
+    }
+
 internal sealed interface PairedRingDecision {
     data object Keep : PairedRingDecision
     data object Clear : PairedRingDecision
@@ -252,10 +271,12 @@ internal sealed interface PairedRingDecision {
 }
 
 /**
- * Pure decision for what to do with the stored paired ring on startup.
+ * Pure decision for what to do with the stored paired ring, re-evaluated whenever the
+ * association list changes.
  *
  * [associations] is null when the platform has no bt association support (iOS) or the
- * list has not been loaded yet (BLUETOOTH_CONNECT not granted / BT off).
+ * list has not been loaded yet (BLUETOOTH_CONNECT not granted / BT off). Must never
+ * resolve to [PairedRingDecision.Clear] in that case.
  */
 internal fun resolvePairedRing(
     storedPairedId: String?,

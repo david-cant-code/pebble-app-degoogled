@@ -5,8 +5,6 @@
 **.DS_Store
 /.kotlin
 **/build/
-/libpebble3/libpebble-swift/LibPebbleSwift.xcodeproj/project.xcworkspace/xcuserdata
-/libpebble3/libpebble-swift/LibPebbleSwift.xcodeproj/xcuserdata
 *.xcodeproj/*
 !*.xcodeproj/project.pbxproj
 !*.xcodeproj/xcshareddata/
@@ -18,3 +16,6 @@
 iosApp/iosApp.xcodeproj/xcuserdata
 iosApp/iosApp.xcworkspace/xcuserdata
 iosApp/iosApp/GoogleService-Info.plist
+# CMake external-native-build config dirs (cactus-native); generated per
+# machine and full of absolute paths, never committed.
+**/.cxx/

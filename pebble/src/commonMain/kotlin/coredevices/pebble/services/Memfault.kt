@@ -116,14 +116,6 @@ class Memfault(
     // so legacy diagnostics data is drained locally, never transmitted.
     suspend fun uploadChunkBatch(chunks: List<ByteArray>, serial: String): Boolean = true
 
-    private fun ensureVersionPrefix(version: String): String {
-        return if (version.startsWith("v")) {
-            version
-        } else {
-            "v$version"
-        }
-    }
-
     /**
      * Memfault signals rate-limiting via `Memfault-Reason: rate-limited`
      * (confirmed by Memfault support). We need this to disambiguate a
@@ -144,6 +136,14 @@ class Memfault(
             "XXXXXXXXXXXX" -> "XXXX${partialMacAddress()}"
             else -> serial
         }
+    }
+}
+
+internal fun ensureVersionPrefix(version: String): String {
+    return if (version.startsWith("v")) {
+        version
+    } else {
+        "v$version"
     }
 }
 

@@ -25,7 +25,13 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
 - **No `google-services.json`.** The google-services plugin and the Firebase
   SDKs are gone, so no config file (dummy or real) is needed or consumed;
   this supersedes the upstream build instruction below that still asks for
-  `composeApp/src/google-services.json`.
+  `androidApp/src/google-services.json`.
+- **Test source sets under AGP 9.** Android unit tests live in
+  `src/androidHostTest` in the KMP modules and instrumented tests in
+  `androidApp/src/androidTest`; upstream's "General editing info" line
+  below still naming `androidUnitTest` / `androidInstrumentedTest`
+  predates its own AGP 9 migration. Do not add tests under the old names:
+  the new plugins silently ignore those directories.
 - **Distinct branding: the fork is Gravel.** applicationId is
   `com.anopticlabs.gravel`; the Kotlin `namespace` and source packages
   deliberately stay `coredevices.coreapp` so upstream merges stay cheap;
@@ -96,13 +102,14 @@ Kotlin Multiplatform / Compose Multiplatform app targeting Android and iOS.
 
 ## Repository layout
 
-- `:composeApp` — main Android/iOS app entry point (Compose UI, Firebase, Cocoapods, Koin DI). Android `applicationId` is `coredevices.coreapp`.
+- `:composeApp` — shared Compose UI / Firebase / Cocoapods / Koin DI, and the iOS entry point. KMP library.
+- `:androidApp` — Android application shell: manifest, launcher resources, signing, R8, google-services. `applicationId` is `coredevices.coreapp`; the Activity and Service classes it declares live in `:composeApp`.
 - `:libpebble3` — KMP library for talking to Pebble/Core watches (BLE, protocol, services, endpoint managers). Mirrored from a standalone repo.
 - `:pebble` — Pebble-related shared code used by the app.
 - `:experimental` — newer/experimental device features (e.g. ring); see `coredevices.ring`.
 - `:util` — shared utilities (logging, IO, etc.).
 - `:mcp`, `:index-ai`, `:libindex` — AI/MCP-related modules.
-- `:cactus`, `:resampler`, `:krisp-stubs` — audio/ML support modules.
+- `:cactus`, `:resampler`, `:krisp-stubs` — audio/ML support modules. `:cactus-native` is a plain Android library holding cactus' CMake build and prebuilt `.so` (the KMP Android library plugin has no NDK support).
 - `:blobannotations`, `:blobdbgen` — KSP annotations + code generator for Pebble blobdb.
 
 iOS app project: `iosApp/iosApp.xcworkspace` (always open the `.xcworkspace`, not `.xcodeproj`).
@@ -111,7 +118,7 @@ iOS app project: `iosApp/iosApp.xcworkspace` (always open the `.xcworkspace`, no
 
 - Source layout per module follows standard KMP: `src/commonMain/kotlin`, `src/androidMain/kotlin`, `src/iosMain/kotlin`, plus `commonTest` / `androidUnitTest` / `androidInstrumentedTest`.
 - Compose resources are generated under the package `coreapp.composeapp.generated.resources`.
-- `versionCode` is derived from git commit count (`versioning.getVersionCode()`); `versionName` requires a git tag (e.g. `git tag 1.0.0`) or falls back to `"unknown"`.
+- `versionCode` is derived from git commit count; `versionName` requires a git tag (e.g. `git tag 1.0.0`) or falls back to `"unknown"`. Both are set lazily in `androidComponents.onVariants` so the git commands don't run during configuration.
 - DI is Koin (`koin-core`, `koin-compose`, `koin-compose-viewmodel`); navigation uses `androidx.navigation.compose`; logging uses Kermit; HTTP is Ktor (OkHttp on Android, Darwin on iOS).
 - Some dependencies are internally developed and published. You can still ask for the source code of these dependencies to be included in the session if you need more context but don't try looking for it in the filesystem.
 
@@ -192,7 +199,7 @@ When adding a new format/encoding, prefer keeping the local storage format uncha
 - Gradle wrapper at the root: `./gradlew`.
 - JDK 17 required. JVM target is 17 across modules.
 - Version catalog: `gradle/libs.versions.toml`.
-- Android: `./gradlew :composeApp:assembleDebug` / `assembleRelease`. Needs `composeApp/src/google-services.json` (a dummy is committed alongside).
+- Android: `./gradlew :androidApp:assembleDebug` / `assembleRelease`. Needs `androidApp/src/google-services.json` (a dummy is committed alongside).
 - iOS: `./gradlew podInstall`, then build from Xcode against `iosApp/iosApp.xcworkspace`.
 - The iOS framework is named `ComposeApp` and is wired up via the Kotlin Cocoapods plugin in `composeApp/build.gradle.kts`.
 
@@ -211,8 +218,8 @@ When adding a new format/encoding, prefer keeping the local storage format uncha
 When asked to make a release build and install it on a local device, follow the GitHub Actions release build shape instead of inventing a shortcut:
 
 1. Add or confirm `LOCAL_RELEASE_BUILD=true` in the root `local.properties`. This makes the release variant use the debug signing config, so it can install over an existing local/debug app without uninstalling.
-2. Build from the repo root with `./gradlew :composeApp:assembleRelease --stacktrace --no-daemon`. Do not skip release lint unless the user explicitly asks.
-3. Install over the existing app with `adb -s <device-id> install -r composeApp/build/outputs/apk/release/composeApp-<version>-release.apk`. Do not uninstall first unless explicitly requested.
+2. Build from the repo root with `./gradlew :androidApp:assembleRelease --stacktrace --no-daemon`. Do not skip release lint unless the user explicitly asks.
+3. Install over the existing app with `adb -s <device-id> install -r androidApp/build/outputs/apk/release/androidApp-release.apk`. Do not uninstall first unless explicitly requested.
 4. Launch and verify with logcat:
     - `adb -s <device-id> logcat -c`
     - `adb -s <device-id> shell monkey -p coredevices.coreapp -c android.intent.category.LAUNCHER 1`

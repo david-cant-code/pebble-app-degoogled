@@ -2,6 +2,7 @@ package coredevices.ring.database
 
 import com.russhwolf.settings.Settings
 import coredevices.libindex.database.BasePreferences
+import coredevices.ring.agent.LlmMode
 import coredevices.ring.agent.builtin_servlets.messaging.ApprovedBeeperContact
 import coredevices.ring.agent.builtin_servlets.notes.NoteProvider
 import coredevices.ring.agent.builtin_servlets.reminders.ReminderProvider
@@ -16,7 +17,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 
 interface Preferences: BasePreferences {
-    val useCactusAgent: StateFlow<Boolean>
+    val llmMode: StateFlow<LlmMode>
     val useCactusTranscription: StateFlow<Boolean>
     val cactusMode: CactusSTTMode
     val ringPairedOld: StateFlow<Boolean>
@@ -44,7 +45,7 @@ interface Preferences: BasePreferences {
     /** One-shot: onboarding already auto-defaulted STT to the platform engine, don't do it again. */
     val platformSttDefaulted: Boolean
 
-    suspend fun setUseCactusAgent(useCactus: Boolean)
+    suspend fun setLlmMode(mode: LlmMode)
     suspend fun setUseCactusTranscription(useCactus: Boolean)
     fun setCactusMode(mode: CactusSTTMode)
     fun setMusicControlMode(mode: MusicControlMode)
@@ -67,8 +68,18 @@ interface Preferences: BasePreferences {
 
 class PreferencesImpl(private val settings: Settings): Preferences {
 
-    private val _useCactusAgent = MutableStateFlow(settings.getBoolean("use_cactus_agent", false))
-    override val useCactusAgent = _useCactusAgent.asStateFlow()
+    private val _llmMode = MutableStateFlow(
+        LlmMode.fromId(
+            settings.getIntOrNull("llm_mode")
+                // Migrated from the "use local LLM" switch this preference replaced.
+                ?: if (settings.getBoolean("use_cactus_agent", false)) {
+                    LlmMode.LocalOnly.id
+                } else {
+                    LlmMode.RemoteOnly.id
+                }
+        )
+    )
+    override val llmMode = _llmMode.asStateFlow()
     private val _useCactusTranscription = MutableStateFlow(settings.getBoolean("use_cactus_transcription", true))
     override val useCactusTranscription = _useCactusTranscription.asStateFlow()
     override val cactusMode get() = CactusSTTMode.fromId(settings.getInt("cactus_mode", 0))
@@ -158,10 +169,10 @@ class PreferencesImpl(private val settings: Settings): Preferences {
     override val platformSttDefaulted: Boolean
         get() = settings.getBoolean("platform_stt_defaulted", false)
 
-    override suspend fun setUseCactusAgent(useCactus: Boolean) {
+    override suspend fun setLlmMode(mode: LlmMode) {
         withContext(Dispatchers.IO) {
-            settings.putBoolean("use_cactus_agent", useCactus)
-            _useCactusAgent.value = useCactus
+            settings.putInt("llm_mode", mode.id)
+            _llmMode.value = mode
         }
     }
 

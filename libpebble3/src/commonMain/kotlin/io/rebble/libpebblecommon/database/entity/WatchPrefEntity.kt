@@ -554,7 +554,7 @@ enum class NumberWatchPref(
         id = "lightAmbientThreshold",
         displayName = "Ambient Light Threshold",
         description = "Controls how low ambient light needs to be to enable backlight (if using Ambient Light Sensor)",
-        defaultValue = 150,
+        defaultValue = 800,
         type = WatchPrefType.TypeUInt32,
         min = 1,
         max = 4096,

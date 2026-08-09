@@ -33,6 +33,7 @@ import coredevices.coreapp.di.utilModule
 import coredevices.coreapp.util.FileLogWriter
 import coredevices.coreapp.util.FirebaseResidueCleanup
 import coredevices.coreapp.util.initLogging
+import coredevices.coreapp.util.registerBluetoothPairingDebugLogger
 import coredevices.pebble.PebbleAppDelegate
 import coredevices.pebble.watchModule
 import coredevices.util.CoreConfig
@@ -75,7 +76,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         // strip removed every code path that could clear them; see
         // FirebaseResidueCleanup for the threat model.
         FirebaseResidueCleanup.launchInBackground(this)
-        logger.i { "onCreate() version = ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) ${BuildConfig.BUILD_TYPE}" }
+        logger.i { "onCreate() version = $appVersionName ($appVersionCode) ${if (isDebuggableBuild) "debug" else "release"}" }
         dumpPreviousExitInfo()
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         registerReceiver(object : BroadcastReceiver() {
@@ -83,6 +84,14 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
                 logger.i { "Power state changed: isPowerSaveMode=${powerManager.isPowerSaveMode}" }
             }
         }, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED))
+        // Fork: upstream registers this pairing diagnostic unconditionally,
+        // but it records every Bluetooth pairing on the phone into the
+        // persisted log that bug reports upload. Debuggable builds only here;
+        // the receiver additionally redacts the passkey extra as a second,
+        // independent layer.
+        if (isDebuggableBuild) {
+            registerBluetoothPairingDebugLogger(this)
+        }
         setupExceptionHandler()
         experimentalDevices.appInit()
         // Cactus telemetry is initialized via CommonAppDelegate.initCactus()
@@ -130,7 +139,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     }
 
     private fun configureStrictMode() {
-        if (BuildConfig.DEBUG) {
+        if (isDebuggableBuild) {
             StrictMode.setThreadPolicy(
                 StrictMode.ThreadPolicy.Builder()
                     .detectDiskReads()

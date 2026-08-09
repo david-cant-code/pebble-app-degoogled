@@ -117,7 +117,9 @@ class AllListsViewModel(
                 }
                 .map { l -> UiState.Entry(l, notesByList[l.firestoreId].orEmpty()) }
                 .let { all ->
-                    if (q.isEmpty()) all.toList()
+                    // Only the resting grid hides done items; a search must
+                    // still match a completed item by name.
+                    if (q.isEmpty()) all.map { e -> e.copy(items = e.items.filter { !it.done }) }.toList()
                     else all
                         .filter { e -> match(e.list.title) || e.items.any { match(it.title) } }
                         .toList()

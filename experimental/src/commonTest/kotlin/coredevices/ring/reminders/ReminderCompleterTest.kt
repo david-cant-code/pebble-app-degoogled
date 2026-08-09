@@ -63,6 +63,9 @@ class ReminderCompleterTest {
         override suspend fun clearNotifyBefore(id: Int) {
             reminders[id]?.let { reminders[id] = it.copy(notifyBeforeMillis = null) }
         }
+        override suspend fun setTime(id: Int, time: Instant?) {
+            reminders[id]?.let { reminders[id] = it.copy(time = time) }
+        }
         override suspend fun deleteReminder(id: Int) { reminders.remove(id) }
     }
 
@@ -70,7 +73,7 @@ class ReminderCompleterTest {
         val itemDao = FakeCachedItemDao()
         val reminderDao = FakeLocalReminderDao()
         val cancelled = mutableListOf<Int>()
-        val repo = ItemRepository(itemDao) { cancelled += it }
+        val repo = ItemRepository(itemDao, cancelReminder = { cancelled += it })
         val completer = ReminderCompleter(reminderDao, itemDao, repo)
 
         /** Register a local reminder row so the completer can resolve its source recording. */

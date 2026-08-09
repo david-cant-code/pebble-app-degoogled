@@ -1,8 +1,10 @@
 package coredevices.pebble.firmware
 
 import co.touchlab.kermit.Logger
+import coredevices.pebble.services.EngDashOta
 import coredevices.pebble.services.Memfault
 import coredevices.util.CommonBuildKonfig
+import coredevices.util.CoreConfigFlow
 import io.rebble.libpebblecommon.connection.FirmwareUpdateCheckResult
 import io.rebble.libpebblecommon.metadata.WatchHardwarePlatform
 import io.rebble.libpebblecommon.metadata.WatchHardwarePlatform.*
@@ -16,12 +18,14 @@ import kotlin.time.Instant
 
 class FirmwareUpdateCheck(
     private val memfault: Memfault,
+    private val engDashOta: EngDashOta,
     private val cohorts: Cohorts,
     // Fork: GitHub-releases checker for Core watches; see doCheck.
     private val githubReleases: GithubReleases,
     // Fork: user-configurable channel for the GitHub checker, re-read on
     // every check, exactly once per check; see checkForUpdates.
     private val channel: () -> FirmwareUpdateChannel,
+    private val coreConfig: CoreConfigFlow,
     private val clock: Clock = Clock.System,
 ) {
     private val logger = Logger.withTag("FirmwareUpdateCheck")
@@ -100,13 +104,33 @@ class FirmwareUpdateCheck(
         watch: WatchInfo,
         route: Route,
         channelForCheck: FirmwareUpdateChannel?,
-    ): FirmwareUpdateCheckResult = when (route) {
-        Route.UnknownPlatform -> FirmwareUpdateCheckResult.UpdateCheckFailed("Unknown platform")
-        Route.Memfault -> memfault.getLatestFirmware(watch)
-        Route.GithubReleases ->
-            githubReleases.getLatestFirmware(watch, checkNotNull(channelForCheck))
-        Route.Cohorts -> cohorts.getLatestFirmware(watch)
+    ): FirmwareUpdateCheckResult {
+        // Upstream's opt-in eng-dash source takes precedence for Core watches
+        // and falls back to the routing below when it fails. Doubly disabled
+        // in fork builds: BUG_URL is a build-time Gradle property the fork
+        // never sets, and useEngDashOta additionally needs a runtime opt-in.
+        // Kept wired anyway so upstream merges stay cheap. Eng-dash results
+        // share the routed cache key, matching upstream's caching.
+        if (route == Route.Memfault || route == Route.GithubReleases) {
+            if (engDashOtaEnabled()) {
+                val result = engDashOta.getLatestFirmware(watch)
+                if (result !is FirmwareUpdateCheckResult.UpdateCheckFailed) {
+                    return result
+                }
+                logger.w { "eng-dash OTA check failed (${result.error}); falling back" }
+            }
+        }
+        return when (route) {
+            Route.UnknownPlatform -> FirmwareUpdateCheckResult.UpdateCheckFailed("Unknown platform")
+            Route.Memfault -> memfault.getLatestFirmware(watch)
+            Route.GithubReleases ->
+                githubReleases.getLatestFirmware(watch, checkNotNull(channelForCheck))
+            Route.Cohorts -> cohorts.getLatestFirmware(watch)
+        }
     }
+
+    private fun engDashOtaEnabled(): Boolean =
+        CommonBuildKonfig.BUG_URL != null && coreConfig.value.useEngDashOta
 
     companion object {
         private val CACHE_TTL: Duration = 15.minutes

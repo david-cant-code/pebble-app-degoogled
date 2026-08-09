@@ -24,6 +24,7 @@ import io.rebble.libpebblecommon.di.HackyProvider
 import io.rebble.libpebblecommon.di.LibPebbleCoroutineScope
 import io.rebble.libpebblecommon.metadata.WatchColor
 import io.rebble.libpebblecommon.metadata.WatchHardwarePlatform
+import io.rebble.libpebblecommon.services.FirmwareVersion
 import io.rebble.libpebblecommon.services.WatchInfo
 import io.rebble.libpebblecommon.web.FirmwareUpdateManager
 import com.russhwolf.settings.PropertiesSettings
@@ -163,7 +164,12 @@ class WatchManagerTest {
         override val firmwareUpdateState: StateFlow<FirmwareUpdater.FirmwareUpdateStatus>
             = MutableStateFlow(FirmwareUpdater.FirmwareUpdateStatus.NotInProgress.Idle())
 
-        override fun init(watchPlatform: WatchHardwarePlatform, slot: Int?) {
+        override fun init(
+            watchPlatform: WatchHardwarePlatform,
+            slot: Int?,
+            supportsResume: Boolean,
+            runningFwVersion: FirmwareVersion,
+        ) {
         }
 
         override fun sideloadFirmware(path: Path) {}

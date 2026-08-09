@@ -65,8 +65,12 @@ class PutBytesService(
         size: UInt,
         type: ObjectType,
         bank: UByte,
-        filename: String
-    ): PutBytesResponse = sendAndAwaitAck(PutBytesInit(size, type, bank, filename), timeout = 35.seconds)
+        filename: String,
+        resumeOffset: UInt = 0u,
+    ): PutBytesResponse = sendAndAwaitAck(
+        PutBytesInit(size, type, bank, filename, resumeOffset.takeIf { it > 0u }),
+        timeout = 35.seconds,
+    )
 
     /**
      * Initializes a PutBytes session on the device for transferring 3.x+ app data

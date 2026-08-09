@@ -95,11 +95,16 @@ data class WeatherDailyForecast(
     val precipSumMm: Int? = null,
 )
 
-/** One hour of today's v4 forecast (diurnal curve) carried to the watch. */
+/**
+ * One hour of today's v4 forecast (diurnal curve) carried to the watch. The UV index lands in
+ * the v4 minor 4 hourly block and is the watch's only live UV reading — [WeatherDailyForecast]'s
+ * `uvIndexX10` is the day's peak.
+ */
 @Serializable
 data class WeatherHourlyForecast(
     val weatherType: WeatherType,
     val temp: Byte,
+    val uvIndexX10: Short? = null,
 )
 
 sealed class WeatherLocationData {

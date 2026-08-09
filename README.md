@@ -61,12 +61,12 @@ lands piece by piece:
 ## Building (Android)
 
 - JDK 17; Gradle wrapper included. Debug build:
-  `./gradlew :composeApp:assembleDebug`
+  `./gradlew :androidApp:assembleDebug`
 - No `google-services.json` is needed: the google-services plugin is gone
   along with the Firebase SDKs.
 - For a release build signed with the debug key, set
   `LOCAL_RELEASE_BUILD=true` in the root `local.properties`, then
-  `./gradlew :composeApp:assembleRelease`.
+  `./gradlew :androidApp:assembleRelease`.
 - Fork builds ship no Memfault token and make no Memfault requests.
   Upstream's optional `memfaultToken` Gradle property would route Core
   watch update checks through `api.memfault.com`, periodically sending the

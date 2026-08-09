@@ -408,7 +408,9 @@ class IndexFeedViewModel(
                     }
                 }
             } else {
-                allNotesLists
+                // Only the resting grid hides done items; a search must still
+                // match a completed item by name.
+                allNotesLists.map { entry -> entry.copy(items = entry.items.filter { !it.done }) }
             }
 
             val rawAnswers = items

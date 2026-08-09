@@ -79,6 +79,7 @@ import io.rebble.libpebblecommon.connection.endpointmanager.CompanionAppLifecycl
 import io.rebble.libpebblecommon.connection.endpointmanager.DebugPebbleProtocolSender
 import io.rebble.libpebblecommon.connection.endpointmanager.FirmwareUpdater
 import io.rebble.libpebblecommon.connection.endpointmanager.LanguagePackInstaller
+import io.rebble.libpebblecommon.connection.endpointmanager.InterruptedFirmwareUpdates
 import io.rebble.libpebblecommon.connection.endpointmanager.RealFirmwareUpdater
 import io.rebble.libpebblecommon.connection.endpointmanager.RealLanguagePackInstaller
 import io.rebble.libpebblecommon.connection.endpointmanager.audio.VoiceSessionManager
@@ -363,7 +364,7 @@ fun initKoin(
                 single { get<Database>().appPrefsDao() }
                 singleOf(::LegacyBtClassicMigrator)
                 singleOf(::WatchManager) bind WatchConnector::class
-                single { bleScanner() }
+                single { bleScanner(get()) }
                 singleOf(::RealScanning) bind Scanning::class
                 single { libPebbleScope }
                 singleOf(::Locker)
@@ -443,6 +444,7 @@ fun initKoin(
                 singleOf(::PhoneCalendarSyncer)
                 singleOf(::MissedCallSyncer)
                 singleOf(::FirmwareDownloader)
+                singleOf(::InterruptedFirmwareUpdates)
                 singleOf(::JsTokenUtil)
                 singleOf(::Datalogging)
                 singleOf(::Health)

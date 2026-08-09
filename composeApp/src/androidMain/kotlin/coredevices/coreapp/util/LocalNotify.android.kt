@@ -12,9 +12,8 @@ import coredevices.coreapp.MainActivity
 import coredevices.util.R
 
 private const val CHANNEL_ID = "app_notices"
-private const val NOTIFICATION_ID = 3006090
 
-actual fun notifyLocal(platformContext: PlatformContext, title: String, message: String) {
+actual fun notifyLocal(platformContext: PlatformContext, id: Int, title: String, message: String) {
     val context = platformContext.context
     val channel = NotificationChannel(
         CHANNEL_ID,
@@ -45,9 +44,15 @@ actual fun notifyLocal(platformContext: PlatformContext, title: String, message:
         .setAutoCancel(true)
         .build()
     try {
-        manager.notify(NOTIFICATION_ID, notification)
+        manager.notify(id, notification)
     } catch (e: SecurityException) {
         // POST_NOTIFICATIONS can be denied; the nudge is best-effort.
         Logger.withTag("LocalNotify").w(e) { "Notification blocked" }
     }
+}
+
+actual fun cancelNotifyLocal(platformContext: PlatformContext, id: Int) {
+    // cancel() neither throws for an unknown id nor needs POST_NOTIFICATIONS,
+    // so unlike notifyLocal there is no failure path to guard.
+    platformContext.context.getSystemService(NotificationManager::class.java).cancel(id)
 }
