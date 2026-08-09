@@ -235,7 +235,7 @@ class FakeLibPebble : LibPebble {
         type: LockerAppPermissionType,
     ): Boolean = false
 
-    override fun globalDefault(type: LockerAppPermissionType): Boolean = false
+    override fun globalDefault(type: LockerAppPermissionType): Flow<Boolean> = flowOf(false)
 
     override suspend fun setWatchappPermission(
         uuid: Uuid,

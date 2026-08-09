@@ -84,9 +84,11 @@ enum class OnboardingStage {
     DeviceSelection,
     Permissions,
     // Fork: the user's one-time choice for whether watchfaces/apps may reach the
-    // internet and location by default. Placed just before Done so it is the last
-    // thing set during onboarding; existing installs (which never re-run onboarding)
-    // keep the deny-by-default baseline.
+    // internet and location by default. Runs as the last stage of the fork's flow:
+    // Permissions routes here and onDone goes straight to Done, skipping the SignIn
+    // stage that sits between them in this enum (kept compiled for cheap upstream
+    // merges). Existing installs, which never re-run onboarding, keep the
+    // deny-by-default baseline.
     WatchappPrivacy,
     SignIn,
     Done,
@@ -364,8 +366,8 @@ fun OnboardingScreen(
  * Fork: one-time onboarding choice for the global watchapp/watchface phone-side
  * permission defaults (internet + location). Both default to off (deny) here: the user
  * opts in rather than out. The choice is confirmed via a dialog, then written to
- * WatchConfig, then acknowledged with a note pointing at the settings screen where it can
- * be changed later, per David's requested flow.
+ * WatchConfig, then acknowledged with a note pointing at the settings screen where it
+ * can be changed later.
  */
 @Composable
 private fun WatchappPrivacyStage(onDone: () -> Unit) {

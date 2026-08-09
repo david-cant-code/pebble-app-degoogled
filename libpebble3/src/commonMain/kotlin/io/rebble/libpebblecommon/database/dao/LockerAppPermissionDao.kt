@@ -20,8 +20,6 @@ interface LockerAppPermissionDao {
     // Fork: needed for the tri-state per-app model. Removing the (app, permission)
     // row is how "follow the global default" is represented: absence of a row
     // means the app has no explicit override, so the global default applies.
-    // deleteByAppUuid above would wipe every permission type for the app, which is
-    // not what a single-toggle "reset to default" should do.
     @Query("DELETE FROM LockerAppPermission WHERE appUuid = :appUuid AND permission = :permission")
     suspend fun deleteByAppUuidAndPermission(appUuid: Uuid, permission: LockerAppPermissionType)
 

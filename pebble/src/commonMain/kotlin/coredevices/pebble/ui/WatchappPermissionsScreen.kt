@@ -25,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -251,14 +252,12 @@ private fun WatchappPermissionSelector(
     label: String,
     libPebble: LibPebble,
 ) {
-    val scope = rememberCoroutineScopeForPermissions()
+    val scope = rememberCoroutineScope()
     val setting by libPebble.watchappPermissionSetting(uuid, type)
         .collectAsState(PermissionSetting.FollowGlobal)
-    val config by libPebble.config.collectAsState()
-    val globalAllowed = when (type) {
-        LockerAppPermissionType.Network -> config.watchConfig.watchappDefaultNetworkAllowed
-        LockerAppPermissionType.Location -> config.watchConfig.watchappDefaultLocationAllowed
-    }
+    // Resolved by the permission resolver, which owns the type-to-config-field
+    // mapping, so this label cannot drift from what FollowGlobal actually grants.
+    val globalAllowed by libPebble.globalDefault(type).collectAsState(false)
     // The "Default" option names what it currently resolves to, so the choice is honest
     // about the effect (e.g. "Default (Off)") rather than hiding it behind a word.
     val options = listOf(
@@ -280,9 +279,3 @@ private fun WatchappPermissionSelector(
         }
     }
 }
-
-// Small local helper so the two composables above share one scope-obtaining call without
-// each importing the same set of runtime symbols; keeps the imports at the top tidy.
-@Composable
-private fun rememberCoroutineScopeForPermissions() =
-    androidx.compose.runtime.rememberCoroutineScope()

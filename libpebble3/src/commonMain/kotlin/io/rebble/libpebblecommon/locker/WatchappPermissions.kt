@@ -45,8 +45,12 @@ interface WatchappPermissions {
     /** One-shot resolved grant, for enforcement sites that only need a snapshot. */
     suspend fun isWatchappPermissionGranted(uuid: Uuid, type: LockerAppPermissionType): Boolean
 
-    /** Current global default for a capability (the value FollowGlobal apps inherit). */
-    fun globalDefault(type: LockerAppPermissionType): Boolean
+    /**
+     * The global default for a capability (the value FollowGlobal apps inherit), as a
+     * live flow so the UI can label the "Default" choice with what it currently
+     * resolves to and track toggles of the default while visible.
+     */
+    fun globalDefault(type: LockerAppPermissionType): Flow<Boolean>
 
     suspend fun setWatchappPermission(
         uuid: Uuid,
@@ -60,8 +64,8 @@ class WatchappPermissionResolver(
     private val configFlow: LibPebbleConfigFlow,
 ) : WatchappPermissions {
 
-    override fun globalDefault(type: LockerAppPermissionType): Boolean =
-        configFlow.value.watchConfig.globalDefaultFor(type)
+    override fun globalDefault(type: LockerAppPermissionType): Flow<Boolean> =
+        configFlow.flow.map { it.watchConfig.globalDefaultFor(type) }
 
     override fun watchappPermissionSetting(
         uuid: Uuid,
@@ -86,7 +90,8 @@ class WatchappPermissionResolver(
         uuid: Uuid,
         type: LockerAppPermissionType,
     ): Boolean =
-        permissionDao.getByAppUuidAndPermission(uuid, type)?.granted ?: globalDefault(type)
+        permissionDao.getByAppUuidAndPermission(uuid, type)?.granted
+            ?: configFlow.value.watchConfig.globalDefaultFor(type)
 
     override suspend fun setWatchappPermission(
         uuid: Uuid,

@@ -900,8 +900,10 @@ private fun PropertyRow(
 @Composable
 fun PermissionItem(permission: AppCapability, entry: CommonApp, topBarParams: TopBarParams) {
     if (entry.commonAppType is CommonAppType.Locker) {
-        // Installed apps render the functional controls (WatchappPermissionControls)
-        // instead of these informational chips.
+        // Unreachable from current call sites: PermissionItem is only rendered for
+        // store listings (via StoreCapabilityDisclosure); installed apps get
+        // WatchappPermissionControls on their detail page instead. The branch is
+        // kept so the function keeps its upstream shape for cheap merges.
     } else {
         AssistChip(
             onClick = {
