@@ -184,6 +184,53 @@ class GeolocationInterfaceTest {
     }
 
     @Test
+    fun reusingAWatchIdCancelsThePreviousRegistration() = runTest {
+        val f = fixture(this, locationDefault = true)
+        f.geo.watchPosition(id = 7.0, interval = 1000.0, highAccuracy = 0.0)
+        runCurrent()
+        assertEquals(1, f.systemGeolocation.activeWatchers)
+
+        // Same id again: the first registration must die with the overwrite, or a
+        // page re-registering its watch would leak one collector per call.
+        f.geo.watchPosition(id = 7.0, interval = 1000.0, highAccuracy = 0.0)
+        runCurrent()
+        assertEquals(1, f.systemGeolocation.activeWatchers, "id reuse must not stack streams")
+
+        f.geo.clearWatch(7)
+        runCurrent()
+        assertEquals(0, f.systemGeolocation.activeWatchers, "exactly one job may back a reused id")
+    }
+
+    @Test
+    fun deniedWatchRegistrationsAreBoundedByEviction() = runTest {
+        // A denied watch stays registered so a re-grant can resume it, which means
+        // an app retrying watchPosition with fresh ids after each denial (never
+        // calling clearWatch) would otherwise pin one grant collector per retry
+        // for a session that can last days.
+        val f = fixture(this, locationDefault = false)
+        val extra = 3
+        repeat(GeolocationInterface.MAX_ACTIVE_WATCHES + extra) { i ->
+            f.geo.watchPosition(id = (100 + i).toDouble(), interval = 1000.0, highAccuracy = 0.0)
+        }
+        runCurrent()
+        assertEquals(0, f.systemGeolocation.activeWatchers, "denied watches must not open GPS streams")
+
+        // A grant resumes every registration still tracked, so the stream count
+        // proves eviction bounded the denied backlog at the cap.
+        f.resolver.setWatchappPermission(uuid, LockerAppPermissionType.Location, PermissionSetting.Allow)
+        runCurrent()
+        assertEquals(
+            GeolocationInterface.MAX_ACTIVE_WATCHES,
+            f.systemGeolocation.activeWatchers,
+            "a retry loop must not accumulate unbounded watch registrations",
+        )
+
+        repeat(GeolocationInterface.MAX_ACTIVE_WATCHES + extra) { i -> f.geo.clearWatch(100 + i) }
+        runCurrent()
+        assertEquals(0, f.systemGeolocation.activeWatchers)
+    }
+
+    @Test
     fun getCurrentPositionIsGatedPerCall() = runTest {
         val f = fixture(this, locationDefault = false)
         f.systemGeolocation.currentPositionResult = position(4.0)

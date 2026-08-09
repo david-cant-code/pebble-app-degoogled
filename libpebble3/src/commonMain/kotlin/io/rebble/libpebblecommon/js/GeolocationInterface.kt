@@ -135,12 +135,39 @@ abstract class GeolocationInterface(
                     }
                 }
         }
-        watchJobs[id.toInt()] = job
+        registerWatchJob(id.toInt(), job)
         return id.toInt()
+    }
+
+    private fun registerWatchJob(id: Int, job: Job) {
+        // A reused id replaces its previous registration, so the replaced job must
+        // be cancelled here or its grant collector would keep running unreachable
+        // for the rest of the session.
+        watchJobs.remove(id)?.cancel("Watch replaced")
+        // Evict oldest-first at the cap so an app that retries watchPosition with
+        // fresh ids after each error (and never calls clearWatch) converges to its
+        // newest registrations instead of accumulating collectors for a session
+        // that can last days.
+        while (watchJobs.size >= MAX_ACTIVE_WATCHES) {
+            val oldest = watchJobs.keys.first()
+            logger.w { "watchPosition: evicting watch $oldest, limit is $MAX_ACTIVE_WATCHES active watches" }
+            watchJobs.remove(oldest)?.cancel("Watch evicted")
+        }
+        watchJobs[id] = job
     }
 
     open fun clearWatch(id: Int) {
         logger.d { "clearWatch()" }
         watchJobs.remove(id)?.cancel("Watch cleared")
+    }
+
+    companion object {
+        // Hard cap on concurrently registered watchPosition watches per session.
+        // Every registration pins a live grant collector until it is cleared or
+        // the session ends (denied watches included, so a re-grant can resume
+        // them), and the bridge is callable from arbitrary page JS, so without a
+        // cap a retry loop grows the collector set for the whole session. Sixteen
+        // is far above any legitimate concurrent use.
+        internal const val MAX_ACTIVE_WATCHES = 16
     }
 }
