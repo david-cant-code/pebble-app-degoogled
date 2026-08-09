@@ -69,6 +69,16 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // Fork: :cactus keeps its iOS static archives (libcactus_engine.a,
+            // libcurl.a) under src/commonMain/resources so the cinterop build
+            // can link them. Under AGP 9's androidKotlinMultiplatformLibrary
+            // plugin commonMain resources are packaged as Android java
+            // resources, which silently shipped ~23 MB of Mach-O dead weight
+            // in every APK (and shipped the sourceless cactus engine in a
+            // second form). Excluding here at the application boundary keeps
+            // the archives available to the iOS toolchain while keeping them
+            // out of the Android artifact.
+            excludes += "/ios/**"
         }
     }
     buildTypes {
