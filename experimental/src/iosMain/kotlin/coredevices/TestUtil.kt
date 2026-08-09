@@ -17,6 +17,7 @@ import coredevices.ring.database.SecondaryMode
 import coredevices.ring.firestoreModule
 import coredevices.ring.mcpModule
 import coredevices.util.Platform
+import coredevices.ring.agent.LlmMode
 import coredevices.util.models.CactusSTTMode
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.FirebaseAuthException
@@ -113,8 +114,8 @@ object TestUtil {
 }
 
 private object PreferencesTestImpl: Preferences {
-    override val useCactusAgent: StateFlow<Boolean>
-        get() = MutableStateFlow(false)
+    override val llmMode: StateFlow<LlmMode>
+        get() = MutableStateFlow(LlmMode.RemoteOnly)
     override val useCactusTranscription: StateFlow<Boolean>
         get() = TODO("Not yet implemented")
     override val cactusMode: CactusSTTMode
@@ -159,7 +160,7 @@ private object PreferencesTestImpl: Preferences {
         get() = MutableStateFlow(null)
     override val platformSttDefaulted: Boolean = false
 
-    override suspend fun setUseCactusAgent(useCactus: Boolean) {
+    override suspend fun setLlmMode(mode: LlmMode) {
         TODO("Not yet implemented")
     }
 

@@ -15,7 +15,7 @@ import kotlin.uuid.Uuid
  *
  * The fixed prefix + daily[7] are constant-width, so v4 today-extras land at stable offsets:
  * uv @21, precip @23, wind speed @25, wind direction @27, hourly count @69,
- * hourly weather types @70..93, hourly temps @94..117.
+ * hourly weather types @70..93, hourly temps @94..117, hourly uv @177..200.
  */
 internal class WeatherAppEntryV4MappingTest {
 
@@ -54,8 +54,8 @@ internal class WeatherAppEntryV4MappingTest {
     @Test
     fun mapsPopulatedV4Fields() {
         val hourly = listOf(
-            WeatherHourlyForecast(WeatherType.Sun, 20),
-            WeatherHourlyForecast(WeatherType.CloudyDay, -5),
+            WeatherHourlyForecast(WeatherType.Sun, 20, uvIndexX10 = 62),
+            WeatherHourlyForecast(WeatherType.CloudyDay, -5, uvIndexX10 = 0),
             WeatherHourlyForecast(WeatherType.LightRain, 12),
         )
         val bytes = entry(
@@ -82,6 +82,11 @@ internal class WeatherAppEntryV4MappingTest {
         assertEquals(0xFBu.toUByte(), bytes[95])
         assertEquals(12u.toUByte(), bytes[96])
         assertEquals(0u.toUByte(), bytes[97])
+        // Hourly uv x10; hour 2 has none and the rest is padding, both unknown (255).
+        assertEquals(62u.toUByte(), bytes[177])
+        assertEquals(0u.toUByte(), bytes[178])
+        assertEquals(0xFFu.toUByte(), bytes[179])
+        assertEquals(0xFFu.toUByte(), bytes[180])
     }
 
     @Test
@@ -95,6 +100,7 @@ internal class WeatherAppEntryV4MappingTest {
         assertEquals(0u.toUByte(), bytes[69])                                        // hourly count = 0
         assertUByteArrayEquals(ubyteArrayOf(0x00u, 0x80u), bytes.sliceArray(118..119)) // utc offset = -32768
         assertUByteArrayEquals(ubyteArrayOf(0xFFu, 0xFFu), bytes.sliceArray(161..162)) // wind dir deg = -1
+        assertUByteArrayEquals(UByteArray(24) { 0xFFu }, bytes.sliceArray(177..200))   // hourly uv = 255
     }
 
     @Test
@@ -112,7 +118,7 @@ internal class WeatherAppEntryV4MappingTest {
             ),
         ).v4Record().toBytes()
 
-        assertEquals(3u.toUByte(), bytes[18])                                  // minor_version
+        assertEquals(4u.toUByte(), bytes[18])                                  // minor_version
         assertUByteArrayEquals(le16(540), bytes.sliceArray(118..119))          // utc offset
         // daily_metrics[0] @120, [1] @123 (no wind for day 1), [2] @126 padded unknown
         assertUByteArrayEquals(ubyteArrayOf(40u, 15u, 62u), bytes.sliceArray(120..122))
@@ -155,11 +161,11 @@ internal class WeatherAppEntryV4MappingTest {
         assertUByteArrayEquals(le16(65534), bytes.sliceArray(145..146))
     }
 
-    /** The watch drops any minor >= 1 record whose fixed block is short of 177 bytes. */
+    /** The watch drops any minor >= 1 record whose fixed block is short of 201 bytes. */
     @Test
-    fun fixedBlockIsAlways177Bytes() {
+    fun fixedBlockIsAlways201Bytes() {
         val bytes = entry().v4Record().toBytes()
-        assertEquals(177 + 2 + 3 + 3, bytes.size) // fixed + string header + "X" + "Y"
+        assertEquals(201 + 2 + 3 + 3, bytes.size) // fixed + string header + "X" + "Y"
     }
 
     @Test

@@ -2,7 +2,13 @@ package coredevices.pebble.firmware
 
 import com.russhwolf.settings.MapSettings
 import coredevices.pebble.Platform
+import coredevices.pebble.services.EngDashOta
 import coredevices.pebble.services.Memfault
+import coredevices.pebble.services.PebbleAccountProvider
+import coredevices.pebble.services.PebbleHttpClient
+import coredevices.util.CoreConfig
+import coredevices.util.CoreConfigFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -42,6 +48,24 @@ class FirmwareUpdateCheckRoutingTest {
     private fun memfaultNeverContacted() =
         Memfault(failingClient("Memfault"), MapSettings(), Platform.Android, memfaultToken = null)
 
+    // Eng-dash is doubly disabled in fork builds (BUG_URL is never set, and
+    // useEngDashOta defaults to false), so the routing must never touch it;
+    // every collaborator this instance holds fails the test on first use.
+    private fun engDashNeverContacted() = EngDashOta(
+        failingClient("EngDashOta"),
+        PebbleHttpClient(
+            pebbleAccount = object : PebbleAccountProvider {
+                override fun get() = fail("PebbleAccount must not be touched: eng-dash is disabled in fork builds")
+            },
+            httpClient = failingClient("PebbleHttpClient"),
+            libPebble = lazy { fail("LibPebble must not be touched by the eng-dash path") },
+        ),
+    )
+
+    // Defaults only: useEngDashOta stays false, mirroring a fork install that
+    // never opted in.
+    private fun forkDefaultConfig() = CoreConfigFlow(MutableStateFlow(CoreConfig()))
+
     private val githubBody = releaseList(
         releaseJson("v4.31.0", 10, listOf(normalAsset("asterix", "v4.31.0", "sha256:" + "a".repeat(64), 100))),
     )
@@ -51,6 +75,8 @@ class FirmwareUpdateCheckRoutingTest {
         val expectations = FirmwareArtifactExpectations()
         val check = FirmwareUpdateCheck(
             memfault = memfaultNeverContacted(),
+            engDashOta = engDashNeverContacted(),
+            coreConfig = forkDefaultConfig(),
             cohorts = testCohorts(failingClient("Cohorts"), expectations),
             githubReleases = GithubReleases(jsonRespondingClient(githubBody), expectations, fixedTestClock),
             channel = { FirmwareUpdateChannel.Soaked },
@@ -69,6 +95,8 @@ class FirmwareUpdateCheckRoutingTest {
         val expectations = FirmwareArtifactExpectations()
         val check = FirmwareUpdateCheck(
             memfault = memfaultNeverContacted(),
+            engDashOta = engDashNeverContacted(),
+            coreConfig = forkDefaultConfig(),
             cohorts = testCohorts(jsonRespondingClient(cohortsBody()), expectations),
             githubReleases = GithubReleases(failingClient("GitHub"), expectations, fixedTestClock),
             channel = { FirmwareUpdateChannel.Soaked },
@@ -104,6 +132,8 @@ class FirmwareUpdateCheckRoutingTest {
         }
         val check = FirmwareUpdateCheck(
             memfault = memfaultNeverContacted(),
+            engDashOta = engDashNeverContacted(),
+            coreConfig = forkDefaultConfig(),
             cohorts = testCohorts(failingClient("Cohorts"), expectations),
             githubReleases = GithubReleases(client, expectations, fixedTestClock),
             channel = { channel },
@@ -150,6 +180,8 @@ class FirmwareUpdateCheckRoutingTest {
         }
         val check = FirmwareUpdateCheck(
             memfault = memfaultNeverContacted(),
+            engDashOta = engDashNeverContacted(),
+            coreConfig = forkDefaultConfig(),
             cohorts = testCohorts(failingClient("Cohorts"), expectations),
             githubReleases = GithubReleases(client, expectations, fixedTestClock),
             channel = { channel },
@@ -185,6 +217,8 @@ class FirmwareUpdateCheckRoutingTest {
         }
         val check = FirmwareUpdateCheck(
             memfault = memfaultNeverContacted(),
+            engDashOta = engDashNeverContacted(),
+            coreConfig = forkDefaultConfig(),
             cohorts = testCohorts(client, expectations),
             githubReleases = GithubReleases(failingClient("GitHub"), expectations, fixedTestClock),
             channel = { channel },

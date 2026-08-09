@@ -76,15 +76,21 @@ class WatchappConfigPageGateTest {
     @Test
     fun configPageProceedsPastGateWhenNetworkAllowed() = runTest {
         val libPebble = FakeLibPebble()
-        // Empty watch list makes the flow stop right after the gate (no connected
-        // watch), which keeps the test on the gate itself: passing it silently is
-        // exactly the granted behaviour, refusing it would surface the snackbar.
+        // Empty watch list makes the flow stop right after the gate at the
+        // connected-watch check, which keeps the test on the gate itself. That
+        // stop surfaces its own "No connected watch" snackbar (upstream shows
+        // errors in the UI), so reaching exactly that message, and not the
+        // permission pointer, is what proves the gate let the app through.
         libPebble.watches.value = emptyList()
         libPebble.setWatchappPermission(uuid, LockerAppPermissionType.Network, PermissionSetting.Allow)
         val snackbars = mutableListOf<String>()
 
         installedApp().showSettings(NoOpNavBarNav, libPebble, topBarParams(snackbars))
 
-        assertTrue(snackbars.isEmpty(), "a granted app must get past the permission gate")
+        assertEquals(
+            listOf("No connected watch"),
+            snackbars,
+            "a granted app must get past the permission gate to the watch check",
+        )
     }
 }

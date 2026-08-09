@@ -16,6 +16,7 @@ import io.rebble.libpebblecommon.calls.MissedCallSyncer
 import io.rebble.libpebblecommon.connection.bt.BluetoothState
 import io.rebble.libpebblecommon.connection.bt.BluetoothStateProvider
 import io.rebble.libpebblecommon.connection.bt.ble.transport.GattServerManager
+import io.rebble.libpebblecommon.connection.bt.ble.transport.impl.configureKableCentral
 import io.rebble.libpebblecommon.connection.endpointmanager.timeline.ActionOverrides
 import io.rebble.libpebblecommon.connection.endpointmanager.timeline.CustomTimelineActionHandler
 import io.rebble.libpebblecommon.contacts.PhoneContactsSyncer
@@ -256,6 +257,11 @@ sealed class FirmwareUpdateCheckResult {
         val version: FirmwareVersion,
         val url: String,
         val notes: String,
+        /**
+         * Whether installing this over a higher version is intended: the update server flagged it
+         * as a downgrade, or the user picked the file themselves.
+         */
+        val canDowngrade: Boolean = false,
     ) : FirmwareUpdateCheckResult()
 
     data object FoundNoUpdate : FirmwareUpdateCheckResult()
@@ -517,6 +523,12 @@ class LibPebble3(
             injectedPKJSHttpInterceptors: InjectedPKJSHttpInterceptors = InjectedPKJSHttpInterceptors(emptyList()),
         ): LibPebble {
             koin = initKoin(defaultConfig, webServices, appContext, tokenProvider, proxyTokenProvider, transcriptionProvider, injectedPKJSHttpInterceptors)
+            // Reads the persisted config (not defaultConfig), but must still precede anything that
+            // touches Kable's shared central manager. Every Koin single here is lazy, and Kable is
+            // only reached on the first scan/connect, which happens after create() returns.
+            configureKableCentral(
+                koin.get<LibPebbleConfigHolder>().config.value.bleConfig.centralStateRestoration
+            )
             val libPebble = koin.get<LibPebble>()
             return libPebble
         }

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -84,6 +85,7 @@ import coreapp.util.generated.resources.back
 import coreapp.util.generated.resources.ring_wireframe
 import coreapp.util.generated.resources.settings
 import coredevices.indexai.data.entity.mcp_sandbox.McpSandboxGroupEntity
+import coredevices.ring.agent.LlmMode
 import coredevices.ring.agent.builtin_servlets.notes.NoteIntegrationFactory
 import coredevices.ring.agent.builtin_servlets.notes.NoteProvider
 import coredevices.ring.agent.builtin_servlets.notes.TASKER_DEFINITION
@@ -139,7 +141,9 @@ private fun UriHandler.openUrlSafely(url: String) {
 fun IndexSettings(coreNav: CoreNav) {
     val viewModel = koinViewModel<SettingsViewModel>()
     val webhookViewModel = koinViewModel<IndexWebhookSettingsViewModel>()
-    val useCactusAgent by viewModel.useCactusAgent.collectAsState()
+    val llmMode by viewModel.llmMode.collectAsState()
+    val localLlmSupported by viewModel.localLlmSupported.collectAsState()
+    val showLlmModeDialog by viewModel.showLlmModeDialog.collectAsState()
     val showMusicControlDialog by viewModel.showMusicControlDialog.collectAsState()
     val debugDetailsEnabled by viewModel.debugDetailsEnabled.collectAsState()
     val showContactsDialog by viewModel.showContactsDialog.collectAsState()
@@ -171,6 +175,17 @@ fun IndexSettings(coreNav: CoreNav) {
     if (showContactsDialog && platform.isAndroid) {
         SettingsBeeperContactsDialog(
             onDismissRequest = viewModel::closeContactsDialog
+        )
+    }
+    if (showLlmModeDialog) {
+        LlmModeDialog(
+            currentMode = llmMode,
+            localSupported = localLlmSupported,
+            onModeSelected = {
+                viewModel.setLlmMode(it)
+                viewModel.closeLlmModeDialog()
+            },
+            onDismissRequest = viewModel::closeLlmModeDialog
         )
     }
     if (showMusicControlDialog) {
@@ -251,7 +266,7 @@ fun IndexSettings(coreNav: CoreNav) {
                         pebble = false,
                         screenContext = mapOf(
                             "screen" to "Settings",
-                            "useCactusAgent" to useCactusAgent.toString(),
+                            "llmMode" to llmMode.name,
                             "username" to (accountUsername ?: "null")
                         )
                     )
@@ -504,17 +519,9 @@ fun IndexSettings(coreNav: CoreNav) {
             }
             item {
                 ListItem(
-                    modifier = Modifier.clickable(onClick = viewModel::toggleCactusAgent),
-                    headlineContent = { Text("Use Local LLM") },
-                    supportingContent = {
-                        Text("Experimental! Less accurate than cloud")
-                    },
-                    trailingContent = {
-                        Switch(
-                            checked = useCactusAgent,
-                            onCheckedChange = { viewModel.toggleCactusAgent() }
-                        )
-                    }
+                    modifier = Modifier.clickable(onClick = viewModel::showLlmModeDialog),
+                    headlineContent = { Text("Assistant Model") },
+                    supportingContent = { Text(llmMode.displayName()) }
                 )
             }
             item {
@@ -590,6 +597,67 @@ fun IndexSettings(coreNav: CoreNav) {
             item {
                 Spacer(Modifier.height(32.dp))
             }
+        }
+    }
+}
+
+fun LlmMode.displayName(): String = when (this) {
+    LlmMode.RemoteOnly -> "Cloud Only"
+    LlmMode.RemoteFirst -> "Cloud (with Local Fallback)"
+    LlmMode.LocalOnly -> "Local Only"
+}
+
+@Composable
+fun LlmModeDialog(
+    currentMode: LlmMode,
+    localSupported: Boolean,
+    onModeSelected: (LlmMode) -> Unit,
+    onDismissRequest: () -> Unit
+) {
+    var targetMode by remember { mutableStateOf(currentMode) }
+    M3Dialog(
+        onDismissRequest = onDismissRequest,
+        icon = { Icon(Icons.Default.Bolt, contentDescription = null) },
+        title = { Text("Assistant Model") },
+        buttons = {
+            TextButton(onClick = onDismissRequest) {
+                Text("Cancel")
+            }
+            TextButton(onClick = { onModeSelected(targetMode) }) {
+                Text("OK")
+            }
+        }
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LlmMode.entries.forEach { mode ->
+                val enabled = localSupported || !mode.usesLocalCactus()
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = enabled) { targetMode = mode }
+                ) {
+                    RadioButton(
+                        selected = targetMode == mode,
+                        enabled = enabled,
+                        onClick = { targetMode = mode }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        mode.displayName(),
+                        color = if (enabled) Color.Unspecified else MaterialTheme.colorScheme.outline
+                    )
+                }
+            }
+            Text(
+                if (localSupported) {
+                    "The local model runs on-device and is experimental — less accurate than cloud."
+                } else {
+                    "The offline agent does not support MCP sandboxes. Set the default MCP " +
+                        "sandbox group's model to \"Index Agent\" to use it."
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
         }
     }
 }

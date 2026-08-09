@@ -289,8 +289,17 @@ class PPoG(
                             }
                         }
 
-                        is PPoGPacket.ResetComplete -> throw IllegalStateException("We don't handle resetting PPoG - disconnect and reconnect")
-                        is PPoGPacket.ResetRequest -> throw IllegalStateException("We don't handle resetting PPoG - disconnect and reconnect")
+                        // Always logged: the watch sends these when its ack timeouts have run out,
+                        // so they are the phone-side marker of a watch reset storm.
+                        is PPoGPacket.ResetComplete -> {
+                            logger.w("in-session $packet from watch; tearing down PPoG session")
+                            throw IllegalStateException("We don't handle resetting PPoG - disconnect and reconnect")
+                        }
+
+                        is PPoGPacket.ResetRequest -> {
+                            logger.w("in-session $packet from watch; tearing down PPoG session")
+                            throw IllegalStateException("We don't handle resetting PPoG - disconnect and reconnect")
+                        }
                     }
                 }
             }

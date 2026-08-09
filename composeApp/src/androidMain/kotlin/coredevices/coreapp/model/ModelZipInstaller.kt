@@ -16,6 +16,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.zip.ZipInputStream
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -65,6 +66,11 @@ class ModelZipInstaller(
     private val httpClient: HttpClient,
     private val cacheDir: File,
     private val modelsDir: File,
+    // Injected so tests can disable it: under runTest's virtual clock the
+    // MockEngine body writer races this timeout (Ktor delivers the body on a
+    // real dispatcher since 3.5), and multi-chunk transfers lose spuriously.
+    // Production always uses the default.
+    private val readStallTimeout: Duration = READ_STALL_TIMEOUT,
 ) {
     companion object {
         private val logger = Logger.withTag("ModelZipInstaller")
@@ -219,7 +225,7 @@ class ModelZipInstaller(
                 FileOutputStream(tempZip).use { output ->
                     val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
                     while (true) {
-                        val read = withTimeoutOrNull(READ_STALL_TIMEOUT) {
+                        val read = withTimeoutOrNull(readStallTimeout) {
                             channel.readAvailable(buffer, 0, buffer.size)
                         } ?: throw Exception("Download stalled for $url")
                         if (read == -1) break

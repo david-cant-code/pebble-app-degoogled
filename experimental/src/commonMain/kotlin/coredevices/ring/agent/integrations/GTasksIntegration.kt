@@ -38,16 +38,8 @@ class GTasksIntegration(
             ?: throw Exception("Failed to create reminder in Google Tasks")
     }
 
-    override suspend fun searchForList(listName: String): List<ReminderListEntry> {
-        val token = tokenForScopes() ?: throw IntegrationAuthException("Google Tasks not authorized")
-        return googleTasksApi.getTaskLists(token).filter { it.title?.contains(listName, ignoreCase = true) == true }.mapNotNull {
-            if (it.id != null && it.title != null) {
-                ReminderListEntry(it.id, it.title)
-            } else {
-                null
-            }
-        }
-    }
+    override suspend fun searchForList(listName: String): List<ReminderListEntry> =
+        getAllLists().fuzzyFilter(listName)
 
     override suspend fun getAllLists(): List<ReminderListEntry> {
         val token = tokenForScopes() ?: throw IntegrationAuthException("Google Tasks not authorized")

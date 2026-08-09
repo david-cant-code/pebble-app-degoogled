@@ -43,6 +43,7 @@ import kotlin.time.Instant
 
 internal const val STT_UPDATE_NOTIFIED_VERSION_KEY = "stt_update_notified_version"
 internal const val STT_MODE_BEFORE_UPDATE_KEY = "stt_mode_before_update"
+internal val STT_UPDATE_NOTIFICATION_ID = "stt_update_notif".hashCode()
 
 class CommonAppDelegate(
     private val platformContext: PlatformContext,
@@ -107,6 +108,7 @@ class CommonAppDelegate(
                     settings.putString(STT_UPDATE_NOTIFIED_VERSION_KEY, CommonBuildKonfig.CACTUS_WEIGHTS_VERSION)
                     notifyLocal(
                         platformContext,
+                        STT_UPDATE_NOTIFICATION_ID,
                         "Offline voice recognition",
                         "We've improved offline voice recognition. Open the app to update the model."
                     )

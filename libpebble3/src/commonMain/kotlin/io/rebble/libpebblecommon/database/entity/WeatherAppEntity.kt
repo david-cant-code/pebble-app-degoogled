@@ -111,6 +111,9 @@ data class WeatherAppEntry(
                 hourly.getOrNull(i)?.weatherType?.code?.toUByte() ?: WeatherType.Unknown.code.toUByte()
             },
             todayHourlyTemp = ByteArray(WEATHER_DB_HOURLY_COUNT) { i -> hourly.getOrNull(i)?.temp ?: 0 },
+            todayHourlyUvX10 = UByteArray(WEATHER_DB_HOURLY_COUNT) { i ->
+                hourly.getOrNull(i)?.uvIndexX10?.toInt().toMetricByte()
+            },
             locationUtcOffsetMin = locationUtcOffsetMin?.toShort() ?: WEATHER_V4_UTC_OFFSET_UNKNOWN,
             todayWindDirDeg = todayWindDirection?.toShort() ?: WEATHER_V4_WIND_DIR_DEG_UNKNOWN,
             locationName = locationName,
@@ -162,7 +165,7 @@ class WeatherAppBlobRecord(
 // v4 record sizing + "unknown" sentinels — must match weather_db.h.
 internal const val WEATHER_DB_MAX_FORECAST_DAYS = 7
 internal const val WEATHER_DB_HOURLY_COUNT = 24
-internal const val WEATHER_DB_MINOR_VERSION: UByte = 3u
+internal const val WEATHER_DB_MINOR_VERSION: UByte = 4u
 internal val WEATHER_V4_TEMP_UNKNOWN: Short = Short.MAX_VALUE          // 32767
 internal val WEATHER_V4_UV_UNKNOWN: Short = -1
 internal val WEATHER_V4_PRECIP_UNKNOWN: Short = -1
@@ -220,12 +223,15 @@ private fun Int?.toClampedUShort(): UShort =
     this?.takeIf { it >= 0 }?.coerceAtMost(65534)?.toUShort() ?: WEATHER_V4_USHORT_UNKNOWN
 
 /**
- * v4 weather BlobDB record, minor version 3. Layout is the v3 fixed prefix (identical offsets),
+ * v4 weather BlobDB record, minor version 4. Layout is the v3 fixed prefix (identical offsets),
  * then the v4 fixed fields, then the trailing pstring16s — exactly as the firmware reads it. See
- * weather_db.h. The fixed block is 177 bytes; the watch rejects a minor >= 1 record any shorter,
+ * weather_db.h. The fixed block is 201 bytes; the watch rejects a minor >= 1 record any shorter,
  * so every field is always emitted (unknown ones as sentinels). The phone only sends this when
  * the watch advertises
  * [ProtocolCapsFlag.SupportsWeatherDbV4]; otherwise it keeps writing [WeatherAppBlobRecord] (v3).
+ *
+ * The minor version decides where the watch looks for the trailing strings, so appending a block
+ * here requires firmware that knows that minor.
  */
 class WeatherAppBlobRecordV4(
     currentTemp: Short,
@@ -251,6 +257,7 @@ class WeatherAppBlobRecordV4(
     todayHourlyTemp: ByteArray,
     locationUtcOffsetMin: Short,
     todayWindDirDeg: Short,
+    todayHourlyUvX10: UByteArray,
     locationName: String,
     forecastShort: String,
 ) : StructMappable(endianness = Endian.Little) {
@@ -328,6 +335,10 @@ class WeatherAppBlobRecordV4(
         dailyShortsLe(daily, WEATHER_V4_WIND_DIR_DEG_UNKNOWN) { it.windDirectionDeg?.toShort() },
         endianness = Endian.Unspecified,
     )
+
+    // --- v4 minor 4 additions ---
+    // UV x10 per hour 0-23 (255 unknown): the watch's current-hour reading.
+    val todayHourlyUvX10 = SBytes(m, WEATHER_DB_HOURLY_COUNT, todayHourlyUvX10, endianness = Endian.Unspecified)
 
     // --- variable-length trailing strings (MUST stay last) ---
     // UTF-8 byte counts, not String.length: SLongString writes UTF-8 bytes on the wire.

@@ -25,7 +25,7 @@ jobs:
           restore-keys: |
             android-deps-${{ runner.os }}-
       - name: Build and Test
-        run: ./gradlew :composeApp:assembleDebug testDebugUnitTest jvmTest lintDebug
+        run: ./gradlew :androidApp:assembleDebug testDebugUnitTest testAndroidHostTest jvmTest lintDebug
         env:
           GITHUB_ACTOR: ${{ secrets.READ_PACKAGES_ACTOR }}
           GITHUB_TOKEN: ${{ secrets.READ_PACKAGES_TOKEN }}

@@ -26,6 +26,7 @@ import io.rebble.libpebblecommon.SystemAppIDs.TIMELINE_FUTURE_UUID
 import io.rebble.libpebblecommon.SystemAppIDs.TIMELINE_PAST_UUID
 import io.rebble.libpebblecommon.connection.LibPebble
 import io.rebble.libpebblecommon.database.dao.WatchPreference
+import io.rebble.libpebblecommon.database.entity.BacklightPresetMode
 import io.rebble.libpebblecommon.database.entity.BoolWatchPref
 import io.rebble.libpebblecommon.database.entity.ColorWatchPref
 import io.rebble.libpebblecommon.database.entity.EnumWatchPref
@@ -44,13 +45,30 @@ import kotlin.uuid.Uuid
 // so the displayed MM:SS value is always a clean :00 or :30.
 private const val NOTIFICATION_TIMEOUT_STEP_COUNT = 19
 
+// The watch overwrites these whenever a non-Advanced backlight preset is set, so showing them
+// under a preset would offer settings the watch immediately reverts.
+private val PRESET_MANAGED_BACKLIGHT_PREFS = setOf<WatchPref<*>>(
+    BoolWatchPref.AmbientLightSensor,
+    BoolWatchPref.BacklightMotion,
+    EnumWatchPref.BacklightIntensity,
+    EnumWatchPref.DynamicBacklightMode,
+    EnumWatchPref.BacklightTouch,
+    NumberWatchPref.BacklightTimeoutMs,
+)
+
+internal fun List<WatchPreference<*>>.hidePresetManagedBacklightPrefs(): List<WatchPreference<*>> {
+    val preset = firstOrNull { it.pref == EnumWatchPref.BacklightPreset }?.valueOrDefault()
+    return if (preset == BacklightPresetMode.Advanced) this
+    else filterNot { it.pref in PRESET_MANAGED_BACKLIGHT_PREFS }
+}
+
 @Composable
 fun watchPrefs(): List<SettingsItem> {
     val libPebble = rememberLibPebble()
     val settings by libPebble.watchPrefs.collectAsState(emptyList())
     val quickLaunchOptions = quickLaunchOptions(libPebble)
     val mapped = remember(settings, quickLaunchOptions) {
-        settings.map { item ->
+        settings.hidePresetManagedBacklightPrefs().map { item ->
             when (val pref = item.pref) {
                 is BoolWatchPref -> booleanPref(pref.castParent(item), libPebble)
                 is EnumWatchPref -> enumPref(pref.castParent(item), libPebble)

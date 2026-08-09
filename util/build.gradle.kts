@@ -1,12 +1,11 @@
 
 import com.codingfeline.buildkonfig.compiler.FieldSpec
-import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
-    alias(libs.plugins.android.library)
+    alias(libs.plugins.androidKotlinMultiplatformLibrary)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlin.serialization)
@@ -17,26 +16,6 @@ plugins {
 
 room {
     schemaDirectory("schema")
-}
-
-android {
-    namespace = "coredevices.util"
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
-
-    buildFeatures {
-        buildConfig = true
-        compose = true
-    }
-
-    defaultConfig {
-        minSdk = libs.versions.android.minSdk.get().toInt()
-        targetSdk = libs.versions.android.targetSdk.get().toInt()
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
 }
 
 compose.resources {
@@ -69,12 +48,20 @@ kotlin {
 // Target declarations - add or remove as needed below. These define
 // which platforms this KMP module supports.
 // See: https://kotlinlang.org/docs/multiplatform-discover-project.html#targets
-    androidTarget {
-        publishLibraryVariants("release", "debug")
-        @OptIn(ExperimentalKotlinGradlePluginApi::class)
+    android {
+        namespace = "coredevices.util"
+        compileSdk = libs.versions.android.compileSdk.get().toInt()
+        minSdk = libs.versions.android.minSdk.get().toInt()
+
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
         }
+
+        androidResources {
+            enable = true
+        }
+
+        withHostTestBuilder {}
     }
 
 // For iOS targets, this is also where you should
@@ -182,11 +169,6 @@ dependencies {
     add("kspAndroid", libs.room.compiler)
     add("kspIosArm64", libs.room.compiler)
     add("kspIosSimulatorArm64", libs.room.compiler)
-
-    // Debug-only: compose.uiTooling contributes an exported
-    // androidx.compose.ui.tooling.PreviewActivity to the merged manifest, which must not
-    // reach a release APK. Declaring it in androidMain put it in every variant.
-    debugImplementation(compose.uiTooling)
 }
 
 val headSha by lazy {

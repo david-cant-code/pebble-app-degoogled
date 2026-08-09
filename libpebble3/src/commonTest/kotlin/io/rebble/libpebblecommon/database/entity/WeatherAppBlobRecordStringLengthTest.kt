@@ -46,16 +46,17 @@ internal class WeatherAppBlobRecordStringLengthTest {
             todayHourlyTemp = ByteArray(24),
             locationUtcOffsetMin = WEATHER_V4_UTC_OFFSET_UNKNOWN,
             todayWindDirDeg = WEATHER_V4_WIND_DIR_DEG_UNKNOWN,
+            todayHourlyUvX10 = UByteArray(24) { WEATHER_V4_DAILY_METRIC_UNKNOWN },
             locationName = locationName,
             forecastShort = forecastShort,
         )
 
         val bytes = record.toBytes()
 
-        // Fixed block is 177 bytes (see WeatherAppBlobRecordV4Test), then the declared
+        // Fixed block is 201 bytes (see WeatherAppBlobRecordV4Test), then the declared
         // length, then the string block itself.
-        assertEquals(177 + 2 + expectedStringsBytes, bytes.size)
-        assertEquals(expectedStringsBytes, declaredLengthAt(bytes, 177))
+        assertEquals(201 + 2 + expectedStringsBytes, bytes.size)
+        assertEquals(expectedStringsBytes, declaredLengthAt(bytes, 201))
     }
 
     @Test

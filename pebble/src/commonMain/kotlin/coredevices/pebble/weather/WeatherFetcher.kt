@@ -68,7 +68,7 @@ class WeatherFetcher(
     suspend fun fetchWeather(scope: CoroutineScope) {
         val weatherEnabled = coreConfigFlow.value.fetchWeather
         val pinsEnabled = coreConfigFlow.value.weatherPinsV2
-        val units = coreConfigFlow.value.weatherUnits
+        val units = coreConfigFlow.value.resolvedWeatherUnits
         if (!pinsEnabled || !weatherEnabled) {
             Day.entries.forEach {
                 libPebble.delete(it.dayUuid)
@@ -187,6 +187,7 @@ class WeatherFetcher(
             WeatherHourlyForecast(
                 weatherType = hour.iconCode.toWeatherType(),
                 temp = (hour.temp ?: 0).coerceIn(Byte.MIN_VALUE.toInt(), Byte.MAX_VALUE.toInt()).toByte(),
+                uvIndexX10 = hour.uvIndex?.let { (it * 10).roundToInt().toShort() },
             )
         }
         return WeatherLocationData.WeatherLocationDataPopulated(
@@ -559,4 +560,7 @@ data class HourlyForecast(
     @SerialName("icon_code")
     val iconCode: Int,
     val temp: Int? = null,
+    // Plain index (e.g. 5.4) for this hour; the daily uv_index is the day's peak.
+    @SerialName("uv_index")
+    val uvIndex: Double? = null,
 )

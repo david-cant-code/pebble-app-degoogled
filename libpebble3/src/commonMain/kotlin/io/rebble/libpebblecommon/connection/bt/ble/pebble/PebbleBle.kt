@@ -75,7 +75,10 @@ class PebbleBle(
         // (Pebble 2 / silk / Dialog); fall back to hosting forward PPoG
         // ourselves if neither is present.
         val watchServices = device.services?.takeIf { discovered }.orEmpty()
+        val bleConfig = libPebbleConfigFlow.value.bleConfig
         val reversedConfig: PpogClientConfig? = when {
+            !bleConfig.useReversedPpogV2 -> null
+
             watchServices.any { it.uuid == PPOGATT_WATCH_SERVER_V2_SERVICE } -> PpogClientConfig(
                 serviceUuid = PPOGATT_WATCH_SERVER_V2_SERVICE,
                 notifyCharacteristic = PPOGATT_WATCH_SERVER_V2_DATA,
@@ -83,7 +86,7 @@ class PebbleBle(
                 version = ReversePpogVersion.V2,
             )
 
-            libPebbleConfigFlow.value.bleConfig.legacyReversedPPoG && watchServices.any { it.uuid == PPOGATT_DEVICE_SERVICE_UUID_CLIENT } -> PpogClientConfig(
+            bleConfig.legacyReversedPPoG && watchServices.any { it.uuid == PPOGATT_DEVICE_SERVICE_UUID_CLIENT } -> PpogClientConfig(
                 serviceUuid = PPOGATT_DEVICE_SERVICE_UUID_CLIENT,
                 notifyCharacteristic = PPOGATT_DEVICE_CHARACTERISTIC_READ,
                 // V1 legacy firmware accepts data writes on the notify char

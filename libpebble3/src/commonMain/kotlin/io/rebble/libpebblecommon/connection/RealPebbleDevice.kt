@@ -111,14 +111,14 @@ class PebbleDeviceFactory {
                     pebbleDevice = pebbleDevice,
                     activeDevice = RealActiveDevice(identifier, watchConnector, usingBtClassic, reversePpogVersion),
                     negotiating = state is ConnectingPebbleState.Negotiating,
-                    rebootingAfterFirmwareUpdate = lastFirmwareUpdateState !is FirmwareUpdateStatus.NotInProgress,
+                    rebootingAfterFirmwareUpdate = lastFirmwareUpdateState is FirmwareUpdateStatus.WaitingForReboot
                 )
 
                 else -> RealConnectingKnownPebbleDevice(
                     knownDevice = knownDevice,
                     activeDevice = RealActiveDevice(identifier, watchConnector, usingBtClassic, reversePpogVersion),
                     negotiating = state is ConnectingPebbleState.Negotiating,
-                    rebootingAfterFirmwareUpdate = lastFirmwareUpdateState !is FirmwareUpdateStatus.NotInProgress,
+                    rebootingAfterFirmwareUpdate = lastFirmwareUpdateState is FirmwareUpdateStatus.WaitingForReboot
                 )
             }
 

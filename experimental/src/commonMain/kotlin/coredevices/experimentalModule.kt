@@ -166,7 +166,13 @@ val experimentalModule = module {
     singleOf(::RecordingProcessingTaskRepository)
     single {
         val builtInReminders = get<BuiltInReminderIntegration>()
-        ItemRepository(get()) { builtInReminders.cancelReminder(it) }
+        ItemRepository(
+            get(),
+            cancelReminder = { builtInReminders.cancelReminder(it) },
+            rescheduleReminder = { id, recordingId, newTime ->
+                builtInReminders.rescheduleReminder(id, recordingId, newTime)
+            },
+        )
     }
     singleOf(::ListRepository)
     singleOf(::DefaultListsBootstrap)

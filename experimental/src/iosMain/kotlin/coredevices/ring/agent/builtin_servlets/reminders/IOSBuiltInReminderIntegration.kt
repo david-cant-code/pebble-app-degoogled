@@ -33,6 +33,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 import kotlin.time.Clock
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Instant
 
 /**
@@ -134,6 +135,25 @@ class IOSBuiltInReminderIntegration : BuiltInReminderIntegration, KoinComponent 
         notificationCenter.removePendingNotificationRequestsWithIdentifiers(identifiers)
         notificationCenter.removeDeliveredNotificationsWithIdentifiers(identifiers)
         db.localReminderDao().deleteReminder(reminderId)
+    }
+
+    override suspend fun rescheduleReminder(reminderId: Int, expectedRecordingId: String?, newTime: Instant?) {
+        val reminder = db.localReminderDao().getReminder(reminderId) ?: return
+        if (reminder.recordingId != expectedRecordingId) return
+        val identifiers = listOf(notificationId(reminderId), preNotificationId(reminderId))
+        notificationCenter.removePendingNotificationRequestsWithIdentifiers(identifiers)
+        notificationCenter.removeDeliveredNotificationsWithIdentifiers(identifiers)
+
+        db.localReminderDao().setTime(reminderId, newTime)
+
+        if (newTime == null || newTime <= Clock.System.now()) return
+        scheduleNotification(reminderId, reminder.message, newTime, notificationId(reminderId), notificationTitle = "Reminder")
+        reminder.notifyBeforeMillis?.let { lead ->
+            val preTime = newTime - lead.milliseconds
+            if (preTime > Clock.System.now()) {
+                scheduleNotification(reminderId, reminder.message, preTime, preNotificationId(reminderId), notificationTitle = "Upcoming reminder")
+            }
+        }
     }
 
     override suspend fun cancelExtraNotification(reminderId: Int) {

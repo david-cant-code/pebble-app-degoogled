@@ -30,7 +30,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Semaphore
@@ -106,6 +105,13 @@ sealed interface RingEvent {
         ) : FirmwareUpdate
 
         data class Failed(
+            override val ringId: String,
+            override val newVersion: String,
+            override val isFailsafe: Boolean
+        ) : FirmwareUpdate
+
+        /** The update never got underway (typically we couldn't connect); it will be retried. */
+        data class NotStarted(
             override val ringId: String,
             override val newVersion: String,
             override val isFailsafe: Boolean
@@ -803,6 +809,20 @@ class RingSync(
                                                         )
                                                     )
                                                 }
+
+                                                is SatelliteStatus.FirmwareUpdating.NotStarted -> {
+                                                    logger.i {
+                                                        "Satellite ${satelliteStatus.satellite.id} firmware update to version ${satelliteStatus.newVersion} did not start, will retry"
+                                                    }
+                                                    deviceManager.markFirmwareUpdatingState(satelliteStatus.satellite, isUpdating = false)
+                                                    _ringEvents.emit(
+                                                        RingEvent.FirmwareUpdate.NotStarted(
+                                                            ringId = satelliteStatus.satellite.id,
+                                                            newVersion = satelliteStatus.newVersion,
+                                                            isFailsafe = isFailsafe,
+                                                        )
+                                                    )
+                                                }
                                             }
                                         }
 
@@ -852,8 +872,8 @@ class RingSync(
         )
     }
 
-    suspend fun stop() {
-        syncJob?.cancelAndJoin()
+    fun stop() {
+        syncJob?.cancel()
     }
 
     fun lastRingSummary(): String? = lastRing.value?.let {

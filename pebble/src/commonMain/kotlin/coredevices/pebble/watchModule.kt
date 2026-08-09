@@ -15,17 +15,21 @@ import coredevices.pebble.account.RealBootConfigProvider
 import coredevices.pebble.account.RealFirestoreKnownWatchesSync
 import coredevices.pebble.account.RealFirestoreLocker
 import coredevices.pebble.account.RealPebbleAccount
+import coredevices.pebble.firmware.BatteryChargedNotifier
 import coredevices.pebble.firmware.Cohorts
 import coredevices.pebble.firmware.FirmwareArtifactExpectations
 import coredevices.pebble.firmware.FirmwareUpdateCheck
 import coredevices.pebble.firmware.FirmwareUpdateUiTracker
 import coredevices.pebble.firmware.GithubReleases
 import coredevices.pebble.firmware.firmwareUpdateChannel
+import coredevices.pebble.firmware.RealBatteryChargedNotifier
 import coredevices.pebble.firmware.RealFirmwareUpdateUiTracker
 import coredevices.pebble.firmware.VerifiedFirmwareInstaller
+import coredevices.pebble.firmware.postWatchFullyChargedNotification
 import coredevices.pebble.services.AppstoreCache
 import coredevices.pebble.services.AppstoreService
 import coredevices.pebble.services.AppstoreSourceInitializer
+import coredevices.pebble.services.EngDashOta
 import coredevices.pebble.services.HybridTranscription
 import coredevices.pebble.services.LanguagePackRepository
 import coredevices.pebble.services.Memfault
@@ -133,6 +137,10 @@ val watchModule = module {
     } } bind PebbleAccountProvider::class
     singleOf(::PebbleAppDelegate)
     singleOf(::RealFirmwareUpdateUiTracker) bind FirmwareUpdateUiTracker::class
+    single<BatteryChargedNotifier> {
+        val appContext: AppContext = get()
+        RealBatteryChargedNotifier(get()) { postWatchFullyChargedNotification(appContext, it) }
+    }
     factory<Clock> { Clock.System }
     singleOf(::RealPebbleAccount) bind PebbleAccount::class
     single { FirestoreLockerDao { get() } }
@@ -192,6 +200,7 @@ val watchModule = module {
     // Not singleOf: Koin cannot resolve the nullable token parameter, and passing it
     // here keeps the class testable with explicit token states.
     single { Memfault(get(), get(), get(), CommonBuildKonfig.MEMFAULT_TOKEN) }
+    singleOf(::EngDashOta)
     singleOf(::MemfaultChunkQueue)
     singleOf(::AnalyticsIngest)
     singleOf(::AnalyticsHeartbeatQueue)
@@ -226,9 +235,11 @@ val watchModule = module {
         val coreConfig = get<CoreConfigFlow>()
         FirmwareUpdateCheck(
             memfault = get(),
+            engDashOta = get(),
             cohorts = get(),
             githubReleases = get(),
             channel = { coreConfig.value.firmwareUpdateChannel() },
+            coreConfig = coreConfig,
             clock = get(),
         )
     }

@@ -685,6 +685,20 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     },
                     show = { pebbleFeatures.supportsForegroundService() },
                 ),
+                basicSettingsToggleItem(
+                    title = "Watch fully charged",
+                    description = "Notify on this phone when a watch finishes charging",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.General,
+                    checked = coreConfig.notifyWatchFullyCharged,
+                    onCheckChanged = {
+                        coreConfigHolder.update(
+                            coreConfig.copy(
+                                notifyWatchFullyCharged = it
+                            )
+                        )
+                    },
+                ),
                 navBarNav?.let { nav -> basicSettingsActionItem(
                     title = "Quick replies",
                     description = "Preset messages for notification replies on the watch (canned messages)",
@@ -728,6 +742,40 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                         )
                     },
                     show = { pebbleFeatures.supportsNotificationFiltering() },
+                ),
+                basicSettingsToggleItem(
+                    title = "Mute phone notification effects",
+                    description = "Mutes the phone's own notification vibration/sound while the watch is connected",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Notifications,
+                    checked = libPebbleConfig.notificationConfig.mutePhoneNotificationSoundsWhenConnected,
+                    onCheckChanged = {
+                        libPebble.updateConfig(
+                            libPebbleConfig.copy(
+                                notificationConfig = libPebbleConfig.notificationConfig.copy(
+                                    mutePhoneNotificationSoundsWhenConnected = it
+                                )
+                            )
+                        )
+                    },
+                    show = { pebbleFeatures.supportsNotificationHints() },
+                ),
+                basicSettingsToggleItem(
+                    title = "Mute phone call effects",
+                    description = "Mutes the phone's own call vibration/sound while the watch is connected",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Notifications,
+                    checked = libPebbleConfig.notificationConfig.mutePhoneCallSoundsWhenConnected,
+                    onCheckChanged = {
+                        libPebble.updateConfig(
+                            libPebbleConfig.copy(
+                                notificationConfig = libPebbleConfig.notificationConfig.copy(
+                                    mutePhoneCallSoundsWhenConnected = it
+                                )
+                            )
+                        )
+                    },
+                    show = { pebbleFeatures.supportsNotificationHints() },
                 ),
                 SettingsItem(
                     title = "Vibration Pattern",
@@ -938,6 +986,33 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                         )
                     },
                     show = { libPebbleConfig.watchConfig.calendarPins },
+                ),
+                SettingsItem(
+                    title = "Reminder Vibration Pattern",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Calendar,
+                    show = {
+                        libPebbleConfig.watchConfig.calendarPins &&
+                                libPebbleConfig.watchConfig.calendarReminders &&
+                                pebbleFeatures.supportsVibePatterns()
+                    },
+                    item = {
+                        SelectVibePatternOrNone(
+                            currentPattern = libPebbleConfig.watchConfig.overrideCalendarVibePattern,
+                            onChangePattern = { pattern ->
+                                libPebble.updateConfig(
+                                    libPebbleConfig.copy(
+                                        watchConfig = libPebbleConfig.watchConfig.copy(
+                                            overrideCalendarVibePattern = pattern?.name
+                                        )
+                                    )
+                                )
+                            },
+                            subtext = "Override the default on the watch",
+                            title = "Reminder Vibration Pattern",
+                        )
+                    },
+                    isDebugSetting = false,
                 ),
                 basicSettingsToggleItem(
                     title = "Declined Events",
@@ -1280,7 +1355,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     topLevelType = TopLevelType.Phone,
                     section = Section.Weather,
                     items = WeatherUnit.entries,
-                    selectedItem = coreConfig.weatherUnits,
+                    selectedItem = coreConfig.resolvedWeatherUnits,
                     onItemSelected = {
                         coreConfigHolder.update(
                             coreConfig.copy(
@@ -1358,6 +1433,21 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                                 watchConfig = libPebbleConfig.watchConfig.copy(
                                     enableWatchSettingsSync = it
                                 )
+                            )
+                        )
+                    },
+                    isDebugSetting = true,
+                ),
+                basicSettingsToggleItem(
+                    title = "Use Core OTA service",
+                    description = "Check Core Devices service for Core watch firmware updates instead of Memfault (falls back to Memfault on failure)",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Debug,
+                    checked = coreConfig.useEngDashOta,
+                    onCheckChanged = {
+                        coreConfigHolder.update(
+                            coreConfig.copy(
+                                useEngDashOta = it,
                             )
                         )
                     },
@@ -1593,6 +1683,41 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     show = { pebbleFeatures.supportsRestartingGattServerAfterBtPowerOn() }
                 ),
                 basicSettingsToggleItem(
+                    title = "Reversed PPoG",
+                    description = "Let the watch host the data connection when it supports it. Turn off to use the older phone-hosted mode. Reconnect for this to take effect",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Connectivity,
+                    checked = libPebbleConfig.bleConfig.useReversedPpogV2,
+                    onCheckChanged = {
+                        libPebble.updateConfig(
+                            libPebbleConfig.copy(
+                                bleConfig = libPebbleConfig.bleConfig.copy(
+                                    useReversedPpogV2 = it
+                                )
+                            )
+                        )
+                    },
+                    isDebugSetting = true,
+                ),
+                basicSettingsToggleItem(
+                    title = "Bluetooth state restoration",
+                    description = "Let iOS relaunch the app to restore the watch connection. Takes effect on next app launch",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Connectivity,
+                    checked = libPebbleConfig.bleConfig.centralStateRestoration,
+                    onCheckChanged = {
+                        libPebble.updateConfig(
+                            libPebbleConfig.copy(
+                                bleConfig = libPebbleConfig.bleConfig.copy(
+                                    centralStateRestoration = it
+                                )
+                            )
+                        )
+                    },
+                    show = { pebbleFeatures.supportsCentralStateRestoration() },
+                    isDebugSetting = true,
+                ),
+                basicSettingsToggleItem(
                     title = "Passive reconnection mode",
                     description = "After a failed connection, wait for the watch to become available instead of retrying repeatedly",
                     topLevelType = TopLevelType.Phone,
@@ -1608,6 +1733,23 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                         )
                     },
                     show = { pebbleFeatures.supportsBleAutoConnect() },
+                ),
+                basicSettingsToggleItem(
+                    title = "Filter BLE watch scans by UUID",
+                    description = "Disable this only if BLE scans are not finding your Core watch or Pebble 2",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Connectivity,
+                    checked = libPebbleConfig.bleConfig.filterScanResultsByUuid,
+                    onCheckChanged = {
+                        libPebble.updateConfig(
+                            libPebbleConfig.copy(
+                                bleConfig = libPebbleConfig.bleConfig.copy(
+                                    filterScanResultsByUuid = it
+                                )
+                            )
+                        )
+                    },
+                    isDebugSetting = true,
                 ),
                 basicSettingsActionItem(
                     title = "Post test notification",
@@ -1740,6 +1882,22 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                         }
                     },
                     show = { loggedIn != null },
+                ),
+                basicSettingsToggleItem(
+                    title = "Auto-Resume Firmware Updates",
+                    description = "Automatically continue an interrupted firmware update when the watch reconnects",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.General,
+                    checked = libPebbleConfig.watchConfig.autoResumeFirmwareUpdate,
+                    onCheckChanged = {
+                        libPebble.updateConfig(
+                            libPebbleConfig.copy(
+                                watchConfig = libPebbleConfig.watchConfig.copy(
+                                    autoResumeFirmwareUpdate = it
+                                )
+                            )
+                        )
+                    },
                 ),
                 navBarNav?.let {basicSettingsActionItem(
                     title = "Show Watch Onboarding",

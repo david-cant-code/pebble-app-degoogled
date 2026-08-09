@@ -359,7 +359,10 @@ actual class GattServer(
                 peripheralManager.respondToRequest(request, CBATTErrorRequestNotSupported)
                 return@forEach
             }
-            device.dataChannel.trySend(value.toByteArray())
+            val result = device.dataChannel.trySend(value.toByteArray())
+            if (result.isFailure) {
+                logger.e("didReceiveWriteRequests error writing to channel: $result")
+            }
             peripheralManager.respondToRequest(request, CBATTErrorSuccess)
         }
     }

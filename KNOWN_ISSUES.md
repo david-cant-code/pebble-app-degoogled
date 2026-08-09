@@ -215,11 +215,15 @@ is prebuilt binary code that F-Droid's scanner rejects and its inclusion
 policy disallows (dependencies must be free software, built from source
 or served from trusted repositories):
 
-- `cactus/src/androidMain/jniLibs/arm64-v8a/libcactus_engine.so`, the
-  dictation engine, is a 57 MB prebuilt native library checked into git
+- `cactus-native/src/main/jniLibs/arm64-v8a/libcactus_engine.so`, the
+  dictation engine, is a 55 MB prebuilt native library checked into git
   with no source or license in the tree, and it ships in the APK. The
   missing license is a problem beyond F-Droid: the app links it while
-  shipping under GPLv3.
+  shipping under GPLv3. (Upstream moved it from
+  `cactus/src/androidMain/jniLibs/` into the `:cactus-native` module and
+  updated the binary; the module's CMake build only compiles a small
+  CPU-capability shim, `cactus_cpu.c`, so the engine itself is still
+  sourceless.)
 - `models/needle-pebble-ft-cq4.zip` (13.7 MB) is bundled into APK assets
   via a symlink, and the main STT weights (383 MB) are downloaded at
   runtime from Hugging Face; neither carries a license statement in the

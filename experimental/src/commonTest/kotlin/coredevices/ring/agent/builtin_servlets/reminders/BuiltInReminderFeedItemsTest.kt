@@ -77,7 +77,7 @@ class BuiltInReminderFeedItemsTest {
         val itemDao = FakeCachedItemDao()
         val feedItems = BuiltInReminderFeedItems(
             ItemFactory(),
-            ItemRepository(itemDao) {},
+            ItemRepository(itemDao, cancelReminder = {}),
             ListRepository(FakeCachedListDao(lists)),
         )
         return feedItems to itemDao

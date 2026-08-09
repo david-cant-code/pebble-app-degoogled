@@ -1,4 +1,3 @@
-import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 // Fork module: inert stand-ins for the dev.gitlive Firebase KMP artifacts
@@ -7,33 +6,28 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 // while the real Firebase/GMS SDKs stay out of the dependency graph
 // entirely. Re-adding a real gitlive artifact alongside this module trips
 // duplicate-class errors, which is the intended tripwire (same pattern as
-// the ring fork stubs). Module shape mirrors :krisp-stubs.
+// the ring fork stubs). Module shape mirrors :krisp-stubs, including its
+// AGP 9 migration to the KMP Android library plugin (AGP 9 rejects the old
+// com.android.library + kotlin.multiplatform combination).
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
-    alias(libs.plugins.android.library)
-}
-
-android {
-    namespace = "coredevices.firebasestubs"
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
-
-    defaultConfig {
-        minSdk = libs.versions.android.minSdk.get().toInt()
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
+    alias(libs.plugins.androidKotlinMultiplatformLibrary)
 }
 
 kotlin {
-    androidTarget {
-        publishLibraryVariants("release", "debug")
-        @OptIn(ExperimentalKotlinGradlePluginApi::class)
+    android {
+        namespace = "coredevices.firebasestubs"
+        compileSdk = libs.versions.android.compileSdk.get().toInt()
+        minSdk = libs.versions.android.minSdk.get().toInt()
+
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
         }
+
+        // The stub-behavior tests live in commonTest; without this the new
+        // plugin would silently skip them for the android compilation (they
+        // still run on the jvm target, this keeps both).
+        withHostTestBuilder {}
     }
 
     // The jvm and iOS targets exist only so consumers can keep this

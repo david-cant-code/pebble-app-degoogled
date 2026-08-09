@@ -45,6 +45,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.experimental.ExperimentalNativeApi
+import kotlin.native.Platform
 import kotlinx.datetime.toKotlinInstant
 import kotlinx.datetime.toNSDate
 import okio.ByteString.Companion.toByteString
@@ -57,6 +59,7 @@ import org.koin.dsl.module
 import platform.BackgroundTasks.BGAppRefreshTaskRequest
 import platform.BackgroundTasks.BGTaskScheduler
 import platform.Foundation.NSBundle
+import platform.Foundation.NSUserDefaults
 import platform.Foundation.NSData
 import platform.Foundation.NSNotificationCenter
 import platform.Foundation.NSProcessInfo
@@ -67,6 +70,7 @@ import platform.Foundation.NSUserActivityTypeBrowsingWeb
 import platform.Foundation.dataWithContentsOfFile
 import platform.Foundation.isLowPowerModeEnabled
 import platform.UIKit.UIApplication
+import platform.UIKit.UIApplicationState
 import platform.UIKit.UIBackgroundFetchResult
 import platform.UIKit.registerForRemoteNotifications
 import platform.UserNotifications.UNNotificationResponse
@@ -215,7 +219,13 @@ object IOSDelegate : KoinComponent {
         requestBgRefresh(force = false, coreConfigHolder.config.value)
         val appVersion = NSBundle.mainBundle.objectForInfoDictionaryKey("CFBundleVersion") as? String ?: "Unknown"
         val appVersionShort = NSBundle.mainBundle.objectForInfoDictionaryKey("CFBundleShortVersionString") as? String ?: "Unknown"
-        logger.i { "didFinishLaunching() appVersion=$appVersion appVersionShort=$appVersionShort" }
+        // launchState=background means iOS started us on its own (BLE, background refresh, push)
+        // rather than the user opening the app.
+        logger.i {
+            "didFinishLaunching() appVersion=$appVersion appVersionShort=$appVersionShort " +
+                    "launchState=${application.applicationState.stateName()}"
+        }
+        reportPreviousRunOutcome()
         // Can only use Koin after this point
 
         // Initialize NotifierManager early to prevent crashes when PushMessaging tries to use it
@@ -294,13 +304,43 @@ object IOSDelegate : KoinComponent {
         completionHandler()
     }
 
+    @OptIn(ExperimentalNativeApi::class)
     private fun setupCrashlytics() {
+        // Debug builds never upload their dSYMs, so their crashes can't be symbolicated.
+        if (Platform.isDebugBinary) {
+            Firebase.crashlytics.setCrashlyticsCollectionEnabled(false)
+            return
+        }
         enableCrashlytics()
         setCrashlyticsUnhandledExceptionHook()
     }
 
     fun applicationWillTerminate() {
+        NSUserDefaults.standardUserDefaults.setBool(true, RUN_EXITED_CLEANLY_KEY)
         fileLogWriter.logBlockingAndFlush(Severity.Info, "applicationWillTerminate", "IOSDelegate", null)
+    }
+
+    /**
+     * iOS doesn't tell us why the previous run ended. We set a flag at launch and only clear it in
+     * [applicationWillTerminate], so anything else — jetsam, crash, or the user swiping the app
+     * away — shows up here as an unclean exit. [RUN_LAST_STATE_KEY] narrows it down: "background"
+     * means we were killed while backgrounded, which is the case that leaves the watch stranded.
+     */
+    private fun reportPreviousRunOutcome() {
+        val defaults = NSUserDefaults.standardUserDefaults
+        val hadPreviousRun = defaults.objectForKey(RUN_EXITED_CLEANLY_KEY) != null
+        val exitedCleanly = defaults.boolForKey(RUN_EXITED_CLEANLY_KEY)
+        val lastState = defaults.stringForKey(RUN_LAST_STATE_KEY) ?: "unknown"
+        if (hadPreviousRun && !exitedCleanly) {
+            logger.w { "previous run ended without applicationWillTerminate (lastState=$lastState)" }
+        } else if (hadPreviousRun) {
+            logger.i { "previous run exited cleanly" }
+        }
+        defaults.setBool(false, RUN_EXITED_CLEANLY_KEY)
+    }
+
+    private fun recordAppState(state: String) {
+        NSUserDefaults.standardUserDefaults.setObject(state, RUN_LAST_STATE_KEY)
     }
 
     fun sceneDidBecomeActive() {
@@ -322,10 +362,12 @@ object IOSDelegate : KoinComponent {
 
     fun sceneWillEnterForeground() {
         logger.v { "sceneWillEnterForeground" }
+        recordAppState("foreground")
     }
 
     fun sceneDidEnterBackground() {
         logger.v { "sceneDidEnterBackground" }
+        recordAppState("background")
     }
 
     fun applicationDidReceiveMemoryWarning() {
@@ -378,6 +420,14 @@ object IOSDelegate : KoinComponent {
 }
 
 private const val REFRESH_TASK_IDENTIFIER = "coredevices.coreapp.sync"
+private const val RUN_EXITED_CLEANLY_KEY = "coreapp.runExitedCleanly"
+private const val RUN_LAST_STATE_KEY = "coreapp.runLastState"
+
+private fun UIApplicationState.stateName(): String = when (this) {
+    UIApplicationState.UIApplicationStateActive -> "active"
+    UIApplicationState.UIApplicationStateInactive -> "inactive"
+    UIApplicationState.UIApplicationStateBackground -> "background"
+}
 
 fun requestBgRefresh(force: Boolean, coreConfig: CoreConfig) {
     val interval = coreConfig.weatherSyncInterval

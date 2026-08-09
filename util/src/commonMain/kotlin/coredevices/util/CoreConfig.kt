@@ -87,7 +87,7 @@ data class CoreConfig(
     val firmwareUpdatesEarlyChannel: Boolean = false,
     val enableIndex: Boolean = false,
     val indexPermissionsConfirmed: Boolean = false,
-    val weatherUnits: WeatherUnit = deviceDefaultWeatherUnit(),
+    val weatherUnits: WeatherUnit? = null,
     val showAllSettingsTab: Boolean = false,
     val sttConfig: STTConfig = STTConfig(),
     val interceptPKJSWeather: Boolean = true,
@@ -98,6 +98,8 @@ data class CoreConfig(
     val hidePermissionWarningBadges: Boolean = false,
     val androidForegroundServiceForWatchConnectionV2: Boolean = true,
     val showWatchConnectionDebugInfo: Boolean = false,
+    val notifyWatchFullyCharged: Boolean = true,
+    val useEngDashOta: Boolean = false,
     /**
      * Fork: highest "What's New" changelog revision the user has already seen. Compared
      * against WHATS_NEW_VERSION to decide whether to show the one-time update dialog.
@@ -107,7 +109,11 @@ data class CoreConfig(
      * chose during setup.
      */
     val lastSeenWhatsNewVersion: Int = 0,
-)
+) {
+    /** Null until the user picks explicitly; the settings [Json] omits defaults, so a
+     * locale-derived default here would never be persisted. */
+    val resolvedWeatherUnits: WeatherUnit get() = weatherUnits ?: deviceDefaultWeatherUnit()
+}
 
 @Serializable
 data class STTConfig(

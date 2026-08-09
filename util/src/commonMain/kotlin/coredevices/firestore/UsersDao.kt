@@ -304,7 +304,7 @@ class UsersDaoImpl(
 
 private const val KEY_HAD_NON_ANONYMOUS_ACCOUNT = "had_non_anonymous_account"
 private const val KEY_HAD_ANONYMOUS_ACCOUNT = "had_anonymous_account"
-private const val KEY_LAST_SIGN_IN_PROVIDERS = "last_sign_in_providers"
+internal const val KEY_LAST_SIGN_IN_PROVIDERS = "last_sign_in_providers"
 
 // Poll quickly at first so a silently-restored session is picked up within seconds
 // (the user is looking at a sign-in screen while we wait), backing off to a steady

@@ -44,7 +44,7 @@ class LocalNoteClientTest {
 
     private fun fixture(): Pair<LocalNoteClient, FakeCachedItemDao> {
         val itemDao = FakeCachedItemDao()
-        return LocalNoteClient(ItemFactory(), ItemRepository(itemDao) {}) to itemDao
+        return LocalNoteClient(ItemFactory(), ItemRepository(itemDao, cancelReminder = {})) to itemDao
     }
 
     @Test

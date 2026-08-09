@@ -69,7 +69,7 @@ class DelegatedIntegrationItemsTest {
     private val source = ItemSource(recordingFirestoreId = "rec-1", createdAt = now, toolCallId = "call-1")
 
     private fun writer(dao: FakeCachedItemDao) =
-        DelegatedIntegrationItems(ItemFactory(), ItemRepository(dao) {})
+        DelegatedIntegrationItems(ItemFactory(), ItemRepository(dao, cancelReminder = {}))
 
     @Test
     fun noteDecoratorRecordsDelegatedItemOnSuccess() = runBlocking {
