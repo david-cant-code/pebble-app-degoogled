@@ -163,6 +163,65 @@ change to existing users (`WhatsNewDialog`).
 only: current stable, Apache-2.0, on Google's Maven (F-Droid
 deliverable), no known advisories, non-deprecated API surface.
 
+## The whisper speech engine
+
+Upstream's on-device dictation ran on the proprietary Cactus engine: a
+prebuilt 57.7 MB `libcactus_engine.so` checked into git with no source
+in the tree, under a source-available license with commercial revenue
+caps. That is not free software, which blocked the F-Droid goal, and it
+conflicts with distributing this fork's GPLv3 APKs, so the speech stack
+is the second place (after FCM) where the fork replaces upstream code
+outright instead of no-opping it at a seam: dictation is a core watch
+feature, and its only other backends are cloud services or the
+GMS-backed platform recognizer, both dead ends here.
+
+The replacement is whisper.cpp (MIT), compiled from source:
+
+- `whisper-native/src/main/cpp/whisper.cpp` is a git submodule pinned to
+  an upstream release tag (clone with `--recursive`). The CMake build in
+  `:whisper-native` statically links the engine into one JNI shim,
+  `libwhisperjni.so`, with the network, server, example, and dynamic
+  backend surfaces disabled; a linker version script exports only the
+  JNI entry points so the statically linked engine symbols cannot be
+  interposed.
+- CPU gating uses two libraries. The engine is compiled for
+  armv8.2-a with dotprod and fp16 (ggml selects CPU features at compile
+  time, with no runtime dispatch), so a tiny baseline-architecture
+  probe, `libwhispercpu.so`, checks the hwcaps first, and no engine code
+  is mapped until it passes.
+- `:whisper` holds the Kotlin bindings: a seven-function expect/actual
+  surface whose iOS actuals are unsupported stubs, keeping commonMain
+  compiling for the unmaintained iOS targets. Engine strings cross JNI
+  as UTF-8 byte arrays: engine output can be byte sequences that are
+  invalid modified UTF-8, which NewStringUTF aborts on under CheckJNI.
+- `WhisperTranscriptionService` (util) keeps the Cactus-era service's
+  proven shape: config-driven re-initialization, the two-mutex warm-up
+  design, the memory guard, and the InferenceBoost foreground-priority
+  seam.
+
+Model weights are never checked in. `WhisperModelCatalog` (util) pins
+five models (large-v3-turbo q5_0, small, small.en, base, base.en) from
+the whisper.cpp author's Hugging Face conversions, each with an
+immutable-commit URL, exact byte size, and SHA-256; the catalog KDoc
+records the three-source re-pin procedure. Verification is layered,
+each layer defensible alone: the commit-pinned URL (a retargeted branch
+or re-uploaded file cannot swap bytes), the download-time streaming
+digest gate in `ModelFileInstaller` (fail closed, mid-stream size
+abort; interrupted transfers keep a resumable partial, completed-but-
+wrong bytes delete it), and a load-time re-hash in
+`WhisperModelProvider` that quarantines a mismatch before the native
+parser ever sees the file.
+
+Naming: `CactusSTTMode` and `CactusModelPathProvider` keep their
+upstream names. The enum's entry names are persisted inside the
+serialized config on every existing install (a rename is a data
+migration), and both types are referenced across upstream-owned files
+where a rename would cost churn in every future merge. Migration of
+existing installs rides the incompatible-model sweep in
+`CommonAppDelegate`: previous-engine model directories are deleted, the
+user's local mode is stashed, and `SttModelUpdatePrompt` restores it
+once a catalog model is downloaded.
+
 ## Branding assets
 
 applicationId is `com.anopticlabs.gravel`; the Kotlin `namespace` and

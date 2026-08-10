@@ -22,31 +22,6 @@ and the watch's own bootloader validation with recovery fallback
 backstops a bad install. This entry leaves the file when a single-slot
 watch runs the end-to-end pass.
 
-## Pre-pinning STT/LM model installs are grandfathered without retroactive verification
-
-**Status: accepted until the first model pin bump.**
-
-On-device model archives are now verified before install (immutable-commit
-download URLs, SHA-256 and exact-size gates, bounded staged extraction),
-but that verification is prospective only. Installs made before the
-pinning scheme wrote the release tag (`v2.0.1`) as their
-`.cactus_version` marker after an unverified download from a mutable tag,
-so the marker proves nothing about the installed bytes. `CactusModelPins`
-grandfathers that legacy marker while a model's current pin still names
-the very archive the tag shipped, which means an install that was already
-tampered with under the old scheme (the retargeted-tag or
-compromised-org threats the old entry here described) keeps feeding its
-weights to the native parser until the first real pin bump forces a
-verified reinstall. Retroactive verification is not feasible cheaply:
-only the archive digest is pinned and nothing per-file survives
-extraction, so re-verifying would force every existing user through a
-full re-download (383 MB for STT) after first downgrading them to
-remote-only STT via the incompatible-model sweep, a user-hostile trade
-against a purely historical exposure window. The grandfather clause and
-its frozen anchor digests live in `CactusModelPins.kt`; the first pin
-bump ends the exception automatically, and this entry leaves the file
-with it.
-
 ## Classic PebbleKit broadcasts cannot be restricted to authorized callers
 
 **Status: accepted, no fix available on Android.**
@@ -208,42 +183,28 @@ rules that would keep insecure WebSocket covered deterministically. This
 entry leaves the file if that ships, or if the ecosystem's http-only
 apps age out.
 
-## The bundled speech stack blocks F-Droid inclusion
+## Prebuilt Haversine satellite libraries remain an F-Droid blocker
 
-**Status: open; which way to resolve it is not yet decided.**
+**Status: open; the speech stack no longer blocks inclusion.**
 
-The fork targets inclusion in F-Droid's main repository. The de-Google
-work itself passes F-Droid's checks: the fdroidserver scanner flags real
-Google dependency coordinates and class paths, not mere names like the
-`firebase-stubs` module, and the built release APK carries no Firebase,
-GMS, or tracker classes. What fails is the on-device speech stack, which
-is prebuilt binary code that F-Droid's scanner rejects and its inclusion
-policy disallows (dependencies must be free software, built from source
-or served from trusted repositories):
+The fork targets inclusion in F-Droid's main repository. The on-device
+speech stack, formerly the main blocker, is now free software built from
+source: the whisper.cpp engine is an MIT-licensed git submodule compiled
+by the NDK during the build, and the model weights (MIT, the whisper.cpp
+author's own conversions of OpenAI's release) are integrity-pinned
+runtime downloads, never checked in. Runtime model downloads from
+Hugging Face are expected to draw the NonFreeNet anti-feature flag,
+which documents but does not block inclusion.
 
-- `cactus-native/src/main/jniLibs/arm64-v8a/libcactus_engine.so`, the
-  dictation engine, is a 57.7 MB prebuilt native library checked into git
-  with no source or license in the tree, and it ships in the APK. The
-  missing license is a problem beyond F-Droid: the app links it while
-  shipping under GPLv3. (Upstream moved the file, bit-identical, from
-  `cactus/src/androidMain/jniLibs/` into the `:cactus-native` module; the
-  module's CMake build only compiles a small CPU-capability shim,
-  `cactus_cpu.c`, so the engine itself is still sourceless.)
-- `models/needle-pebble-ft-cq4.zip` (13.7 MB) is bundled into APK assets
-  via a symlink, and the main STT weights (383 MB) are downloaded at
-  runtime from Hugging Face; neither carries a license statement in the
-  tree, and both would draw non-free-assets objections.
-- The `io.github.coredevices.haversine` AAR ships prebuilt satellite
-  `.so` libraries into the APK, even though the Ring runtime they serve
-  is disabled at the DI seam in this fork.
-
-Resolving this means building the engine from source (upstream has not
-published it), dropping the speech stack from an F-Droid build, or
-replacing it with a free engine; each option costs something real, so
-the choice is recorded here rather than made silently. Routine
-submission work (build recipe, signing, versioning) is not tracked
-here. This entry leaves the file when an F-Droid submission is accepted
-or the target is dropped.
+What still fails policy is the `io.github.coredevices.haversine` AAR,
+which ships prebuilt satellite `.so` libraries into the APK even though
+the Ring runtime they serve is disabled at the DI seam; the satellite C
+sources and their licensing are unconfirmed. Resolving it means removing
+Haversine from the classpath (it remains only as a compile-time
+dependency of the deliberately retained `:libindex`) or upstream
+publishing source and license for it. Routine submission work (build
+recipe, signing, versioning) is not tracked here. This entry leaves the
+file when an F-Droid submission is accepted or the target is dropped.
 
 ## Sleep blob mixes epoch timestamps with seconds-of-day typicals
 

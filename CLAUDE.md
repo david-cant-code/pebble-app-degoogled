@@ -22,6 +22,15 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   Google or does not exist, so `PushMessaging`, `PushService`, and their
   call sites were deleted outright rather than no-opped; do not read that
   deletion as precedent for other strips.
+- **The speech engine is whisper.cpp, built from source.** Upstream's
+  proprietary Cactus engine modules are replaced by the fork's
+  `:whisper`/`:whisper-native` pair; the engine is a pinned git submodule
+  at `whisper-native/src/main/cpp/whisper.cpp`, so clone with
+  `--recursive` (or run `git submodule update --init`) before building.
+  Model weights are integrity-pinned runtime downloads, never committed;
+  the re-pin procedure lives in `WhisperModelCatalog`. Upstream mentions
+  of `:cactus`/`:cactus-native` in the module list below predate the
+  swap.
 - **No `google-services.json`.** The google-services plugin and the Firebase
   SDKs are gone, so no config file (dummy or real) is needed or consumed;
   this supersedes the upstream build instruction below that still asks for
