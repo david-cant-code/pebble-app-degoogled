@@ -325,3 +325,24 @@ would diverge a binary file from upstream for zero functional gain, so
 this waits for upstream's next wrapper update (or any local wrapper task
 run that lands with other build changes). This entry leaves the file when
 the committed jar matches the declared distribution.
+
+## Large whisper models are absent from the catalog
+
+**Status: accepted; blocked on the pinned upstream engine revision.**
+
+The catalog originally carried ggml-large-v3-turbo-q5_0. Two findings
+removed it. First, transcribing with it on the test platform (a Pixel
+running GrapheneOS) crashed the app with a native out-of-bounds read
+inside ggml's quantized matrix-multiply path at the pinned whisper.cpp
+revision; the hardened system allocator surfaces the stray read as a
+fault, and a model whose inference can fault the process cannot ship
+for any consumer. Second, whisper.cpp applies the audio-context trim
+only to the main transcription pass, while language auto-detection
+(reached whenever a multilingual model runs with no spoken language
+pinned) encodes at the full 1500-frame context; for a 32-encoder-layer
+model on phone-class CPUs that single pass alone exceeds the watch
+dictation window, so the model could never serve dictation even without
+the crash. Both point at the engine revision rather than the catalog
+design. This entry leaves the file when a large tier is reinstated
+after an upstream fix or a re-pin that passes the same on-device checks
+the smaller models passed.

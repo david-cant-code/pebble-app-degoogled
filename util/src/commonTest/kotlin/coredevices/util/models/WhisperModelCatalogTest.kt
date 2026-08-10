@@ -19,8 +19,6 @@ class WhisperModelCatalogTest {
         // restated verbatim so any drift in the table is a loud failure
         // naming this test, which points back at that procedure.
         val vetted = mapOf(
-            "whisper-large-v3-turbo-q5_0" to
-                ("394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2" to 574_041_195L),
             "whisper-small" to
                 ("1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b" to 487_601_967L),
             "whisper-small-en" to
@@ -91,19 +89,6 @@ class WhisperModelCatalogTest {
         assertEquals("whisper-small", WhisperModelCatalog.recommended(8 * gib, preferEnglishOnly = false).id)
         assertEquals("whisper-base-en", WhisperModelCatalog.recommended(3 * gib, preferEnglishOnly = true).id)
         assertEquals("whisper-base", WhisperModelCatalog.recommended(3 * gib, preferEnglishOnly = false).id)
-    }
-
-    @Test
-    fun theLargeModelIsNeverTheAutomaticPick() {
-        val gib = 1024L * 1024 * 1024
-        for (ram in listOf(1 * gib, 4 * gib, 16 * gib)) {
-            for (english in listOf(true, false)) {
-                assertNotEquals(
-                    "whisper-large-v3-turbo-q5_0",
-                    WhisperModelCatalog.recommended(ram, english).id,
-                )
-            }
-        }
     }
 
     @Test

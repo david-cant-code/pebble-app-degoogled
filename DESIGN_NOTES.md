@@ -200,7 +200,7 @@ The replacement is whisper.cpp (MIT), compiled from source:
   seam.
 
 Model weights are never checked in. `WhisperModelCatalog` (util) pins
-five models (large-v3-turbo q5_0, small, small.en, base, base.en) from
+four models (small, small.en, base, base.en) from
 the whisper.cpp author's Hugging Face conversions, each with an
 immutable-commit URL, exact byte size, and SHA-256; the catalog KDoc
 records the three-source re-pin procedure. Verification is layered,

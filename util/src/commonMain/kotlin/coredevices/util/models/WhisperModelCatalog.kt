@@ -79,16 +79,11 @@ object WhisperModelCatalog {
     const val STANDARD_TIER_MIN_TOTAL_RAM: Long = 4 * GIB
 
     // Values derived 2026-08-09 via the three-source procedure above.
+    // No large tier: at the pinned engine revision the large-v3-turbo
+    // q5_0 quant faulted in native inference on the test device, and its
+    // encoder cost cannot meet the watch dictation window on phone-class
+    // CPUs (details in KNOWN_ISSUES); revisit at the next engine re-pin.
     val MODELS: List<WhisperModel> = listOf(
-        WhisperModel(
-            id = "whisper-large-v3-turbo-q5_0",
-            displayName = "Whisper Large v3 Turbo",
-            fileName = "ggml-large-v3-turbo-q5_0.bin",
-            sha256 = "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
-            sizeBytes = 574_041_195,
-            minRamBytes = 3 * GIB,
-            multilingual = true,
-        ),
         WhisperModel(
             id = "whisper-small",
             displayName = "Whisper Small (multilingual)",
@@ -138,9 +133,7 @@ object WhisperModelCatalog {
      * The default pick for a device: base tier under
      * [STANDARD_TIER_MIN_TOTAL_RAM] of total RAM, small tier above it, and
      * the English-only variant when the device language is English (the
-     * .en models are more accurate for English at the same size). The
-     * large model is never recommended automatically: at 574 MB and the
-     * heaviest inference cost it is a deliberate user choice.
+     * .en models are more accurate for English at the same size).
      */
     fun recommended(totalRamBytes: Long, preferEnglishOnly: Boolean): WhisperModel {
         val standardTier = totalRamBytes >= STANDARD_TIER_MIN_TOTAL_RAM
