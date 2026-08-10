@@ -15,7 +15,7 @@ import coredevices.util.R
 
 /**
  * Fork-owned shortService foreground service that holds process priority
- * during local Cactus transcription. Upstream's equivalent
+ * during local speech transcription. Upstream's equivalent
  * (InferenceForegroundService) lives in the unplugged :experimental
  * module, so without this the app transcribes at background priority
  * whenever the watch-connection foreground service is toggled off, and

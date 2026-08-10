@@ -34,12 +34,9 @@ include(":util")
 include(":mcp")
 include(":index-ai")
 include(":resampler")
-include(":cactus")
-include(":cactus-native")
 // Fork modules: the whisper.cpp speech engine, built from source (KMP
 // bindings plus the plain Android library that owns the NDK/CMake build
-// and the pinned engine submodule). Replaces the proprietary Cactus
-// engine pair above.
+// and the pinned engine submodule).
 include(":whisper")
 include(":whisper-native")
 include(":libindex")

@@ -37,7 +37,7 @@ object NativeSpeechAnalyzerBridge {
 
 /** Apple SpeechAnalyzer/SpeechTranscriber (iOS 26+) via the Swift bridge. */
 actual class PlatformSpeechRecognizer {
-    // The system caps concurrent SpeechAnalyzer sessions; serialize like Cactus does.
+    // The system caps concurrent SpeechAnalyzer sessions; serialize like the local whisper service does.
     private val mutex = Mutex()
 
     actual suspend fun isAvailable(): Boolean =

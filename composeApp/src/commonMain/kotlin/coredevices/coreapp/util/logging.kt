@@ -33,11 +33,6 @@ import org.koin.mp.KoinPlatform
 
 fun initLogging() {
     Logger.addLogWriter(KoinPlatform.getKoin().get<FileLogWriter>())
-    try {
-        // Cactus logging is handled natively in the vendored SDK
-    } catch (e: Exception) {
-        Logger.e(e) { "Failed to initialize Cactus logging" }
-    }
 }
 
 expect fun generateDeviceSummaryPlatformDetails(): String

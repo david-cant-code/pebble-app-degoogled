@@ -1,5 +1,0 @@
-package = cactus
-headers = cactus_engine.h
-headerFilter = cactus_engine.h
-staticLibraries = libcactus_engine.a libcurl.a
-linkerOpts = -framework Foundation -framework Accelerate -framework Metal -framework MetalPerformanceShaders -framework Security -framework SystemConfiguration -framework CFNetwork
