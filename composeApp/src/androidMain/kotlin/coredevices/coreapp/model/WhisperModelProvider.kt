@@ -98,7 +98,7 @@ class WhisperModelProvider(
      * the catalog, since there is no pin to verify such a download
      * against.
      */
-    suspend fun getModelPath(modelId: String): String = withContext(Dispatchers.IO) {
+    override suspend fun getModelPath(modelId: String): String = withContext(Dispatchers.IO) {
         val model = WhisperModelCatalog.byId(modelId)
             ?: throw IllegalStateException("No catalog entry for model '$modelId'; refusing to download")
         mutexFor(model.id).withLock {

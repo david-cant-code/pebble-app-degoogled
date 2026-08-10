@@ -63,4 +63,19 @@ class Pcm16ToFloatsTest {
             pcm16ToFloats(ByteArray(3))
         }
     }
+
+    @Test
+    fun shortDecodeAndFloatScaleComposeToTheSameResult() {
+        // The split exists so a resampler can sit between the two steps;
+        // composed with no resampler they must equal the one-shot path.
+        val bytes = byteArrayOf(0x01, 0x00, 0x00, 0x80.toByte(), 0xFF.toByte(), 0x7F)
+        assertContentEquals(pcm16ToFloats(bytes), shortsToFloats(pcm16ToShorts(bytes)))
+    }
+
+    @Test
+    fun shortDecodeIsLittleEndianSigned() {
+        val shorts = pcm16ToShorts(byteArrayOf(0xFE.toByte(), 0xFF.toByte(), 0x01, 0x00))
+        assertEquals(-2, shorts[0].toInt())
+        assertEquals(1, shorts[1].toInt())
+    }
 }

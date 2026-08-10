@@ -115,7 +115,7 @@ kotlin {
                 // real gitlive firebase-auth/firebase-firestore artifacts.
                 implementation(project(":firebase-stubs"))
                 implementation(libs.coredevices.speex)
-                api(project(":cactus"))
+                api(project(":whisper"))
                 api(libs.algolia)
                 implementation(libs.reorderable)
                 implementation(libs.compass.geocoder)

@@ -21,3 +21,21 @@ actual fun Platform.supportsHeavyCPU(): Boolean {
     val soc = Build.SOC_MODEL
     return HEAVY_MODELS.any { soc.contains(it, ignoreCase = true) }
 }
+// Total physical RAM without needing a Context: MemTotal from
+// /proc/meminfo, which Android keeps readable by apps. Failure degrades to
+// 0, which the recommendation treats as the low tier, the safe direction.
+actual fun Platform.totalRamBytes(): Long = try {
+    java.io.File("/proc/meminfo").useLines { lines ->
+        lines.firstOrNull { it.startsWith("MemTotal:") }
+            ?.split(Regex("\\s+"))
+            ?.getOrNull(1)
+            ?.toLongOrNull()
+            ?.times(1024L)
+            ?: 0L
+    }
+} catch (e: Exception) {
+    0L
+}
+
+actual fun Platform.prefersEnglishModels(): Boolean =
+    java.util.Locale.getDefault().language == "en"

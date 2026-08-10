@@ -111,9 +111,6 @@ class ModelManagementScreenViewModel(
     private val _availableSTTModels =
         MutableStateFlow<AvailableModelsState>(AvailableModelsState.Loading)
     val availableSTTModels = _availableSTTModels.asStateFlow()
-    private val _availableLanguageModels =
-        MutableStateFlow<AvailableModelsState>(AvailableModelsState.Loading)
-    val availableLanguageModels = _availableLanguageModels.asStateFlow()
 
     init {
         refreshAvailableModels()
@@ -160,13 +157,6 @@ class ModelManagementScreenViewModel(
         modelManager.cancelDownload()
     }
 
-    fun downloadLanguageModel(info: ModelInfo) {
-        viewModelScope.launch {
-            modelManager.downloadLanguageModel(info, allowMetered = true)
-            refreshDownloadedModels()
-        }
-    }
-
     fun setCurrentSTTModel(slug: String) {
         val newConfig = coreConfigHolder.config.value.copy(
             sttConfig = coreConfigHolder.config.value.sttConfig.copy(
@@ -179,24 +169,11 @@ class ModelManagementScreenViewModel(
     fun refreshAvailableModels() {
         viewModelScope.launch {
             _availableSTTModels.value = try {
-                val models = modelManager.getAvailableSTTModels()
-                val recommendedSTTModelSlug = modelManager.getRecommendedSTTModel()
-                AvailableModelsState.Success(
-                    if (!settings.showDebugOptions()) {
-                        models.filter {
-                            it.slug == recommendedSTTModelSlug.modelSlug || it.slug in downloadedModels.value
-                        }
-                    } else {
-                        models
-                    }
-                )
-            } catch (e: Exception) {
-                AvailableModelsState.Error(e.message ?: "Unknown error")
-            }
-        }
-        viewModelScope.launch {
-            _availableLanguageModels.value = try {
-                AvailableModelsState.Success(modelManager.getAvailableLanguageModels())
+                // The whole catalog is user-facing choice by design; the
+                // Cactus-era recommended-or-downloaded filter would hide
+                // the size/accuracy tiers the multi-model catalog exists
+                // to offer.
+                AvailableModelsState.Success(modelManager.getAvailableSTTModels())
             } catch (e: Exception) {
                 AvailableModelsState.Error(e.message ?: "Unknown error")
             }
@@ -205,10 +182,6 @@ class ModelManagementScreenViewModel(
 
     fun getRecommendedSTTModel(): RecommendedModel {
         return modelManager.getRecommendedSTTModel()
-    }
-
-    fun getRecommendedLanguageModel(): String {
-        return modelManager.getRecommendedLanguageModel()
     }
 }
 

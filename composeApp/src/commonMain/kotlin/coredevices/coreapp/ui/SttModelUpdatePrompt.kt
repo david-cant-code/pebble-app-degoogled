@@ -26,18 +26,25 @@ import coredevices.coreapp.STT_MODE_BEFORE_UPDATE_KEY
 import coredevices.coreapp.STT_UPDATE_NOTIFICATION_ID
 import coredevices.coreapp.util.cancelNotifyLocal
 import coredevices.ui.M3Dialog
-import coredevices.util.CommonBuildKonfig
 import coredevices.util.CoreConfigHolder
 import coredevices.util.models.CactusSTTMode
 import coredevices.util.models.ModelDownloadStatus
 import coredevices.util.models.ModelManager
 import coredevices.util.transcription.CactusModelPathProvider
+import coredevices.whisper.isWhisperSupported
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 
+/**
+ * One-time engine-migration dialog. Shows when the startup sweep has
+ * stashed a local STT mode (the previous engine's model was removed) and
+ * no catalog model is installed yet; downloads the recommended model and
+ * restores the stashed mode on success. Unsupported CPUs never see it:
+ * a download the engine cannot use would be 150+ MB of pure waste.
+ */
 @Composable
 fun SttModelUpdatePrompt() {
     val modelProvider: CactusModelPathProvider = koinInject()
@@ -46,23 +53,30 @@ fun SttModelUpdatePrompt() {
     val settings: Settings = koinInject()
     val platformContext: PlatformContext = koinInject()
     val scope = rememberCoroutineScope()
-    val sttModel = CommonBuildKonfig.CACTUS_STT_MODEL
+    val targetModel = remember { modelManager.getRecommendedSTTModel().modelSlug }
 
     var needsUpdate by remember { mutableStateOf(false) }
     var downloading by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
     val downloadStatus by modelManager.modelDownloadStatus.collectAsState()
 
+    fun anyModelInstalled(): Boolean =
+        modelProvider.getDownloadedModels().any { modelProvider.isModelDownloaded(it) }
+
     LaunchedEffect(Unit) {
-        needsUpdate = withContext(Dispatchers.IO) { sttModel in modelProvider.getIncompatibleModels() }
+        needsUpdate = isWhisperSupported() &&
+            settings.hasKey(STT_MODE_BEFORE_UPDATE_KEY) &&
+            withContext(Dispatchers.IO) { !anyModelInstalled() }
     }
 
     LaunchedEffect(downloadStatus) {
         if (!downloading) return@LaunchedEffect
         when (downloadStatus) {
             is ModelDownloadStatus.Idle -> {
-                val stillStale = withContext(Dispatchers.IO) { sttModel in modelProvider.getIncompatibleModels() }
-                if (stillStale) {
+                val installed = withContext(Dispatchers.IO) {
+                    modelProvider.isModelDownloaded(targetModel)
+                }
+                if (!installed) {
                     failed = true
                 } else {
                     val restored = CactusSTTMode.fromId(
@@ -72,7 +86,7 @@ fun SttModelUpdatePrompt() {
                         configHolder.config.value.copy(
                             sttConfig = configHolder.config.value.sttConfig.copy(
                                 mode = restored,
-                                modelName = sttModel,
+                                modelName = targetModel,
                             )
                         )
                     )
@@ -97,7 +111,7 @@ fun SttModelUpdatePrompt() {
         // starts the download; same behavior via the fork's notification seam.
         cancelNotifyLocal(platformContext, STT_UPDATE_NOTIFICATION_ID)
         scope.launch {
-            val info = modelManager.getAvailableSTTModels().firstOrNull { it.slug == sttModel }
+            val info = modelManager.getAvailableSTTModels().firstOrNull { it.slug == targetModel }
             if (info != null && modelManager.downloadSTTModel(info, allowMetered = true)) {
                 downloading = true
             } else {
@@ -116,9 +130,9 @@ fun SttModelUpdatePrompt() {
         title = {
             Text(
                 when {
-                    downloading -> "Updating voice model"
-                    failed -> "Update failed"
-                    else -> "Voice model update"
+                    downloading -> "Downloading voice model"
+                    failed -> "Download failed"
+                    else -> "Voice recognition upgraded"
                 }
             )
         },
@@ -130,18 +144,20 @@ fun SttModelUpdatePrompt() {
                 }) { Text("Cancel") }
             } else {
                 TextButton(onClick = { needsUpdate = false }) { Text("Later") }
-                TextButton(onClick = { startDownload() }) { Text(if (failed) "Retry" else "Update") }
+                TextButton(onClick = { startDownload() }) { Text(if (failed) "Retry" else "Download") }
             }
         },
     ) {
         when {
             downloading -> {
-                Text("Downloading the updated model. This may take a few minutes.")
+                Text("Downloading the new voice model. This may take a few minutes.")
                 Spacer(Modifier.height(24.dp))
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
             failed -> Text("The download didn't finish. Check your connection and try again.")
-            else -> Text("We've improved on-device voice recognition. Update the model to keep transcribing offline.")
+            else -> Text(
+                "Offline voice recognition now uses a new engine and needs a fresh model download to keep transcribing offline."
+            )
         }
     }
 }

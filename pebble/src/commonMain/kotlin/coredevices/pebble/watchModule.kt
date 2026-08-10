@@ -284,9 +284,9 @@ val watchModule = module {
     singleOf(::RebbleAsrTranscription)
     single {
         STTRouter(
-            cactus = get(),
+            hybrid = get(),
             rebble = get(),
-            cactusService = get(),
+            whisperService = get(),
             coreConfigFlow = get(),
         )
     } bind TranscriptionProvider::class

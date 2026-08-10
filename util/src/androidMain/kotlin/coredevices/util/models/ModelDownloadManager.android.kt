@@ -118,12 +118,11 @@ actual class ModelDownloadManager(
     }
 
     @RequiresPermission(Manifest.permission.RUN_USER_INITIATED_JOBS)
-    private fun buildJobInfo(modelSlug: String, modelSizeMb: Int, stt: Boolean, networkRequest: NetworkRequest, allowMetered: Boolean): JobInfo {
+    private fun buildJobInfo(modelSlug: String, modelSizeMb: Int, networkRequest: NetworkRequest, allowMetered: Boolean): JobInfo {
         val builder = JobInfo.Builder(slugToJobId(modelSlug), serviceComponentName)
             .setExtras(
                 android.os.PersistableBundle().apply {
                     putString(ModelDownloadService.KEY_MODEL_SLUG, modelSlug)
-                    putBoolean(ModelDownloadService.KEY_IS_STT, stt)
                 }
             )
 
@@ -152,7 +151,7 @@ actual class ModelDownloadManager(
      * jobs for other models are cancelled first so a hung job can never
      * permanently block a new download.
      */
-    private fun scheduleDownload(modelInfo: ModelInfo, stt: Boolean, allowMetered: Boolean): Boolean {
+    private fun scheduleDownload(modelInfo: ModelInfo, allowMetered: Boolean): Boolean {
         val existingJobs = pendingServiceJobs()
         val aliveSameModelJob = existingJobs.firstOrNull {
             it.extras.getString(ModelDownloadService.KEY_MODEL_SLUG) == modelInfo.slug &&
@@ -176,7 +175,6 @@ actual class ModelDownloadManager(
         val info = buildJobInfo(
             modelSlug = modelInfo.slug,
             modelSizeMb = modelInfo.sizeInMB,
-            stt = stt,
             networkRequest = buildNetworkRequest(allowMetered),
             allowMetered = allowMetered
         )
@@ -184,10 +182,7 @@ actual class ModelDownloadManager(
     }
 
     actual fun downloadSTTModel(modelInfo: ModelInfo, allowMetered: Boolean): Boolean =
-        scheduleDownload(modelInfo, stt = true, allowMetered = allowMetered)
-
-    actual fun downloadLanguageModel(modelInfo: ModelInfo, allowMetered: Boolean): Boolean =
-        scheduleDownload(modelInfo, stt = false, allowMetered = allowMetered)
+        scheduleDownload(modelInfo, allowMetered = allowMetered)
 
     actual fun cancelDownload() {
         pendingServiceJobs().forEach { job ->
@@ -208,7 +203,6 @@ class ModelDownloadService : JobService(), KoinComponent {
 
     companion object {
         const val KEY_MODEL_SLUG = "model_slug"
-        const val KEY_IS_STT = "is_stt"
         private const val CHANNEL_ID = "model_download_channel"
         // Generous upper bound so a wedged download can't run forever.
         private const val DOWNLOAD_TIMEOUT_MILLIS = 45L * 60L * 1000L
@@ -223,11 +217,9 @@ class ModelDownloadService : JobService(), KoinComponent {
     override fun onStartJob(params: JobParameters?): Boolean {
         val modelSlug = params?.extras?.getString(KEY_MODEL_SLUG) ?: return false
         this.modelSlug = modelSlug
-        if (!params.extras.containsKey(KEY_IS_STT)) return false
-        val isStt = params.extras.getBoolean(KEY_IS_STT)
         stoppedBySystem.set(false)
 
-        logger.i { "Starting download job for model: $modelSlug, stt = $isStt" }
+        logger.i { "Starting download job for model: $modelSlug" }
         createChannel()
         val notification = notifBuilder()
             .setContentTitle("Downloading Model")
@@ -253,7 +245,7 @@ class ModelDownloadService : JobService(), KoinComponent {
                 heartbeatStore.record(modelSlug)
                 modelDownloadManager.updateDownloadStatus(ModelDownloadStatus.Downloading(modelSlug))
                 withTimeout(DOWNLOAD_TIMEOUT_MILLIS) {
-                    downloadModel(modelSlug, isStt)
+                    downloadModel(modelSlug)
                 }
                 logger.i { "Completed download job for model: $modelSlug" }
                 notificationManager.notify(
@@ -310,13 +302,11 @@ class ModelDownloadService : JobService(), KoinComponent {
         return true
     }
 
-    private suspend fun downloadModel(modelSlug: String, stt: Boolean) {
+    // The slug names the catalog entry to install; the provider verifies the
+    // download against its pin before anything becomes loadable.
+    private suspend fun downloadModel(modelSlug: String) {
         val modelProvider: CactusModelPathProvider by inject()
-        if (stt) {
-            modelProvider.getSTTModelPath()
-        } else {
-            modelProvider.getLMModelPath()
-        }
+        modelProvider.getModelPath(modelSlug)
     }
 
     override fun onStopJob(params: JobParameters?): Boolean {

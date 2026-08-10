@@ -86,13 +86,6 @@ actual class ModelDownloadManager {
         return download(modelInfo, isStt = true, allowMetered)
     }
 
-    actual fun downloadLanguageModel(
-        modelInfo: ModelInfo,
-        allowMetered: Boolean
-    ): Boolean {
-        return download(modelInfo, isStt = false, allowMetered)
-    }
-
     actual fun cancelDownload() {
         session.getTasksWithCompletionHandler { _, _, downloadTasks ->
             downloadTasks?.forEach { task ->

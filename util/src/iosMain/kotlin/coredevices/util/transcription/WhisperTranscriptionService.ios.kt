@@ -39,3 +39,6 @@ actual suspend fun getFreeMemoryMB(): Long = memScoped {
 
 // iOS is good at the model memory pressure / uses GPU so we can have minimum low
 actual val PLATFORM_MIN_TRANSCRIPTION_MEMORY_MB: Long = 1
+
+// Unreachable in practice: the iOS whisper actuals are unsupported stubs.
+actual fun transcriptionThreadCount(): Int = 4

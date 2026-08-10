@@ -111,6 +111,13 @@ class CactusModelProvider(
         return@withContext resolveModelPath(CommonBuildKonfig.CACTUS_LM_MODEL_NAME)
     }
 
+    // Interface addition for the whisper catalog; this legacy provider is
+    // unbound and pending removal, so it just funnels into its own pinned
+    // resolve (which fails closed for names outside its pin table).
+    override suspend fun getModelPath(modelId: String): String = withContext(Dispatchers.IO) {
+        return@withContext resolveModelPath(modelId)
+    }
+
     override fun isModelDownloaded(modelName: String): Boolean {
         val modelDir = modelsDir.resolve(modelName)
         return modelDir.exists() && modelDir.resolve(ModelZipInstaller.CONFIG_FILE).exists()

@@ -25,13 +25,13 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 /**
- * Mode-aware [TranscriptionService] that routes between the local Cactus model
- * ([CactusTranscriptionService]) and the remote backends (WisprFlow with Kirinki as backup),
+ * Mode-aware [TranscriptionService] that routes between the local whisper model
+ * ([WhisperTranscriptionService]) and the remote backends (WisprFlow with Kirinki as backup),
  * and owns the fallback behaviour for the [CactusSTTMode] options.
  */
 class HybridTranscriptionService(
     private val coreConfigFlow: CoreConfigFlow,
-    private val cactus: CactusTranscriptionService,
+    private val whisper: WhisperTranscriptionService,
     private val wisprFlow: WisprFlowRESTTranscriptionService,
     private val kirinki: KirinkiTranscriptionService,
     private val analytics: CoreAnalytics,
@@ -57,23 +57,23 @@ class HybridTranscriptionService(
     val configuredModel get() = sttConfig.modelName
     val configuredLanguage get() = sttConfig.spokenLanguage
     val lastSuccessfulMode get() = _lastSuccessfulMode
-    val lastModelUsed get() = _lastModelUsed ?: cactus.lastModelUsed
-    val isModelReady get() = cactus.isModelReady
+    val lastModelUsed get() = _lastModelUsed ?: whisper.lastModelUsed
+    val isModelReady get() = whisper.isModelReady
 
-    override val onInitialized: Channel<Boolean> get() = cactus.onInitialized
+    override val onInitialized: Channel<Boolean> get() = whisper.onInitialized
 
     override fun earlyInit() {
         if (sttConfig.mode.usesLocalCactus()) {
-            cactus.earlyInit()
+            whisper.earlyInit()
         }
     }
 
     override suspend fun isAvailable(): Boolean {
         return when (configuredMode) {
             CactusSTTMode.RemoteOnly -> wisprFlow.isAvailable() || kirinki.isAvailable()
-            CactusSTTMode.LocalOnly -> cactus.isLocalAvailable()
+            CactusSTTMode.LocalOnly -> whisper.isLocalAvailable()
             CactusSTTMode.RemoteFirst, CactusSTTMode.LocalFirst ->
-                wisprFlow.isAvailable() || kirinki.isAvailable() || cactus.isModelReady
+                wisprFlow.isAvailable() || kirinki.isAvailable() || whisper.isModelReady
             CactusSTTMode.PlatformOnly ->
                 (platform.isAvailable() && platform.isAuthorized()) ||
                     wisprFlow.isAvailable() || kirinki.isAvailable()
@@ -128,7 +128,7 @@ class HybridTranscriptionService(
         val canUseKirinki = !willFallbackLocal && kirinki.isAvailable()
 
         val skipWispr = lastErrorMutex.withLock {
-            // Don't skip wispr if local fallback, because cactus might still be running, we can't trust its cancellation right now due to bug
+            // Don't skip wispr if local fallback, because the local engine might still be running, we can't trust its cancellation right now due to bug
             ((Clock.System.now() - lastWisprError) < wisprSkipInterval && canUseKirinki) && !willFallbackLocal
         }
         if (skipWispr) {
@@ -201,7 +201,7 @@ class HybridTranscriptionService(
                 RoutedResult(result.text, sttMode, result.modelUsed)
             }
             CactusSTTMode.LocalOnly -> {
-                val text = cactus.transcribeLocal(audio, sampleRate)
+                val text = whisper.transcribeLocal(audio, sampleRate)
                 RoutedResult(text, sttMode, configuredModel)
             }
             CactusSTTMode.PlatformOnly -> {
@@ -253,19 +253,19 @@ class HybridTranscriptionService(
                     RoutedResult(result.text, sttMode, result.modelUsed)
                 } catch (e: TimeoutCancellationException) {
                     logger.w(e) { "Remote transcription timeout, falling back to local: ${e.message}" }
-                    val text = cactus.transcribeLocal(audio, sampleRate)
+                    val text = whisper.transcribeLocal(audio, sampleRate)
                     RoutedResult(text, CactusSTTMode.LocalOnly, configuredModel)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     logger.w(e) { "Remote transcription failed, falling back to local: ${e.message}" }
-                    val text = cactus.transcribeLocal(audio, sampleRate)
+                    val text = whisper.transcribeLocal(audio, sampleRate)
                     RoutedResult(text, CactusSTTMode.LocalOnly, configuredModel)
                 }
             }
             CactusSTTMode.LocalFirst -> {
                 try {
-                    val text = cactus.transcribeLocal(audio, sampleRate, timeout = 8.seconds)
+                    val text = whisper.transcribeLocal(audio, sampleRate, timeout = 8.seconds)
                     // Treat an empty/no-speech local result as a failure so we fall back to
                     // remote, as remote is more accurate.
                     validateContainsSpeech(text, configuredModel)

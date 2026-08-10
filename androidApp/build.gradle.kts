@@ -155,7 +155,7 @@ dependencies {
     // (watchModule seam checks, Cactus STT lifecycle), and project deps of
     // :composeApp are not on the androidTest compile classpath transitively.
     androidTestImplementation(project(":pebble"))
-    androidTestImplementation(project(":cactus"))
+    androidTestImplementation(project(":whisper"))
     androidTestImplementation(project(":libpebble3"))
     androidTestImplementation(libs.serialization)
     // Same artifact and version the app already ships via libpebble3; test-scope only,

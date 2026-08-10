@@ -47,23 +47,33 @@ expect fun whisperFree(handle: Long)
 expect fun whisperGetLastError(): String
 
 /**
- * Converts little-endian signed 16-bit PCM (the watch pipeline's wire
- * format) to the [-1, 1) float samples the engine consumes. Lives in
- * commonMain as plain Kotlin so the conversion is host-testable without
+ * Decodes little-endian signed 16-bit PCM (the watch pipeline's wire
+ * format) into samples. Split from [shortsToFloats] so a resampler can
+ * operate on the integer samples between the two steps; both live in
+ * commonMain as plain Kotlin so the conversions are host-testable without
  * any native library.
  */
-fun pcm16ToFloats(bytes: ByteArray): FloatArray {
+fun pcm16ToShorts(bytes: ByteArray): ShortArray {
     require(bytes.size % 2 == 0) {
         "PCM16 input must be an even number of bytes, got ${bytes.size}"
     }
-    val out = FloatArray(bytes.size / 2)
+    val out = ShortArray(bytes.size / 2)
     for (i in out.indices) {
         val lo = bytes[2 * i].toInt() and 0xFF
         val hi = bytes[2 * i + 1].toInt() and 0xFF
-        // Reassemble the sample then reinterpret the low 16 bits as
-        // signed; 32768 is the divisor (not 32767) so -32768 maps exactly
-        // to -1.0 and no sample can exceed the unit range.
-        out[i] = ((hi shl 8) or lo).toShort() / 32768f
+        // Reassemble the sample then reinterpret the low 16 bits as signed.
+        out[i] = ((hi shl 8) or lo).toShort()
     }
     return out
 }
+
+/**
+ * Integer samples to the [-1, 1) floats the engine consumes. 32768 is the
+ * divisor (not 32767) so -32768 maps exactly to -1.0 and no sample can
+ * exceed the unit range.
+ */
+fun shortsToFloats(samples: ShortArray): FloatArray =
+    FloatArray(samples.size) { samples[it] / 32768f }
+
+/** [pcm16ToShorts] and [shortsToFloats] composed, for the no-resample path. */
+fun pcm16ToFloats(bytes: ByteArray): FloatArray = shortsToFloats(pcm16ToShorts(bytes))
