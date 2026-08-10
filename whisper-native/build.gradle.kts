@@ -1,0 +1,37 @@
+// The KMP Android library plugin has no NDK support, so the CMake build of
+// the whisper.cpp engine and its JNI shim live in this plain Android
+// library, consumed by :whisper (the same split :cactus-native used for the
+// engine this fork replaced). Unlike that predecessor there is no prebuilt
+// engine binary here: the engine is the git submodule at
+// src/main/cpp/whisper.cpp, pinned in the superproject index and compiled
+// from source by src/main/cpp/CMakeLists.txt.
+plugins {
+    alias(libs.plugins.android.library)
+}
+
+android {
+    namespace = "coredevices.whisper.nativelib"
+    compileSdk = libs.versions.android.compileSdk.get().toInt()
+
+    defaultConfig {
+        minSdk = libs.versions.android.minSdk.get().toInt()
+        ndk {
+            // arm64 only, matching the app's real device population and the
+            // armv8.2 feature floor the CMake build compiles against. The
+            // Kotlin side gates every engine touch on isWhisperSupported(),
+            // which reports false where these libraries are absent.
+            abiFilters += "arm64-v8a"
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}

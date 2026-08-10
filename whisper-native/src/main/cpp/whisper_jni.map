@@ -1,0 +1,13 @@
+/* Export only the JNI entry points. The engine is statically linked into
+ * the shim, and without this script its whisper/ggml symbols would be
+ * exported with default visibility, where any other library in the process
+ * could interpose them (or vice versa). Note the NDK links with
+ * --no-undefined-version, so only symbols these libraries actually define
+ * may be named here; a JNI_OnLoad would have to be added the day one
+ * exists. */
+{
+  global:
+    Java_*;
+  local:
+    *;
+};

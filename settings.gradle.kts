@@ -36,6 +36,12 @@ include(":index-ai")
 include(":resampler")
 include(":cactus")
 include(":cactus-native")
+// Fork modules: the whisper.cpp speech engine, built from source (KMP
+// bindings plus the plain Android library that owns the NDK/CMake build
+// and the pinned engine submodule). Replaces the proprietary Cactus
+// engine pair above.
+include(":whisper")
+include(":whisper-native")
 include(":libindex")
 // :experimental (the Ring/Index feature module) is unplugged from the fork's
 // build: it carries firebase-auth/firestore/storage, the googleServices
