@@ -90,9 +90,9 @@ internal fun whisperLanguageFor(modelMultilingual: Boolean?, spokenLanguage: Str
  * engine. A thread blocked inside a native call cannot observe coroutine
  * cancellation, so the waiter and the blocked thread must be different
  * threads: this waiter is the cancellable side, and on cancellation it arms
- * the engine's abort flag via [setCancel] (polled by the native inference
- * loop between steps), then holds the already-cancelled caller until the
- * worker has actually unwound. The hold preserves the one-native-call-at-a-
+ * the engine's abort flag via [setCancel] (checked by the engine between
+ * its encoder and decoder passes), then holds the already-cancelled caller
+ * until the worker has actually unwound. The hold preserves the one-native-call-at-a-
  * time invariant the caller's mutex provides: resuming while the engine is
  * still inside the context would let the next transcription run against it
  * concurrently. The hold is bounded by [unwindBound] so an engine that
@@ -164,11 +164,13 @@ class WhisperTranscriptionService(
 
         /**
          * How long a cancelled transcription may take to unwind out of the
-         * native call after the abort flag is armed. The engine polls the
-         * flag between inference steps (well under a second even for the
-         * large model), so this is pure margin: blowing it means the engine
-         * is wedged, and the native context gets abandoned rather than
-         * risking a concurrent next call against it.
+         * native call after the abort flag is armed. The engine checks the
+         * flag only between encoder and decoder passes, and one encoder
+         * pass is seconds-scale for the bigger catalog models on
+         * phone-class CPUs, so the bound must comfortably exceed a single
+         * pass. Blowing it means the engine is wedged, and the native
+         * context gets abandoned rather than risking a concurrent next
+         * call against it.
          */
         private val ENGINE_UNWIND_BOUND = 10.seconds
     }
@@ -366,6 +368,13 @@ class WhisperTranscriptionService(
             val modelPath = modelProvider.getModelPath(modelName)
             modelHandle = whisperInit(modelPath)
             lastInitedModel = config.modelName
+            // A fresh handle is cold no matter how recently the previous
+            // model transcribed: its first inference pays one-time graph
+            // and buffer setup that can multiply latency past the watch
+            // dictation window. Clearing the recency mark makes the
+            // post-init warm-up unconditional so a real dictation never
+            // pays those costs.
+            lastTranscriptionAt = null
             val initDuration = Clock.System.now() - start
             logger.d { "Whisper STT model initialized in $initDuration" }
         }
