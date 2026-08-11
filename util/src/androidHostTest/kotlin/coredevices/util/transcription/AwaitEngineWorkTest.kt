@@ -64,11 +64,9 @@ class AwaitEngineWorkTest {
                 awaitEngineWork(
                     worker = worker,
                     // A cooperative engine: honours the abort by unwinding.
-                    setCancel = { armed ->
-                        if (armed) {
-                            abortArmed.set(true)
-                            release.countDown()
-                        }
+                    cancel = {
+                        abortArmed.set(true)
+                        release.countDown()
                     },
                     unwindBound = 5.seconds,
                     onWedged = { fail("a cooperative engine must not be reported wedged") },
@@ -108,7 +106,7 @@ class AwaitEngineWorkTest {
         val caller = launch(Dispatchers.Default, CoroutineStart.UNDISPATCHED) {
             awaitEngineWork(
                 worker = worker,
-                setCancel = { /* armed but ignored by the wedge */ },
+                cancel = { /* requested but ignored by the wedge */ },
                 unwindBound = 200.milliseconds,
                 onWedged = { wedgeReported.incrementAndGet() },
             )
@@ -129,7 +127,7 @@ class AwaitEngineWorkTest {
         val worker = scope.async { runCatching { "transcribed text" } }
         val result = awaitEngineWork(
             worker = worker,
-            setCancel = { if (it) abortArmed.set(true) },
+            cancel = { abortArmed.set(true) },
             unwindBound = 5.seconds,
             onWedged = { fail("no wedge on the happy path") },
         )
@@ -145,7 +143,7 @@ class AwaitEngineWorkTest {
         val e = assertFailsWith<IllegalStateException> {
             awaitEngineWork(
                 worker = worker,
-                setCancel = { fail("failure is not cancellation") },
+                cancel = { fail("failure is not cancellation") },
                 unwindBound = 5.seconds,
                 onWedged = { fail("failure is not a wedge") },
             )
@@ -175,7 +173,7 @@ class AwaitEngineWorkTest {
         assertFailsWith<IllegalStateException> {
             awaitEngineWork(
                 worker = worker,
-                setCancel = { fail("the caller was never cancelled") },
+                cancel = { fail("the caller was never cancelled") },
                 unwindBound = 1.seconds,
                 onWedged = { fail("the caller was never cancelled") },
             )

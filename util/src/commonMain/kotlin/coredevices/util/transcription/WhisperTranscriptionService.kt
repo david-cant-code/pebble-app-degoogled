@@ -9,9 +9,9 @@ import coredevices.util.models.WhisperModelCatalog
 import coredevices.whisper.isWhisperSupported
 import coredevices.whisper.pcm16ToShorts
 import coredevices.whisper.shortsToFloats
+import coredevices.whisper.whisperCancel
 import coredevices.whisper.whisperFree
 import coredevices.whisper.whisperInit
-import coredevices.whisper.whisperSetCancel
 import coredevices.whisper.whisperTranscribe
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -184,17 +184,19 @@ internal fun collapseRepeatedSentences(text: String): String {
  * such that cancelling the waiting coroutine genuinely interrupts the
  * engine. A thread blocked inside a native call cannot observe coroutine
  * cancellation, so the waiter and the blocked thread must be different
- * threads: this waiter is the cancellable side, and on cancellation it arms
- * the engine's abort flag via [setCancel] (checked by the engine between
- * its encoder and decoder passes), then holds the already-cancelled caller
- * until the worker has actually unwound. The hold preserves the one-native-call-at-a-
- * time invariant the caller's mutex provides: resuming while the engine is
- * still inside the context would let the next transcription run against it
- * concurrently. The hold is bounded by [unwindBound] so an engine that
- * never honours the abort cannot hold the mutex forever (the exact stuck
- * state cancellation exists to prevent); a blown bound runs [onWedged]
- * before rethrowing so the owner can quarantine the still-occupied native
- * context.
+ * threads: this waiter is the cancellable side, and on cancellation it
+ * requests the engine's per-call abort via [cancel] (checked by the engine
+ * between its encoder and decoder passes), then holds the already-cancelled
+ * caller until the worker has actually unwound. The hold preserves the
+ * one-native-call-at-a-time invariant the caller's mutex provides: resuming
+ * while the engine is still inside the context would let the next
+ * transcription run against it concurrently. The hold is bounded by
+ * [unwindBound] so an engine that never honours the abort cannot hold the
+ * mutex forever (the exact stuck state cancellation exists to prevent); a
+ * blown bound runs [onWedged] before rethrowing so the owner can quarantine
+ * the still-occupied native context. Because [cancel] targets one call by
+ * id, a later call clearing or arming its own abort cannot revoke this
+ * abandoned call's pending abort.
  *
  * [worker] must not be a child of the waiter (cancelling the waiter must
  * leave the work free to finish unwinding) and must wrap the engine call in
@@ -203,7 +205,7 @@ internal fun collapseRepeatedSentences(text: String): String {
  */
 internal suspend fun <T> awaitEngineWork(
     worker: Deferred<Result<T>>,
-    setCancel: (Boolean) -> Unit,
+    cancel: () -> Unit,
     unwindBound: Duration,
     onWedged: () -> Unit,
 ): T {
@@ -216,7 +218,7 @@ internal suspend fun <T> awaitEngineWork(
             // phantom cancellation of a coroutine nobody cancelled.
             throw IllegalStateException("Engine worker cancelled unexpectedly", e)
         }
-        setCancel(true)
+        cancel()
         val unwound = withContext(NonCancellable) {
             withTimeoutOrNull(unwindBound) {
                 worker.join()
@@ -238,8 +240,8 @@ internal suspend fun <T> awaitEngineWork(
 internal interface WhisperEngine {
     fun supported(): Boolean
     fun init(modelPath: String): Long
-    fun transcribe(handle: Long, pcm: FloatArray, threads: Int, language: String?): String
-    fun setCancel(cancel: Boolean)
+    fun transcribe(handle: Long, pcm: FloatArray, threads: Int, language: String?, callId: Long): String
+    fun cancel(callId: Long)
     fun free(handle: Long)
 }
 
@@ -247,9 +249,9 @@ internal interface WhisperEngine {
 internal object RealWhisperEngine : WhisperEngine {
     override fun supported(): Boolean = isWhisperSupported()
     override fun init(modelPath: String): Long = whisperInit(modelPath)
-    override fun transcribe(handle: Long, pcm: FloatArray, threads: Int, language: String?): String =
-        whisperTranscribe(handle, pcm, threads, language)
-    override fun setCancel(cancel: Boolean) = whisperSetCancel(cancel)
+    override fun transcribe(handle: Long, pcm: FloatArray, threads: Int, language: String?, callId: Long): String =
+        whisperTranscribe(handle, pcm, threads, language, callId)
+    override fun cancel(callId: Long) = whisperCancel(callId)
     override fun free(handle: Long) = whisperFree(handle)
 }
 
@@ -266,9 +268,8 @@ internal object RealWhisperEngine : WhisperEngine {
  *
  * Engine input is 16 kHz mono float PCM handed over in memory; audio at
  * any other rate is resampled first. Cancellation is cooperative through
- * the engine's abort callback: a process-wide flag armed on caller
- * cancellation, safe exactly because these mutexes allow one native
- * transcription at a time.
+ * the engine's abort callback, requested per call id so an abandoned
+ * wedged call keeps its own abort while a fresh call runs unaffected.
  */
 class WhisperTranscriptionService internal constructor(
     private val coreConfigFlow: CoreConfigFlow,
@@ -293,8 +294,8 @@ class WhisperTranscriptionService internal constructor(
 
         /**
          * How long a cancelled transcription may take to unwind out of the
-         * native call after the abort flag is armed. The engine checks the
-         * flag only between encoder and decoder passes, and one encoder
+         * native call after its abort is requested. The engine checks the
+         * request only between encoder and decoder passes, and one encoder
          * pass is seconds-scale for the bigger catalog models on
          * phone-class CPUs, so the bound must comfortably exceed a single
          * pass. Blowing it means the engine is wedged, and the native
@@ -352,43 +353,54 @@ class WhisperTranscriptionService internal constructor(
 
     /**
      * Runs [block], a blocking native engine call, with working
-     * cancellation: the call is dispatched to a worker on the service
-     * [scope] while this coroutine waits at a cancellable suspension point,
-     * and a cancelled wait arms the process-wide abort flag whisper polls
-     * between inference steps (see [awaitEngineWork] for the unwind and
-     * wedge contract). The split matters because a coroutine whose own
-     * thread is inside the native call has no suspension point left: nothing
-     * observing only that coroutine can act until the call it was supposed
-     * to interrupt has already returned.
+     * cancellation: [block] receives a per-call id, the call is dispatched
+     * to a worker on the service [scope], and this coroutine waits at a
+     * cancellable suspension point; a cancelled wait requests that specific
+     * call's abort, which whisper polls between inference steps (see
+     * [awaitEngineWork] for the unwind and wedge contract). The split
+     * matters because a coroutine whose own thread is inside the native call
+     * has no suspension point left: nothing observing only that coroutine
+     * can act until the call it was supposed to interrupt has returned.
      *
-     * The flag is process-wide, which is sound only because [modelMutex]
-     * allows a single native call at a time; clearing it on entry discards
-     * any stale request from a previous cancelled call. A cancel that lands
-     * before the worker even reaches the engine is still honoured: the
-     * worker is not cancelled with the caller, and the already-armed flag
-     * is read at the engine's first abort-callback poll.
+     * Cancellation is per call id, not a shared flag, so an abandoned
+     * wedged call keeps its own pending abort even after a fresh call
+     * starts: there is nothing to clear on entry, and a later call can
+     * never revoke this one's abort. A cancel that lands before the worker
+     * reaches the engine is still honoured, because the id is armed before
+     * the worker is cancelled and the engine reads it at its first
+     * abort-callback poll. Call ids come from [nextCallId], generated under
+     * [modelMutex] (every call site holds it), so they are unique across
+     * any calls that can be in flight at once.
      */
-    private suspend fun <T> withWhisperCancelOnCancel(block: () -> T): T {
-        engine.setCancel(false)
-        val worker = scope.async(Dispatchers.IO) { runCatching { block() } }
+    private suspend fun <T> withWhisperCancelOnCancel(block: (Long) -> T): T {
+        val callId = nextCallId()
+        val worker = scope.async(Dispatchers.IO) { runCatching { block(callId) } }
         return awaitEngineWork(
             worker = worker,
-            setCancel = { requested ->
-                logger.d { "Requesting whisper engine abort (caller cancelled)" }
-                engine.setCancel(requested)
+            cancel = {
+                logger.d { "Requesting whisper engine abort for call $callId (caller cancelled)" }
+                engine.cancel(callId)
             },
             unwindBound = ENGINE_UNWIND_BOUND,
             onWedged = ::abandonWedgedContext,
         )
     }
 
+    // Monotonic call-id source. Only ever incremented from
+    // withWhisperCancelOnCancel, which every caller enters holding
+    // [modelMutex], so the increment is already serialized and the ids are
+    // unique even against an abandoned wedged call still running.
+    private var callIdCounter: Long = 0L
+    private fun nextCallId(): Long = ++callIdCounter
+
     /**
-     * Containment for an engine that ignored the abort flag past
+     * Containment for an engine that ignored its abort past
      * [ENGINE_UNWIND_BOUND]: a thread may still be inside the native
      * context, so freeing it would be a use-after-free. The context is
      * leaked deliberately and the handle zeroed (still under [modelMutex])
      * so the next transcription re-initializes a fresh context instead of
-     * racing the stuck call inside the old one.
+     * racing the stuck call inside the old one. The wedged call keeps its
+     * own per-id abort armed, so the fresh call does not disturb it.
      */
     private fun abandonWedgedContext() {
         logger.e {
@@ -416,8 +428,8 @@ class WhisperTranscriptionService internal constructor(
                 ?.let { WhisperModelCatalog.byId(it) }?.multilingual,
             spokenLanguage = sttConfig.value.spokenLanguage,
         )
-        return withWhisperCancelOnCancel {
-            engine.transcribe(handle, pcm, transcriptionThreadCount(), language).trim()
+        return withWhisperCancelOnCancel { callId ->
+            engine.transcribe(handle, pcm, transcriptionThreadCount(), language, callId).trim()
         }
     }
 
@@ -464,10 +476,10 @@ class WhisperTranscriptionService internal constructor(
             withHighPriorityThread {
                 try {
                     withTimeout(2.seconds) {
-                        withWhisperCancelOnCancel {
+                        withWhisperCancelOnCancel { callId ->
                             // Fixed "en": silence has no language to detect,
                             // and detection would only add an extra pass.
-                            engine.transcribe(handle, silentPcm, transcriptionThreadCount(), "en")
+                            engine.transcribe(handle, silentPcm, transcriptionThreadCount(), "en", callId)
                         }
                     }
                 } catch (e: TimeoutCancellationException) {

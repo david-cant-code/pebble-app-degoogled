@@ -9,9 +9,11 @@ package coredevices.whisper
  *
  * Threading contract: callers serialize [whisperInit], [whisperTranscribe]
  * and [whisperFree] per handle (the transcription service holds a mutex
- * across every native call). [whisperSetCancel] is the one function safe
- * to call concurrently; it flips a process-wide flag the engine polls, and
- * a single flag suffices exactly because transcriptions never overlap.
+ * across every native call). [whisperCancel] is the one function safe to
+ * call concurrently; it targets a specific in-flight call by its [callId],
+ * so a cancellation can never revoke a different call's pending abort (the
+ * case that arises when an abandoned wedged call still runs alongside a
+ * fresh one).
  */
 
 /**
@@ -32,13 +34,20 @@ expect fun whisperInit(modelPath: String): Long
 /**
  * Transcribes 16 kHz mono float PCM and returns plain text ("" means no
  * speech found). [language] is an ISO 639-1 code; null lets the engine
- * detect the language. Throws with the engine's error text on failure,
- * including cancellation via [whisperSetCancel].
+ * detect the language. [callId] identifies this call for [whisperCancel];
+ * it must be unique among all calls that can be in flight at once (the
+ * service uses a monotonic counter). Throws with the engine's error text
+ * on failure, including cancellation via [whisperCancel].
  */
-expect fun whisperTranscribe(handle: Long, pcm: FloatArray, threads: Int, language: String?): String
+expect fun whisperTranscribe(handle: Long, pcm: FloatArray, threads: Int, language: String?, callId: Long): String
 
-/** Requests (true) or clears (false) cancellation of the in-flight transcription. */
-expect fun whisperSetCancel(cancel: Boolean)
+/**
+ * Requests cancellation of the in-flight [whisperTranscribe] call with the
+ * matching [callId]. Cancellation is per call, not process-wide, so it
+ * only aborts that call; the engine polls it between inference passes and
+ * the call clears its own request on return.
+ */
+expect fun whisperCancel(callId: Long)
 
 /** Releases an engine handle. Safe to call with 0. */
 expect fun whisperFree(handle: Long)

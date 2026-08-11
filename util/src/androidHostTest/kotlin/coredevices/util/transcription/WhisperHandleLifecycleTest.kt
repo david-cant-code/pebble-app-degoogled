@@ -79,6 +79,7 @@ class WhisperHandleLifecycleTest {
                 pcm: FloatArray,
                 threads: Int,
                 language: String?,
+                callId: Long,
             ): String {
                 if (pcm.all { it == 0f }) {
                     synchronized(lock) { warmedUpHandles.add(handle) }
@@ -94,7 +95,7 @@ class WhisperHandleLifecycleTest {
                 return "hello world"
             }
 
-            override fun setCancel(cancel: Boolean) {}
+            override fun cancel(callId: Long) {}
 
             override fun free(handle: Long) {
                 if (inRealTranscribe) freedWhileTranscribing = true

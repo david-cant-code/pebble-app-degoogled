@@ -11,18 +11,21 @@
 //  - nativeTranscribe returns null on failure and records a reason for
 //    nativeGetLastError; an empty array is a valid result meaning "no
 //    speech found".
-//  - Cancellation is a process-wide flag polled by whisper's
-//    abort_callback. The Kotlin service serializes native calls behind a
-//    mutex (a single transcription in flight at any time), which is what
-//    makes one flag per process sufficient.
+//  - Cancellation is per call, keyed by a caller-supplied call id, polled
+//    by whisper's abort_callback. A cancel request targets exactly one
+//    call, so it can never revoke a different call's pending abort. The
+//    Kotlin service still serializes native calls behind a mutex, but an
+//    abandoned wedged call can briefly run alongside a fresh one, and
+//    per-call ids keep each one's cancellation independent.
 
 #include <jni.h>
 #include <android/log.h>
 
 #include <algorithm>
-#include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <string>
+#include <unordered_set>
 
 #include "whisper.h"
 
@@ -38,7 +41,27 @@ constexpr const char *kLogTag = "whisper_jni";
 // no_speech_thold default.
 constexpr float kNoSpeechThreshold = 0.6f;
 
-std::atomic<bool> g_cancel{false};
+// Call ids whose transcription has been asked to abort. Membership is the
+// abort signal for that call; a call clears its own id on return. The set
+// is guarded by a mutex rather than a lock-free structure because the
+// abort_callback polls only between inference passes, not on a hot path.
+std::mutex g_cancel_mutex;
+std::unordered_set<int64_t> g_cancelled_calls;
+
+bool is_call_cancelled(int64_t call_id) {
+    std::lock_guard<std::mutex> lock(g_cancel_mutex);
+    return g_cancelled_calls.count(call_id) != 0;
+}
+
+void request_call_cancel(int64_t call_id) {
+    std::lock_guard<std::mutex> lock(g_cancel_mutex);
+    g_cancelled_calls.insert(call_id);
+}
+
+void clear_call_cancel(int64_t call_id) {
+    std::lock_guard<std::mutex> lock(g_cancel_mutex);
+    g_cancelled_calls.erase(call_id);
+}
 
 std::mutex g_error_mutex;
 std::string g_last_error;
@@ -114,12 +137,17 @@ Java_coredevices_whisper_WhisperJNI_nativeInit(JNIEnv *env, jclass, jstring mode
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong handle,
                                                      jfloatArray pcm, jint n_threads,
-                                                     jstring language) {
+                                                     jstring language, jlong call_id) {
     auto *ctx = reinterpret_cast<whisper_context *>(handle);
     if (ctx == nullptr) {
         set_last_error("transcribe called with a null engine handle");
         return nullptr;
     }
+
+    // This call's abort key lives on the stack for the whole whisper_full
+    // call; the abort_callback reads it through user_data. Cleared on every
+    // return path so a cancel request for this id cannot linger.
+    const int64_t this_call = call_id;
 
     const jsize n_samples = env->GetArrayLength(pcm);
     jfloat *samples = env->GetFloatArrayElements(pcm, nullptr);
@@ -129,6 +157,7 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
         // null buffer into the engine.
         env->ExceptionClear();
         set_last_error("could not pin the PCM buffer");
+        clear_call_cancel(this_call);
         return nullptr;
     }
 
@@ -197,12 +226,18 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
     // 14 s dictation deadline; 32 holds it comfortably inside.
     params.max_tokens = 32;
 
-    params.abort_callback = [](void *) -> bool {
-        return g_cancel.load(std::memory_order_relaxed);
+    // Poll this specific call's abort key. user_data carries the stack
+    // address of this_call, valid for the whole whisper_full call.
+    params.abort_callback = [](void *data) -> bool {
+        return is_call_cancelled(*static_cast<const int64_t *>(data));
     };
-    params.abort_callback_user_data = nullptr;
+    params.abort_callback_user_data = const_cast<int64_t *>(&this_call);
 
     const int rc = whisper_full(ctx, params, samples, static_cast<int>(n_samples));
+    const bool was_cancelled = is_call_cancelled(this_call);
+    // The abort key is per call, so clearing it here cannot revoke any
+    // other in-flight call's pending abort.
+    clear_call_cancel(this_call);
 
     env->ReleaseFloatArrayElements(pcm, samples, JNI_ABORT); // read-only, never copy back
     if (lang != nullptr) {
@@ -210,7 +245,7 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
     }
 
     if (rc != 0) {
-        if (g_cancel.load(std::memory_order_relaxed)) {
+        if (was_cancelled) {
             set_last_error("transcription aborted by cancellation");
         } else {
             set_last_error("whisper_full failed with code " + std::to_string(rc));
@@ -233,8 +268,8 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_coredevices_whisper_WhisperJNI_nativeSetCancel(JNIEnv *, jclass, jboolean cancel) {
-    g_cancel.store(cancel == JNI_TRUE, std::memory_order_relaxed);
+Java_coredevices_whisper_WhisperJNI_nativeCancel(JNIEnv *, jclass, jlong call_id) {
+    request_call_cancel(call_id);
 }
 
 extern "C" JNIEXPORT void JNICALL

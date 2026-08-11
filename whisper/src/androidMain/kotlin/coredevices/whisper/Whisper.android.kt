@@ -46,10 +46,10 @@ private object WhisperJNI {
     external fun nativeInit(modelPath: String): Long
 
     @JvmStatic
-    external fun nativeTranscribe(handle: Long, pcm: FloatArray, threads: Int, language: String?): ByteArray?
+    external fun nativeTranscribe(handle: Long, pcm: FloatArray, threads: Int, language: String?, callId: Long): ByteArray?
 
     @JvmStatic
-    external fun nativeSetCancel(cancel: Boolean)
+    external fun nativeCancel(callId: Long)
 
     @JvmStatic
     external fun nativeFree(handle: Long)
@@ -66,14 +66,14 @@ actual fun whisperInit(modelPath: String): Long {
     return handle
 }
 
-actual fun whisperTranscribe(handle: Long, pcm: FloatArray, threads: Int, language: String?): String {
-    val bytes = WhisperJNI.nativeTranscribe(handle, pcm, threads, language)
+actual fun whisperTranscribe(handle: Long, pcm: FloatArray, threads: Int, language: String?, callId: Long): String {
+    val bytes = WhisperJNI.nativeTranscribe(handle, pcm, threads, language, callId)
         ?: throw RuntimeException("whisper transcription failed: ${whisperGetLastError()}")
     return bytes.decodeToString()
 }
 
-actual fun whisperSetCancel(cancel: Boolean) {
-    WhisperJNI.nativeSetCancel(cancel)
+actual fun whisperCancel(callId: Long) {
+    WhisperJNI.nativeCancel(callId)
 }
 
 actual fun whisperFree(handle: Long) {
