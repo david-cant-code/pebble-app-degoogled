@@ -76,4 +76,26 @@ class WhisperModelProviderDecisionTest {
     fun emptyModelsDirHasNothingToSweep() {
         assertEquals(emptyList(), WhisperModelProvider.incompatibleIn(modelsDir))
     }
+
+    @Test
+    fun singleSegmentNamesAreSafeModelDirNames() {
+        // Everything a legitimate caller can produce: catalog ids and
+        // directory names from a modelsDir listing.
+        assertTrue(WhisperModelProvider.isSafeModelDirName("whisper-base-en"))
+        assertTrue(WhisperModelProvider.isSafeModelDirName("parakeet-tdt-0.6b-v3"))
+        assertTrue(WhisperModelProvider.isSafeModelDirName(".cactus_version"))
+    }
+
+    @Test
+    fun traversingAndAbsoluteNamesAreRejected() {
+        // deleteModel resolves its argument into a recursive delete, so a
+        // name that escapes modelsDir must never reach it.
+        assertFalse(WhisperModelProvider.isSafeModelDirName(""))
+        assertFalse(WhisperModelProvider.isSafeModelDirName("."))
+        assertFalse(WhisperModelProvider.isSafeModelDirName(".."))
+        assertFalse(WhisperModelProvider.isSafeModelDirName("../databases"))
+        assertFalse(WhisperModelProvider.isSafeModelDirName("a/b"))
+        assertFalse(WhisperModelProvider.isSafeModelDirName("a\\b"))
+        assertFalse(WhisperModelProvider.isSafeModelDirName("/data/data/com.anopticlabs.gravel/files"))
+    }
 }

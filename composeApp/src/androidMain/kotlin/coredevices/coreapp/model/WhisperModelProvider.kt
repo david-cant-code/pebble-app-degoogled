@@ -78,6 +78,55 @@ class WhisperModelProvider(
                     model == null || !isInstalledShapeIn(modelsDir, model)
                 }
                 ?: emptyList()
+
+        /**
+         * Every legitimate model name is a single path segment: a catalog
+         * id or a directory name straight out of a modelsDir listing.
+         * File.resolve honours separators, ".." and absolute paths, so an
+         * arbitrary name reaching the delete/size sinks below could
+         * operate outside modelsDir (deleteModel resolves into a recursive
+         * delete). No current caller passes such a name; this gate keeps
+         * that true for future ones, matching the fail-closed stance
+         * getModelPath already takes for unknown ids.
+         */
+        internal fun isSafeModelDirName(name: String): Boolean =
+            name.isNotEmpty() && name != "." && name != ".." &&
+                !name.contains('/') && !name.contains('\\')
+
+        /**
+         * The load-time half of the layered model verification, static so
+         * the orchestration stays under JVM tests: install when missing,
+         * re-hash once per process before first use ([loadVerified] is the
+         * per-process memo), quarantine plus one fresh reinstall on a
+         * mismatch, and a hard failure instead of a retry loop when the
+         * reinstall does not verify either. A fresh install always drops
+         * the memo entry so the new bytes are re-hashed before use.
+         */
+        internal suspend fun resolveVerifiedModelPath(
+            installer: ModelFileInstaller,
+            loadVerified: MutableMap<String, Boolean>,
+            model: WhisperModel,
+        ): String {
+            if (!installer.isInstalled(model)) {
+                installer.install(model)
+                loadVerified.remove(model.id)
+            }
+            if (loadVerified[model.id] != true) {
+                if (!installer.verifyOnLoad(model)) {
+                    // Quarantined: one fresh verified reinstall, then the
+                    // same gate again; two failures mean something is
+                    // persistently wrong and the engine must not load it.
+                    installer.install(model)
+                    if (!installer.verifyOnLoad(model)) {
+                        throw SecurityException(
+                            "Model '${model.id}' failed load-time verification after a fresh reinstall",
+                        )
+                    }
+                }
+                loadVerified[model.id] = true
+            }
+            return installer.installedFile(model).absolutePath
+        }
     }
 
     private val modelsDir: File get() = context.filesDir.resolve("models").also { it.mkdirs() }
@@ -102,25 +151,7 @@ class WhisperModelProvider(
         val model = WhisperModelCatalog.byId(modelId)
             ?: throw IllegalStateException("No catalog entry for model '$modelId'; refusing to download")
         mutexFor(model.id).withLock {
-            if (!installer.isInstalled(model)) {
-                installer.install(model)
-                loadVerified.remove(model.id)
-            }
-            if (loadVerified[model.id] != true) {
-                if (!installer.verifyOnLoad(model)) {
-                    // Quarantined: one fresh verified reinstall, then the
-                    // same gate again; two failures mean something is
-                    // persistently wrong and the engine must not load it.
-                    installer.install(model)
-                    if (!installer.verifyOnLoad(model)) {
-                        throw SecurityException(
-                            "Model '$modelId' failed load-time verification after a fresh reinstall",
-                        )
-                    }
-                }
-                loadVerified[model.id] = true
-            }
-            installer.installedFile(model).absolutePath
+            resolveVerifiedModelPath(installer, loadVerified, model)
         }
     }
 
@@ -148,11 +179,16 @@ class WhisperModelProvider(
     override fun getIncompatibleModels(): List<String> = incompatibleIn(modelsDir)
 
     override fun deleteModel(modelName: String) {
+        if (!isSafeModelDirName(modelName)) {
+            logger.w { "Refusing to delete model with unsafe name '$modelName'" }
+            return
+        }
         modelsDir.resolve(modelName).deleteRecursively()
         loadVerified.remove(modelName)
     }
 
     override fun getModelSizeBytes(modelName: String): Long {
+        if (!isSafeModelDirName(modelName)) return 0L
         val dir = modelsDir.resolve(modelName)
         return if (dir.exists()) dir.walkTopDown().sumOf { it.length() } else 0L
     }
