@@ -93,7 +93,7 @@ class WhisperColdStartRaceTest {
                     // Only the *production* provider downloads, through its full verify gate.
                     runBlocking {
                         withTimeout(20.minutes) {
-                            WhisperModelProvider(context, HttpClient(OkHttp)).getModelPath(MODEL_NAME)
+                            WhisperModelProvider(context, HttpClient(OkHttp), coredevices.util.AndroidPlatform(context)).getModelPath(MODEL_NAME)
                         }
                     }
                 }

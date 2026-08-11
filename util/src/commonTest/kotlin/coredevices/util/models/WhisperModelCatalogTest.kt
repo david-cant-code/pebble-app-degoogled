@@ -2,6 +2,7 @@ package coredevices.util.models
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -85,10 +86,27 @@ class WhisperModelCatalogTest {
     @Test
     fun recommendationTiersByRamAndLanguage() {
         val gib = 1024L * 1024 * 1024
-        assertEquals("whisper-small-en", WhisperModelCatalog.recommended(8 * gib, preferEnglishOnly = true).id)
-        assertEquals("whisper-small", WhisperModelCatalog.recommended(8 * gib, preferEnglishOnly = false).id)
-        assertEquals("whisper-base-en", WhisperModelCatalog.recommended(3 * gib, preferEnglishOnly = true).id)
-        assertEquals("whisper-base", WhisperModelCatalog.recommended(3 * gib, preferEnglishOnly = false).id)
+        assertEquals("whisper-small-en", WhisperModelCatalog.recommended(8 * gib, preferEnglishOnly = true).model.id)
+        assertEquals("whisper-small", WhisperModelCatalog.recommended(8 * gib, preferEnglishOnly = false).model.id)
+        assertEquals("whisper-base-en", WhisperModelCatalog.recommended(3 * gib, preferEnglishOnly = true).model.id)
+        assertEquals("whisper-base", WhisperModelCatalog.recommended(3 * gib, preferEnglishOnly = false).model.id)
+    }
+
+    @Test
+    fun recommendationTierFlagMatchesTheChosenModel() {
+        // The tier flag and the model come from one decision, so the
+        // Lite/Standard label a caller derives can never contradict the id.
+        val gib = 1024L * 1024 * 1024
+        assertTrue(WhisperModelCatalog.recommended(8 * gib, preferEnglishOnly = false).standardTier)
+        assertTrue(WhisperModelCatalog.recommended(8 * gib, preferEnglishOnly = true).standardTier)
+        assertFalse(WhisperModelCatalog.recommended(3 * gib, preferEnglishOnly = false).standardTier)
+        assertFalse(WhisperModelCatalog.recommended(3 * gib, preferEnglishOnly = true).standardTier)
+        // Exactly at the threshold is the Standard tier.
+        assertTrue(
+            WhisperModelCatalog.recommended(
+                WhisperModelCatalog.STANDARD_TIER_MIN_TOTAL_RAM, preferEnglishOnly = false,
+            ).standardTier,
+        )
     }
 
     @Test

@@ -130,12 +130,17 @@ object WhisperModelCatalog {
         "https://huggingface.co/ggerganov/whisper.cpp/resolve/$HF_REPO_COMMIT/${model.fileName}"
 
     /**
-     * The default pick for a device: base tier under
-     * [STANDARD_TIER_MIN_TOTAL_RAM] of total RAM, small tier above it, and
-     * the English-only variant when the device language is English (the
-     * .en models are more accurate for English at the same size).
+     * The default pick for a device together with the tier that decision
+     * belongs to: base (Lite) tier under [STANDARD_TIER_MIN_TOTAL_RAM] of
+     * total RAM, small (Standard) tier above it, and the English-only
+     * variant when the device language is English (the .en models are more
+     * accurate for English at the same size). Returning the tier alongside
+     * the model keeps the tier the single decision made here: callers that
+     * need the Lite/Standard label read [WhisperRecommendation.standardTier]
+     * instead of re-comparing RAM, so the label and the model can never
+     * disagree.
      */
-    fun recommended(totalRamBytes: Long, preferEnglishOnly: Boolean): WhisperModel {
+    fun recommended(totalRamBytes: Long, preferEnglishOnly: Boolean): WhisperRecommendation {
         val standardTier = totalRamBytes >= STANDARD_TIER_MIN_TOTAL_RAM
         val id = when {
             standardTier && preferEnglishOnly -> "whisper-small-en"
@@ -143,6 +148,9 @@ object WhisperModelCatalog {
             preferEnglishOnly -> "whisper-base-en"
             else -> "whisper-base"
         }
-        return byId(id) ?: MODELS.last()
+        return WhisperRecommendation(byId(id) ?: MODELS.last(), standardTier)
     }
 }
+
+/** A recommended model and the tier the recommendation placed it in. */
+data class WhisperRecommendation(val model: WhisperModel, val standardTier: Boolean)

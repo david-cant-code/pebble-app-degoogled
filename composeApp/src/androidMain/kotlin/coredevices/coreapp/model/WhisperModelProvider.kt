@@ -1,10 +1,12 @@
 package coredevices.coreapp.model
 
-import android.app.ActivityManager
 import android.content.Context
 import co.touchlab.kermit.Logger
+import coredevices.util.Platform
 import coredevices.util.models.WhisperModel
 import coredevices.util.models.WhisperModelCatalog
+import coredevices.util.models.prefersEnglishModels
+import coredevices.util.models.totalRamBytes
 import coredevices.util.transcription.CactusModelPathProvider
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +41,9 @@ import java.util.concurrent.ConcurrentHashMap
 class WhisperModelProvider(
     private val context: Context,
     private val httpClient: HttpClient,
+    // Same RAM/locale source the ModelManager recommendation uses, so the
+    // two recommendation paths cannot diverge near the tier boundary.
+    private val platform: Platform,
     // Handed in by the DI wiring so the provider can resolve "the
     // configured model" without owning config plumbing; null means nothing
     // configured yet, which falls back to the device-appropriate
@@ -219,17 +224,17 @@ class WhisperModelProvider(
     }
 
     /**
-     * Device-appropriate default when nothing is configured: tier by
-     * total device RAM, English-only variant when the device language is
-     * English. Total RAM (not free heap) is the right signal because the
-     * model cost is native allocation over the device's lifetime of the
-     * process, not JVM heap.
+     * Device-appropriate default when nothing is configured: the same
+     * single [WhisperModelCatalog.recommended] decision the ModelManager
+     * uses, over the same [Platform] RAM/locale source, so a bare
+     * getSTTModelPath and the recommendation prompt can never pick
+     * different models for one device.
      */
     private fun recommendedDefault(): WhisperModel {
-        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        val memoryInfo = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
-        val english = context.resources.configuration.locales.get(0)?.language == "en"
-        val model = WhisperModelCatalog.recommended(memoryInfo.totalMem, english)
+        val model = WhisperModelCatalog.recommended(
+            totalRamBytes = platform.totalRamBytes(),
+            preferEnglishOnly = platform.prefersEnglishModels(),
+        ).model
         logger.d { "Recommended model for this device: ${model.id}" }
         return model
     }

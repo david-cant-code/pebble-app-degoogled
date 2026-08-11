@@ -86,7 +86,7 @@ val androidDefaultModule = module {
     // resolve "the chosen model" without owning config plumbing.
     single {
         val coreConfigFlow = get<coredevices.util.CoreConfigFlow>()
-        WhisperModelProvider(androidContext(), get()) {
+        WhisperModelProvider(androidContext(), get(), get()) {
             coreConfigFlow.value.sttConfig.modelName
         }
     } bind CactusModelPathProvider::class

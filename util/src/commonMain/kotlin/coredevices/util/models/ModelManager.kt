@@ -32,9 +32,8 @@ class ModelManager(
      * directory view above additionally includes stale previous-engine
      * leftovers so they stay deletable.
      */
-    fun getDownloadedSTTModelSlugs(): List<String> {
-        return getDownloadedModelSlugs().filter { modelPathProvider?.isModelDownloaded(it) == true }
-    }
+    fun getDownloadedSTTModelSlugs(): List<String> =
+        downloadedSTTModelSlugs(modelPathProvider)
 
     fun deleteModel(modelName: String) {
         modelPathProvider?.deleteModel(modelName)
@@ -45,22 +44,8 @@ class ModelManager(
      * anything is downloaded), plus any downloaded directory outside the
      * catalog so stale models remain visible for deletion.
      */
-    suspend fun getAvailableSTTModels(): List<ModelInfo> {
-        val catalog = WhisperModelCatalog.MODELS.map { model ->
-            ModelInfo(
-                slug = model.id,
-                sizeInMB = (model.sizeBytes / (1024 * 1024)).toInt(),
-                url = WhisperModelCatalog.urlFor(model),
-            )
-        }
-        val stale = modelPathProvider?.getDownloadedModels()
-            ?.filter { WhisperModelCatalog.byId(it) == null }
-            ?.map { slug ->
-                val sizeMB = ((modelPathProvider.getModelSizeBytes(slug)) / (1024 * 1024)).toInt()
-                ModelInfo(slug = slug, sizeInMB = sizeMB)
-            } ?: emptyList()
-        return catalog + stale
-    }
+    suspend fun getAvailableSTTModels(): List<ModelInfo> =
+        availableSTTModels(modelPathProvider)
 
     fun getRecommendedSTTMode(): CactusSTTMode {
         return when {
@@ -72,18 +57,52 @@ class ModelManager(
     /**
      * Device-appropriate default pick: small tier as Standard on machines
      * with enough RAM, base tier as Lite below that, English-only variants
-     * on English-language devices. The tier threshold lives in the catalog
-     * next to the entries it gates.
+     * on English-language devices. Both the model and the Lite/Standard
+     * label come from a single [WhisperModelCatalog.recommended] decision
+     * over one RAM read, so the label always matches the chosen model.
      */
     fun getRecommendedSTTModel(): RecommendedModel {
-        val model = WhisperModelCatalog.recommended(
+        val recommendation = WhisperModelCatalog.recommended(
             totalRamBytes = platform.totalRamBytes(),
             preferEnglishOnly = platform.prefersEnglishModels(),
         )
-        return if (platform.totalRamBytes() >= WhisperModelCatalog.STANDARD_TIER_MIN_TOTAL_RAM) {
-            RecommendedModel.Standard(model.id)
+        return if (recommendation.standardTier) {
+            RecommendedModel.Standard(recommendation.model.id)
         } else {
-            RecommendedModel.Lite(model.id)
+            RecommendedModel.Lite(recommendation.model.id)
+        }
+    }
+
+    companion object {
+        /**
+         * Catalog models actually installed and usable by the engine.
+         * Static and provider-parameterized so the install filter stays
+         * host-testable with a fake provider (the instance method delegates
+         * here).
+         */
+        internal fun downloadedSTTModelSlugs(provider: CactusModelPathProvider?): List<String> =
+            provider?.getDownloadedModels()?.filter { provider.isModelDownloaded(it) } ?: emptyList()
+
+        /**
+         * The whole catalog plus any downloaded directory outside the
+         * catalog (stale previous-engine leftovers), so those stay visible
+         * for deletion. Static and provider-parameterized for host tests.
+         */
+        internal fun availableSTTModels(provider: CactusModelPathProvider?): List<ModelInfo> {
+            val catalog = WhisperModelCatalog.MODELS.map { model ->
+                ModelInfo(
+                    slug = model.id,
+                    sizeInMB = (model.sizeBytes / (1024 * 1024)).toInt(),
+                    url = WhisperModelCatalog.urlFor(model),
+                )
+            }
+            val stale = provider?.getDownloadedModels()
+                ?.filter { WhisperModelCatalog.byId(it) == null }
+                ?.map { slug ->
+                    val sizeMB = (provider.getModelSizeBytes(slug) / (1024 * 1024)).toInt()
+                    ModelInfo(slug = slug, sizeInMB = sizeMB)
+                } ?: emptyList()
+            return catalog + stale
         }
     }
 }
