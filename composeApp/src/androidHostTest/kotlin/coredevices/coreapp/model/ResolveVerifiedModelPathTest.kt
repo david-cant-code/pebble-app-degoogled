@@ -13,6 +13,8 @@ import java.security.MessageDigest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.Duration
 
@@ -121,6 +123,35 @@ class ResolveVerifiedModelPathTest {
         )
         assertEquals(installedFile.absolutePath, path)
         assertEquals(mapOf(model.id to true), loadVerified)
+    }
+
+    @Test
+    fun initPathDoesNotDownloadAMissingModel() = runTest {
+        // allowReinstall=false is the engine init path: it must never pull
+        // a download. A missing model throws instead.
+        val loadVerified = mutableMapOf<String, Boolean>()
+        assertFailsWith<IllegalStateException> {
+            WhisperModelProvider.resolveVerifiedModelPath(
+                installerServing(null), loadVerified, model, allowReinstall = false,
+            )
+        }
+    }
+
+    @Test
+    fun initPathQuarantinesCorruptModelWithoutReinstalling() = runTest {
+        // A corrupt on-disk model on the init path: the file is quarantined
+        // (removed) but no reinstall download happens; it throws so the
+        // caller treats it as not installed and the visible download flow
+        // re-fetches it.
+        seedInstalled(payload.copyOf().also { it[10] = (it[10] + 1).toByte() })
+        val loadVerified = mutableMapOf<String, Boolean>()
+        assertFailsWith<SecurityException> {
+            WhisperModelProvider.resolveVerifiedModelPath(
+                installerServing(null), loadVerified, model, allowReinstall = false,
+            )
+        }
+        assertFalse(installedFile.isFile, "the corrupt file must be quarantined off the load path")
+        assertEquals(emptyMap(), loadVerified, "a failed verification must not be memoized")
     }
 
     @Test

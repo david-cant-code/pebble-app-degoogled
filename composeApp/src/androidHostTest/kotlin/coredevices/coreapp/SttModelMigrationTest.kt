@@ -34,7 +34,7 @@ class SttModelMigrationTest {
         val deleted = mutableListOf<String>()
         override suspend fun getSTTModelPath(): String = error("unused in these tests")
         override suspend fun getLMModelPath(): String = error("unused in these tests")
-        override suspend fun getModelPath(modelId: String): String = error("unused in these tests")
+        override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = error("unused in these tests")
         override fun isModelDownloaded(modelName: String): Boolean = modelName in installed
         override fun getDownloadedModels(): List<String> = downloaded
         override fun getIncompatibleModels(): List<String> = incompatible

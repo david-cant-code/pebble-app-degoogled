@@ -513,12 +513,12 @@ class WhisperTranscriptionService internal constructor(
             }
             if (modelHandle == 0L) {
                 // getModelPath re-hashes the installed file once per process
-                // before first use. The isModelDownloaded gate above means
-                // the initial install is normally skipped, but a hash
-                // mismatch still quarantines the file and pulls one fresh
-                // reinstall inside this call, so a corrupted model can turn
-                // init into a full re-download.
-                val modelPath = modelProvider.getModelPath(modelName)
+                // before first use. allowReinstall=false keeps init out of
+                // the download flow: a corrupt model is quarantined and this
+                // throws (surfacing as not-installed to the visible download
+                // UI) rather than pulling a silent multi-hundred-MB metered
+                // re-download from an engine-init path.
+                val modelPath = modelProvider.getModelPath(modelName, allowReinstall = false)
                 modelHandle = engine.init(modelPath)
                 lastInitedModel = modelName
                 // A fresh handle is cold no matter how recently the previous

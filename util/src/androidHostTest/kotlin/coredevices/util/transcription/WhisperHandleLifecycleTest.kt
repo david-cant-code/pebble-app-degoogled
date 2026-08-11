@@ -106,7 +106,7 @@ class WhisperHandleLifecycleTest {
     private class FakeProvider : CactusModelPathProvider {
         override suspend fun getSTTModelPath(): String = error("unused in these tests")
         override suspend fun getLMModelPath(): String = error("unused in these tests")
-        override suspend fun getModelPath(modelId: String): String = "/fake/$modelId"
+        override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = "/fake/$modelId"
         override fun isModelDownloaded(modelName: String): Boolean = true
         override fun getDownloadedModels(): List<String> = emptyList()
         override fun getIncompatibleModels(): List<String> = emptyList()

@@ -101,21 +101,41 @@ class WhisperModelProvider(
          * mismatch, and a hard failure instead of a retry loop when the
          * reinstall does not verify either. A fresh install always drops
          * the memo entry so the new bytes are re-hashed before use.
+         *
+         * With [allowReinstall] false the function never downloads: a
+         * missing model throws, and a load-verification failure quarantines
+         * the file (removing the corrupt bytes) and then throws. This is
+         * the engine init path, kept out of the download flow so a
+         * corrupted model cannot trigger a silent metered re-download; the
+         * caller surfaces it as not-installed to the visible download UI.
          */
         internal suspend fun resolveVerifiedModelPath(
             installer: ModelFileInstaller,
             loadVerified: MutableMap<String, Boolean>,
             model: WhisperModel,
+            allowReinstall: Boolean = true,
         ): String {
             if (!installer.isInstalled(model)) {
+                if (!allowReinstall) {
+                    throw IllegalStateException(
+                        "Model '${model.id}' is not installed; the init path does not download",
+                    )
+                }
                 installer.install(model)
                 loadVerified.remove(model.id)
             }
             if (loadVerified[model.id] != true) {
                 if (!installer.verifyOnLoad(model)) {
-                    // Quarantined: one fresh verified reinstall, then the
+                    // verifyOnLoad has quarantined the corrupt file. On the
+                    // download path, one fresh verified reinstall then the
                     // same gate again; two failures mean something is
                     // persistently wrong and the engine must not load it.
+                    if (!allowReinstall) {
+                        throw SecurityException(
+                            "Model '${model.id}' failed load-time verification; " +
+                                "quarantined, awaiting re-download through the download flow",
+                        )
+                    }
                     installer.install(model)
                     if (!installer.verifyOnLoad(model)) {
                         throw SecurityException(
@@ -147,11 +167,11 @@ class WhisperModelProvider(
      * the catalog, since there is no pin to verify such a download
      * against.
      */
-    override suspend fun getModelPath(modelId: String): String = withContext(Dispatchers.IO) {
+    override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = withContext(Dispatchers.IO) {
         val model = WhisperModelCatalog.byId(modelId)
             ?: throw IllegalStateException("No catalog entry for model '$modelId'; refusing to download")
         mutexFor(model.id).withLock {
-            resolveVerifiedModelPath(installer, loadVerified, model)
+            resolveVerifiedModelPath(installer, loadVerified, model, allowReinstall)
         }
     }
 

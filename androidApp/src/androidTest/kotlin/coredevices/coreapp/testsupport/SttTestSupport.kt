@@ -23,7 +23,7 @@ class ReadOnlyModelPathProvider(
 
     override suspend fun getSTTModelPath(): String = getModelPath(sttModelId)
     override suspend fun getLMModelPath(): String = error("no language model in this fork")
-    override suspend fun getModelPath(modelId: String): String =
+    override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String =
         installedFile(modelId)?.takeIf { it.isFile }?.absolutePath
             ?: error("model $modelId not installed; tests never download")
 
