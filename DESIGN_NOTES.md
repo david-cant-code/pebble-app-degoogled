@@ -197,7 +197,9 @@ The replacement is whisper.cpp (MIT), compiled from source:
 - `WhisperTranscriptionService` (util) keeps the Cactus-era service's
   proven shape: config-driven re-initialization, the two-mutex warm-up
   design, the memory guard, and the InferenceBoost foreground-priority
-  seam.
+  seam. Unlike the Cactus-era service, the handle's init/free runs under
+  the same mutex the transcriptions hold, so a config-driven model
+  switch cannot free the native context under an in-flight engine call.
 - Decode parameters trade offline-transcription accuracy for a bounded
   worst case, because the watch firmware cancels a dictation session
   after 15 seconds: the JNI shim trims the encoder context to the real

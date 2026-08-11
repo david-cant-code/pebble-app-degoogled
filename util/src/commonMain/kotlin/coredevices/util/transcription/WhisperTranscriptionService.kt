@@ -203,15 +203,40 @@ internal suspend fun <T> awaitEngineWork(
 }
 
 /**
+ * The engine entry points the service drives, injectable so the
+ * init/free/transcribe handle lifecycle stays under host tests with a
+ * scripted fake (the real functions are hard-wired to the native library
+ * and cannot run on a host JVM). Production wiring is [RealWhisperEngine];
+ * only the service's own tests pass anything else.
+ */
+internal interface WhisperEngine {
+    fun supported(): Boolean
+    fun init(modelPath: String): Long
+    fun transcribe(handle: Long, pcm: FloatArray, threads: Int, language: String?): String
+    fun setCancel(cancel: Boolean)
+    fun free(handle: Long)
+}
+
+/** The :whisper top-level binding functions, bound 1:1. */
+internal object RealWhisperEngine : WhisperEngine {
+    override fun supported(): Boolean = isWhisperSupported()
+    override fun init(modelPath: String): Long = whisperInit(modelPath)
+    override fun transcribe(handle: Long, pcm: FloatArray, threads: Int, language: String?): String =
+        whisperTranscribe(handle, pcm, threads, language)
+    override fun setCancel(cancel: Boolean) = whisperSetCancel(cancel)
+    override fun free(handle: Long) = whisperFree(handle)
+}
+
+/**
  * Local speech-to-text over the whisper.cpp engine (:whisper bindings).
  * Successor to the Cactus-era service with the same shape: the mode/model
  * config flow drives (re)initialization, a rendezvous channel reports init
  * settling, and two mutexes serialize the native handle. The two-mutex
  * split ([transcriptionMutex] taken with tryLock as the busy gate,
- * [modelMutex] guarding every native call) is load-bearing: the warm-up
- * path yields to an in-flight transcription instead of queueing behind it,
- * which is what keeps a warm-up racing a real dictation from wedging
- * either.
+ * [modelMutex] guarding every native call, including init and free) is
+ * load-bearing: the warm-up path yields to an in-flight transcription
+ * instead of queueing behind it, which is what keeps a warm-up racing a
+ * real dictation from wedging either.
  *
  * Engine input is 16 kHz mono float PCM handed over in memory; audio at
  * any other rate is resampled first. Cancellation is cooperative through
@@ -219,12 +244,21 @@ internal suspend fun <T> awaitEngineWork(
  * cancellation, safe exactly because these mutexes allow one native
  * transcription at a time.
  */
-class WhisperTranscriptionService(
+class WhisperTranscriptionService internal constructor(
     private val coreConfigFlow: CoreConfigFlow,
     private val modelProvider: CactusModelPathProvider,
     private val analytics: CoreAnalytics,
-    private val inferenceBoost: InferenceBoost = NoOpInferenceBoost()
+    private val inferenceBoost: InferenceBoost,
+    private val engine: WhisperEngine,
 ) {
+    /** Production entry point: the real native engine. */
+    constructor(
+        coreConfigFlow: CoreConfigFlow,
+        modelProvider: CactusModelPathProvider,
+        analytics: CoreAnalytics,
+        inferenceBoost: InferenceBoost = NoOpInferenceBoost(),
+    ) : this(coreConfigFlow, modelProvider, analytics, inferenceBoost, RealWhisperEngine)
+
     companion object {
         private val logger = Logger.withTag("WhisperTranscriptionService")
 
@@ -245,8 +279,20 @@ class WhisperTranscriptionService(
     }
 
     private val transcriptionMutex = Mutex()
+
+    // Volatile: these are written by init jobs on the IO dispatcher and read
+    // by the config observer, earlyInit/ensureInit gates, and the public
+    // ready-state accessors on other threads. The gates are advisory (the
+    // authoritative re-check happens under modelMutex in initIfNeeded), but
+    // without a happens-before edge they could act on arbitrarily stale
+    // values.
+    @kotlin.concurrent.Volatile
     private var modelHandle: Long = 0L
+
+    @kotlin.concurrent.Volatile
     private var initJob: Job? = null
+
+    @kotlin.concurrent.Volatile
     private var lastInitedModel: String? = null
     private val scope = CoroutineScope(Dispatchers.Default)
 
@@ -270,6 +316,7 @@ class WhisperTranscriptionService(
         }.launchIn(scope)
     }
 
+    @kotlin.concurrent.Volatile
     private var lastTranscriptionAt: TimeMark? = null
     private val modelMutex = Mutex()
 
@@ -296,13 +343,13 @@ class WhisperTranscriptionService(
      * is read at the engine's first abort-callback poll.
      */
     private suspend fun <T> withWhisperCancelOnCancel(block: () -> T): T {
-        whisperSetCancel(false)
+        engine.setCancel(false)
         val worker = scope.async(Dispatchers.IO) { runCatching { block() } }
         return awaitEngineWork(
             worker = worker,
             setCancel = { requested ->
                 logger.d { "Requesting whisper engine abort (caller cancelled)" }
-                whisperSetCancel(requested)
+                engine.setCancel(requested)
             },
             unwindBound = ENGINE_UNWIND_BOUND,
             onWedged = ::abandonWedgedContext,
@@ -344,7 +391,7 @@ class WhisperTranscriptionService(
             spokenLanguage = sttConfig.value.spokenLanguage,
         )
         return withWhisperCancelOnCancel {
-            whisperTranscribe(handle, pcm, transcriptionThreadCount(), language).trim()
+            engine.transcribe(handle, pcm, transcriptionThreadCount(), language).trim()
         }
     }
 
@@ -394,7 +441,7 @@ class WhisperTranscriptionService(
                         withWhisperCancelOnCancel {
                             // Fixed "en": silence has no language to detect,
                             // and detection would only add an extra pass.
-                            whisperTranscribe(handle, silentPcm, transcriptionThreadCount(), "en")
+                            engine.transcribe(handle, silentPcm, transcriptionThreadCount(), "en")
                         }
                     }
                 } catch (e: TimeoutCancellationException) {
@@ -409,7 +456,7 @@ class WhisperTranscriptionService(
     private suspend fun initIfNeeded() {
         val config = sttConfig.value
         if (config.mode == CactusSTTMode.RemoteOnly) return
-        if (!isWhisperSupported()) return
+        if (!engine.supported()) return
         // The configured model is the single source of truth; null means no
         // local model has been chosen yet (fresh install, or the migration
         // sweep cleared it) and there is nothing to initialize.
@@ -424,28 +471,40 @@ class WhisperTranscriptionService(
             return
         }
         val start = Clock.System.now()
-        if (config.modelName != lastInitedModel) {
-            if (modelHandle != 0L) {
-                whisperFree(modelHandle)
+        // The free/init pair holds [modelMutex] for the same reason every
+        // other native call does: a model switch must not free the context
+        // while a transcription or warm-up is inside it on another thread
+        // (native use-after-free), and it is what the :whisper threading
+        // contract promises the shim. Holding the lock across the whole
+        // block also serializes concurrent init jobs (the config observer
+        // launches one per relevant emission with no coordination): the
+        // second job re-reads the handle state below and becomes a no-op
+        // instead of double-freeing or leaking a second context.
+        modelMutex.withLock {
+            if (modelName != lastInitedModel && modelHandle != 0L) {
+                engine.free(modelHandle)
                 modelHandle = 0L
             }
-        }
-        if (modelHandle == 0L) {
-            // getModelPath re-verifies the installed file before returning
-            // it (quarantining a mismatch); the download branch is
-            // unreachable here behind the isModelDownloaded gate above.
-            val modelPath = modelProvider.getModelPath(modelName)
-            modelHandle = whisperInit(modelPath)
-            lastInitedModel = config.modelName
-            // A fresh handle is cold no matter how recently the previous
-            // model transcribed: its first inference pays one-time graph
-            // and buffer setup that can multiply latency past the watch
-            // dictation window. Clearing the recency mark makes the
-            // post-init warm-up unconditional so a real dictation never
-            // pays those costs.
-            lastTranscriptionAt = null
-            val initDuration = Clock.System.now() - start
-            logger.d { "Whisper STT model initialized in $initDuration" }
+            if (modelHandle == 0L) {
+                // getModelPath re-hashes the installed file once per process
+                // before first use. The isModelDownloaded gate above means
+                // the initial install is normally skipped, but a hash
+                // mismatch still quarantines the file and pulls one fresh
+                // reinstall inside this call, so a corrupted model can turn
+                // init into a full re-download.
+                val modelPath = modelProvider.getModelPath(modelName)
+                modelHandle = engine.init(modelPath)
+                lastInitedModel = modelName
+                // A fresh handle is cold no matter how recently the previous
+                // model transcribed: its first inference pays one-time graph
+                // and buffer setup that can multiply latency past the watch
+                // dictation window. Clearing the recency mark makes the
+                // post-init warm-up unconditional so a real dictation never
+                // pays those costs.
+                lastTranscriptionAt = null
+                val initDuration = Clock.System.now() - start
+                logger.d { "Whisper STT model initialized in $initDuration" }
+            }
         }
     }
 
@@ -466,7 +525,7 @@ class WhisperTranscriptionService(
     }
 
     /** True if the local model is loaded, or downloaded and ready to load, on a supported device. */
-    fun isLocalAvailable(): Boolean = isWhisperSupported() && (modelHandle != 0L || modelExists())
+    fun isLocalAvailable(): Boolean = engine.supported() && (modelHandle != 0L || modelExists())
 
     fun earlyInit() {
         if (initJob == null || modelHandle == 0L || lastInitedModel != sttConfig.value.modelName) {
@@ -505,7 +564,7 @@ class WhisperTranscriptionService(
         try {
             val handle = modelHandle
             if (handle == 0L) {
-                if (!isWhisperSupported()) {
+                if (!engine.supported()) {
                     throw TranscriptionException.TranscriptionServiceUnavailable(modelUsed = sttConfig.value.modelName)
                 }
                 throw TranscriptionException.TranscriptionRequiresDownload("Model not initialized")
