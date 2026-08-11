@@ -78,6 +78,33 @@ class CollapseRepeatedSentencesTest {
     }
 
     @Test
+    fun keepsRepeatedSingleWords() {
+        // Short emphatic repetition is ordinary speech in this feature's
+        // main use cases (notification replies, short notes); silently
+        // rewriting it would drop words the user actually said. Only
+        // multi-word phrases qualify as word-level loop collapse.
+        assertEquals("no no no", collapseRepeatedSentences("no no no"))
+        assertEquals("yes yes yes yes", collapseRepeatedSentences("yes yes yes yes"))
+    }
+
+    @Test
+    fun keepsLongSingleWordRuns() {
+        // Even a run long enough to be a genuine decoder loop is left
+        // alone at word level: visible garble beats a silent rewrite, and
+        // the sentence-level pass still collapses punctuated loops.
+        val run = List(13) { "no" }.joinToString(" ")
+        assertEquals(run, collapseRepeatedSentences(run))
+    }
+
+    @Test
+    fun collapsesRepeatedSingleWordSentences() {
+        // Punctuated single-word loops are sentence runs, not word runs:
+        // the sentence-level pass owns them and its threshold applies.
+        val spam = "No. No. No. No."
+        assertEquals("No.", collapseRepeatedSentences(spam))
+    }
+
+    @Test
     fun leavesNormalSentencesAlone() {
         val normal = "Remind me to pick up the dry cleaning tomorrow afternoon."
         assertEquals(normal, collapseRepeatedSentences(normal))

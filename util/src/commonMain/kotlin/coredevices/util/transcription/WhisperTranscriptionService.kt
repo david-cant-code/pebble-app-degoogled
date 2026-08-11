@@ -123,9 +123,10 @@ private val sentenceUnitRegex = "[^.?!]+[.?!]*\\s*".toRegex()
  * consecutive copies. Runs of at least [REPEAT_COLLAPSE_THRESHOLD]
  * identical sentences (case- and whitespace-insensitive) are collapsed to
  * their first instance; shorter runs pass through untouched. Unpunctuated
- * output repeating one phrase back-to-back is collapsed by the same rule
- * with words as the unit. Static and pure so the behavior stays under host
- * tests.
+ * output repeating one multi-word phrase back-to-back is collapsed by the
+ * same rule with words as the unit; single-word repetition is left alone
+ * because it is ordinary emphatic speech. Static and pure so the behavior
+ * stays under host tests.
  */
 internal fun collapseRepeatedSentences(text: String): String {
     if (text.isBlank()) return text
@@ -156,10 +157,18 @@ internal fun collapseRepeatedSentences(text: String): String {
 
     // Word-level pass for unpunctuated loops: if the whole remaining text is
     // one phrase repeated back-to-back at least threshold times (a trailing
-    // partial copy counts as part of the loop), keep one instance.
+    // partial copy counts as part of the loop), keep one instance. Only
+    // phrases with at least two distinct words qualify: a single word
+    // repeated is ordinary speech ("no no no" in a notification reply), and
+    // rewriting it would silently drop words the user actually said,
+    // whereas the observed decoder loops repeat phrases. The distinct-word
+    // check (not just period >= 2) matters because a single-word run also
+    // matches every longer period ("no" x6 is "no no" x3). A single-word
+    // loop surfaces as visibly garbled output instead of a silent rewrite.
     val words = sentenceCollapsed.split(Regex("\\s+"))
-    for (period in 1..words.size / REPEAT_COLLAPSE_THRESHOLD) {
+    for (period in 2..words.size / REPEAT_COLLAPSE_THRESHOLD) {
         val phrase = words.subList(0, period).map { it.lowercase() }
+        if (phrase.distinct().size < 2) continue
         val repeats = words.size / period
         if (repeats >= REPEAT_COLLAPSE_THRESHOLD &&
             (0 until words.size).all { words[it].lowercase() == phrase[it % period] }
