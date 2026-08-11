@@ -155,6 +155,33 @@ class ModelFileInstallerTest {
         assertFalse(installedFile.exists())
     }
 
+    @Test
+    fun fullLengthWrongBytesPartialIsDeletedAndReDownloaded() = runTest {
+        // A complete-size partial whose bytes are wrong (corruption, or a
+        // prior tampered download that reached full length) must not be
+        // promoted: it is deleted and a clean verified download replaces it.
+        seedPartial(payload.copyOf().also { it[10] = (it[10] + 1).toByte() })
+        installer { respond(ByteReadChannel(payload), HttpStatusCode.OK) }.install(model)
+        assertContentEquals(payload, installedFile.readBytes())
+        assertEquals(
+            listOf<String?>(null),
+            requestedRanges,
+            "a wrong full-length partial must fall through to a clean GET, not a resume",
+        )
+        assertFalse(partialFile.exists())
+    }
+
+    @Test
+    fun oversizePartialIsDeletedAndReDownloaded() = runTest {
+        // A partial larger than the pin cannot be a valid prefix; it is
+        // discarded and re-downloaded clean.
+        seedPartial(payload + ByteArray(512))
+        installer { respond(ByteReadChannel(payload), HttpStatusCode.OK) }.install(model)
+        assertContentEquals(payload, installedFile.readBytes())
+        assertEquals(listOf<String?>(null), requestedRanges, "an oversize partial must not be resumed")
+        assertFalse(partialFile.exists())
+    }
+
     // --- Resume protocol ---
 
     @Test
