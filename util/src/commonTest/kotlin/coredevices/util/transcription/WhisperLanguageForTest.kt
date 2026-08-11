@@ -37,4 +37,27 @@ class WhisperLanguageForTest {
         assertEquals("fr", whisperLanguageFor(modelMultilingual = null, spokenLanguage = "fr"))
         assertNull(whisperLanguageFor(modelMultilingual = null, spokenLanguage = null))
     }
+
+    @Test
+    fun legacyJavaLocaleCodesAreMappedToWhisperCodes() {
+        // java.util.Locale reports the pre-1989 codes for Hebrew, Indonesian
+        // and Yiddish, so they are exactly what the language picker stores
+        // for those users; whisper's language map only knows the modern
+        // codes, and an unknown explicit code corrupts the decoder prompt.
+        assertEquals("he", whisperLanguageFor(modelMultilingual = true, spokenLanguage = "iw"))
+        assertEquals("id", whisperLanguageFor(modelMultilingual = true, spokenLanguage = "in"))
+        assertEquals("yi", whisperLanguageFor(modelMultilingual = true, spokenLanguage = "ji"))
+    }
+
+    @Test
+    fun englishOnlyModelForcesEnglishEvenForLegacyCodes() {
+        assertEquals("en", whisperLanguageFor(modelMultilingual = false, spokenLanguage = "iw"))
+    }
+
+    @Test
+    fun modernCodesPassThroughTheNormalizer() {
+        assertEquals("he", normalizeSpokenLanguage("he"))
+        assertEquals("de", normalizeSpokenLanguage("de"))
+        assertNull(normalizeSpokenLanguage(null))
+    }
 }

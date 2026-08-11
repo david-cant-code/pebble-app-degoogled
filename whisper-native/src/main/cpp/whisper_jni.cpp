@@ -136,6 +136,21 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
     // this input path too. Null means in-engine language detection.
     const char *lang = (language != nullptr) ? env->GetStringUTFChars(language, nullptr) : nullptr;
 
+    // whisper_full does not validate an explicitly requested language: an
+    // unknown code yields lang_id -1, and whisper_token_lang(ctx, -1) puts
+    // a second SOT token into the decoder prompt on multilingual models,
+    // silently degrading output with rc == 0. The Kotlin layer normalizes
+    // the legacy Java locale codes it knows about; this is the backstop
+    // for everything else the ~190-entry language picker can produce that
+    // whisper's ~100-entry map does not know. Fall back to in-engine
+    // detection, which is what the caller gets for a null language anyway.
+    if (lang != nullptr && whisper_lang_id(lang) == -1) {
+        __android_log_print(ANDROID_LOG_WARN, kLogTag,
+                            "unknown language '%s', falling back to in-engine detection", lang);
+        env->ReleaseStringUTFChars(language, lang);
+        lang = nullptr;
+    }
+
     whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     params.n_threads       = n_threads > 0 ? n_threads : 4;
     params.language        = lang;

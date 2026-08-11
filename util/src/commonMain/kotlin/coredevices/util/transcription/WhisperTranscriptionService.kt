@@ -75,14 +75,31 @@ internal fun validateContainsSpeech(text: String?, modelUsed: String?) {
  * The language handed to the engine for one transcription. The English-only
  * models decode only English, so the spoken-language preference must never
  * reach them (whisper would warn and misbehave); multilingual models get the
- * preference as-is, with null meaning in-engine detection. Static so this
- * mapping stays under host tests.
+ * preference normalized through [normalizeSpokenLanguage], with null meaning
+ * in-engine detection. Static so this mapping stays under host tests.
  */
 internal fun whisperLanguageFor(modelMultilingual: Boolean?, spokenLanguage: String?): String? =
     when (modelMultilingual) {
         false -> "en"
-        else -> spokenLanguage
+        else -> normalizeSpokenLanguage(spokenLanguage)
     }
+
+/**
+ * Maps the legacy ISO 639-1 codes java.util.Locale still reports (the
+ * pre-1989 codes for Hebrew, Indonesian and Yiddish, kept by Java for
+ * serialization compatibility) to the modern codes whisper's language map
+ * uses. Without this, a Hebrew-locale user picking their own language gets
+ * "iw" all the way to the engine, which whisper does not know; explicitly
+ * requested unknown languages corrupt the decoder prompt instead of
+ * failing (the native shim's fallback is the second layer against that).
+ * Codes outside the legacy trio pass through untouched.
+ */
+internal fun normalizeSpokenLanguage(code: String?): String? = when (code) {
+    "iw" -> "he"
+    "in" -> "id"
+    "ji" -> "yi"
+    else -> code
+}
 
 /**
  * Minimum run length [collapseRepeatedSentences] treats as decoder
