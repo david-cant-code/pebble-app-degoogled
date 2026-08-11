@@ -42,7 +42,6 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
 
-expect suspend fun withHighPriorityThread(block: suspend () -> Unit)
 expect suspend fun getFreeMemoryMB(): Long
 expect val PLATFORM_MIN_TRANSCRIPTION_MEMORY_MB: Long
 
@@ -473,18 +472,16 @@ class WhisperTranscriptionService internal constructor(
         try {
             val handle = modelHandle
             if (handle == 0L) return
-            withHighPriorityThread {
-                try {
-                    withTimeout(2.seconds) {
-                        withWhisperCancelOnCancel { callId ->
-                            // Fixed "en": silence has no language to detect,
-                            // and detection would only add an extra pass.
-                            engine.transcribe(handle, silentPcm, transcriptionThreadCount(), "en", callId)
-                        }
+            try {
+                withTimeout(2.seconds) {
+                    withWhisperCancelOnCancel { callId ->
+                        // Fixed "en": silence has no language to detect,
+                        // and detection would only add an extra pass.
+                        engine.transcribe(handle, silentPcm, transcriptionThreadCount(), "en", callId)
                     }
-                } catch (e: TimeoutCancellationException) {
-                    logger.w { "Whisper STT warmup timed out" }
                 }
+            } catch (e: TimeoutCancellationException) {
+                logger.w { "Whisper STT warmup timed out" }
             }
         } finally {
             modelMutex.unlock()

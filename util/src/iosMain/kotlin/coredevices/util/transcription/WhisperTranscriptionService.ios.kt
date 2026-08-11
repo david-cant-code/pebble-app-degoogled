@@ -15,10 +15,6 @@ import platform.darwin.mach_host_self
 import platform.darwin.vm_size_tVar
 import platform.darwin.vm_statistics64_data_t
 
-actual suspend fun withHighPriorityThread(block: suspend () -> Unit) {
-    block()
-}
-
 actual suspend fun getFreeMemoryMB(): Long = memScoped {
     val hostPort = mach_host_self()
     val hostSize = alloc<UIntVar> {

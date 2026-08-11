@@ -61,15 +61,7 @@ kotlin {
             enable = true
         }
 
-        withHostTestBuilder {}.configure {
-            // The transcription-service host tests drive the init/warm-up
-            // state machine with a fake engine; the warm-up path crosses
-            // withHighPriorityThread, whose android.os.Process calls only
-            // exist as throwing stubs on the host JVM. Defaulted stubs
-            // (no-op priority juggling) keep that path runnable; nothing
-            // in this module's host tests asserts on android.* behavior.
-            isReturnDefaultValues = true
-        }
+        withHostTestBuilder {}
     }
 
 // For iOS targets, this is also where you should
