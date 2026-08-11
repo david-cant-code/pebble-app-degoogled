@@ -189,7 +189,7 @@ The replacement is whisper.cpp (MIT), compiled from source:
   time, with no runtime dispatch), so a tiny baseline-architecture
   probe, `libwhispercpu.so`, checks the hwcaps first, and no engine code
   is mapped until it passes.
-- `:whisper` holds the Kotlin bindings: a seven-function expect/actual
+- `:whisper` holds the Kotlin bindings: a six-function expect/actual
   surface whose iOS actuals are unsupported stubs, keeping commonMain
   compiling for the unmaintained iOS targets. Engine strings cross JNI
   as UTF-8 byte arrays: engine output can be byte sequences that are

@@ -128,7 +128,11 @@ class HybridTranscriptionService(
         val canUseKirinki = !willFallbackLocal && kirinki.isAvailable()
 
         val skipWispr = lastErrorMutex.withLock {
-            // Don't skip wispr if local fallback, because the local engine might still be running, we can't trust its cancellation right now due to bug
+            // A session with a local fallback never skips wispr outright: a
+            // wispr failure costs at most initialTimeout before the caller
+            // falls back locally, and wispr quality is worth that attempt.
+            // canUseKirinki already excludes the local-fallback case; the
+            // last clause pins that intent if kirinki's gate ever changes.
             ((Clock.System.now() - lastWisprError) < wisprSkipInterval && canUseKirinki) && !willFallbackLocal
         }
         if (skipWispr) {

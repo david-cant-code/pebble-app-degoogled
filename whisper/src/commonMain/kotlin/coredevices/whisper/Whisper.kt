@@ -1,7 +1,7 @@
 package coredevices.whisper
 
 /**
- * The complete engine surface for on-device speech recognition. Seven
+ * The complete engine surface for on-device speech recognition. Six
  * functions on purpose: this is the fork's replacement for a much larger
  * proprietary binding surface, and everything the app needs from the
  * engine fits here. Anything not expressible through these functions
