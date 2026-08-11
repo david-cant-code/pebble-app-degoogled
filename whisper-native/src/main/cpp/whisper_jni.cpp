@@ -158,6 +158,30 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
     const int wanted_ctx = static_cast<int>(n_samples / (WHISPER_SAMPLE_RATE / 50)) + 64;
     params.audio_ctx = std::min(wanted_ctx, 1500);
 
+    // Disable the temperature-fallback ladder: this transcription path
+    // serves interactive dictation with a hard caller-side deadline, and
+    // the ladder multiplies worst-case decode time by the number of retry
+    // temperatures. Measured on degraded watch captures on phone-class
+    // hardware, a clip whose single greedy pass costs ~1-3 s ground for
+    // 38-89 s on the default ladder before returning the same low-quality
+    // text the first pass produced. A single pass keeps the worst case
+    // near one encoder plus one decoder evaluation; audio bad enough that
+    // the ladder would have engaged yields its garbage immediately, and
+    // the caller-side no-speech and text-validation gates reject it.
+    params.temperature_inc = 0.0f;
+
+    // Cap tokens per segment: without the ladder, a decoder repetition
+    // loop on degraded audio runs to whisper's internal per-segment limit
+    // (~10 s on the base model for one such runaway; the small model
+    // decodes ~3x slower, which would breach the dictation deadline on
+    // its own). Hitting the cap closes the segment and decoding continues
+    // from there, so legitimate speech gets split across segments rather
+    // than truncated; real watch dictations measure ~15-30 tokens total.
+    // Measured on the degraded reference capture, a 64 cap still let the
+    // small model's multi-segment runaway reach 12.6-14.4 s against the
+    // 14 s dictation deadline; 32 holds it comfortably inside.
+    params.max_tokens = 32;
+
     params.abort_callback = [](void *) -> bool {
         return g_cancel.load(std::memory_order_relaxed);
     };

@@ -85,6 +85,75 @@ internal fun whisperLanguageFor(modelMultilingual: Boolean?, spokenLanguage: Str
     }
 
 /**
+ * Minimum run length [collapseRepeatedSentences] treats as decoder
+ * pathology. Two consecutive identical sentences are plausibly real speech
+ * (a measured watch capture genuinely contains its phrase twice, and every
+ * engine configuration agrees on the double); three or more identical
+ * sentences inside a dictation clip bounded by the firmware's 15 s window
+ * have only been observed from decoder repetition loops.
+ */
+internal const val REPEAT_COLLAPSE_THRESHOLD = 3
+
+private val sentenceUnitRegex = "[^.?!]+[.?!]*\\s*".toRegex()
+
+/**
+ * Collapses decoder repetition loops in engine output to a single instance.
+ *
+ * The engine runs without whisper's temperature-fallback ladder (bounded
+ * dictation latency; see the native transcribe shim), so a repetition loop
+ * that the ladder used to retry away now surfaces as the same sentence
+ * emitted until the per-segment token cap: real captures produced thirteen
+ * consecutive copies. Runs of at least [REPEAT_COLLAPSE_THRESHOLD]
+ * identical sentences (case- and whitespace-insensitive) are collapsed to
+ * their first instance; shorter runs pass through untouched. Unpunctuated
+ * output repeating one phrase back-to-back is collapsed by the same rule
+ * with words as the unit. Static and pure so the behavior stays under host
+ * tests.
+ */
+internal fun collapseRepeatedSentences(text: String): String {
+    if (text.isBlank()) return text
+    val units = sentenceUnitRegex.findAll(text).map { it.value }.toList()
+    if (units.isEmpty()) return text
+
+    // Sentence-level pass: collapse runs of >= threshold equal sentences.
+    val kept = ArrayList<String>(units.size)
+    var i = 0
+    while (i < units.size) {
+        var j = i
+        val key = units[i].trim().lowercase()
+        while (j < units.size && units[j].trim().lowercase() == key) j++
+        kept.add(units[i])
+        if (j - i in 2 until REPEAT_COLLAPSE_THRESHOLD) {
+            // Keep short runs verbatim (they may be real speech).
+            for (k in i + 1 until j) kept.add(units[k])
+        } else if (j - i >= REPEAT_COLLAPSE_THRESHOLD && j < units.size) {
+            // The per-segment token cap can cut the loop mid-sentence,
+            // leaving a truncated copy right after the run; a strict prefix
+            // of the collapsed sentence there is loop residue, not speech.
+            val tail = units[j].trim().lowercase()
+            if (tail.isNotEmpty() && tail.length < key.length && key.startsWith(tail)) j++
+        }
+        i = j
+    }
+    val sentenceCollapsed = kept.joinToString("").trim()
+
+    // Word-level pass for unpunctuated loops: if the whole remaining text is
+    // one phrase repeated back-to-back at least threshold times (a trailing
+    // partial copy counts as part of the loop), keep one instance.
+    val words = sentenceCollapsed.split(Regex("\\s+"))
+    for (period in 1..words.size / REPEAT_COLLAPSE_THRESHOLD) {
+        val phrase = words.subList(0, period).map { it.lowercase() }
+        val repeats = words.size / period
+        if (repeats >= REPEAT_COLLAPSE_THRESHOLD &&
+            (0 until words.size).all { words[it].lowercase() == phrase[it % period] }
+        ) {
+            return words.subList(0, period).joinToString(" ")
+        }
+    }
+    return sentenceCollapsed
+}
+
+/**
  * Awaits [worker], a blocking native engine call running on another thread,
  * such that cancelling the waiting coroutine genuinely interrupts the
  * engine. A thread blocked inside a native call cannot observe coroutine
@@ -450,7 +519,7 @@ class WhisperTranscriptionService(
                 inferenceBoost.release()
             }
             analytics.logTranscriptionSuccess("whisper")
-            return text
+            return collapseRepeatedSentences(text)
         } catch (e: TimeoutCancellationException) {
             analytics.logTranscriptionFailure("whisper", transcriptionFailureReason(e), e.message)
             throw e

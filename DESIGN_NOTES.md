@@ -198,6 +198,19 @@ The replacement is whisper.cpp (MIT), compiled from source:
   proven shape: config-driven re-initialization, the two-mutex warm-up
   design, the memory guard, and the InferenceBoost foreground-priority
   seam.
+- Decode parameters trade offline-transcription accuracy for a bounded
+  worst case, because the watch firmware cancels a dictation session
+  after 15 seconds: the JNI shim trims the encoder context to the real
+  audio length, disables whisper's temperature-fallback ladder, and
+  caps tokens per segment (`whisper_jni.cpp` documents each choice).
+  The ladder's job, retrying a decoder repetition loop away, moves to
+  a text-level pass (`collapseRepeatedSentences` in the service) that
+  folds three or more consecutive identical sentences into one; a
+  doubled sentence is left alone because real captures contain genuine
+  doubles. Measured on a degraded capture that ground for 38 to 89
+  seconds under the default parameters, the bounded configuration
+  returns the correct text in under 10 seconds on the slowest catalog
+  model.
 
 Model weights are never checked in. `WhisperModelCatalog` (util) pins
 four models (small, small.en, base, base.en) from

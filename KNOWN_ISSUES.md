@@ -346,3 +346,38 @@ the crash. Both point at the engine revision rather than the catalog
 design. This entry leaves the file when a large tier is reinstated
 after an upstream fix or a re-pin that passes the same on-device checks
 the smaller models passed.
+
+## Watch dictation accuracy varies sharply between sessions
+
+**Status: open; capture-chain investigation pending.**
+
+On-device testing found dictation accuracy varying between
+back-to-back sessions under identical conditions: the same sentence
+dictated twice minutes apart produced a word-perfect transcript and
+then a transcript with most words wrong or missing, on both catalog
+model tiers. Replaying a captured session's audio through the engine
+reproduces that session's result deterministically, and clean
+microphone captures transcribe correctly, so the variance enters
+between the watch microphone and the phone-side decode of the
+speex-encoded BLE audio stream, not in the engine. A frame-level scan
+of degraded captures found no lost-frame or codec-state signature, so
+the root cause is unconfirmed. The decode path stays within the
+dictation deadline on degraded audio (see the decode-parameter notes
+in `DESIGN_NOTES.md`), so the user-visible cost is wrong words rather
+than hangs or session failures.
+
+## Watch-side dictation endpointing misfires in both directions
+
+**Status: open; firmware behavior, app-side mitigation only.**
+
+The watch's end-of-speech detection sometimes streams the entire 15
+second firmware window although speech ended seconds earlier, and
+sometimes ends the session after one to two seconds while the user is
+still speaking. Both directions were observed repeatedly during
+on-device dictation testing; a fully silent session reliably streams
+the whole window. The endpointer runs in the watch firmware, so the
+app can only shape what it does with the audio it receives: the
+encoder-context trim keeps full-window sessions cheap to decode, and
+a truncated session transcribes as the fragment that was actually
+captured. Recorded here so short or slow dictation results are
+attributed correctly during testing.
