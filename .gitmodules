@@ -1,0 +1,11 @@
+# The on-device speech engine, built from source; this fork ships no
+# prebuilt speech binaries. The pinned commit lives in the superproject
+# index (git submodule status shows it); at the time of adding it is
+# 306c88f4d1286aec1bf96e544632897886af5501, upstream tag v1.9.2. Vetted
+# before adoption: MIT license (engine and models), active upstream,
+# current stable tag, and the CMake build in whisper-native disables every
+# network, server, and example surface so only the core library is
+# compiled in.
+[submodule "whisper-native/src/main/cpp/whisper.cpp"]
+	path = whisper-native/src/main/cpp/whisper.cpp
+	url = https://github.com/ggml-org/whisper.cpp.git

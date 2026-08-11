@@ -102,7 +102,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.ViewModel
 import co.touchlab.kermit.Logger
-import com.cactus.isCactusSupported
+import coredevices.whisper.isWhisperSupported
 import com.russhwolf.settings.Settings
 import com.russhwolf.settings.set
 import coredevices.CoreBackgroundSync
@@ -444,10 +444,12 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     val showChangelogBadge = remember { appUpdateTracker.appWasUpdated.value }
     val hasOfflineModels by produceState(false) {
         withContext(Dispatchers.Default) {
-            value = modelManager.getDownloadedModelSlugs().any { it.startsWith("parakeet", false) }
+            // Installed catalog models only: a stale previous-engine dir on
+            // disk must not make the speech section claim a usable model.
+            value = modelManager.getDownloadedSTTModelSlugs().isNotEmpty()
         }
     }
-    val cactusSupported = remember { isCactusSupported() }
+    val whisperSupported = remember { isWhisperSupported() }
     val platformSpeechRecognizer: PlatformSpeechRecognizer = koinInject()
     val platformSttAvailable by produceState(false) {
         value = withContext(Dispatchers.Default) { platformSpeechRecognizer.isAvailable() }
@@ -1456,7 +1458,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                 basicSettingsDropdownItem(
                     id = OfflineSpeechRecognition,
                     title = "Offline Speech Recognition",
-                    keywords = "cactus stt speech recognition offline rebble",
+                    keywords = "whisper stt speech recognition offline rebble",
                     topLevelType = TopLevelType.Phone,
                     section = Section.Speech,
                     items = CactusSTTMode.entries.filter { mode ->
@@ -1490,7 +1492,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                             showSignInDialog = true
                         } else if (isPlatform && !platformSttAvailable) {
                             snackbarDisplay.showSnackbar("This device doesn't support system speech recognition")
-                        } else if (it != CactusSTTMode.RemoteOnly && !isPlatform && !cactusSupported) {
+                        } else if (it != CactusSTTMode.RemoteOnly && !isPlatform && !whisperSupported) {
                             snackbarDisplay.showSnackbar("This device doesn't support local speech recognition")
                         } else if (it != CactusSTTMode.LocalOnly && !isPlatform && !isRebble && coreUser == null) {
                             snackbarDisplay.showSnackbar("You need to be signed in to use cloud speech recognition")
@@ -1555,7 +1557,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     } else {
                         null
                     },
-                    keywords = "cactus stt speech recognition offline",
+                    keywords = "whisper stt speech recognition offline",
                     topLevelType = TopLevelType.Phone,
                     section = Section.Speech,
                     show = {

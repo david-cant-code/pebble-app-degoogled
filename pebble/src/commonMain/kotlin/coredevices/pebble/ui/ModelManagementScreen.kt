@@ -57,12 +57,12 @@ import coredevices.util.models.ModelInfo
 import coredevices.util.models.ModelManager
 import coredevices.util.models.RecommendedModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
@@ -74,6 +74,29 @@ import org.jetbrains.compose.ui.tooling.preview.Preview
 import org.koin.compose.viewmodel.koinViewModel
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
+
+/**
+ * Completes a just-scheduled model download: waits for it to settle and
+ * selects the model only if it actually installed. Settling means the
+ * first non-Downloading status after the replayed current one (Idle on
+ * success and on Android cancel, Cancelled on iOS cancel, Failed on
+ * error); waiting on Idle alone would leave a failed download's coroutine
+ * alive to select its model on the next unrelated download's Idle. The
+ * install check guards the cancel/failure cases: selecting an absent
+ * model strands config pointing at nothing, and the engine then skips
+ * init for it, so local dictation dies at the next process restart.
+ * Static so the settle/select decision stays under host tests.
+ */
+internal suspend fun settleDownloadThenSelect(
+    status: Flow<ModelDownloadStatus>,
+    isInstalled: () -> Boolean,
+    refresh: () -> Unit,
+    select: () -> Unit,
+) {
+    status.drop(1).firstOrNull { it !is ModelDownloadStatus.Downloading }
+    refresh()
+    if (isInstalled()) select()
+}
 
 class ModelManagementScreenViewModel(
     private val modelManager: ModelManager,
@@ -111,9 +134,6 @@ class ModelManagementScreenViewModel(
     private val _availableSTTModels =
         MutableStateFlow<AvailableModelsState>(AvailableModelsState.Loading)
     val availableSTTModels = _availableSTTModels.asStateFlow()
-    private val _availableLanguageModels =
-        MutableStateFlow<AvailableModelsState>(AvailableModelsState.Loading)
-    val availableLanguageModels = _availableLanguageModels.asStateFlow()
 
     init {
         refreshAvailableModels()
@@ -148,23 +168,17 @@ class ModelManagementScreenViewModel(
     fun downloadSTTModel(info: ModelInfo) {
         viewModelScope.launch {
             modelManager.downloadSTTModel(info, allowMetered = true)
-            modelDownloadState.drop(1)
-                .filterIsInstance<ModelDownloadStatus.Idle>()
-                .firstOrNull()
-            setCurrentSTTModel(info.slug)
-            refreshDownloadedModels()
+            settleDownloadThenSelect(
+                status = modelDownloadState,
+                isInstalled = { info.slug in modelManager.getDownloadedSTTModelSlugs() },
+                refresh = ::refreshDownloadedModels,
+                select = { setCurrentSTTModel(info.slug) },
+            )
         }
     }
 
     fun cancelDownload() {
         modelManager.cancelDownload()
-    }
-
-    fun downloadLanguageModel(info: ModelInfo) {
-        viewModelScope.launch {
-            modelManager.downloadLanguageModel(info, allowMetered = true)
-            refreshDownloadedModels()
-        }
     }
 
     fun setCurrentSTTModel(slug: String) {
@@ -179,24 +193,11 @@ class ModelManagementScreenViewModel(
     fun refreshAvailableModels() {
         viewModelScope.launch {
             _availableSTTModels.value = try {
-                val models = modelManager.getAvailableSTTModels()
-                val recommendedSTTModelSlug = modelManager.getRecommendedSTTModel()
-                AvailableModelsState.Success(
-                    if (!settings.showDebugOptions()) {
-                        models.filter {
-                            it.slug == recommendedSTTModelSlug.modelSlug || it.slug in downloadedModels.value
-                        }
-                    } else {
-                        models
-                    }
-                )
-            } catch (e: Exception) {
-                AvailableModelsState.Error(e.message ?: "Unknown error")
-            }
-        }
-        viewModelScope.launch {
-            _availableLanguageModels.value = try {
-                AvailableModelsState.Success(modelManager.getAvailableLanguageModels())
+                // The whole catalog is user-facing choice by design; the
+                // Cactus-era recommended-or-downloaded filter would hide
+                // the size/accuracy tiers the multi-model catalog exists
+                // to offer.
+                AvailableModelsState.Success(modelManager.getAvailableSTTModels())
             } catch (e: Exception) {
                 AvailableModelsState.Error(e.message ?: "Unknown error")
             }
@@ -205,10 +206,6 @@ class ModelManagementScreenViewModel(
 
     fun getRecommendedSTTModel(): RecommendedModel {
         return modelManager.getRecommendedSTTModel()
-    }
-
-    fun getRecommendedLanguageModel(): String {
-        return modelManager.getRecommendedLanguageModel()
     }
 }
 

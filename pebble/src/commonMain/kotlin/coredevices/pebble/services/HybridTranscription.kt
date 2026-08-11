@@ -47,7 +47,7 @@ class HybridTranscription(
         isNotificationReply: Boolean
     ): TranscriptionResult {
         require(encoderInfo is VoiceEncoderInfo.Speex) {
-            "Cactus transcription only supports Speex encoding, got ${encoderInfo::class.simpleName}"
+            "Local transcription only supports Speex encoding, got ${encoderInfo::class.simpleName}"
         }
 
         val speex = SpeexCodec(

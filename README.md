@@ -29,6 +29,10 @@ a security posture tightened beyond upstream's defaults.
   ([KNOWN_ISSUES.md](KNOWN_ISSUES.md) records the trade-offs).
 - **Weather without Play services.** Manual latitude/longitude entry, since
   the stock place search relies on the GMS-backed platform geocoder.
+- **Free on-device dictation.** Voice dictation runs on whisper.cpp,
+  built from source as a pinned git submodule, with a choice of
+  integrity-pinned model downloads; the proprietary speech engine
+  upstream bundles as a prebuilt binary is gone.
 - **A watch microphone API for third-party applications** documented and
   authorization-gated, rather than locking watch mic audio to first-party
   features.
@@ -54,12 +58,17 @@ lands piece by piece:
 - [x] Google Play services / Firebase removal
 - [x] Core watch firmware updates from the public PebbleOS GitHub releases
 - [x] Per-app watchapp permissions (internet + location, deny by default)
+- [x] Free speech engine (whisper.cpp built from source, replacing the
+      proprietary Cactus stack)
 - [ ] Third-party microphone API
 - [ ] Local on-device battery analytics (secondary goal, feasibility open)
 - [ ] F-Droid inclusion (blockers tracked in KNOWN_ISSUES.md)
 
 ## Building (Android)
 
+- Clone with `--recursive` (or run `git submodule update --init`): the
+  whisper.cpp speech engine is a pinned git submodule, compiled from
+  source by the Android build.
 - JDK 17; Gradle wrapper included. Debug build:
   `./gradlew :androidApp:assembleDebug`
 - No `google-services.json` is needed: the google-services plugin is gone

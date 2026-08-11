@@ -5,7 +5,9 @@ import kotlinx.cinterop.useContents
 import platform.CoreML.MLAllComputeDevices
 import platform.CoreML.MLComputeDeviceProtocolProtocol
 import platform.CoreML.MLNeuralEngineComputeDevice
+import platform.Foundation.NSLocale
 import platform.Foundation.NSProcessInfo
+import platform.Foundation.currentLocale
 
 actual fun Platform.supportsNPU(): Boolean {
     if (NSProcessInfo.processInfo.operatingSystemVersion.useContents { majorVersion } < 16) return false
@@ -15,3 +17,8 @@ actual fun Platform.supportsNPU(): Boolean {
 actual fun Platform.supportsHeavyCPU(): Boolean {
     return false
 }
+actual fun Platform.totalRamBytes(): Long =
+    NSProcessInfo.processInfo.physicalMemory.toLong()
+
+actual fun Platform.prefersEnglishModels(): Boolean =
+    NSLocale.currentLocale().localeIdentifier.startsWith("en")

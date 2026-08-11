@@ -94,7 +94,6 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         }
         setupExceptionHandler()
         experimentalDevices.appInit()
-        // Cactus telemetry is initialized via CommonAppDelegate.initCactus()
         pebbleAppDelegate.init()
         configureStrictMode()
         scheduleBackgroundJob(AppContext(this), coreConfigHolder.config.value)

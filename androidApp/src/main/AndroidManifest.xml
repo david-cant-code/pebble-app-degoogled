@@ -98,7 +98,7 @@
             android:foregroundServiceType="connectedDevice"
             android:exported="false" />
         <!--
-            Fork: holds foreground priority during local Cactus
+            Fork: holds foreground priority during local speech
             transcription; upstream's equivalent service lives in the
             unplugged :experimental module. shortService needs no
             type-specific permission.

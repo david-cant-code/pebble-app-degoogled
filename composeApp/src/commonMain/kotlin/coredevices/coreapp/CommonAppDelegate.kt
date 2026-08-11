@@ -19,7 +19,7 @@ import coredevices.pebble.account.FirestoreLocker
 import coredevices.pebble.health.PlatformHealthSync
 import coredevices.pebble.services.PebbleAccountProvider
 import coredevices.pebble.weather.WeatherFetcher
-import coredevices.util.CommonBuildKonfig
+import coredevices.util.models.WhisperModelCatalog
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigHolder
 import coredevices.util.DoneInitialOnboarding
@@ -45,6 +45,93 @@ internal const val STT_UPDATE_NOTIFIED_VERSION_KEY = "stt_update_notified_versio
 internal const val STT_MODE_BEFORE_UPDATE_KEY = "stt_mode_before_update"
 internal val STT_UPDATE_NOTIFICATION_ID = "stt_update_notif".hashCode()
 
+private val sttMigrationLogger = Logger.withTag("SttModelMigration")
+
+/**
+ * Startup pass over the on-device STT models; every install runs it on
+ * every launch, and it is the only path that migrates a previous-engine
+ * install. When stale installs exist (previous-engine directories, torn
+ * catalog installs), the user's local mode is stashed under
+ * [STT_MODE_BEFORE_UPDATE_KEY], config falls back to RemoteOnly with no
+ * model, the stale directories are deleted, and [notifyUpgrade] fires once
+ * per catalog generation (deduped via [STT_UPDATE_NOTIFIED_VERSION_KEY])
+ * to point at the re-download. The stash is only resolved once a usable
+ * catalog model is actually installed, so SttModelUpdatePrompt keeps
+ * offering the download across launches until then; a user who picked a
+ * local mode themselves in the meantime keeps their choice and the stash
+ * is dropped as stale.
+ *
+ * Static with its dependencies handed in so the state machine stays under
+ * host tests: it is destructive (deletes model directories) and runs
+ * exactly once per user in the field, so a regression here is
+ * unrecoverable and invisible.
+ */
+internal fun runSttModelMigration(
+    modelProvider: CactusModelPathProvider,
+    settings: Settings,
+    coreConfigHolder: CoreConfigHolder,
+    notifyUpgrade: () -> Unit,
+) {
+    val incompatible = modelProvider.getIncompatibleModels()
+    if (incompatible.isNotEmpty()) {
+        sttMigrationLogger.d { "Incompatible models found: $incompatible" }
+        val currentMode = coreConfigHolder.config.value.sttConfig.mode
+        if (currentMode != CactusSTTMode.RemoteOnly && !settings.hasKey(STT_MODE_BEFORE_UPDATE_KEY)) {
+            settings.putInt(STT_MODE_BEFORE_UPDATE_KEY, currentMode.id)
+        }
+        coreConfigHolder.update(
+            coreConfigHolder.config.value.copy(
+                sttConfig = coreConfigHolder.config.value.sttConfig.copy(
+                    mode = coreConfigHolder.config.value.sttConfig.mode
+                        .takeUnless { it.usesLocalCactus() } ?: CactusSTTMode.RemoteOnly,
+                    modelName = null,
+                )
+            )
+        )
+        // Everything incompatible is deleted outright: an in-flight
+        // catalog re-download is unaffected because its resumable
+        // partial lives in the installer's staging dir, which is
+        // never reported as a model.
+        incompatible.forEach {
+            try {
+                modelProvider.deleteModel(it)
+            } catch (e: Exception) {
+                sttMigrationLogger.w(e) { "Failed to delete incompatible model $it" }
+            }
+        }
+        if (settings.getStringOrNull(STT_UPDATE_NOTIFIED_VERSION_KEY) != WhisperModelCatalog.GENERATION) {
+            settings.putString(STT_UPDATE_NOTIFIED_VERSION_KEY, WhisperModelCatalog.GENERATION)
+            notifyUpgrade()
+        }
+    } else if (settings.hasKey(STT_MODE_BEFORE_UPDATE_KEY)) {
+        val mode = coreConfigHolder.config.value.sttConfig.mode
+        if (mode != CactusSTTMode.RemoteOnly) {
+            // The user picked a mode themselves since the sweep; the
+            // stash is stale and must not override their choice.
+            settings.remove(STT_MODE_BEFORE_UPDATE_KEY)
+        } else {
+            // Complete the restore only once a usable model exists
+            // (downloaded via the prompt or Manage Offline Models).
+            val installed = modelProvider.getDownloadedModels()
+                .firstOrNull { modelProvider.isModelDownloaded(it) }
+            if (installed != null) {
+                val saved = CactusSTTMode.fromId(
+                    settings.getInt(STT_MODE_BEFORE_UPDATE_KEY, CactusSTTMode.RemoteOnly.id)
+                )
+                settings.remove(STT_MODE_BEFORE_UPDATE_KEY)
+                coreConfigHolder.update(
+                    coreConfigHolder.config.value.copy(
+                        sttConfig = coreConfigHolder.config.value.sttConfig.copy(
+                            mode = saved,
+                            modelName = installed,
+                        )
+                    )
+                )
+            }
+        }
+    }
+}
+
 class CommonAppDelegate(
     private val platformContext: PlatformContext,
     private val bugReports: BugReports,
@@ -68,67 +155,29 @@ class CommonAppDelegate(
     private val logger = Logger.withTag("CommonAppDelegate")
     private val syncInProgress = MutableStateFlow(false)
 
-    private fun initCactus() {
+    /**
+     * Runs [runSttModelMigration] (the host-tested state machine) with the
+     * production wiring: the DI-resolved provider and the platform
+     * notification.
+     */
+    private fun initLocalSttModels() {
         val modelProvider = try {
             org.koin.mp.KoinPlatform.getKoin().get<CactusModelPathProvider>()
         } catch (e: Exception) {
-            logger.w(e) { "Cactus model provider not available" }
+            logger.w(e) { "STT model provider not available" }
             return
         }
         try {
-            modelProvider.initTelemetry()
-        } catch (e: Exception) {
-            logger.w(e) { "Cactus telemetry init skipped" }
-        }
-        try {
-            val incompatible = modelProvider.getIncompatibleModels()
-            if (incompatible.isNotEmpty()) {
-                logger.d { "Incompatible models found: $incompatible" }
-                val currentMode = coreConfigHolder.config.value.sttConfig.mode
-                if (currentMode != CactusSTTMode.RemoteOnly && !settings.hasKey(STT_MODE_BEFORE_UPDATE_KEY)) {
-                    settings.putInt(STT_MODE_BEFORE_UPDATE_KEY, currentMode.id)
-                }
-                coreConfigHolder.update(
-                    coreConfigHolder.config.value.copy(
-                        sttConfig = coreConfigHolder.config.value.sttConfig.copy(
-                            mode = coreConfigHolder.config.value.sttConfig.mode
-                                .takeUnless { it.usesLocalCactus() } ?: CactusSTTMode.RemoteOnly,
-                            modelName = null,
-                        )
-                    )
+            runSttModelMigration(modelProvider, settings, coreConfigHolder) {
+                notifyLocal(
+                    platformContext,
+                    STT_UPDATE_NOTIFICATION_ID,
+                    "Offline voice recognition",
+                    "Offline voice recognition has been upgraded. Open the app to download the new model."
                 )
-                incompatible.filter { it != CommonBuildKonfig.CACTUS_STT_MODEL }.forEach {
-                    try {
-                        modelProvider.deleteModel(it)
-                    } catch (e: Exception) {
-                        logger.w(e) { "Failed to delete incompatible model $it" }
-                    }
-                }
-                if (settings.getStringOrNull(STT_UPDATE_NOTIFIED_VERSION_KEY) != CommonBuildKonfig.CACTUS_WEIGHTS_VERSION) {
-                    settings.putString(STT_UPDATE_NOTIFIED_VERSION_KEY, CommonBuildKonfig.CACTUS_WEIGHTS_VERSION)
-                    notifyLocal(
-                        platformContext,
-                        STT_UPDATE_NOTIFICATION_ID,
-                        "Offline voice recognition",
-                        "We've improved offline voice recognition. Open the app to update the model."
-                    )
-                }
-            } else if (settings.hasKey(STT_MODE_BEFORE_UPDATE_KEY)) {
-                val saved = CactusSTTMode.fromId(settings.getInt(STT_MODE_BEFORE_UPDATE_KEY, CactusSTTMode.RemoteOnly.id))
-                settings.remove(STT_MODE_BEFORE_UPDATE_KEY)
-                if (coreConfigHolder.config.value.sttConfig.mode == CactusSTTMode.RemoteOnly) {
-                    coreConfigHolder.update(
-                        coreConfigHolder.config.value.copy(
-                            sttConfig = coreConfigHolder.config.value.sttConfig.copy(
-                                mode = saved,
-                                modelName = CommonBuildKonfig.CACTUS_STT_MODEL,
-                            )
-                        )
-                    )
-                }
             }
         } catch (e: Exception) {
-            logger.w(e) { "Cactus incompatible model check skipped" }
+            logger.w(e) { "STT model check skipped" }
         }
     }
 
@@ -159,7 +208,7 @@ class CommonAppDelegate(
                 analyticsBackend.setUser(email = it)
             }
         }
-        initCactus()
+        initLocalSttModels()
         bugReports.init()
         GlobalScope.launch(Dispatchers.Default) {
             weatherFetcher.init()

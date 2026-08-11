@@ -28,7 +28,7 @@ import coredevices.util.DoneInitialOnboarding
 import coredevices.util.OAuthRedirectHandler
 import coredevices.util.models.ModelManager
 import coredevices.util.transcription.CactusModelPathProvider
-import coredevices.util.transcription.CactusTranscriptionService
+import coredevices.util.transcription.WhisperTranscriptionService
 import coredevices.util.transcription.HybridTranscriptionService
 import coredevices.util.transcription.KirinkiTranscriptionService
 import coredevices.util.transcription.PlatformSpeechRecognizer
@@ -86,11 +86,12 @@ val utilModule = module {
     singleOf(::OAuthRedirectHandler)
     singleOf(::WisprFlowAuth)
     single {
-        CactusTranscriptionService(
+        WhisperTranscriptionService(
             get(),
             getOrNull<CactusModelPathProvider>() ?: object : CactusModelPathProvider {
                 override suspend fun getSTTModelPath(): String = throw IllegalStateException("CactusModelPathProvider not available")
                 override suspend fun getLMModelPath(): String = throw IllegalStateException("CactusModelPathProvider not available")
+                override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = throw IllegalStateException("CactusModelPathProvider not available")
                 override fun isModelDownloaded(modelName: String): Boolean = false
                 override fun getDownloadedModels(): List<String> = emptyList()
                 override fun getIncompatibleModels(): List<String> = emptyList()

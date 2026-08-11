@@ -13,7 +13,7 @@ import coredevices.coreapp.auth.NoOpGoogleAuthUtil
 import coredevices.coreapp.AndroidInferenceBoost
 import coredevices.coreapp.util.AppUpdate
 import coredevices.coreapp.util.NoOpAppUpdate
-import coredevices.coreapp.model.CactusModelProvider
+import coredevices.coreapp.model.WhisperModelProvider
 import coredevices.pebble.PebbleAndroidDelegate
 import coredevices.util.AndroidCompanionDevice
 import coredevices.util.AndroidPermissionRequester
@@ -77,12 +77,19 @@ val androidDefaultModule = module {
     }
     single { createAndroidAnalytics(get()) }
     singleOf(::ModelDownloadManager)
-    // Fork binding: upstream registers its Cactus model provider inside the
-    // unplugged :experimental module; without this, on-device Cactus STT
-    // falls back to a provider that throws (utilModule) and dictation dies.
+    // Fork binding: upstream registers its model provider inside the
+    // unplugged :experimental module; without this, on-device STT falls
+    // back to a provider that throws (utilModule) and dictation dies.
     // The HttpClient is watchModule's shared app-graph single, the same one
-    // the verified firmware installer downloads through.
-    single { CactusModelProvider(androidContext(), get()) } bind CactusModelPathProvider::class
+    // the verified firmware installer downloads through. The configured-
+    // model accessor closes over the config flow so the provider can
+    // resolve "the chosen model" without owning config plumbing.
+    single {
+        val coreConfigFlow = get<coredevices.util.CoreConfigFlow>()
+        WhisperModelProvider(androidContext(), get(), get()) {
+            coreConfigFlow.value.sttConfig.modelName
+        }
+    } bind CactusModelPathProvider::class
     // Fork binding: upstream's inference boost rides in the unplugged
     // :experimental module, so utilModule's getOrNull fallback always found
     // nothing and local transcription ran at background priority whenever

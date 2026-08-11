@@ -22,31 +22,6 @@ and the watch's own bootloader validation with recovery fallback
 backstops a bad install. This entry leaves the file when a single-slot
 watch runs the end-to-end pass.
 
-## Pre-pinning STT/LM model installs are grandfathered without retroactive verification
-
-**Status: accepted until the first model pin bump.**
-
-On-device model archives are now verified before install (immutable-commit
-download URLs, SHA-256 and exact-size gates, bounded staged extraction),
-but that verification is prospective only. Installs made before the
-pinning scheme wrote the release tag (`v2.0.1`) as their
-`.cactus_version` marker after an unverified download from a mutable tag,
-so the marker proves nothing about the installed bytes. `CactusModelPins`
-grandfathers that legacy marker while a model's current pin still names
-the very archive the tag shipped, which means an install that was already
-tampered with under the old scheme (the retargeted-tag or
-compromised-org threats the old entry here described) keeps feeding its
-weights to the native parser until the first real pin bump forces a
-verified reinstall. Retroactive verification is not feasible cheaply:
-only the archive digest is pinned and nothing per-file survives
-extraction, so re-verifying would force every existing user through a
-full re-download (383 MB for STT) after first downgrading them to
-remote-only STT via the incompatible-model sweep, a user-hostile trade
-against a purely historical exposure window. The grandfather clause and
-its frozen anchor digests live in `CactusModelPins.kt`; the first pin
-bump ends the exception automatically, and this entry leaves the file
-with it.
-
 ## Classic PebbleKit broadcasts cannot be restricted to authorized callers
 
 **Status: accepted, no fix available on Android.**
@@ -208,42 +183,28 @@ rules that would keep insecure WebSocket covered deterministically. This
 entry leaves the file if that ships, or if the ecosystem's http-only
 apps age out.
 
-## The bundled speech stack blocks F-Droid inclusion
+## Prebuilt Haversine satellite libraries remain an F-Droid blocker
 
-**Status: open; which way to resolve it is not yet decided.**
+**Status: open; the speech stack no longer blocks inclusion.**
 
-The fork targets inclusion in F-Droid's main repository. The de-Google
-work itself passes F-Droid's checks: the fdroidserver scanner flags real
-Google dependency coordinates and class paths, not mere names like the
-`firebase-stubs` module, and the built release APK carries no Firebase,
-GMS, or tracker classes. What fails is the on-device speech stack, which
-is prebuilt binary code that F-Droid's scanner rejects and its inclusion
-policy disallows (dependencies must be free software, built from source
-or served from trusted repositories):
+The fork targets inclusion in F-Droid's main repository. The on-device
+speech stack, formerly the main blocker, is now free software built from
+source: the whisper.cpp engine is an MIT-licensed git submodule compiled
+by the NDK during the build, and the model weights (MIT, the whisper.cpp
+author's own conversions of OpenAI's release) are integrity-pinned
+runtime downloads, never checked in. Runtime model downloads from
+Hugging Face are expected to draw the NonFreeNet anti-feature flag,
+which documents but does not block inclusion.
 
-- `cactus-native/src/main/jniLibs/arm64-v8a/libcactus_engine.so`, the
-  dictation engine, is a 57.7 MB prebuilt native library checked into git
-  with no source or license in the tree, and it ships in the APK. The
-  missing license is a problem beyond F-Droid: the app links it while
-  shipping under GPLv3. (Upstream moved the file, bit-identical, from
-  `cactus/src/androidMain/jniLibs/` into the `:cactus-native` module; the
-  module's CMake build only compiles a small CPU-capability shim,
-  `cactus_cpu.c`, so the engine itself is still sourceless.)
-- `models/needle-pebble-ft-cq4.zip` (13.7 MB) is bundled into APK assets
-  via a symlink, and the main STT weights (383 MB) are downloaded at
-  runtime from Hugging Face; neither carries a license statement in the
-  tree, and both would draw non-free-assets objections.
-- The `io.github.coredevices.haversine` AAR ships prebuilt satellite
-  `.so` libraries into the APK, even though the Ring runtime they serve
-  is disabled at the DI seam in this fork.
-
-Resolving this means building the engine from source (upstream has not
-published it), dropping the speech stack from an F-Droid build, or
-replacing it with a free engine; each option costs something real, so
-the choice is recorded here rather than made silently. Routine
-submission work (build recipe, signing, versioning) is not tracked
-here. This entry leaves the file when an F-Droid submission is accepted
-or the target is dropped.
+What still fails policy is the `io.github.coredevices.haversine` AAR,
+which ships prebuilt satellite `.so` libraries into the APK even though
+the Ring runtime they serve is disabled at the DI seam; the satellite C
+sources and their licensing are unconfirmed. Resolving it means removing
+Haversine from the classpath (it remains only as a compile-time
+dependency of the deliberately retained `:libindex`) or upstream
+publishing source and license for it. Routine submission work (build
+recipe, signing, versioning) is not tracked here. This entry leaves the
+file when an F-Droid submission is accepted or the target is dropped.
 
 ## Sleep blob mixes epoch timestamps with seconds-of-day typicals
 
@@ -364,3 +325,59 @@ would diverge a binary file from upstream for zero functional gain, so
 this waits for upstream's next wrapper update (or any local wrapper task
 run that lands with other build changes). This entry leaves the file when
 the committed jar matches the declared distribution.
+
+## Large whisper models are absent from the catalog
+
+**Status: accepted; blocked on the pinned upstream engine revision.**
+
+The catalog originally carried ggml-large-v3-turbo-q5_0. Two findings
+removed it. First, transcribing with it on the test platform (a Pixel
+running GrapheneOS) crashed the app with a native out-of-bounds read
+inside ggml's quantized matrix-multiply path at the pinned whisper.cpp
+revision; the hardened system allocator surfaces the stray read as a
+fault, and a model whose inference can fault the process cannot ship
+for any consumer. Second, whisper.cpp applies the audio-context trim
+only to the main transcription pass, while language auto-detection
+(reached whenever a multilingual model runs with no spoken language
+pinned) encodes at the full 1500-frame context; for a 32-encoder-layer
+model on phone-class CPUs that single pass alone exceeds the watch
+dictation window, so the model could never serve dictation even without
+the crash. Both point at the engine revision rather than the catalog
+design. This entry leaves the file when a large tier is reinstated
+after an upstream fix or a re-pin that passes the same on-device checks
+the smaller models passed.
+
+## Watch dictation accuracy varies sharply between sessions
+
+**Status: open; capture-chain investigation pending.**
+
+On-device testing found dictation accuracy varying between
+back-to-back sessions under identical conditions: the same sentence
+dictated twice minutes apart produced a word-perfect transcript and
+then a transcript with most words wrong or missing, on both catalog
+model tiers. Replaying a captured session's audio through the engine
+reproduces that session's result deterministically, and clean
+microphone captures transcribe correctly, so the variance enters
+between the watch microphone and the phone-side decode of the
+speex-encoded BLE audio stream, not in the engine. A frame-level scan
+of degraded captures found no lost-frame or codec-state signature, so
+the root cause is unconfirmed. The decode path stays within the
+dictation deadline on degraded audio (see the decode-parameter notes
+in `DESIGN_NOTES.md`), so the user-visible cost is wrong words rather
+than hangs or session failures.
+
+## Watch-side dictation endpointing misfires in both directions
+
+**Status: open; firmware behavior, app-side mitigation only.**
+
+The watch's end-of-speech detection sometimes streams the entire 15
+second firmware window although speech ended seconds earlier, and
+sometimes ends the session after one to two seconds while the user is
+still speaking. Both directions were observed repeatedly during
+on-device dictation testing; a fully silent session reliably streams
+the whole window. The endpointer runs in the watch firmware, so the
+app can only shape what it does with the audio it receives: the
+encoder-context trim keeps full-window sessions cheap to decode, and
+a truncated session transcribes as the fragment that was actually
+captured. Recorded here so short or slow dictation results are
+attributed correctly during testing.

@@ -3,6 +3,12 @@ package coredevices.util.models
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
 
+// This file outlives the Cactus engine it is named after, for two reasons:
+// promoteSingleRootDir is still called by the iOS model downloader, and
+// CactusSTTMode's entry names are persisted inside the serialized
+// CoreConfig JSON on every existing install, so renaming the enum (or its
+// entries) is a data migration, not a refactor.
+
 fun promoteSingleRootDir(dir: Path) {
     val root = SystemFileSystem.list(dir).singleOrNull() ?: return
     if (SystemFileSystem.metadataOrNull(root)?.isDirectory != true) return

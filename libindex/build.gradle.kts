@@ -92,7 +92,6 @@ kotlin {
                 implementation(libs.webview)
                 implementation(libs.uri)
                 implementation(libs.coredevices.haversine)
-                implementation(project(":cactus"))
                 implementation(project(":libpebble3"))
                 implementation(project(":index-ai"))
                 implementation(libs.kmpio)

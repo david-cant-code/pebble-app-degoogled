@@ -179,6 +179,9 @@ kotlin {
             implementation(libs.ktor.client.okhttp)
             implementation(libs.ktor.client.mock)
             implementation(libs.coroutines.test)
+            // MapSettings for the STT migration state-machine tests; same
+            // test-only artifact and version util and pebble already use.
+            implementation(libs.settings.test)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)

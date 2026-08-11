@@ -52,4 +52,39 @@ class ValidateContainsSpeechTest {
         // Should not throw.
         validateContainsSpeech("hello there", modelUsed = "parakeet")
     }
+
+    // Whisper-shaped non-speech outputs: the engine emits bracketed and
+    // parenthesized event tokens and musical-note runs on non-speech audio;
+    // all of them must read as no-speech, not as dictated text.
+
+    @Test
+    fun whisperParenthesizedEventTokensThrow() {
+        val e = assertFailsWith<TranscriptionException.NoSpeechDetected> {
+            validateContainsSpeech("(wind blowing) (birds chirping)", modelUsed = "whisper-base-en")
+        }
+        assertEquals("non_speech_tokens", e.type)
+    }
+
+    @Test
+    fun whisperMusicTokenThrows() {
+        val e = assertFailsWith<TranscriptionException.NoSpeechDetected> {
+            validateContainsSpeech("[MUSIC]", modelUsed = "whisper-base-en")
+        }
+        assertEquals("non_speech_tokens", e.type)
+    }
+
+    @Test
+    fun whisperMusicalNoteRunThrows() {
+        val e = assertFailsWith<TranscriptionException.NoSpeechDetected> {
+            validateContainsSpeech("\u266a\u266a\u266a", modelUsed = "whisper-base-en")
+        }
+        assertEquals("stutters_or_noise", e.type)
+    }
+
+    @Test
+    fun speechSurroundedByEventTokensPasses() {
+        // Real dictation with an incidental event token must survive the
+        // guard; only pure non-speech output is rejected.
+        validateContainsSpeech("(sighs) add milk to the list", modelUsed = "whisper-base-en")
+    }
 }

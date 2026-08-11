@@ -5,7 +5,7 @@ import coredevices.speex.SpeexCodec
 import coredevices.speex.SpeexDecodeResult
 import coredevices.util.CoreConfigFlow
 import coredevices.util.models.CactusSTTMode
-import coredevices.util.transcription.CactusTranscriptionService
+import coredevices.util.transcription.WhisperTranscriptionService
 import coredevices.util.transcription.TranscriptionException
 import io.ktor.utils.io.CancellationException
 import io.rebble.libpebblecommon.voice.TranscriptionProvider
@@ -21,14 +21,14 @@ import kotlinx.coroutines.withContext
 
 /**
  * Mode-aware [TranscriptionProvider] dispatching between [HybridTranscription] (cloud/local via
- * Cactus + WisprFlow) and [RebbleAsrTranscription] (Rebble's ASR). Owns fallback orchestration
+ * whisper + WisprFlow) and [RebbleAsrTranscription] (Rebble's ASR). Owns fallback orchestration
  * for `RebbleFirst`/`RebbleFallback` modes (which buffer Speex frames so they can be replayed
  * across both backends).
  */
 class STTRouter(
-    private val cactus: HybridTranscription,
+    private val hybrid: HybridTranscription,
     private val rebble: RebbleAsrTranscription,
-    private val cactusService: CactusTranscriptionService,
+    private val whisperService: WhisperTranscriptionService,
     private val coreConfigFlow: CoreConfigFlow,
 ) : TranscriptionProvider {
     companion object {
@@ -45,8 +45,8 @@ class STTRouter(
         return when (mode) {
             CactusSTTMode.RebbleOnly -> rebble.isAvailable()
             CactusSTTMode.RebbleFirst, CactusSTTMode.RebbleFallback ->
-                rebble.isAvailable() || cactus.canServeSession()
-            else -> cactus.canServeSession()
+                rebble.isAvailable() || hybrid.canServeSession()
+            else -> hybrid.canServeSession()
         }
     }
 
@@ -58,7 +58,7 @@ class STTRouter(
     ): TranscriptionResult {
         val mode = coreConfigFlow.value.sttConfig.mode
         if (mode !in rebbleModes) {
-            return cactus.transcribe(encoderInfo, audioFrames, isNotificationReply)
+            return hybrid.transcribe(encoderInfo, audioFrames, isNotificationReply)
         }
 
         require(encoderInfo is VoiceEncoderInfo.Speex) {
@@ -111,7 +111,7 @@ class STTRouter(
     ): TranscriptionResult {
         val pcm = decodeSpeex(encoderInfo, frames)
         return try {
-            val text = cactusService.transcribeLocalForFallback(
+            val text = whisperService.transcribeLocalForFallback(
                 audio = pcm,
                 sampleRate = encoderInfo.sampleRate.toInt(),
             )

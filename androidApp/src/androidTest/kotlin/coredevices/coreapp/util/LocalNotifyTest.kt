@@ -16,7 +16,7 @@ import kotlin.test.assertTrue
 /**
  * Pins the fork's notifyLocal/cancelNotifyLocal actuals, the replacement for
  * the deleted kmpnotifier local-notification path. Its only production caller
- * is the Cactus incompatible-model nudge, which is dead on a clean install
+ * is the incompatible-model nudge, which is dead on a clean install
  * (no downloaded models) and only fires in the field on a weights-version
  * bump, with failures swallowed by the caller's catch, so nothing else would
  * surface a broken implementation before it mattered.
