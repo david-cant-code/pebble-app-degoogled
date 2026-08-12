@@ -26,6 +26,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -254,6 +255,7 @@ class ModelFileInstallerTest {
         assertFalse(partialFile.exists())
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun stalledDownloadFailsAndKeepsThePartial() = runTest {
         // A channel that serves a few bytes and then goes quiet, like a
@@ -267,7 +269,31 @@ class ModelFileInstallerTest {
             modelsDir = modelsDir,
             readStallTimeout = 30.seconds,
         )
-        val e = assertFailsWith<Exception> { stallInstaller.install(model) }
+        var failure: Throwable? = null
+        val installJob = launch {
+            failure = runCatching { stallInstaller.install(model) }.exceptionOrNull()
+        }
+        // The seeded bytes reach the installer through a real-dispatcher
+        // hop (bodyAsChannel returns a wrapper fed by a copy writer on the
+        // client's own threads), while the stall timer sits on the virtual
+        // clock, which jumps the whole 30s the moment this coroutine
+        // suspends with the scheduler idle. On a loaded machine that jump
+        // can outrun the copy and stall the download at 0 bytes, so pump
+        // real time until the bytes have landed in the partial before
+        // letting the clock move: runCurrent runs due work without
+        // advancing virtual time, so the timer cannot fire during the
+        // pump. Bounded so a hang fails the test instead of wedging the
+        // suite.
+        val deadline = System.currentTimeMillis() + 5_000
+        while (partialFile.length() < 10 && System.currentTimeMillis() < deadline) {
+            runCurrent()
+            Thread.sleep(5)
+        }
+        assertEquals(10L, partialFile.length(), "seeded bytes must land before the stall timer may fire")
+        // Only quiet-channel waiting is left, so joining idles the
+        // scheduler, the clock jumps to the timer, and the stall fires.
+        installJob.join()
+        val e = assertNotNull(failure, "the install must fail once the channel goes quiet")
         assertTrue(e.message.orEmpty().contains("stalled"), "unexpected failure: $e")
         assertEquals(10L, partialFile.length(), "a stall is a stopped transfer, not wrong bytes")
     }
