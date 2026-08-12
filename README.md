@@ -50,8 +50,7 @@ no Ring services, no Ring endpoints, rings can never be scanned or paired).
 
 ## Status
 
-Early days, the fork currently tracks upstream while the de-Google work
-lands piece by piece:
+De-google work is completed, all telemetry is removed. What remains is polish and features:
 
 - [x] Manual weather location entry
 - [x] Telemetry strip (Crashlytics, analytics, firmware-diagnostics relay)
