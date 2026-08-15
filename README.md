@@ -74,9 +74,12 @@ De-google work is completed, all telemetry is removed. What remains is polish an
   `./gradlew :androidApp:assembleDebug`
 - No `google-services.json` is needed: the google-services plugin is gone
   along with the Firebase SDKs.
-- For a release build signed with the debug key, set
-  `LOCAL_RELEASE_BUILD=true` in the root `local.properties`, then
-  `./gradlew :androidApp:assembleRelease`.
+- Release builds: `./gradlew :androidApp:assembleRelease` signs with
+  `keystore.jks` in the repo root when present (credentials from the
+  `RELEASE_KEYSTORE_PASSWORD`, `RELEASE_KEYSTORE_ALIAS`, and
+  `RELEASE_KEY_PASSWORD` environment variables), produces an unsigned APK
+  when it is absent, and signs with the debug key instead if
+  `LOCAL_RELEASE_BUILD=true` is set in the root `local.properties`.
 - Fork builds ship no Memfault token and make no Memfault requests.
   Upstream's optional `memfaultToken` Gradle property would route Core
   watch update checks through `api.memfault.com`, periodically sending the

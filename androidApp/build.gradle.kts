@@ -16,6 +16,15 @@ val properties = Properties().apply {
 }
 val localReleaseBuild = properties["LOCAL_RELEASE_BUILD"]?.toString()?.toBooleanStrictOrNull() ?: false
 
+// Fork: release is signed with the keystore only when one is actually present
+// next to the checkout. A checkout without one (a fresh clone, CI, an F-Droid
+// build, which signs the APK itself afterwards) then packages release
+// unsigned instead of failing on a missing keystore file. LOCAL_RELEASE_BUILD
+// keeps its meaning: sign release with the debug key so it installs over a
+// debug build.
+val releaseKeystore = rootDir.resolve("keystore.jks")
+val signReleaseWithKeystore = !localReleaseBuild && releaseKeystore.exists()
+
 // Number of commits in the git history, so it always increases on main.
 val gitVersionCode = providers.exec {
     isIgnoreExitValue = true
@@ -40,10 +49,10 @@ android {
     namespace = "coredevices.coreapp"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
-    if (!localReleaseBuild) {
+    if (signReleaseWithKeystore) {
         signingConfigs {
             create("release") {
-                storeFile = file("../keystore.jks")
+                storeFile = releaseKeystore
                 storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("RELEASE_KEYSTORE_ALIAS")
                 keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
@@ -69,13 +78,24 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+    androidResources {
+        // Fork: the two Wispr Flow logos are compose resources of :pebble
+        // (packaged as assets) that nothing references in fork builds, where
+        // the remote Wispr transcription path can never be enabled. Dropped
+        // at the packaging boundary rather than deleted from the upstream
+        // resource directory, which an upstream sync would resurrect. The
+        // property replaces the AGP default, so the default patterns are
+        // restated ahead of the two additions.
+        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~" +
+            ":!wispr_flow_logo_black.png:!wispr_flow_logo_white.png"
+    }
     buildTypes {
         getByName("release") {
             isMinifyEnabled = true
             isShrinkResources = true
             if (localReleaseBuild) {
                 signingConfig = signingConfigs.getByName("debug")
-            } else {
+            } else if (signReleaseWithKeystore) {
                 signingConfig = signingConfigs.getByName("release")
             }
             isDebuggable = false
@@ -89,6 +109,14 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+    // Fork: AGP by default appends a dependency-metadata block to the APK
+    // signing block, compressed and encrypted so that only Google Play can
+    // read it. Nothing in this fork's distribution can consume it, and
+    // F-Droid's APK scan reports it as an extra signing block.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 }
 
