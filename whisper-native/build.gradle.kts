@@ -13,6 +13,17 @@ android {
     namespace = "coredevices.whisper.nativelib"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
+    // Pinned toolchain for the from-source engine build. Both values must
+    // match what the F-Droid build recipe provisions (its ndk field and the
+    // cmake package it installs), because that buildserver has neither by
+    // default and a mismatch is a hard configuration failure there; a pin
+    // also keeps the compiled engine identical across machines. The NDK is
+    // the version AGP resolves on its own for this AGP line, so nothing
+    // changes for local builds; the CMake version is the SDK package that
+    // satisfies the floor the engine's CMakeLists requires
+    // (cmake_minimum_required 3.22).
+    ndkVersion = "28.2.13676358"
+
     defaultConfig {
         minSdk = libs.versions.android.minSdk.get().toInt()
         ndk {
@@ -27,6 +38,7 @@ android {
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 
