@@ -16,9 +16,6 @@ val properties = Properties().apply {
 }
 val localReleaseBuild = properties["LOCAL_RELEASE_BUILD"]?.toString()?.toBooleanStrictOrNull() ?: false
 
-// Hoisted out of the lambda below, which must not capture the project.
-val providerFactory = providers
-
 // Number of commits in the git history, so it always increases on main.
 val gitVersionCode = providers.exec {
     isIgnoreExitValue = true
@@ -27,16 +24,17 @@ val gitVersionCode = providers.exec {
     it.trim().toIntOrNull() ?: throw GradleException("Error reading current commit count")
 }
 
-// Newest tag anywhere in the repo, including on branches HEAD doesn't descend from.
+// Fork: described from HEAD, so the value is a function of the built commit:
+// exactly the tag name on a tag checkout, "<tag>-<n>-g<sha>" past one, and
+// "unknown" when no tag is reachable. Upstream derives it from the newest tag
+// anywhere in the repository, so an older tag rebuilt after a newer one
+// exists reports the newer version and every branch reports the newest tag.
+// F-Droid builds a tag checkout and requires the built versionName to equal
+// the one declared for that tag, which needs the per-commit derivation.
 val gitVersionName = providers.exec {
     isIgnoreExitValue = true
-    commandLine("git", "rev-list", "--tags", "--max-count=1")
-}.standardOutput.asText.flatMap { rev ->
-    providerFactory.exec {
-        isIgnoreExitValue = true
-        commandLine("git", "describe", "--tags", rev.trim().ifEmpty { "HEAD" })
-    }.standardOutput.asText
-}.map { it.trim().ifEmpty { "unknown" } }
+    commandLine("git", "describe", "--tags", "HEAD")
+}.standardOutput.asText.map { it.trim().ifEmpty { "unknown" } }
 
 android {
     namespace = "coredevices.coreapp"
