@@ -183,6 +183,24 @@ rules that would keep insecure WebSocket covered deterministically. This
 entry leaves the file if that ships, or if the ecosystem's http-only
 apps age out.
 
+## Language pack downloads are not digest-pinned
+
+**Status: deferred; upstream-inherited, integrity rests on transport security.**
+
+Watch language packs come from a catalog compiled into
+`LanguagePackRepository`: 125 files on binaries.rebble.io and 12 on four
+individual contributors' GitHub repositories, ten of those referenced by a
+mutable branch name rather than a commit. A pack is downloaded and sent to
+the watch with no digest or size check. Firmware bundles and speech models
+in this fork are integrity-pinned; language packs are the one remaining
+install path where a substituted or compromised host, or a force-pushed
+branch, delivers whatever bytes it likes to the watch, bounded only by TLS
+to the host. The fix is per-file digests in the catalog, checked before
+install, in the style of `WhisperModelCatalog`; that needs the catalog
+re-derived with hashes and a decision on the branch-referenced entries
+(pin to a commit or drop), so it is deferred as its own change. This entry
+leaves the file when the catalog carries verified digests.
+
 ## Sleep blob mixes epoch timestamps with seconds-of-day typicals
 
 **Status: deferred; upstream-inherited display defect, no data at risk.**

@@ -124,5 +124,10 @@ documentation describe device compatibility, nothing more; the fork's own
 branding (name, icon, colors) is deliberately distinct so users are never
 confused about which app they are running.
 
+The bundled Inter typeface (version 4.001, copyright 2016 The Inter Project
+Authors) is licensed under the SIL Open Font License 1.1; the notice and
+license text are in [LICENSE-Inter-OFL](LICENSE-Inter-OFL). The whisper.cpp
+speech engine submodule carries its own MIT license file.
+
 Development of this fork uses AI assistance; commits carry `Co-Authored-By`
 trailers accordingly, matching upstream's disclosure practice.

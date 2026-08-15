@@ -1,1 +1,1 @@
-Gravel: an unofficial, de-Googled companion app for Pebble smartwatches.
+Gravel: an unofficial, de-Googled companion app for Pebble smartwatches

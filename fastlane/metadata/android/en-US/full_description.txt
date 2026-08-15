@@ -1,9 +1,15 @@
-Gravel is an unofficial, de-Googled fork of the Pebble mobile app by Core Devices, for managing Pebble and Core Devices smartwatches without Google Play services or Firebase. Pair your watch, customize your settings, and browse watchfaces and apps on GrapheneOS, LineageOS, and similar phones.
+Gravel is an unofficial, de-Googled fork of the Pebble mobile app by Core Devices, for managing Pebble and Core Devices smartwatches without Google Play services or Firebase. Pair your watch, customize your settings, browse watchfaces and apps, and update watch firmware on GrapheneOS, LineageOS, and similar phones.
 
 Gravel is not affiliated with or endorsed by Core Devices. "Pebble" and "Core Devices" are trademarks of their respective owners; Gravel is an independent fork of their GPLv3-licensed source code, under its own name and icon to avoid any confusion with the official app.
 
 Features include:
-- Bluetooth pairing and reconnection
+- Bluetooth pairing and reconnection, notifications, calendar, music, health, and weather on the watch
 - Watchface and app gallery browsing
-- Works without Google Play services or Firebase
-- No telemetry
+- Core watch firmware updates fetched from the public PebbleOS releases and integrity-verified before install
+- Per-app permissions for watchapps' companion JavaScript: internet and phone location are denied by default until you allow them
+- On-device voice dictation with the whisper.cpp speech engine, built from source; the speech model is an optional, integrity-pinned download you start yourself
+- Works without Google Play services or Firebase; no telemetry, no analytics, no crash reporting
+
+The app talks to the Core Devices and Rebble web services (app store and its search index, weather, timeline, notification icons, language packs), to the PebbleOS release feed on GitHub for firmware, and to the speech model host on first download; there is no Google endpoint. Manual latitude/longitude entry replaces the Play-services place search for weather.
+
+Permissions Gravel asks for are the ones the watch features need: Bluetooth and location for finding and staying connected to the watch (background location so location-based watchapps and weather keep working while the app is not open), notification access to forward notifications, contacts, call log, and phone state for caller names and call control on the watch, calendar for timeline pins, Health Connect write access to sync the watch's health data, and the list of installed apps for per-app notification settings. Each is requested when the corresponding feature is first set up.
