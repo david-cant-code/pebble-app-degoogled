@@ -279,6 +279,17 @@ abstract class VerifyExportedComponents : DefaultTask() {
     }
 }
 
+// Fork: FdroidGuardrailsTest reads the git-tracked tree (build files, tracked
+// binaries) through git rather than through declared task inputs, so Gradle
+// cannot tell when its verdict is stale. Left tracked, an unchanged test
+// classpath would let the unit test task be skipped as up-to-date or restored
+// from the build cache while the tree it judges had changed, which is the
+// silent-skip shape the guardrail exists to prevent. The module's unit tests
+// are few and fast, so they simply always run.
+tasks.withType<Test>().configureEach {
+    doNotTrackState("FdroidGuardrailsTest scans the git-tracked tree, which is not a declared input")
+}
+
 // Resolved at execution time — a configuration-time .get() makes every commit invalidate the
 // configuration cache.
 androidComponents {

@@ -61,8 +61,11 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
 - **Stay F-Droid deliverable.** The fork targets inclusion in F-Droid's
   main repository, so a change must not add non-free dependencies,
   dependencies from repositories F-Droid does not allow, or prebuilt
-  binaries in the tree. The pre-existing violations are recorded in
-  `KNOWN_ISSUES.md`; do not add new ones.
+  binaries in the tree. `FdroidGuardrailsTest` in `:androidApp` replicates
+  F-Droid's source scanner over the tracked tree (dependency lines in every
+  gradle file, iOS-only and unplugged modules included; maven URLs; checked-in
+  binaries) and defines the envelope: it must stay green, and a change that
+  needs it loosened is a change that breaks the target.
 - **Security first.** No known security flaw ships, however small; genuinely
   deferred issues are documented in `KNOWN_ISSUES.md` with rationale. Any
   cross-app interface (e.g. the third-party mic API) must be explicitly
