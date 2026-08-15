@@ -15,13 +15,12 @@ android {
 
     // Pinned toolchain for the from-source engine build. Both values must
     // match what the F-Droid build recipe provisions (its ndk field and the
-    // cmake package it installs), because that buildserver has neither by
-    // default and a mismatch is a hard configuration failure there; a pin
-    // also keeps the compiled engine identical across machines. The NDK is
-    // the version AGP resolves on its own for this AGP line, so nothing
-    // changes for local builds; the CMake version is the SDK package that
-    // satisfies the floor the engine's CMakeLists requires
-    // (cmake_minimum_required 3.22).
+    // cmake package it installs; the recipe contract is in DESIGN_NOTES.md,
+    // F-Droid section), because that buildserver has neither by default and
+    // a mismatch is a hard configuration failure there; a pin also keeps
+    // the compiled engine identical across machines. The NDK is the version
+    // AGP resolves on its own for this AGP line, so nothing changes for
+    // local builds. The CMake pin sits with the CMake block below.
     ndkVersion = "28.2.13676358"
 
     defaultConfig {
@@ -38,6 +37,10 @@ android {
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
+            // The SDK's cmake package that satisfies the floor the fork's own
+            // wrapper CMakeLists.txt above declares (cmake_minimum_required
+            // 3.22); the engine submodule itself only asks for 3.5. Pinned
+            // for the same reason as ndkVersion.
             version = "3.22.1"
         }
     }
