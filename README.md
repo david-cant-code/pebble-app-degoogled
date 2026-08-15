@@ -37,8 +37,12 @@ a security posture tightened beyond upstream's defaults.
   authorization-gated, rather than locking watch mic audio to first-party
   features.
 - **Distribution through F-Droid.** The fork targets inclusion in F-Droid's
-  main repository; the blockers still standing are tracked in
-  [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
+  main repository. The tree holds no binaries and every dependency is free
+  software from a repository F-Droid allows: the speech engine is built
+  from source, and the Ring satellite library, the last dependency whose
+  native code had no public source, is replaced by a stub. What remains is
+  the submission itself; `DESIGN_NOTES.md` records what the tree
+  guarantees and what the build recipe has to supply.
 
 Out of scope: iOS (sources remain in-tree but are unmaintained here), and the
 Pebble Index 01 (Ring) / Index AI features, due to their heavy reliance on
@@ -61,7 +65,7 @@ De-google work is completed, all telemetry is removed. What remains is polish an
       proprietary Cactus stack)
 - [ ] Third-party microphone API
 - [ ] Local on-device battery analytics (secondary goal, feasibility open)
-- [ ] F-Droid inclusion (blockers tracked in KNOWN_ISSUES.md)
+- [ ] F-Droid inclusion (tree ready; submission pending)
 
 ## Building (Android)
 
@@ -72,9 +76,12 @@ De-google work is completed, all telemetry is removed. What remains is polish an
   `./gradlew :androidApp:assembleDebug`
 - No `google-services.json` is needed: the google-services plugin is gone
   along with the Firebase SDKs.
-- For a release build signed with the debug key, set
-  `LOCAL_RELEASE_BUILD=true` in the root `local.properties`, then
-  `./gradlew :androidApp:assembleRelease`.
+- Release builds: `./gradlew :androidApp:assembleRelease` signs with
+  `keystore.jks` in the repo root when present (credentials from the
+  `RELEASE_KEYSTORE_PASSWORD`, `RELEASE_KEYSTORE_ALIAS`, and
+  `RELEASE_KEY_PASSWORD` environment variables), produces an unsigned APK
+  when it is absent, and signs with the debug key instead if
+  `LOCAL_RELEASE_BUILD=true` is set in the root `local.properties`.
 - Fork builds ship no Memfault token and make no Memfault requests.
   Upstream's optional `memfaultToken` Gradle property would route Core
   watch update checks through `api.memfault.com`, periodically sending the
@@ -118,6 +125,11 @@ GPLv3-licensed source code. References to Pebble watches in this app and its
 documentation describe device compatibility, nothing more; the fork's own
 branding (name, icon, colors) is deliberately distinct so users are never
 confused about which app they are running.
+
+The bundled Inter typeface (version 4.001, copyright 2016 The Inter Project
+Authors) is licensed under the SIL Open Font License 1.1; the notice and
+license text are in [LICENSE-Inter-OFL](LICENSE-Inter-OFL). The whisper.cpp
+speech engine submodule carries its own MIT license file.
 
 Development of this fork uses AI assistance; commits carry `Co-Authored-By`
 trailers accordingly, matching upstream's disclosure practice.

@@ -53,3 +53,26 @@ include(":krisp-stubs")
 // strip). Keeps upstream call sites compiling with no Firebase/GMS SDKs
 // in the graph.
 include(":firebase-stubs")
+// Fork module: inert stand-ins for the io.github.coredevices.haversine Ring
+// satellite library (a prebuilt AAR with bundled native libraries and no
+// public source, incompatible with the F-Droid target). Wired by the
+// dependency substitution rule below; the seam is described in
+// DESIGN_NOTES.md (Ring / Index AI).
+include(":haversine-stubs")
+
+// Every project resolves the substitution, not just :libindex: the artifact
+// is a transitive runtime dependency of everything that depends on libindex
+// (:pebble, :composeApp, :androidApp), and a substitution rule only applies
+// to the configurations of the project that declares it, so applying it in
+// libindex alone would keep the real AAR on the app's runtime classpath.
+// The coordinate is matched by group:name only, so an upstream version bump
+// in libs.versions.toml still lands on the stub.
+gradle.lifecycle.beforeProject {
+    configurations.configureEach {
+        resolutionStrategy.dependencySubstitution {
+            substitute(module("io.github.coredevices.haversine:haversine"))
+                .using(project(":haversine-stubs"))
+                .because("Gravel replaces the prebuilt Ring satellite AAR with :haversine-stubs")
+        }
+    }
+}

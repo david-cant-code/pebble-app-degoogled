@@ -185,7 +185,11 @@ kotlin {
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
-            implementation(libs.crashkios)
+            // Fork: upstream adds libs.crashkios (a Crashlytics wrapper) here.
+            // The fork ships no crash reporting on any platform, and the
+            // coordinate is a build-failing F-Droid scanner signature even
+            // on an iOS-only line, since the scanner reads dependency lines
+            // textually. The iOS target is unmaintained in this fork.
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

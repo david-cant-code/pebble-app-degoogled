@@ -32,6 +32,28 @@ entities, which need `mcp`. Their runtime is dead:
   the `experimental` module trips duplicate-class errors;
 - `CoreConfig.enableIndex` has no reachable set-point.
 
+The Ring satellite library `libindex` compiles against
+(`io.github.coredevices.haversine`, a prebuilt AAR with no public source
+that bundles two native libraries per ABI) is replaced by the fork module
+`:haversine-stubs`: inert same-FQN stand-ins for the seven symbols
+`libindex` references, whose satellite classes have private constructors
+and no factory, so no ring object can exist anywhere in the app
+(`HaversineStubShapeTest` pins that shape, `HaversineStubTest` the two
+static entry points). The wiring is a `dependencySubstitution` rule in
+`settings.gradle.kts`, applied to every project, rather than an edited
+dependency line: the artifact is a transitive runtime dependency of every
+module that depends on `libindex`, which the rule covers and a single
+edited line would not, and the rule matches the coordinate by group and
+name, so an upstream version bump still lands on the stub. Nothing names
+`:haversine-stubs` directly, so a lost rule would bring the AAR back
+silently; `AppClasspathSentinelTest` in `:androidApp` pins the swap from
+the shipping runtime graph (the AAR's wrapped `com.wtlp.*` vendor classes
+must be absent), and `VerifyApkContents` asserts the release APK carries
+no `libhaversinesatellitelibrary.so` / `libppcommon.so`. This was the
+last dependency whose native code had no public source, and the last
+tree-level F-Droid inclusion blocker (the F-Droid section below records
+what the tree guarantees).
+
 ## Firebase
 
 The Firebase SDKs are gone via the same idea at a different seam: the
@@ -236,6 +258,76 @@ existing installs rides the incompatible-model sweep in
 `CommonAppDelegate`: previous-engine model directories are deleted, the
 user's local mode is stashed, and `SttModelUpdatePrompt` restores it
 once a catalog model is downloaded.
+
+## F-Droid
+
+The fork targets inclusion in F-Droid's main repository. What that means
+in practice is a split between what the tree guarantees on its own and
+what the build recipe (the app's metadata file in F-Droid's `fdroiddata`
+repository, maintained out of tree) has to supply. The two must agree, so
+both halves are recorded here.
+
+What the tree guarantees, and how it is pinned:
+
+- No binaries are tracked, no dependency comes from a repository outside
+  F-Droid's allowlist, and no dependency line matches F-Droid's "usual
+  suspects" signature database. `FdroidGuardrailsTest` in `:androidApp`
+  replicates the buildserver's source scanner (`FdroidScannerReplica`
+  holds the checks, `FdroidScannerReplicaTest` proves each one fires) over
+  the tracked tree, the whisper.cpp submodule included, minus the paths the
+  recipe removes before scanning. Its `recipeRemovedPaths` list is the
+  tree's copy of the recipe's `rm:` field. F-Droid's inclusion policy is
+  about the tree and about dependency provenance, not about native code as
+  such: free-software Maven artifacts from allowed repositories may carry
+  compiled native libraries, and the APK does still ship such libraries
+  (the Speex codec from `io.github.coredevices.speex`, Apache-2.0 with
+  public source; SQLite from `androidx.sqlite:sqlite-bundled`; androidx
+  graphics-path) next to the whisper engine built from source. What the
+  fork removed was prebuilt native code with no public source (the Cactus
+  engine, the Ring satellite AAR), which the policy does reject.
+- The engine toolchain is pinned in `whisper-native/build.gradle.kts`
+  (`ndkVersion` 28.2.13676358, that is NDK r28c, and CMake 3.22.1), so a
+  build is the same on every machine and the recipe has exact values to
+  provision.
+- `versionName` is `git describe --tags HEAD` and `versionCode` the commit
+  count, both functions of the built commit (`androidApp/build.gradle.kts`),
+  so a tag checkout reports exactly the tag name and the values the recipe
+  declares for that tag can be checked against the built APK.
+- A checkout without `keystore.jks` packages release unsigned, and the
+  APK carries no dependency-metadata signing block; both are checked by
+  the packaging-time `VerifyApkContents` task in
+  `androidApp/build.gradle.kts`, which also asserts the excluded assets and
+  the replaced native libraries are absent from every APK. CI builds the
+  release variant on a keystore-less checkout and compares the built
+  `versionName` with `git describe` of the built commit.
+
+What the recipe has to supply (field names as in the fdroiddata format):
+
+- `submodules: yes`: the engine is compiled from the whisper.cpp submodule.
+- `rm:` exactly the directories `FdroidGuardrailsTest.recipeRemovedPaths`
+  lists under `whisper-native/src/main/cpp/whisper.cpp/` (bindings,
+  examples, models, samples, tests). They hold language bindings with their
+  own gradle builds and a lockfile-less `package.json`, example apps naming
+  a maven host off the allowlist, binary test-fixture models, and sample
+  audio, none of it part of the fork's build. `rm:`, not `scandelete:`: the
+  scanner counts a `scandelete` entry that removed nothing as an error,
+  while `rm:` tolerates a path that is already gone.
+- `ndk:` r28c (28.2.13676358) and a `prebuild`/`sudo` step that installs the
+  SDK package `cmake;3.22.1`, matching the pins above; the buildserver
+  provisions neither by default and a mismatch fails configuration.
+- JDK 17: `libpebble3`, `blobannotations`, and `blobdbgen` pin
+  `jvmToolchain(17)` and Gradle toolchain auto-download is off on the
+  buildserver, which ships a newer JDK, so the recipe installs
+  `openjdk-17-jdk-headless` (`sudo:`).
+- A build against a tag checkout (`commit:` the tag) with the tag's literal
+  `versionName` and `versionCode`; the F-Droid build fails if the built
+  values differ from the declared ones.
+- The build subdirectory is `androidApp`; the unsigned release APK is the
+  output F-Droid signs.
+- Anti-features: the on-device dictation models are runtime downloads from
+  Hugging Face (`WhisperModelCatalog`), which is expected to draw the
+  NonFreeNet anti-feature flag; that documents but does not block
+  inclusion.
 
 ## Branding assets
 

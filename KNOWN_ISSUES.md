@@ -183,28 +183,27 @@ rules that would keep insecure WebSocket covered deterministically. This
 entry leaves the file if that ships, or if the ecosystem's http-only
 apps age out.
 
-## Prebuilt Haversine satellite libraries remain an F-Droid blocker
+## Language pack downloads are not digest-pinned
 
-**Status: open; the speech stack no longer blocks inclusion.**
+**Status: deferred; upstream-inherited, integrity rests on transport security.**
 
-The fork targets inclusion in F-Droid's main repository. The on-device
-speech stack, formerly the main blocker, is now free software built from
-source: the whisper.cpp engine is an MIT-licensed git submodule compiled
-by the NDK during the build, and the model weights (MIT, the whisper.cpp
-author's own conversions of OpenAI's release) are integrity-pinned
-runtime downloads, never checked in. Runtime model downloads from
-Hugging Face are expected to draw the NonFreeNet anti-feature flag,
-which documents but does not block inclusion.
-
-What still fails policy is the `io.github.coredevices.haversine` AAR,
-which ships prebuilt satellite `.so` libraries into the APK even though
-the Ring runtime they serve is disabled at the DI seam; the satellite C
-sources and their licensing are unconfirmed. Resolving it means removing
-Haversine from the classpath (it remains only as a compile-time
-dependency of the deliberately retained `:libindex`) or upstream
-publishing source and license for it. Routine submission work (build
-recipe, signing, versioning) is not tracked here. This entry leaves the
-file when an F-Droid submission is accepted or the target is dropped.
+Watch language packs come from a catalog compiled into
+`LanguagePackRepository`: 137 entries, 125 of them on binaries.rebble.io
+and 12 on four individual contributors' GitHub repositories; of those 12,
+two reference a mutable branch, eight are release assets addressed by a
+tag name (replaceable by the repository owner without a tag change), and
+two are pinned to a commit. A pack is downloaded and sent to the watch
+with no digest or size check. Firmware bundles and speech models in this
+fork are integrity-pinned; language packs are the one remaining install
+path where a substituted or compromised host, a re-uploaded release asset,
+or a force-pushed branch delivers whatever bytes it likes to the watch,
+bounded only by TLS to the host. The fix is per-file digests in the
+catalog, checked before install, in the style of `WhisperModelCatalog`;
+that needs the catalog re-derived with hashes and a decision on the two
+branch-referenced entries (pin to a commit or drop; release assets have no
+commit-addressed form, so the digest is the whole fix there), so it is
+deferred as its own change. This entry leaves the file when the catalog
+carries verified digests.
 
 ## Sleep blob mixes epoch timestamps with seconds-of-day typicals
 
@@ -246,23 +245,6 @@ leaves the file if the fork adopts the resume machinery for its verified
 flow (plausible follow-up: writing the interrupted-update record at the
 sideload boundary) or upstream's toggle becomes conditional on the
 feature being armable.
-
-## The Haversine AAR embeds an inert debug telemetry endpoint
-
-**Status: accepted; the code is unreachable, the artifact is unchanged.**
-
-The prebuilt `haversine` satellite library AAR (kept on the classpath as
-a compile-time dependency of the deliberately retained `:libindex`) ships
-a default debug-log delegate class containing a hardcoded MongoDB Atlas
-Data API write endpoint and a hardcoded firmware-release URL. The class
-is present in the APK's dex but nothing in this fork constructs it: the
-Ring runtime that would use Haversine is disabled at the DI seam
-(`NoOpLibIndex` never scans, no ring can pair), so no code path reaches
-the delegate. This is the same acceptance already recorded for the
-Haversine prebuilts in the F-Droid entry above, extended to name the
-endpoint explicitly so artifact-level endpoint scans have a documented
-match. This entry leaves the file when Haversine leaves the classpath or
-ships without the debug delegate.
 
 ## The "Use Core OTA service" debug toggle is inert in fork builds
 

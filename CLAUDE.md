@@ -15,13 +15,13 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
 - **De-Google at the DI seam, not by mass deletion.** Swap Firebase/GMS-backed
   implementations for no-op or GMS-free ones at the Koin module level, keeping
   upstream call sites intact so upstream merges stay cheap. `DESIGN_NOTES.md`
-  maps the existing seams (the `:firebase-stubs` module, the unplugged
-  `experimental` module, the no-op `LibIndex`); extend those seams rather
-  than deleting upstream code. The FCM push stack is the one deliberate
-  exception to the seam rule: push either registers a device token with
-  Google or does not exist, so `PushMessaging`, `PushService`, and their
-  call sites were deleted outright rather than no-opped; do not read that
-  deletion as precedent for other strips.
+  maps the existing seams (the `:firebase-stubs` and `:haversine-stubs`
+  modules, the unplugged `experimental` module, the no-op `LibIndex`);
+  extend those seams rather than deleting upstream code. The FCM push stack
+  is the one deliberate exception to the seam rule: push either registers a
+  device token with Google or does not exist, so `PushMessaging`,
+  `PushService`, and their call sites were deleted outright rather than
+  no-opped; do not read that deletion as precedent for other strips.
 - **The speech engine is whisper.cpp, built from source.** Upstream's
   proprietary Cactus engine modules are replaced by the fork's
   `:whisper`/`:whisper-native` pair; the engine is a pinned git submodule
@@ -61,8 +61,14 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
 - **Stay F-Droid deliverable.** The fork targets inclusion in F-Droid's
   main repository, so a change must not add non-free dependencies,
   dependencies from repositories F-Droid does not allow, or prebuilt
-  binaries in the tree. The pre-existing violations are recorded in
-  `KNOWN_ISSUES.md`; do not add new ones.
+  binaries in the tree. `FdroidGuardrailsTest` in `:androidApp` replicates
+  F-Droid's source scanner over the tracked tree, the whisper.cpp submodule
+  included, minus the paths the F-Droid recipe removes (dependency lines in
+  every gradle file, iOS-only and unplugged modules included; maven URLs;
+  checked-in binaries; lockfile-less dependency manifests), and defines the
+  envelope: it must stay green, and a change that needs it loosened is a
+  change that breaks the target. The recipe contract the tree assumes is in
+  `DESIGN_NOTES.md` (F-Droid section).
 - **Security first.** No known security flaw ships, however small; genuinely
   deferred issues are documented in `KNOWN_ISSUES.md` with rationale. Any
   cross-app interface (e.g. the third-party mic API) must be explicitly

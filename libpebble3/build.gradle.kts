@@ -11,19 +11,6 @@ plugins {
     alias(libs.plugins.kotlinx.atomicfu)
 }
 
-publishing {
-    repositories {
-        maven {
-            name = "GitHubPackages"
-            url = uri("https://maven.pkg.github.com/pebble-dev/libpebblecommon")
-            credentials {
-                username = System.getenv("GITHUB_ACTOR")
-                password = System.getenv("GITHUB_TOKEN")
-            }
-        }
-    }
-}
-
 room {
     schemaDirectory("schema")
 }
