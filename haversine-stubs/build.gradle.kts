@@ -37,8 +37,9 @@ kotlin {
             jvmTarget.set(JvmTarget.JVM_17)
         }
 
-        // The stub-behavior tests live in commonTest; without this the
-        // plugin would silently skip them for the android compilation.
+        // The stub-behavior tests live in commonTest and the reflection-based
+        // shape test in androidHostTest; without this the plugin would
+        // silently skip both for the android compilation.
         withHostTestBuilder {}
     }
 
@@ -58,7 +59,6 @@ kotlin {
         commonTest {
             dependencies {
                 implementation(libs.kotlin.test)
-                implementation(libs.coroutines.test)
             }
         }
     }

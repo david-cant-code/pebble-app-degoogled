@@ -23,8 +23,8 @@ import kotlin.test.assertTrue
  * regression, and this class is the source-text one:
  * - the classpath sentinels ([AppClasspathSentinelTest] and the library
  *   copies) prove the shipped runtime graph is clean;
- * - the built APK is inspected directly (fork rule: verify against the
- *   artifact, not the tree);
+ * - the packaging-time APK inspection in androidApp/build.gradle.kts
+ *   (VerifyApkContents) proves the built artifact is clean;
  * - this class proves the tracked *tree* passes the scanner as F-Droid runs
  *   it, which the other two cannot see: an unplugged module's build file, an
  *   iOS-only dependency line, or a publishing block never reaches the

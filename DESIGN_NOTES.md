@@ -289,8 +289,12 @@ What the tree guarantees, and how it is pinned:
   so a tag checkout reports exactly the tag name and the values the recipe
   declares for that tag can be checked against the built APK.
 - A checkout without `keystore.jks` packages release unsigned, and the
-  APK carries no dependency-metadata signing block (both in
-  `androidApp/build.gradle.kts`, verified against the built APK).
+  APK carries no dependency-metadata signing block; both are checked by
+  the packaging-time `VerifyApkContents` task in
+  `androidApp/build.gradle.kts`, which also asserts the excluded assets and
+  the replaced native libraries are absent from every APK. CI builds the
+  release variant on a keystore-less checkout and compares the built
+  `versionName` with `git describe` of the built commit.
 
 What the recipe has to supply (field names as in the fdroiddata format):
 

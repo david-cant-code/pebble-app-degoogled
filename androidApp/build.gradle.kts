@@ -1,4 +1,8 @@
+import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.Properties
+import java.util.zip.ZipFile
 
 // Fork: upstream applies the google-services and firebase-crashlytics plugins
 // here; both are removed with the rest of the Firebase/GMS stack. See
@@ -279,15 +283,107 @@ abstract class VerifyExportedComponents : DefaultTask() {
     }
 }
 
-// Fork: FdroidGuardrailsTest reads the git-tracked tree (build files, tracked
-// binaries) through git rather than through declared task inputs, so Gradle
-// cannot tell when its verdict is stale. Left tracked, an unchanged test
-// classpath would let the unit test task be skipped as up-to-date or restored
-// from the build cache while the tree it judges had changed, which is the
-// silent-skip shape the guardrail exists to prevent. The module's unit tests
-// are few and fast, so they simply always run.
+/**
+ * Fork: inspects every APK a variant packages, so the packaging decisions taken in this file are
+ * verified against the built artifact on every build rather than by hand:
+ * - no entry matches [forbiddenEntries]: the Wispr Flow logo assets ignoreAssetsPattern drops
+ *   and the two native libraries of the Ring satellite AAR that :haversine-stubs replaces;
+ * - the APK Signing Block is present or absent as the variant's signing configuration says
+ *   ([expectSigned]: a release built without a keystore must come out unsigned, which is the
+ *   shape F-Droid builds), and when present never carries the dependency-metadata pair
+ *   (id 0x504b4453) that the dependenciesInfo block above turns off.
+ * Wired with toListenTo(SingleArtifact.APK), which runs the task as a finalizer of the packaging
+ * task whenever the APK is produced (assemble, install), for every variant. AGP generates the
+ * dependency metadata for release builds only and an unsigned APK has no signing block to carry
+ * it, so that check bites on signed release builds (a keystore build, or LOCAL_RELEASE_BUILD);
+ * the debug build still exercises the signing-block parse on a signed APK.
+ */
+abstract class VerifyApkContents : DefaultTask() {
+
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val apkDirectory: DirectoryProperty
+
+    /** Regular expressions over zip entry names; any match fails the build. */
+    @get:Input
+    abstract val forbiddenEntries: ListProperty<String>
+
+    @get:Input
+    abstract val expectSigned: Property<Boolean>
+
+    @TaskAction
+    fun verify() {
+        val apks = apkDirectory.get().asFile.walkTopDown().filter { it.isFile && it.extension == "apk" }.toList()
+        if (apks.isEmpty()) throw GradleException("No APK found under ${apkDirectory.get().asFile}")
+        val forbidden = forbiddenEntries.get().map(::Regex)
+        val report = StringBuilder()
+        for (apk in apks) {
+            ZipFile(apk).use { zip ->
+                val hits = zip.entries().asSequence().map { it.name }.filter { name -> forbidden.any { it.matches(name) } }.toList()
+                if (hits.isNotEmpty()) report.appendLine("${apk.name} packages forbidden entries: $hits")
+            }
+            val ids = signingBlockIds(apk)
+            if (expectSigned.get() && ids == null) report.appendLine("${apk.name} has no APK Signing Block but this variant is configured to sign")
+            if (!expectSigned.get() && ids != null) report.appendLine("${apk.name} is signed (block ids ${ids.map { it.toString(16) }}) but no keystore was configured for this variant")
+            if (ids != null && DEPENDENCY_METADATA_ID in ids) report.appendLine("${apk.name} carries the dependency-metadata signing block (0x504b4453); dependenciesInfo must stay disabled")
+        }
+        if (report.isNotEmpty()) throw GradleException("APK contents check failed:\n$report")
+        logger.lifecycle("APK contents verified: ${apks.joinToString { it.name }}")
+    }
+
+    /**
+     * The pair ids in the APK Signing Block, or null when the APK has none (an unsigned APK).
+     * Layout, per the APK signature scheme v2 documentation: the block sits immediately before
+     * the ZIP central directory and ends with a uint64 size followed by the 16-byte magic
+     * "APK Sig Block 42"; the size covers the pairs, the trailing size field, and the magic, and
+     * the same size is repeated as a uint64 at the very start of the block. Each pair is a uint64
+     * length, a uint32 id, and (length - 4) bytes of value.
+     */
+    private fun signingBlockIds(apk: File): List<Long>? = RandomAccessFile(apk, "r").use { raf ->
+        val little = ByteOrder.LITTLE_ENDIAN
+        val length = raf.length()
+        val tailStart = maxOf(0L, length - 22 - 0xFFFF)
+        val tail = ByteArray((length - tailStart).toInt()).also { raf.seek(tailStart); raf.readFully(it) }
+        val tailBuffer = ByteBuffer.wrap(tail).order(little)
+        val eocd = (tail.size - 22 downTo 0).firstOrNull { tailBuffer.getInt(it) == 0x06054b50 }
+            ?: throw GradleException("${apk.name}: no end-of-central-directory record; not a zip")
+        val centralDirectory = tailBuffer.getInt(eocd + 16).toLong() and 0xFFFFFFFFL
+        if (centralDirectory < 32) return null
+        val footer = ByteArray(24).also { raf.seek(centralDirectory - 24); raf.readFully(it) }
+        if (String(footer, 8, 16, Charsets.US_ASCII) != "APK Sig Block 42") return null
+        val size = ByteBuffer.wrap(footer).order(little).getLong(0)
+        val blockStart = centralDirectory - size - 8
+        val header = ByteArray(8).also { raf.seek(blockStart); raf.readFully(it) }
+        if (ByteBuffer.wrap(header).order(little).getLong(0) != size) {
+            throw GradleException("${apk.name}: APK Signing Block size fields disagree")
+        }
+        val ids = mutableListOf<Long>()
+        var position = blockStart + 8
+        val pairsEnd = centralDirectory - 24
+        while (position < pairsEnd) {
+            val pair = ByteArray(12).also { raf.seek(position); raf.readFully(it) }
+            val pairBuffer = ByteBuffer.wrap(pair).order(little)
+            ids += pairBuffer.getInt(8).toLong() and 0xFFFFFFFFL
+            position += 8 + pairBuffer.getLong(0)
+        }
+        ids
+    }
+
+    private companion object {
+        const val DEPENDENCY_METADATA_ID = 0x504b4453L
+    }
+}
+
+// Fork: FdroidGuardrailsTest and ExcludedAssetSentinelTest read the git-tracked
+// tree (build files, tracked binaries, sources) through git rather than
+// through declared task inputs, so Gradle cannot tell when their verdict is
+// stale. Left tracked, an unchanged test classpath would let the unit test
+// task be skipped as up-to-date or restored from the build cache while the
+// tree they judge had changed, which is the silent-skip shape the guardrails
+// exist to prevent. The module's unit tests are few and fast, so they simply
+// always run.
 tasks.withType<Test>().configureEach {
-    doNotTrackState("FdroidGuardrailsTest scans the git-tracked tree, which is not a declared input")
+    doNotTrackState("The tree-reading sentinels scan the git-tracked tree, which is not a declared input")
 }
 
 // Resolved at execution time — a configuration-time .get() makes every commit invalidate the
@@ -298,6 +394,26 @@ androidComponents {
             it.versionCode.set(gitVersionCode)
             it.versionName.set(gitVersionName)
         }
+
+        // Fork: artifact-level check of the packaging decisions above, for
+        // every variant; see VerifyApkContents.
+        val verifyApk = tasks.register<VerifyApkContents>(
+            "verify${variant.name.replaceFirstChar { it.uppercase() }}ApkContents",
+        ) {
+            group = "verification"
+            description = "Fails if the packaged APK carries excluded assets, replaced natives, or an unexpected signing block."
+            forbiddenEntries.set(
+                listOf(
+                    """.*wispr_flow_logo_(black|white)\.png""",
+                    """lib/[^/]+/libhaversinesatellitelibrary\.so""",
+                    """lib/[^/]+/libppcommon\.so""",
+                ),
+            )
+            expectSigned.set(variant.buildType != "release" || localReleaseBuild || signReleaseWithKeystore)
+        }
+        variant.artifacts.use(verifyApk)
+            .wiredWith(VerifyApkContents::apkDirectory)
+            .toListenTo(com.android.build.api.artifact.SingleArtifact.APK)
     }
 
     // Fork: release builds fail unless every exported component is allowlisted
