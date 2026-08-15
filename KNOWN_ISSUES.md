@@ -188,18 +188,22 @@ apps age out.
 **Status: deferred; upstream-inherited, integrity rests on transport security.**
 
 Watch language packs come from a catalog compiled into
-`LanguagePackRepository`: 125 files on binaries.rebble.io and 12 on four
-individual contributors' GitHub repositories, ten of those referenced by a
-mutable branch name rather than a commit. A pack is downloaded and sent to
-the watch with no digest or size check. Firmware bundles and speech models
-in this fork are integrity-pinned; language packs are the one remaining
-install path where a substituted or compromised host, or a force-pushed
-branch, delivers whatever bytes it likes to the watch, bounded only by TLS
-to the host. The fix is per-file digests in the catalog, checked before
-install, in the style of `WhisperModelCatalog`; that needs the catalog
-re-derived with hashes and a decision on the branch-referenced entries
-(pin to a commit or drop), so it is deferred as its own change. This entry
-leaves the file when the catalog carries verified digests.
+`LanguagePackRepository`: 137 entries, 125 of them on binaries.rebble.io
+and 12 on four individual contributors' GitHub repositories; of those 12,
+two reference a mutable branch, eight are release assets addressed by a
+tag name (replaceable by the repository owner without a tag change), and
+two are pinned to a commit. A pack is downloaded and sent to the watch
+with no digest or size check. Firmware bundles and speech models in this
+fork are integrity-pinned; language packs are the one remaining install
+path where a substituted or compromised host, a re-uploaded release asset,
+or a force-pushed branch delivers whatever bytes it likes to the watch,
+bounded only by TLS to the host. The fix is per-file digests in the
+catalog, checked before install, in the style of `WhisperModelCatalog`;
+that needs the catalog re-derived with hashes and a decision on the two
+branch-referenced entries (pin to a commit or drop; release assets have no
+commit-addressed form, so the digest is the whole fix there), so it is
+deferred as its own change. This entry leaves the file when the catalog
+carries verified digests.
 
 ## Sleep blob mixes epoch timestamps with seconds-of-day typicals
 

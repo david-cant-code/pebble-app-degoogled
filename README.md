@@ -37,10 +37,12 @@ a security posture tightened beyond upstream's defaults.
   authorization-gated, rather than locking watch mic audio to first-party
   features.
 - **Distribution through F-Droid.** The fork targets inclusion in F-Droid's
-  main repository. The app ships no prebuilt binaries and no non-free
-  dependencies (the speech engine is built from source, the last prebuilt
-  native library, the Ring satellite AAR, is replaced by a stub); what
-  remains is the submission itself.
+  main repository. The tree holds no binaries and every dependency is free
+  software from a repository F-Droid allows: the speech engine is built
+  from source, and the Ring satellite library, the last dependency whose
+  native code had no public source, is replaced by a stub. What remains is
+  the submission itself; `DESIGN_NOTES.md` records what the tree
+  guarantees and what the build recipe has to supply.
 
 Out of scope: iOS (sources remain in-tree but are unmaintained here), and the
 Pebble Index 01 (Ring) / Index AI features, due to their heavy reliance on

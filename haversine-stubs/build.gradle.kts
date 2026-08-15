@@ -9,14 +9,11 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 // nothing observable changes: :libindex only needs the seven symbols below
 // to compile.
 //
-// Wiring differs from :firebase-stubs on purpose. That module is named on
-// upstream dependency lines the fork already edits; here the only consumer
-// is libindex/build.gradle.kts, an upstream file the fork has never touched,
-// so settings.gradle.kts substitutes the maven coordinate for this project
-// instead. libindex keeps its upstream dependency line byte-for-byte, and
-// a future upstream version bump of the artifact still lands on the stub.
-// The AAR's absence from the shipped classpath is pinned by
-// AppClasspathSentinelTest in :androidApp.
+// Wired by the dependencySubstitution rule in settings.gradle.kts, not by
+// a dependency line: nothing names this project directly, so a lost rule
+// brings the AAR back silently, which AppClasspathSentinelTest in
+// :androidApp fails on. The seam and its rationale are in DESIGN_NOTES.md
+// (Ring / Index AI).
 //
 // Module shape mirrors :krisp-stubs and :firebase-stubs (KMP Android library
 // plugin, AGP 9). The iOS targets exist only because libindex declares them

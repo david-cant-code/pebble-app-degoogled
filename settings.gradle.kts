@@ -55,10 +55,9 @@ include(":krisp-stubs")
 include(":firebase-stubs")
 // Fork module: inert stand-ins for the io.github.coredevices.haversine Ring
 // satellite library (a prebuilt AAR with bundled native libraries and no
-// public source, incompatible with the F-Droid target). Wired below by
-// dependency substitution rather than by editing the consumer's dependency
-// line, because the only consumer, libindex/build.gradle.kts, is an upstream
-// file the fork otherwise leaves untouched.
+// public source, incompatible with the F-Droid target). Wired by the
+// dependency substitution rule below; the seam is described in
+// DESIGN_NOTES.md (Ring / Index AI).
 include(":haversine-stubs")
 
 // Every project resolves the substitution, not just :libindex: the artifact

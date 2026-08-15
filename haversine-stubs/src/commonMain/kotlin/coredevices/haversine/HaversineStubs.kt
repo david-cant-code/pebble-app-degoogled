@@ -29,8 +29,10 @@ import kotlinx.coroutines.flow.StateFlow
  * library's API fails the build here until this surface is extended, which
  * is intended: it forces a look at whether the new call belongs to the dead
  * Ring runtime (extend the stub) or to something the fork actually needs to
- * think about. Re-adding the real artifact next to this module trips
- * duplicate-class errors, the same tripwire the other stub modules rely on.
+ * think about. The settings-level substitution rewrites every reference to
+ * the real artifact's coordinate to this module, so the two cannot meet on
+ * a classpath; were that rule ever lost, the AAR would return silently,
+ * which AppClasspathSentinelTest in :androidApp fails on.
  */
 interface CollectionIndexStorage {
     val lastSuccessfulCollectionIndex: StateFlow<Int?>

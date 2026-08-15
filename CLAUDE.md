@@ -17,11 +17,11 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   upstream call sites intact so upstream merges stay cheap. `DESIGN_NOTES.md`
   maps the existing seams (the `:firebase-stubs` and `:haversine-stubs`
   modules, the unplugged `experimental` module, the no-op `LibIndex`);
-  extend those seams rather than deleting upstream code. The FCM push stack is the one deliberate
-  exception to the seam rule: push either registers a device token with
-  Google or does not exist, so `PushMessaging`, `PushService`, and their
-  call sites were deleted outright rather than no-opped; do not read that
-  deletion as precedent for other strips.
+  extend those seams rather than deleting upstream code. The FCM push stack
+  is the one deliberate exception to the seam rule: push either registers a
+  device token with Google or does not exist, so `PushMessaging`,
+  `PushService`, and their call sites were deleted outright rather than
+  no-opped; do not read that deletion as precedent for other strips.
 - **The speech engine is whisper.cpp, built from source.** Upstream's
   proprietary Cactus engine modules are replaced by the fork's
   `:whisper`/`:whisper-native` pair; the engine is a pinned git submodule

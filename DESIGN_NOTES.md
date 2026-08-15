@@ -37,17 +37,22 @@ The Ring satellite library `libindex` compiles against
 that bundles two native libraries per ABI) is replaced by the fork module
 `:haversine-stubs`: inert same-FQN stand-ins for the seven symbols
 `libindex` references, whose satellite classes have private constructors
-and no factory, so no ring object can exist anywhere in the app. The
-wiring is a `dependencySubstitution` rule in `settings.gradle.kts` rather
-than an edited dependency line, because the only consumer,
-`libindex/build.gradle.kts`, is an upstream file the fork otherwise leaves
-untouched; the rule matches the coordinate by group and name, so an
-upstream version bump still lands on the stub. `AppClasspathSentinelTest`
-in `:androidApp` pins the swap from the shipping runtime graph (the AAR's
-wrapped `com.wtlp.*` vendor classes must be absent), and the release APK
-carries no `libhaversinesatellitelibrary.so` / `libppcommon.so`. This was
-the last prebuilt native code in the app and the last tree-level F-Droid
-inclusion blocker.
+and no factory, so no ring object can exist anywhere in the app
+(`HaversineStubShapeTest` pins that shape, `HaversineStubTest` the two
+static entry points). The wiring is a `dependencySubstitution` rule in
+`settings.gradle.kts`, applied to every project, rather than an edited
+dependency line: the artifact is a transitive runtime dependency of every
+module that depends on `libindex`, which the rule covers and a single
+edited line would not, and the rule matches the coordinate by group and
+name, so an upstream version bump still lands on the stub. Nothing names
+`:haversine-stubs` directly, so a lost rule would bring the AAR back
+silently; `AppClasspathSentinelTest` in `:androidApp` pins the swap from
+the shipping runtime graph (the AAR's wrapped `com.wtlp.*` vendor classes
+must be absent), and `VerifyApkContents` asserts the release APK carries
+no `libhaversinesatellitelibrary.so` / `libppcommon.so`. This was the
+last dependency whose native code had no public source, and the last
+tree-level F-Droid inclusion blocker (the F-Droid section below records
+what the tree guarantees).
 
 ## Firebase
 
