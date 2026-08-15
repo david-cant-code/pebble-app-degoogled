@@ -84,4 +84,24 @@ class AppClasspathSentinelTest {
     fun mixpanelIsOffTheAppClasspath() {
         assertAbsent("com.mixpanel.android.mpmetrics.MixpanelAPI")
     }
+
+    @Test
+    fun haversineSatelliteLibraryResolvesToTheForkStub() {
+        // libindex's upstream dependency line still names the prebuilt
+        // io.github.coredevices.haversine AAR; settings.gradle.kts swaps it
+        // for :haversine-stubs across every project. This probe pins the
+        // swap from the app's own runtime graph, so a lost or misapplied
+        // substitution (a settings.gradle.kts merge that drops it, say)
+        // fails here rather than quietly returning the AAR's two native
+        // libraries to the APK. The KMP facade name exists in both the AAR
+        // and the stub, so the positive control alone proves nothing: what
+        // distinguishes them is the AAR's wrapped vendor library
+        // (com.wtlp.*, the JNI side of the bundled .so files) and its
+        // transfer delegate, neither of which the stub declares.
+        Class.forName("coredevices.haversine.KMPHaversineSatelliteManager")
+        assertAbsent("com.wtlp.haversinesatellitelibrary.HaversineSatellite")
+        assertAbsent("com.wtlp.haversinesatellitelibrary.HaversineSatelliteManager")
+        assertAbsent("com.wtlp.ppcommon.PPCommon")
+        assertAbsent("coredevices.haversine.HaversineTransferDelegate")
+    }
 }

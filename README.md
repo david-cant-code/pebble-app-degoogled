@@ -37,8 +37,10 @@ a security posture tightened beyond upstream's defaults.
   authorization-gated, rather than locking watch mic audio to first-party
   features.
 - **Distribution through F-Droid.** The fork targets inclusion in F-Droid's
-  main repository; the blockers still standing are tracked in
-  [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
+  main repository. The app ships no prebuilt binaries and no non-free
+  dependencies (the speech engine is built from source, the last prebuilt
+  native library, the Ring satellite AAR, is replaced by a stub); what
+  remains is the submission itself.
 
 Out of scope: iOS (sources remain in-tree but are unmaintained here), and the
 Pebble Index 01 (Ring) / Index AI features, due to their heavy reliance on
@@ -61,7 +63,7 @@ De-google work is completed, all telemetry is removed. What remains is polish an
       proprietary Cactus stack)
 - [ ] Third-party microphone API
 - [ ] Local on-device battery analytics (secondary goal, feasibility open)
-- [ ] F-Droid inclusion (blockers tracked in KNOWN_ISSUES.md)
+- [ ] F-Droid inclusion (tree ready; submission pending)
 
 ## Building (Android)
 

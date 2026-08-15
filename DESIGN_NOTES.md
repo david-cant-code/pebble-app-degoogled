@@ -32,6 +32,23 @@ entities, which need `mcp`. Their runtime is dead:
   the `experimental` module trips duplicate-class errors;
 - `CoreConfig.enableIndex` has no reachable set-point.
 
+The Ring satellite library `libindex` compiles against
+(`io.github.coredevices.haversine`, a prebuilt AAR with no public source
+that bundles two native libraries per ABI) is replaced by the fork module
+`:haversine-stubs`: inert same-FQN stand-ins for the seven symbols
+`libindex` references, whose satellite classes have private constructors
+and no factory, so no ring object can exist anywhere in the app. The
+wiring is a `dependencySubstitution` rule in `settings.gradle.kts` rather
+than an edited dependency line, because the only consumer,
+`libindex/build.gradle.kts`, is an upstream file the fork otherwise leaves
+untouched; the rule matches the coordinate by group and name, so an
+upstream version bump still lands on the stub. `AppClasspathSentinelTest`
+in `:androidApp` pins the swap from the shipping runtime graph (the AAR's
+wrapped `com.wtlp.*` vendor classes must be absent), and the release APK
+carries no `libhaversinesatellitelibrary.so` / `libppcommon.so`. This was
+the last prebuilt native code in the app and the last tree-level F-Droid
+inclusion blocker.
+
 ## Firebase
 
 The Firebase SDKs are gone via the same idea at a different seam: the

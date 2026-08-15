@@ -183,29 +183,6 @@ rules that would keep insecure WebSocket covered deterministically. This
 entry leaves the file if that ships, or if the ecosystem's http-only
 apps age out.
 
-## Prebuilt Haversine satellite libraries remain an F-Droid blocker
-
-**Status: open; the speech stack no longer blocks inclusion.**
-
-The fork targets inclusion in F-Droid's main repository. The on-device
-speech stack, formerly the main blocker, is now free software built from
-source: the whisper.cpp engine is an MIT-licensed git submodule compiled
-by the NDK during the build, and the model weights (MIT, the whisper.cpp
-author's own conversions of OpenAI's release) are integrity-pinned
-runtime downloads, never checked in. Runtime model downloads from
-Hugging Face are expected to draw the NonFreeNet anti-feature flag,
-which documents but does not block inclusion.
-
-What still fails policy is the `io.github.coredevices.haversine` AAR,
-which ships prebuilt satellite `.so` libraries into the APK even though
-the Ring runtime they serve is disabled at the DI seam; the satellite C
-sources and their licensing are unconfirmed. Resolving it means removing
-Haversine from the classpath (it remains only as a compile-time
-dependency of the deliberately retained `:libindex`) or upstream
-publishing source and license for it. Routine submission work (build
-recipe, signing, versioning) is not tracked here. This entry leaves the
-file when an F-Droid submission is accepted or the target is dropped.
-
 ## Sleep blob mixes epoch timestamps with seconds-of-day typicals
 
 **Status: deferred; upstream-inherited display defect, no data at risk.**
@@ -246,23 +223,6 @@ leaves the file if the fork adopts the resume machinery for its verified
 flow (plausible follow-up: writing the interrupted-update record at the
 sideload boundary) or upstream's toggle becomes conditional on the
 feature being armable.
-
-## The Haversine AAR embeds an inert debug telemetry endpoint
-
-**Status: accepted; the code is unreachable, the artifact is unchanged.**
-
-The prebuilt `haversine` satellite library AAR (kept on the classpath as
-a compile-time dependency of the deliberately retained `:libindex`) ships
-a default debug-log delegate class containing a hardcoded MongoDB Atlas
-Data API write endpoint and a hardcoded firmware-release URL. The class
-is present in the APK's dex but nothing in this fork constructs it: the
-Ring runtime that would use Haversine is disabled at the DI seam
-(`NoOpLibIndex` never scans, no ring can pair), so no code path reaches
-the delegate. This is the same acceptance already recorded for the
-Haversine prebuilts in the F-Droid entry above, extended to name the
-endpoint explicitly so artifact-level endpoint scans have a documented
-match. This entry leaves the file when Haversine leaves the classpath or
-ships without the debug delegate.
 
 ## The "Use Core OTA service" debug toggle is inert in fork builds
 

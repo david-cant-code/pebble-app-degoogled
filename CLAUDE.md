@@ -15,9 +15,9 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
 - **De-Google at the DI seam, not by mass deletion.** Swap Firebase/GMS-backed
   implementations for no-op or GMS-free ones at the Koin module level, keeping
   upstream call sites intact so upstream merges stay cheap. `DESIGN_NOTES.md`
-  maps the existing seams (the `:firebase-stubs` module, the unplugged
-  `experimental` module, the no-op `LibIndex`); extend those seams rather
-  than deleting upstream code. The FCM push stack is the one deliberate
+  maps the existing seams (the `:firebase-stubs` and `:haversine-stubs`
+  modules, the unplugged `experimental` module, the no-op `LibIndex`);
+  extend those seams rather than deleting upstream code. The FCM push stack is the one deliberate
   exception to the seam rule: push either registers a device token with
   Google or does not exist, so `PushMessaging`, `PushService`, and their
   call sites were deleted outright rather than no-opped; do not read that
