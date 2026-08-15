@@ -1,0 +1,1 @@
+Refreshed store listing: the description now covers the hardening beyond the de-googling (per-watchapp internet and location permissions, gated exported interfaces, cleartext blocked) and states plainly which watch features work, which do not yet, and which web services the app talks to. No code changes since 0.1.0.

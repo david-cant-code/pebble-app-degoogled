@@ -44,10 +44,13 @@ a security posture tightened beyond upstream's defaults.
   the submission itself; `DESIGN_NOTES.md` records what the tree
   guarantees and what the build recipe has to supply.
 
-Out of scope: iOS (sources remain in-tree but are unmaintained here), and the
-Pebble Index 01 (Ring) / Index AI features, due to their heavy reliance on
-Firebase and other cloud services. The Ring feature module (`experimental`)
-is unplugged from the build; the `libindex`/`index-ai`/`mcp` libraries stay
+Out of scope: iOS (sources remain in-tree but are unmaintained here).
+
+Not functional for now: the Pebble Index 01 (Ring) / Index AI features,
+because of how heavily they rely on Firebase and other cloud services.
+Finding a way to incorporate them without that reliance is a plan, not a
+current capability. Until then the Ring feature module (`experimental`) is
+unplugged from the build; the `libindex`/`index-ai`/`mcp` libraries stay
 compiled because the watch UI shares code with them, but their runtime is
 disabled at the dependency-injection seam (verified against the built APK:
 no Ring services, no Ring endpoints, rings can never be scanned or paired).
@@ -65,6 +68,8 @@ De-google work is completed, all telemetry is removed. What remains is polish an
       proprietary Cactus stack)
 - [ ] Third-party microphone API
 - [ ] Local on-device battery analytics (secondary goal, feasibility open)
+- [ ] Pebble Index 01 (Ring) / Index AI support without Firebase or other
+      cloud services (approach open)
 - [ ] F-Droid inclusion (tree ready; submission pending)
 
 ## Building (Android)

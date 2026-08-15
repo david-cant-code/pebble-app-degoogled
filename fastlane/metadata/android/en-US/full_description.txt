@@ -1,15 +1,19 @@
-Gravel is an unofficial, de-Googled fork of the Pebble mobile app by Core Devices, for managing Pebble and Core Devices smartwatches without Google Play services or Firebase. Pair your watch, customize your settings, browse watchfaces and apps, and update watch firmware on GrapheneOS, LineageOS, and similar phones.
+Gravel is a de-googled and hardened fork of the Pebble mobile app by Core Devices, for managing Pebble and Core Devices smartwatches on GrapheneOS, LineageOS, and other phones without google play services or Firebase.
 
-Gravel is not affiliated with or endorsed by Core Devices. "Pebble" and "Core Devices" are trademarks of their respective owners; Gravel is an independent fork of their GPLv3-licensed source code, under its own name and icon to avoid any confusion with the official app.
+The watch features of the official app are all here: pairing and reconnection, notifications, calendar, music, health, and weather on the watch, watchface and app gallery browsing, firmware updates, and voice dictation. What is gone is the google plumbing and the reporting built around it: no play services, no Firebase, no telemetry, no analytics, no crash reporting. (The one casualty is the official app's battery analytics page, which was rendered by the telemetry server and so has no data source here. The Pebble Index 01 ring and Index AI features do not function for now, because of how heavily they rely on telemetry and Firebase; work on a way to incorporate them is ongoing.)
 
-Features include:
-- Bluetooth pairing and reconnection, notifications, calendar, music, health, and weather on the watch
-- Watchface and app gallery browsing
-- Core watch firmware updates fetched from the public PebbleOS releases and integrity-verified before install
-- Per-app permissions for watchapps' companion JavaScript: internet and phone location are denied by default until you allow them
+On top of the de-Googling, Gravel tightens the app's own security posture:
+- Per-app permissions for watchapps' companion code: internet and phone location are denied by default and granted per app, and revoking a permission applies to running watchapps immediately
+- The app's exported Android interfaces are authorization-gated or removed
+- Plain-HTTP (cleartext) traffic is blocked app-wide
+- Core watch firmware updates are fetched from the public PebbleOS releases and integrity-verified before install
 - On-device voice dictation with the whisper.cpp speech engine, built from source; the speech model is an optional, integrity-pinned download you start yourself
-- Works without Google Play services or Firebase; no telemetry, no analytics, no crash reporting
+- Manual latitude/longitude entry replaces the play-services place search for weather
 
-The app talks to the Core Devices and Rebble web services (app store and its search index, weather, timeline, notification icons, language packs), to the PebbleOS release feed on GitHub for firmware, and to the speech model host on first download; there is no Google endpoint. Manual latitude/longitude entry replaces the Play-services place search for weather.
+Some watchapps and watchfaces need internet or your location to work, and they will not function fully until you grant them access. That is deliberate: Gravel puts the decision in your hands rather than trusting every watchapp by default.
+
+The app talks to the Core Devices and Rebble web services (app store and its search index, weather, timeline, notification icons, language packs), to the PebbleOS release feed on GitHub for firmware, and to the speech model host on first download; there is no google endpoint.
 
 Permissions Gravel asks for are the ones the watch features need: Bluetooth and location for finding and staying connected to the watch (background location so location-based watchapps and weather keep working while the app is not open), notification access to forward notifications, contacts, call log, and phone state for caller names and call control on the watch, calendar for timeline pins, Health Connect write access to sync the watch's health data, and the list of installed apps for per-app notification settings. Each is requested when the corresponding feature is first set up.
+
+Gravel is not affiliated with or endorsed by Core Devices. "Pebble" and "Core Devices" are trademarks of their respective owners; Gravel is an independent fork of their GPLv3-licensed source code, under its own name and icon to avoid any confusion with the official app.
