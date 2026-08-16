@@ -263,17 +263,25 @@ class FdroidGuardrailsTest {
      * `androidApp/version.properties` is what the recipe's UpdateCheckData
      * regex reads as the versionCode of a tag, so it is held to exactly one
      * `versionCode=<digits>` line: no comment, no second key, nothing the
-     * regex could match first. On a tag checkout the value must be the commit
-     * count the build derives versionCode from; between releases the file
-     * names the last tagged release and only its shape is checked. The
-     * Gradle-time VerifyReleaseVersionFile task makes the same check before
-     * every build; this is the test-suite copy of it.
+     * regex could match first. The value must name a release that has a
+     * changelog (`fastlane/metadata/android/en-US/changelogs/<value>.txt`,
+     * added by the same release commit), and on a tag checkout it must be
+     * the commit count the build derives versionCode from; between releases
+     * the file names the last tagged release. The Gradle-time
+     * VerifyReleaseVersionFile task makes the shape and tag checks before
+     * every build; this is the test-suite copy of it plus the changelog
+     * pairing.
      */
     @Test
     fun versionFileMatchesTheBuiltCommitOnATagCheckout() {
         val text = read("androidApp/version.properties").readText()
-        val declared = Regex("""versionCode=(\d+)\r?\n?""").matchEntire(text)?.groupValues?.get(1)?.toIntOrNull()
+        val declared = declaredVersionCode(text)
         assertTrue(declared != null, "androidApp/version.properties must be exactly one line, versionCode=<digits>, but reads:\n$text")
+        val changelog = "fastlane/metadata/android/en-US/changelogs/$declared.txt"
+        assertTrue(
+            read(changelog).exists(),
+            "androidApp/version.properties declares $declared but there is no $changelog; the release commit adds both",
+        )
         val tags = TrackedTree.git("tag", "--points-at", "HEAD").lines().filter { it.isNotBlank() }
         if (tags.isEmpty()) return
         val count = TrackedTree.git("rev-list", "--count", "HEAD").trim().toInt()
@@ -282,4 +290,44 @@ class FdroidGuardrailsTest {
             "Tag ${tags.joinToString()} builds versionCode $count but androidApp/version.properties declares $declared",
         )
     }
+
+    /**
+     * Positive control for [versionFileMatchesTheBuiltCommitOnATagCheckout]:
+     * the shape check accepts exactly one LF-terminated (or unterminated)
+     * `versionCode=<digits>` line and rejects a comment line, a second key,
+     * a blank line, leading space, CRLF, and a non-numeric value. CRLF is
+     * rejected on purpose so the check agrees with the per-line sed in the
+     * CI tag step, which anchors on `$` before the newline.
+     */
+    @Test
+    fun versionFileShapeCheckAcceptsOnlyOneLine() {
+        val accepted = mapOf("versionCode=2238\n" to 2238, "versionCode=2238" to 2238)
+        val rejected = listOf(
+            "versionCode=2238\r\n",
+            "# the last release\nversionCode=2238\n",
+            "versionCode=2238\nversionName=0.1.2\n",
+            "versionCode=2238\n\n",
+            " versionCode=2238\n",
+            "versionCode=\n",
+            "versionCode=abc\n",
+            "",
+        )
+        for ((text, expected) in accepted) {
+            assertTrue(declaredVersionCode(text) == expected, "shape check rejected ${text.escaped()}")
+        }
+        for (text in rejected) {
+            assertTrue(declaredVersionCode(text) == null, "shape check accepted ${text.escaped()}")
+        }
+    }
+
+    /**
+     * The versionCode a version file declares, or null when the file is not
+     * exactly one `versionCode=<digits>` line. Mirrored by hand in the
+     * VerifyReleaseVersionFile task in androidApp/build.gradle.kts, which
+     * cannot share test code; keep the two regexes identical.
+     */
+    private fun declaredVersionCode(text: String): Int? =
+        Regex("""versionCode=(\d+)\n?""").matchEntire(text)?.groupValues?.get(1)?.toIntOrNull()
+
+    private fun String.escaped(): String = "\"" + replace("\r", "\\r").replace("\n", "\\n") + "\""
 }

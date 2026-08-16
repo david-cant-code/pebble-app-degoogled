@@ -297,11 +297,15 @@ What the tree guarantees, and how it is pinned:
   the versionCode of the most recent tagged release. It exists for
   F-Droid's update checker, which reads it from a tag checkout (it cannot
   count commits) and takes the tag name as versionName. The release commit
-  bumps it to the count that commit will have once tagged; on a tag
-  checkout the Gradle-time `VerifyReleaseVersionFile` task (wired before
-  `preBuild`, so it runs on every build everywhere), the
-  `FdroidGuardrailsTest` copy of the check, and a tag-only CI step all
-  fail if the file, the commit count, and the built APK disagree.
+  bumps it to the count that commit will have once tagged. Three checks
+  guard it: the Gradle-time `VerifyReleaseVersionFile` task (wired before
+  `preBuild`, so it runs on every build everywhere) checks the shape on
+  every build and, on a tag checkout, that the value equals the commit
+  count the build stamps into the APK; `FdroidGuardrailsTest` repeats both
+  and also requires a `changelogs/<value>.txt` for the value the file
+  names; a tag-only CI step compares the file, the commit count, and the
+  versionCode read back from the built APK. All three read the file as
+  exactly one LF-terminated `versionCode=<digits>` line.
 - No module pins a Gradle JVM toolchain. The buildserver ships a single JDK
   (21) with toolchain provisioning disabled, so upstream's `jvmToolchain(17)`
   calls in `libpebble3`, `blobannotations`, and `blobdbgen` are removed and
@@ -343,7 +347,11 @@ What the recipe has to supply (field names as in the fdroiddata format):
   `androidApp/version.properties` and the regex `versionCode=(\d+)` for
   the versionCode, and no file or regex for the versionName so the tag name
   is used; `AutoUpdateMode: Version` then adds the build entry for a new tag
-  (with the commit resolved to its hash) without a manual recipe change.
+  without a manual recipe change (current fdroidserver resolves the entry's
+  `commit:` to the tag's hash). The checker inspects only the newest few
+  tags and errors if none of them carries the file, so the recipe can
+  only enable update checking once a tag containing
+  `androidApp/version.properties` exists.
 - The build subdirectory is `androidApp`; the unsigned release APK is the
   output F-Droid signs.
 - Anti-features: the on-device dictation models are runtime downloads from

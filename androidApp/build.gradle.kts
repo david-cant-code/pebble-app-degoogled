@@ -386,7 +386,16 @@ abstract class VerifyApkContents : DefaultTask() {
 val gitTagsAtHead = providers.exec {
     isIgnoreExitValue = true
     commandLine("git", "tag", "--points-at", "HEAD")
-}.standardOutput.asText.map { it.trim() }
+}.let { exec ->
+    // Fail closed: an empty answer means "not a tag checkout" and skips the
+    // value check, so a git failure must not be mistaken for one.
+    exec.result.zip(exec.standardOutput.asText) { result, output ->
+        if (result.exitValue != 0) {
+            throw GradleException("git tag --points-at HEAD failed (exit ${result.exitValue}); cannot tell whether this is a tag checkout")
+        }
+        output.trim()
+    }
+}
 
 abstract class VerifyReleaseVersionFile : DefaultTask() {
 
@@ -405,7 +414,9 @@ abstract class VerifyReleaseVersionFile : DefaultTask() {
     fun verify() {
         val file = versionFile.get().asFile
         val text = file.readText()
-        val declared = Regex("""versionCode=(\d+)\r?\n?""").matchEntire(text)?.groupValues?.get(1)?.toIntOrNull()
+        // Same regex as FdroidGuardrailsTest.declaredVersionCode; LF only, so
+        // the three layers (this task, the test, the CI sed) agree on shape.
+        val declared = Regex("""versionCode=(\d+)\n?""").matchEntire(text)?.groupValues?.get(1)?.toIntOrNull()
             ?: throw GradleException("$file must be exactly one line, versionCode=<digits>, but reads:\n$text")
         val tags = tagsAtHead.get().lines().filter { it.isNotBlank() }
         if (tags.isEmpty()) return

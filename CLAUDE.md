@@ -59,9 +59,14 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`) sets it
   to the commit count that commit will have, which is `git rev-list --count
   HEAD` plus one when committing on top of HEAD; between releases the file
-  names the last release. A tag build with a stale file fails three ways:
-  Gradle's `preBuild` (`VerifyReleaseVersionFile`), `FdroidGuardrailsTest`,
-  and the tag-build step in CI.
+  names the last release. The value checks fire only on a tag checkout,
+  so after tagging and before pushing the tag run `./gradlew
+  :androidApp:verifyReleaseVersionFile` (or the guardrail suite) on the
+  tagged commit; otherwise a stale file is first rejected once the tag is
+  public, by Gradle's `preBuild` (`VerifyReleaseVersionFile`),
+  `FdroidGuardrailsTest`, and the tag-build step in CI alike. The test
+  also requires `changelogs/<versionCode>.txt` to exist for the value the
+  file names, on every commit.
 - **Distinct branding: the fork is Gravel.** applicationId is
   `com.anopticlabs.gravel`; the Kotlin `namespace` and source packages
   deliberately stay `coredevices.coreapp` so upstream merges stay cheap;
