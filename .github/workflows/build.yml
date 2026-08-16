@@ -2,6 +2,13 @@ name: Build
 
 on: [push]
 
+# The job only builds and asserts; nothing here writes to the repository, so
+# the workflow token gets read access and no more. actions/checkout persists
+# the token in the checkout by default, which is why the scope matters even
+# though no step names it.
+permissions:
+  contents: read
+
 jobs:
   android:
     runs-on: ubuntu-latest
