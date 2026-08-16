@@ -374,6 +374,64 @@ abstract class VerifyApkContents : DefaultTask() {
     }
 }
 
+// Fork: F-Droid's update checker reads the versionCode of a tagged release from
+// androidApp/version.properties (the recipe's UpdateCheckData names that file);
+// it cannot count commits the way the build does. The file is bumped in the
+// commit that gets tagged, so on a tag checkout it must equal the count the
+// build itself uses, and anywhere else it names the last tagged release and only
+// its shape is checked. The task runs before every build (preBuild), so a tag
+// build with a stale file fails locally, in CI, and on the buildserver alike;
+// the unit-test copy of the check is FdroidGuardrailsTest, and F-Droid compares
+// the built APK against the recipe as a third, independent layer.
+val gitTagsAtHead = providers.exec {
+    isIgnoreExitValue = true
+    commandLine("git", "tag", "--points-at", "HEAD")
+}.standardOutput.asText.map { it.trim() }
+
+abstract class VerifyReleaseVersionFile : DefaultTask() {
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val versionFile: RegularFileProperty
+
+    /** Tags pointing at the built commit, one per line; empty on an untagged commit. */
+    @get:Input
+    abstract val tagsAtHead: Property<String>
+
+    @get:Input
+    abstract val builtVersionCode: Property<Int>
+
+    @TaskAction
+    fun verify() {
+        val file = versionFile.get().asFile
+        val text = file.readText()
+        val declared = Regex("""versionCode=(\d+)\r?\n?""").matchEntire(text)?.groupValues?.get(1)?.toIntOrNull()
+            ?: throw GradleException("$file must be exactly one line, versionCode=<digits>, but reads:\n$text")
+        val tags = tagsAtHead.get().lines().filter { it.isNotBlank() }
+        if (tags.isEmpty()) return
+        val built = builtVersionCode.get()
+        if (declared != built) {
+            throw GradleException(
+                "Tag ${tags.joinToString()} builds versionCode $built but $file declares $declared; " +
+                    "the release commit must set the file to the commit count it will have once committed.",
+            )
+        }
+    }
+}
+
+val verifyReleaseVersionFile = tasks.register<VerifyReleaseVersionFile>("verifyReleaseVersionFile") {
+    group = "verification"
+    description = "Fails a tag build whose version.properties disagrees with the built versionCode."
+    versionFile.set(layout.projectDirectory.file("version.properties"))
+    tagsAtHead.set(gitTagsAtHead)
+    builtVersionCode.set(gitVersionCode)
+}
+
+// preBuild is created by AGP after this script runs, hence configureEach.
+tasks.configureEach {
+    if (name == "preBuild") dependsOn(verifyReleaseVersionFile)
+}
+
 // Fork: FdroidGuardrailsTest and ExcludedAssetSentinelTest read the git-tracked
 // tree (build files, tracked binaries, sources) through git rather than
 // through declared task inputs, so Gradle cannot tell when their verdict is

@@ -37,9 +37,12 @@ import kotlin.test.assertTrue
  * list is the tree's half of a contract with the out-of-tree recipe, and
  * DESIGN_NOTES.md (F-Droid section) records the whole contract.
  *
- * The last test is not a scanner check but another part of that contract
- * the tree can verify about itself: the build runs on the buildserver's JDK
- * (no toolchain pin, [noGradleFileConfiguresAJvmToolchain]).
+ * The last two tests are not scanner checks but the other two halves of that
+ * contract the tree can verify about itself: the build runs on the
+ * buildserver's JDK (no toolchain pin, [noGradleFileConfiguresAJvmToolchain])
+ * and the version file F-Droid's update checker reads has the shape its
+ * regex expects and, on a tag checkout, the value the build produces
+ * ([versionFileMatchesTheBuiltCommitOnATagCheckout]).
  */
 class FdroidGuardrailsTest {
 
@@ -227,5 +230,29 @@ class FdroidGuardrailsTest {
             .filterNot { (_, line) -> line.trimStart().startsWith("//") }
             .filter { (_, line) -> call.containsMatchIn(line) }
             .map { (index, line) -> "${index + 1}: ${line.trim()}" }
+    }
+
+    /**
+     * `androidApp/version.properties` is what the recipe's UpdateCheckData
+     * regex reads as the versionCode of a tag, so it is held to exactly one
+     * `versionCode=<digits>` line: no comment, no second key, nothing the
+     * regex could match first. On a tag checkout the value must be the commit
+     * count the build derives versionCode from; between releases the file
+     * names the last tagged release and only its shape is checked. The
+     * Gradle-time VerifyReleaseVersionFile task makes the same check before
+     * every build; this is the test-suite copy of it.
+     */
+    @Test
+    fun versionFileMatchesTheBuiltCommitOnATagCheckout() {
+        val text = read("androidApp/version.properties").readText()
+        val declared = Regex("""versionCode=(\d+)\r?\n?""").matchEntire(text)?.groupValues?.get(1)?.toIntOrNull()
+        assertTrue(declared != null, "androidApp/version.properties must be exactly one line, versionCode=<digits>, but reads:\n$text")
+        val tags = TrackedTree.git("tag", "--points-at", "HEAD").lines().filter { it.isNotBlank() }
+        if (tags.isEmpty()) return
+        val count = TrackedTree.git("rev-list", "--count", "HEAD").trim().toInt()
+        assertTrue(
+            declared == count,
+            "Tag ${tags.joinToString()} builds versionCode $count but androidApp/version.properties declares $declared",
+        )
     }
 }

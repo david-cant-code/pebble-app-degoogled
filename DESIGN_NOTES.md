@@ -293,6 +293,15 @@ What the tree guarantees, and how it is pinned:
   count, both functions of the built commit (`androidApp/build.gradle.kts`),
   so a tag checkout reports exactly the tag name and the values the recipe
   declares for that tag can be checked against the built APK.
+- `androidApp/version.properties` holds one line, `versionCode=<digits>`,
+  the versionCode of the most recent tagged release. It exists for
+  F-Droid's update checker, which reads it from a tag checkout (it cannot
+  count commits) and takes the tag name as versionName. The release commit
+  bumps it to the count that commit will have once tagged; on a tag
+  checkout the Gradle-time `VerifyReleaseVersionFile` task (wired before
+  `preBuild`, so it runs on every build everywhere), the
+  `FdroidGuardrailsTest` copy of the check, and a tag-only CI step all
+  fail if the file, the commit count, and the built APK disagree.
 - No module pins a Gradle JVM toolchain. The buildserver ships a single JDK
   (21) with toolchain provisioning disabled, so upstream's `jvmToolchain(17)`
   calls in `libpebble3`, `blobannotations`, and `blobdbgen` are removed and
@@ -323,9 +332,14 @@ What the recipe has to supply (field names as in the fdroiddata format):
   SDK package `cmake;3.22.1`, matching the pins above; the buildserver
   provisions neither by default and a mismatch fails configuration.
 - No JDK step: the buildserver's own JDK builds the tree (see above).
-- A build against a tag checkout (`commit:` the tag) with the tag's literal
-  `versionName` and `versionCode`; the F-Droid build fails if the built
-  values differ from the declared ones.
+- Per release, a build entry with the tag's literal `versionName` and
+  `versionCode` and `commit:` the full hash of the tagged commit; the
+  F-Droid build fails if the built values differ from the declared ones.
+- Update checking: `UpdateCheckMode: Tags` with `UpdateCheckData` naming
+  `androidApp/version.properties` and the regex `versionCode=(\d+)` for
+  the versionCode, and no file or regex for the versionName so the tag name
+  is used; `AutoUpdateMode: Version` then adds the build entry for a new tag
+  (with the commit resolved to its hash) without a manual recipe change.
 - The build subdirectory is `androidApp`; the unsigned release APK is the
   output F-Droid signs.
 - Anti-features: the on-device dictation models are runtime downloads from

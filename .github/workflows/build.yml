@@ -46,6 +46,24 @@ jobs:
           echo "expected versionName: $expected"
           echo "built:                $badging"
           test "$expected" = "$actual"
+      # androidApp/version.properties is what F-Droid's update checker reads as
+      # the versionCode of a tag. On a tag build the file, the commit count the
+      # build derives versionCode from, and the versionCode in the built APK
+      # must all agree; the Gradle-time VerifyReleaseVersionFile task and
+      # FdroidGuardrailsTest check the same thing from inside the build, this
+      # step checks it from outside against the artifact.
+      - name: Check the version file against the tag
+        if: github.ref_type == 'tag'
+        run: |
+          count="$(git rev-list --count HEAD)"
+          declared="$(sed -n 's/^versionCode=\([0-9][0-9]*\)$/\1/p' androidApp/version.properties)"
+          aapt2="$(ls -d "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -n 1)"
+          badging="$("$aapt2" dump badging androidApp/build/outputs/apk/release/androidApp-release-unsigned.apk | head -n 1)"
+          built="$(printf '%s' "$badging" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")"
+          echo "commit count: $count"
+          echo "version file: $declared"
+          echo "built APK:    $built"
+          test -n "$declared" && test "$count" = "$declared" && test "$count" = "$built"
       # The built manifest is what store scanners read. The source-level pin
       # is NetworkSecurityConfigTest; this catches a library manifest merging
       # usesCleartextTraffic back into the APK, which the source test cannot see.

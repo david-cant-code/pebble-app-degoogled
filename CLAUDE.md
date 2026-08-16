@@ -48,6 +48,16 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   / `compileOptions`, 17). `FdroidGuardrailsTest` fails on any
   `jvmToolchain(` call, which is what an upstream sync would bring back.
   CI builds on 21; this supersedes upstream's "JDK 17 required" below.
+- **A release commit bumps `androidApp/version.properties`.** F-Droid's
+  update checker reads a tag's versionCode from that one-line file because
+  it cannot count commits the way the build does. The commit that gets
+  tagged (the same one that adds
+  `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`) sets it
+  to the commit count that commit will have, which is `git rev-list --count
+  HEAD` plus one when committing on top of HEAD; between releases the file
+  names the last release. A tag build with a stale file fails three ways:
+  Gradle's `preBuild` (`VerifyReleaseVersionFile`), `FdroidGuardrailsTest`,
+  and the tag-build step in CI.
 - **Distinct branding: the fork is Gravel.** applicationId is
   `com.anopticlabs.gravel`; the Kotlin `namespace` and source packages
   deliberately stay `coredevices.coreapp` so upstream merges stay cheap;
