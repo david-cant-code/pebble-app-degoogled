@@ -305,10 +305,14 @@ What the tree guarantees, and how it is pinned:
 - No module pins a Gradle JVM toolchain. The buildserver ships a single JDK
   (21) with toolchain provisioning disabled, so upstream's `jvmToolchain(17)`
   calls in `libpebble3`, `blobannotations`, and `blobdbgen` are removed and
-  every JVM-flavoured target sets `jvmTarget` (and Java compatibility) to 17
-  explicitly; the bytecode is unchanged and any JDK 17+ builds the tree.
-  `FdroidGuardrailsTest` fails on a `jvmToolchain(` call anywhere in the
-  tracked gradle files, and CI builds on JDK 21.
+  every JVM-flavoured target, android and `jvm()` alike, sets `jvmTarget`
+  to 17 explicitly (`blobdbgen`, the one plain-JVM module, also sets Java
+  source and target compatibility); a target without an explicit
+  `jvmTarget` follows the JDK running Gradle, so this is what keeps the
+  class files identical on any JDK 17+. `FdroidGuardrailsTest` fails on a
+  toolchain pin in any spelling (`jvmToolchain(`, `jvmToolchain {`, or the
+  Java plugin's `toolchain {` block) anywhere in the tracked gradle files,
+  and CI builds on JDK 17 and 21.
 - A checkout without `keystore.jks` packages release unsigned, and the
   APK carries no dependency-metadata signing block; both are checked by
   the packaging-time `VerifyApkContents` task in

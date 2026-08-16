@@ -44,10 +44,14 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
 - **Any JDK 17 or newer builds the tree; there is no toolchain pin.**
   F-Droid's buildserver ships a single JDK (21) with Gradle toolchain
   provisioning switched off, so upstream's `jvmToolchain(17)` calls are
-  removed and each module sets its bytecode target explicitly (`jvmTarget`
-  / `compileOptions`, 17). `FdroidGuardrailsTest` fails on any
-  `jvmToolchain(` call, which is what an upstream sync would bring back.
-  CI builds on 21; this supersedes upstream's "JDK 17 required" below.
+  removed and every JVM-flavoured target (android and `jvm()` alike) sets
+  its bytecode target explicitly (`jvmTarget` / `compileOptions`, 17); a
+  target without one follows the JDK running Gradle and emits different
+  class files on 21 than on 17. `FdroidGuardrailsTest` fails on any
+  toolchain pin (`jvmToolchain(` or `jvmToolchain {`, or a Java
+  `toolchain {` block), which is what an upstream sync would bring back.
+  CI builds on both 17 and 21; this supersedes upstream's "JDK 17
+  required" below.
 - **A release commit bumps `androidApp/version.properties`.** F-Droid's
   update checker reads a tag's versionCode from that one-line file because
   it cannot count commits the way the build does. The commit that gets

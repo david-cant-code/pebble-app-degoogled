@@ -34,8 +34,13 @@ kotlin {
     // dependency in commonMain (KMP resolves commonMain deps for every
     // target; index-ai adds a jvm target on top of android + iOS). The iOS
     // app itself is unmaintained in this fork and still uses the real
-    // Firebase pods.
-    jvm()
+    // Firebase pods. The explicit bytecode target is the fork-wide rule (no
+    // toolchain pin, see index-ai/build.gradle.kts).
+    jvm {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
+    }
 
     iosX64 {
     }

@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.androidKotlinMultiplatformLibrary)
@@ -16,6 +18,14 @@ kotlin {
         compileSdk = libs.versions.android.compileSdk.get().toInt()
         minSdk = libs.versions.android.minSdk.get().toInt()
 
+        // Fork: no module pins a JVM toolchain (F-Droid's buildserver has one
+        // JDK, 21), so without an explicit target this compilation would
+        // follow the JDK running Gradle and emit different class files on 21
+        // than on 17. Every JVM-flavoured target in the tree sets 17.
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
+
         withHostTestBuilder {
         }
 
@@ -26,7 +36,11 @@ kotlin {
         }
     }
 
-    jvm()
+    jvm {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
+    }
 
     // For iOS targets, this is also where you should
     // configure native binary output. For more information, see:

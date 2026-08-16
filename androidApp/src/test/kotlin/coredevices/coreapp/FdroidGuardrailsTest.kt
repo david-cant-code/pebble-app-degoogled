@@ -37,11 +37,12 @@ import kotlin.test.assertTrue
  * list is the tree's half of a contract with the out-of-tree recipe, and
  * DESIGN_NOTES.md (F-Droid section) records the whole contract.
  *
- * The last two tests are not scanner checks but the other two halves of that
- * contract the tree can verify about itself: the build runs on the
- * buildserver's JDK (no toolchain pin, [noGradleFileConfiguresAJvmToolchain])
- * and the version file F-Droid's update checker reads has the shape its
- * regex expects and, on a tag checkout, the value the build produces
+ * The tests after the scanner checks are the other two halves of that
+ * contract the tree can verify about itself, each with a positive control
+ * proving its matcher fires: the build runs on the buildserver's JDK (no
+ * toolchain pin, [noGradleFileConfiguresAJvmToolchain]) and the version file
+ * F-Droid's update checker reads has the shape its regex expects and, on a
+ * tag checkout, the value the build produces
  * ([versionFileMatchesTheBuiltCommitOnATagCheckout]).
  */
 class FdroidGuardrailsTest {
@@ -190,15 +191,18 @@ class FdroidGuardrailsTest {
 
     /**
      * The buildserver ships one JDK (21 today) with Gradle toolchain
-     * provisioning disabled, so a `jvmToolchain(17)` call, which upstream had
-     * in three modules and an upstream sync would bring back, fails the
-     * F-Droid build outright. The bytecode target is set per module with
-     * `jvmTarget`/`compileOptions` instead, which any JDK 17+ honours.
+     * provisioning disabled, so any toolchain pin fails the F-Droid build
+     * outright: the `jvmToolchain(17)` call upstream had in three modules and
+     * an upstream sync would bring back, its lambda form
+     * `jvmToolchain { languageVersion.set(...) }`, and the Java plugin's
+     * `java { toolchain { ... } }` block all request the same provisioned JDK.
+     * The bytecode target is set per module with `jvmTarget`/`compileOptions`
+     * instead, which any JDK 17+ honours.
      */
     @Test
     fun noGradleFileConfiguresAJvmToolchain() {
         val problems = scannedGradleFiles().flatMap { path ->
-            jvmToolchainCalls(read(path).readLines()).map { "$path: $it" }
+            toolchainPins(read(path).readLines()).map { "$path: $it" }
         }
         assertTrue(
             problems.isEmpty(),
@@ -206,29 +210,52 @@ class FdroidGuardrailsTest {
         )
     }
 
-    /** Positive control for [noGradleFileConfiguresAJvmToolchain]: the matcher fires on the call shapes upstream uses and ignores comments. */
+    /**
+     * Positive control for [noGradleFileConfiguresAJvmToolchain]: the matcher
+     * fires on every pin spelling (call, lambda, Java toolchain block, and the
+     * property form of the latter) and ignores comments, near-miss identifiers,
+     * and the `libs.versions.jvm.toolchain` catalog accessor that feeds
+     * `jvmTarget`.
+     */
     @Test
-    fun jvmToolchainMatcherFiresOnAPin() {
+    fun toolchainMatcherFiresOnAPin() {
         val sample = listOf(
             "kotlin {",
             "    jvmToolchain(libs.versions.jvm.toolchain.get().toInt())",
             "    // jvmToolchain(17) would fail on the buildserver",
             "    jvmToolchain (17)",
             "    jvmToolchainless()",
+            "    jvmToolchain {",
+            "    jvmTarget.set(JvmTarget.valueOf(\"JVM_${'$'}{libs.versions.jvm.toolchain.get()}\"))",
+            "}",
+            "java {",
+            "    toolchain {",
+            "    toolchain.languageVersion.set(JavaLanguageVersion.of(17))",
+            "    // toolchain { languageVersion = JavaLanguageVersion.of(17) }",
             "}",
         )
-        assertTrue(
-            jvmToolchainCalls(sample) == listOf("2: jvmToolchain(libs.versions.jvm.toolchain.get().toInt())", "4: jvmToolchain (17)"),
-            "matcher returned ${jvmToolchainCalls(sample)}",
+        val expected = listOf(
+            "2: jvmToolchain(libs.versions.jvm.toolchain.get().toInt())",
+            "4: jvmToolchain (17)",
+            "6: jvmToolchain {",
+            "10: toolchain {",
+            "11: toolchain.languageVersion.set(JavaLanguageVersion.of(17))",
         )
+        assertTrue(toolchainPins(sample) == expected, "matcher returned ${toolchainPins(sample)}")
     }
 
-    /** `<line number>: <line>` for every non-comment line calling `jvmToolchain(`. */
-    private fun jvmToolchainCalls(lines: List<String>): List<String> {
-        val call = Regex("""\bjvmToolchain\s*\(""")
+    /**
+     * `<line number>: <line>` for every non-comment line that pins a JVM
+     * toolchain: `jvmToolchain(` or `jvmToolchain {` (Kotlin plugin), and
+     * `toolchain {` or `toolchain.languageVersion` (Java plugin extension).
+     * The catalog accessor `libs.versions.jvm.toolchain.get()` is `toolchain.`
+     * followed by `get`, so it does not match.
+     */
+    private fun toolchainPins(lines: List<String>): List<String> {
+        val pin = Regex("""\bjvmToolchain\s*[({]|\btoolchain\s*(?:\{|\.languageVersion)""")
         return lines.withIndex()
             .filterNot { (_, line) -> line.trimStart().startsWith("//") }
-            .filter { (_, line) -> call.containsMatchIn(line) }
+            .filter { (_, line) -> pin.containsMatchIn(line) }
             .map { (index, line) -> "${index + 1}: ${line.trim()}" }
     }
 
