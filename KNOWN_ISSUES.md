@@ -163,12 +163,13 @@ added to trust user-installed CAs (upstream commit `7549c661`); with
 targetSdk 28+ the config's base default is cleartext off, so the config
 silently blocked cleartext for upstream too. Upstream then restored
 cleartext by setting `cleartextTrafficPermitted="true"` in that config
-(upstream commit `44a15ce5`, taken up in the 2026-08 sync); the fork
-declines exactly that attribute, so the deliberate absence of
-`cleartextTrafficPermitted` in
-`androidApp/src/main/res/xml/network_security_config.xml` is now the
-entire control, re-asserted against upstream at every merge and pinned by
-`NetworkSecurityConfigTest`. The fork keeps the block because a config
+(upstream commit `44a15ce5`, taken up in the 2026-08 sync). The fork sets
+`cleartextTrafficPermitted="false"` on the config's base-config instead
+and drops the manifest's `usesCleartextTraffic` attribute, so the built
+manifest states what is true rather than relying on the precedence rule;
+both are re-asserted against upstream at every merge and pinned by
+`NetworkSecurityConfigTest` (source) and the CI check on the built
+manifest (artifact). The fork keeps the block because a config
 page is remote code executed in a WebView on the phone: fetched over
 cleartext, it hands any network-position attacker script injection into
 that WebView, plus whatever app state rides in the config URL. Legacy

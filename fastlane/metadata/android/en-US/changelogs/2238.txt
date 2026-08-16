@@ -1,0 +1,1 @@
+The app manifest no longer declares cleartext (plain HTTP) traffic as permitted; it was already blocked by the network security config, which now says so explicitly. No functional change.

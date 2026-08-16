@@ -7,11 +7,13 @@
   the user installs and trusts the cert on their device.
 -->
 <network-security-config>
-    <!-- Fork: no cleartextTrafficPermitted here, deliberately diverging from
-         upstream. Plain-HTTP traffic stays blocked app-wide (the platform
-         default since Android 9); user-added CAs above already cover the
-         self-hosted-server case over TLS. -->
-    <base-config>
+    <!-- Fork: cleartext is off app-wide, stated explicitly rather than left
+         to the targetSdk 28+ default, and diverging from upstream, which sets
+         it to true here. The manifest declares no usesCleartextTraffic either
+         (Android ignores that attribute once this file is declared, but the
+         built manifest should say what is true). User-added CAs above cover
+         the self-hosted-server case over TLS. -->
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
             <certificates src="user" />

@@ -5,20 +5,28 @@ import javax.xml.parsers.DocumentBuilderFactory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlin.test.fail
 import org.w3c.dom.Element
 
 /**
- * Pins the fork's network security config, whose entire cleartext control is
- * an ABSENT attribute: with targetSdk 28+ a bare base-config means cleartext
- * off app-wide, and the manifest's usesCleartextTraffic="true" is inert
- * because this config file is declared. Upstream sets
- * cleartextTrafficPermitted="true" here, so every upstream sync presents
- * re-enabling cleartext as an innocuous one-line resolution in a file the
- * fork otherwise takes verbatim; without this test that resolution would land
- * with nothing going red. The threat model for keeping cleartext off is a
- * watchapp config page fetched over plain HTTP handing a network-position
- * attacker script injection into the phone WebView.
+ * Pins the fork's cleartext posture at the source level: the network
+ * security config says cleartextTrafficPermitted="false" on base-config and
+ * nothing in the file says "true", and the app manifest declares no
+ * usesCleartextTraffic attribute while declaring the config. Upstream has the
+ * opposite of both (cleartextTrafficPermitted="true" in the config,
+ * usesCleartextTraffic="true" in the manifest), so every upstream sync
+ * presents re-enabling cleartext as a one-line resolution in files the fork
+ * otherwise takes verbatim; without this test that resolution would land with
+ * nothing going red. The threat model for keeping cleartext off is a watchapp
+ * config page fetched over plain HTTP handing a network-position attacker
+ * script injection into the phone WebView.
+ *
+ * The manifest attribute is checked even though Android ignores it once a
+ * network security config is declared: the built manifest is what store
+ * scanners and reviewers read, and it should state what is true. The
+ * artifact-level counterpart (the attribute absent from the built APK, where
+ * a library manifest could merge it back in) lives in the CI workflow.
  *
  * The trust-anchor pin is functional as much as security: user-added CAs are
  * why this file exists at all (PKJS apps talking to self-hosted servers over
@@ -28,6 +36,18 @@ import org.w3c.dom.Element
 class NetworkSecurityConfigTest {
 
     @Test
+    fun baseConfigDeniesCleartextExplicitly() {
+        val document = parse(configFile())
+        val baseConfigs = document.getElementsByTagName("base-config")
+        assertEquals(1, baseConfigs.length, "expected exactly one base-config")
+        assertEquals(
+            "false",
+            (baseConfigs.item(0) as Element).getAttribute("cleartextTrafficPermitted"),
+            "base-config must set cleartextTrafficPermitted=\"false\" explicitly",
+        )
+    }
+
+    @Test
     fun cleartextIsNotPermittedAnywhereInTheConfig() {
         val document = parse(configFile())
         // File-wide, not just base-config: a permissive domain-config or
@@ -35,11 +55,28 @@ class NetworkSecurityConfigTest {
         val all = document.getElementsByTagName("*")
         (0 until all.length).map { all.item(it) as Element }.forEach { element ->
             assertFalse(
-                element.hasAttribute("cleartextTrafficPermitted"),
-                "<${element.tagName}> sets cleartextTrafficPermitted; the fork's " +
-                    "control is the deliberate absence of this attribute",
+                element.getAttribute("cleartextTrafficPermitted") == "true",
+                "<${element.tagName}> sets cleartextTrafficPermitted=\"true\"; the fork keeps cleartext off",
             )
         }
+    }
+
+    @Test
+    fun manifestDeclaresNoCleartextAttributeAndPointsAtTheConfig() {
+        val document = parse(manifestFile())
+        val applications = document.getElementsByTagName("application")
+        assertEquals(1, applications.length, "expected exactly one <application>")
+        val application = applications.item(0) as Element
+        assertFalse(
+            application.hasAttribute("android:usesCleartextTraffic"),
+            "<application> declares android:usesCleartextTraffic; the fork removed it (the " +
+                "network security config governs, and the built manifest should not claim cleartext)",
+        )
+        assertEquals(
+            "@xml/network_security_config",
+            application.getAttribute("android:networkSecurityConfig"),
+            "<application> must declare the network security config that turns cleartext off",
+        )
     }
 
     @Test
@@ -58,18 +95,22 @@ class NetworkSecurityConfigTest {
         .newDocumentBuilder()
         .parse(file)
 
+    private fun configFile(): File = moduleFile("src/main/res/xml/network_security_config.xml")
+
+    private fun manifestFile(): File = moduleFile("src/main/AndroidManifest.xml")
+
     // Walk up from the runner's working directory like BackupRulesTest does:
     // Gradle runs unit tests with user.dir at the module directory, but the
     // walk keeps the test independent of that detail.
-    private fun configFile(): File {
+    private fun moduleFile(relative: String): File {
         var dir: File? = File(checkNotNull(System.getProperty("user.dir")))
         while (dir != null) {
-            val direct = File(dir, "src/main/res/xml/network_security_config.xml")
+            val direct = File(dir, relative)
             if (direct.isFile) return direct
-            val fromRoot = File(dir, "androidApp/src/main/res/xml/network_security_config.xml")
+            val fromRoot = File(dir, "androidApp/$relative")
             if (fromRoot.isFile) return fromRoot
             dir = dir.parentFile
         }
-        fail("network_security_config.xml not found above ${System.getProperty("user.dir")}")
+        fail("$relative not found above ${System.getProperty("user.dir")}")
     }
 }

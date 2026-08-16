@@ -42,3 +42,15 @@ jobs:
           echo "expected versionName: $expected"
           echo "built:                $badging"
           test "$expected" = "$actual"
+      # The built manifest is what store scanners read. The source-level pin
+      # is NetworkSecurityConfigTest; this catches a library manifest merging
+      # usesCleartextTraffic back into the APK, which the source test cannot see.
+      - name: Check the built manifest keeps cleartext off
+        run: |
+          aapt2="$(ls -d "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -n 1)"
+          manifest="$("$aapt2" dump xmltree --file AndroidManifest.xml androidApp/build/outputs/apk/release/androidApp-release-unsigned.apk)"
+          if printf '%s' "$manifest" | grep -q 'usesCleartextTraffic'; then
+            echo "built manifest declares usesCleartextTraffic:"; printf '%s' "$manifest" | grep 'usesCleartextTraffic'; exit 1
+          fi
+          printf '%s' "$manifest" | grep -q 'networkSecurityConfig' || { echo "built manifest declares no networkSecurityConfig"; exit 1; }
+          echo "built manifest: no usesCleartextTraffic, networkSecurityConfig declared"
