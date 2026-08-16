@@ -1,0 +1,1 @@
+Build changes for the F-Droid submission: the tree builds on any JDK 17 or newer with no toolchain pin, and a version file lets F-Droid's update checker pick up new releases on its own. No functional change.
