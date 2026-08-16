@@ -293,6 +293,13 @@ What the tree guarantees, and how it is pinned:
   count, both functions of the built commit (`androidApp/build.gradle.kts`),
   so a tag checkout reports exactly the tag name and the values the recipe
   declares for that tag can be checked against the built APK.
+- No module pins a Gradle JVM toolchain. The buildserver ships a single JDK
+  (21) with toolchain provisioning disabled, so upstream's `jvmToolchain(17)`
+  calls in `libpebble3`, `blobannotations`, and `blobdbgen` are removed and
+  every JVM-flavoured target sets `jvmTarget` (and Java compatibility) to 17
+  explicitly; the bytecode is unchanged and any JDK 17+ builds the tree.
+  `FdroidGuardrailsTest` fails on a `jvmToolchain(` call anywhere in the
+  tracked gradle files, and CI builds on JDK 21.
 - A checkout without `keystore.jks` packages release unsigned, and the
   APK carries no dependency-metadata signing block; both are checked by
   the packaging-time `VerifyApkContents` task in
@@ -315,10 +322,7 @@ What the recipe has to supply (field names as in the fdroiddata format):
 - `ndk:` r28c (28.2.13676358) and a `prebuild`/`sudo` step that installs the
   SDK package `cmake;3.22.1`, matching the pins above; the buildserver
   provisions neither by default and a mismatch fails configuration.
-- JDK 17: `libpebble3`, `blobannotations`, and `blobdbgen` pin
-  `jvmToolchain(17)` and Gradle toolchain auto-download is off on the
-  buildserver, which ships a newer JDK, so the recipe installs
-  `openjdk-17-jdk-headless` (`sudo:`).
+- No JDK step: the buildserver's own JDK builds the tree (see above).
 - A build against a tag checkout (`commit:` the tag) with the tag's literal
   `versionName` and `versionCode`; the F-Droid build fails if the built
   values differ from the declared ones.

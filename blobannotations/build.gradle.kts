@@ -6,8 +6,10 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(libs.versions.jvm.toolchain.get().toInt())
-
+    // Fork: no jvmToolchain pin. F-Droid's buildserver ships a single JDK (21)
+    // with Gradle toolchain provisioning disabled, so the build has to run on
+    // whichever JDK 17+ launches Gradle. The bytecode target stays 17 through
+    // the explicit jvmTarget on each JVM-flavoured target below.
     android {
         namespace = "coredevices.blobannotations"
         compileSdk = libs.versions.android.compileSdk.get().toInt()
@@ -18,7 +20,11 @@ kotlin {
         }
     }
 
-    jvm()
+    jvm {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.valueOf("JVM_${libs.versions.jvm.toolchain.get()}"))
+        }
+    }
 
     val xcfName = "libpebble-annotations"
 

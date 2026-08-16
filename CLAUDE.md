@@ -41,6 +41,13 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   below still naming `androidUnitTest` / `androidInstrumentedTest`
   predates its own AGP 9 migration. Do not add tests under the old names:
   the new plugins silently ignore those directories.
+- **Any JDK 17 or newer builds the tree; there is no toolchain pin.**
+  F-Droid's buildserver ships a single JDK (21) with Gradle toolchain
+  provisioning switched off, so upstream's `jvmToolchain(17)` calls are
+  removed and each module sets its bytecode target explicitly (`jvmTarget`
+  / `compileOptions`, 17). `FdroidGuardrailsTest` fails on any
+  `jvmToolchain(` call, which is what an upstream sync would bring back.
+  CI builds on 21; this supersedes upstream's "JDK 17 required" below.
 - **Distinct branding: the fork is Gravel.** applicationId is
   `com.anopticlabs.gravel`; the Kotlin `namespace` and source packages
   deliberately stay `coredevices.coreapp` so upstream merges stay cheap;

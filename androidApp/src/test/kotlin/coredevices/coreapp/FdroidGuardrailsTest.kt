@@ -36,6 +36,10 @@ import kotlin.test.assertTrue
  * build recipe removes before its scan, listed in [recipeRemovedPaths]. That
  * list is the tree's half of a contract with the out-of-tree recipe, and
  * DESIGN_NOTES.md (F-Droid section) records the whole contract.
+ *
+ * The last test is not a scanner check but another part of that contract
+ * the tree can verify about itself: the build runs on the buildserver's JDK
+ * (no toolchain pin, [noGradleFileConfiguresAJvmToolchain]).
  */
 class FdroidGuardrailsTest {
 
@@ -179,5 +183,49 @@ class FdroidGuardrailsTest {
             problems.isEmpty(),
             "F-Droid's scanner fails on Java sources that load code at runtime:\n" + problems.joinToString("\n"),
         )
+    }
+
+    /**
+     * The buildserver ships one JDK (21 today) with Gradle toolchain
+     * provisioning disabled, so a `jvmToolchain(17)` call, which upstream had
+     * in three modules and an upstream sync would bring back, fails the
+     * F-Droid build outright. The bytecode target is set per module with
+     * `jvmTarget`/`compileOptions` instead, which any JDK 17+ honours.
+     */
+    @Test
+    fun noGradleFileConfiguresAJvmToolchain() {
+        val problems = scannedGradleFiles().flatMap { path ->
+            jvmToolchainCalls(read(path).readLines()).map { "$path: $it" }
+        }
+        assertTrue(
+            problems.isEmpty(),
+            "F-Droid's buildserver has no JDK to satisfy a toolchain pin; set jvmTarget instead:\n" + problems.joinToString("\n"),
+        )
+    }
+
+    /** Positive control for [noGradleFileConfiguresAJvmToolchain]: the matcher fires on the call shapes upstream uses and ignores comments. */
+    @Test
+    fun jvmToolchainMatcherFiresOnAPin() {
+        val sample = listOf(
+            "kotlin {",
+            "    jvmToolchain(libs.versions.jvm.toolchain.get().toInt())",
+            "    // jvmToolchain(17) would fail on the buildserver",
+            "    jvmToolchain (17)",
+            "    jvmToolchainless()",
+            "}",
+        )
+        assertTrue(
+            jvmToolchainCalls(sample) == listOf("2: jvmToolchain(libs.versions.jvm.toolchain.get().toInt())", "4: jvmToolchain (17)"),
+            "matcher returned ${jvmToolchainCalls(sample)}",
+        )
+    }
+
+    /** `<line number>: <line>` for every non-comment line calling `jvmToolchain(`. */
+    private fun jvmToolchainCalls(lines: List<String>): List<String> {
+        val call = Regex("""\bjvmToolchain\s*\(""")
+        return lines.withIndex()
+            .filterNot { (_, line) -> line.trimStart().startsWith("//") }
+            .filter { (_, line) -> call.containsMatchIn(line) }
+            .map { (index, line) -> "${index + 1}: ${line.trim()}" }
     }
 }

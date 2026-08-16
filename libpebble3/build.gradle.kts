@@ -19,8 +19,7 @@ room {
 val enableIosTarget = System.getProperty("os.name").contains("mac", ignoreCase = true)
 
 kotlin {
-    jvmToolchain(libs.versions.jvm.toolchain.get().toInt())
-
+    // Fork: no jvmToolchain pin (see blobannotations/build.gradle.kts).
     targets.configureEach {
         compilations.configureEach {
             compileTaskProvider.configure {
@@ -57,7 +56,11 @@ kotlin {
         }
     }
 
-    jvm()
+    jvm {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.valueOf("JVM_${libs.versions.jvm.toolchain.get()}"))
+        }
+    }
 
     listOf(
         iosArm64(),

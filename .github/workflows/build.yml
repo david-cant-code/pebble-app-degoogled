@@ -6,11 +6,15 @@ jobs:
   android:
     runs-on: ubuntu-latest
     steps:
+      # 21 is the JDK on F-Droid's buildserver, which is why the tree carries no
+      # jvmToolchain pin (see DESIGN_NOTES.md, F-Droid); the bytecode target
+      # stays 17 and any JDK 17+ builds the tree, so CI exercises the one JDK
+      # nobody builds with by hand.
       - name: Setup JDK
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: 17
+          java-version: 21
       - name: Checkout source
         uses: actions/checkout@v4
         with:
