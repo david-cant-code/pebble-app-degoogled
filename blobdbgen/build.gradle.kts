@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.ksp)
@@ -11,6 +13,16 @@ dependencies {
     implementation("com.squareup:kotlinpoet-ksp:2.1.0")
 }
 
+// Fork: no jvmToolchain pin (see blobannotations/build.gradle.kts). Kotlin and
+// Java compile to the same 17 target so the JVM-target consistency check passes
+// on any JDK 17+.
 kotlin {
-    jvmToolchain(libs.versions.jvm.toolchain.get().toInt())
+    compilerOptions {
+        jvmTarget.set(JvmTarget.valueOf("JVM_${libs.versions.jvm.toolchain.get()}"))
+    }
+}
+
+java {
+    sourceCompatibility = JavaVersion.toVersion(libs.versions.jvm.toolchain.get())
+    targetCompatibility = JavaVersion.toVersion(libs.versions.jvm.toolchain.get())
 }

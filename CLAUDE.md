@@ -41,6 +41,32 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   below still naming `androidUnitTest` / `androidInstrumentedTest`
   predates its own AGP 9 migration. Do not add tests under the old names:
   the new plugins silently ignore those directories.
+- **Any JDK 17 or newer builds the tree; there is no toolchain pin.**
+  F-Droid's buildserver ships a single JDK (21) with Gradle toolchain
+  provisioning switched off, so upstream's `jvmToolchain(17)` calls are
+  removed and every JVM-flavoured target (android and `jvm()` alike) sets
+  its bytecode target explicitly (`jvmTarget` / `compileOptions`, 17); a
+  target without one follows the JDK running Gradle and emits different
+  class files on 21 than on 17. `FdroidGuardrailsTest` fails on any
+  toolchain pin (`jvmToolchain(` or `jvmToolchain {`, or a Java
+  `toolchain {` block), which is what an upstream sync would bring back.
+  CI builds on both 17 and 21; this supersedes upstream's "JDK 17
+  required" below.
+- **A release commit bumps `androidApp/version.properties`.** F-Droid's
+  update checker reads a tag's versionCode from that one-line file because
+  it cannot count commits the way the build does. The commit that gets
+  tagged (the same one that adds
+  `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`) sets it
+  to the commit count that commit will have, which is `git rev-list --count
+  HEAD` plus one when committing on top of HEAD; between releases the file
+  names the last release. The value checks fire only on a tag checkout,
+  so after tagging and before pushing the tag run `./gradlew
+  :androidApp:verifyReleaseVersionFile` (or the guardrail suite) on the
+  tagged commit; otherwise a stale file is first rejected once the tag is
+  public, by Gradle's `preBuild` (`VerifyReleaseVersionFile`),
+  `FdroidGuardrailsTest`, and the tag-build step in CI alike. The test
+  also requires `changelogs/<versionCode>.txt` to exist for the value the
+  file names, on every commit.
 - **Distinct branding: the fork is Gravel.** applicationId is
   `com.anopticlabs.gravel`; the Kotlin `namespace` and source packages
   deliberately stay `coredevices.coreapp` so upstream merges stay cheap;

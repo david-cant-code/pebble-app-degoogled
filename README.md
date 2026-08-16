@@ -77,7 +77,7 @@ De-google work is completed, all telemetry is removed. What remains is polish an
 - Clone with `--recursive` (or run `git submodule update --init`): the
   whisper.cpp speech engine is a pinned git submodule, compiled from
   source by the Android build.
-- JDK 17; Gradle wrapper included. Debug build:
+- Any JDK 17 or newer; Gradle wrapper included. Debug build:
   `./gradlew :androidApp:assembleDebug`
 - No `google-services.json` is needed: the google-services plugin is gone
   along with the Firebase SDKs.

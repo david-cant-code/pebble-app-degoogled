@@ -293,6 +293,30 @@ What the tree guarantees, and how it is pinned:
   count, both functions of the built commit (`androidApp/build.gradle.kts`),
   so a tag checkout reports exactly the tag name and the values the recipe
   declares for that tag can be checked against the built APK.
+- `androidApp/version.properties` holds one line, `versionCode=<digits>`,
+  the versionCode of the most recent tagged release. It exists for
+  F-Droid's update checker, which reads it from a tag checkout (it cannot
+  count commits) and takes the tag name as versionName. The release commit
+  bumps it to the count that commit will have once tagged. Three checks
+  guard it: the Gradle-time `VerifyReleaseVersionFile` task (wired before
+  `preBuild`, so it runs on every build everywhere) checks the shape on
+  every build and, on a tag checkout, that the value equals the commit
+  count the build stamps into the APK; `FdroidGuardrailsTest` repeats both
+  and also requires a `changelogs/<value>.txt` for the value the file
+  names; a tag-only CI step compares the file, the commit count, and the
+  versionCode read back from the built APK. All three read the file as
+  exactly one LF-terminated `versionCode=<digits>` line.
+- No module pins a Gradle JVM toolchain. The buildserver ships a single JDK
+  (21) with toolchain provisioning disabled, so upstream's `jvmToolchain(17)`
+  calls in `libpebble3`, `blobannotations`, and `blobdbgen` are removed and
+  every JVM-flavoured target, android and `jvm()` alike, sets `jvmTarget`
+  to 17 explicitly (`blobdbgen`, the one plain-JVM module, also sets Java
+  source and target compatibility); a target without an explicit
+  `jvmTarget` follows the JDK running Gradle, so this is what keeps the
+  class files identical on any JDK 17+. `FdroidGuardrailsTest` fails on a
+  toolchain pin in any spelling (`jvmToolchain(`, `jvmToolchain {`, or the
+  Java plugin's `toolchain {` block) anywhere in the tracked gradle files,
+  and CI builds on JDK 17 and 21.
 - A checkout without `keystore.jks` packages release unsigned, and the
   APK carries no dependency-metadata signing block; both are checked by
   the packaging-time `VerifyApkContents` task in
@@ -315,13 +339,19 @@ What the recipe has to supply (field names as in the fdroiddata format):
 - `ndk:` r28c (28.2.13676358) and a `prebuild`/`sudo` step that installs the
   SDK package `cmake;3.22.1`, matching the pins above; the buildserver
   provisions neither by default and a mismatch fails configuration.
-- JDK 17: `libpebble3`, `blobannotations`, and `blobdbgen` pin
-  `jvmToolchain(17)` and Gradle toolchain auto-download is off on the
-  buildserver, which ships a newer JDK, so the recipe installs
-  `openjdk-17-jdk-headless` (`sudo:`).
-- A build against a tag checkout (`commit:` the tag) with the tag's literal
-  `versionName` and `versionCode`; the F-Droid build fails if the built
-  values differ from the declared ones.
+- No JDK step: the buildserver's own JDK builds the tree (see above).
+- Per release, a build entry with the tag's literal `versionName` and
+  `versionCode` and `commit:` the full hash of the tagged commit; the
+  F-Droid build fails if the built values differ from the declared ones.
+- Update checking: `UpdateCheckMode: Tags` with `UpdateCheckData` naming
+  `androidApp/version.properties` and the regex `versionCode=(\d+)` for
+  the versionCode, and no file or regex for the versionName so the tag name
+  is used; `AutoUpdateMode: Version` then adds the build entry for a new tag
+  without a manual recipe change (current fdroidserver resolves the entry's
+  `commit:` to the tag's hash). The checker inspects only the newest few
+  tags and errors if none of them carries the file, so the recipe can
+  only enable update checking once a tag containing
+  `androidApp/version.properties` exists.
 - The build subdirectory is `androidApp`; the unsigned release APK is the
   output F-Droid signs.
 - Anti-features: the on-device dictation models are runtime downloads from

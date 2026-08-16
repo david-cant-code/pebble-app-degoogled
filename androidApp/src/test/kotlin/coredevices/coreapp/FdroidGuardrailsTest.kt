@@ -36,6 +36,14 @@ import kotlin.test.assertTrue
  * build recipe removes before its scan, listed in [recipeRemovedPaths]. That
  * list is the tree's half of a contract with the out-of-tree recipe, and
  * DESIGN_NOTES.md (F-Droid section) records the whole contract.
+ *
+ * The tests after the scanner checks are the other two halves of that
+ * contract the tree can verify about itself, each with a positive control
+ * proving its matcher fires: the build runs on the buildserver's JDK (no
+ * toolchain pin, [noGradleFileConfiguresAJvmToolchain]) and the version file
+ * F-Droid's update checker reads has the shape its regex expects and, on a
+ * tag checkout, the value the build produces
+ * ([versionFileMatchesTheBuiltCommitOnATagCheckout]).
  */
 class FdroidGuardrailsTest {
 
@@ -180,4 +188,146 @@ class FdroidGuardrailsTest {
             "F-Droid's scanner fails on Java sources that load code at runtime:\n" + problems.joinToString("\n"),
         )
     }
+
+    /**
+     * The buildserver ships one JDK (21 today) with Gradle toolchain
+     * provisioning disabled, so any toolchain pin fails the F-Droid build
+     * outright: the `jvmToolchain(17)` call upstream had in three modules and
+     * an upstream sync would bring back, its lambda form
+     * `jvmToolchain { languageVersion.set(...) }`, and the Java plugin's
+     * `java { toolchain { ... } }` block all request the same provisioned JDK.
+     * The bytecode target is set per module with `jvmTarget`/`compileOptions`
+     * instead, which any JDK 17+ honours.
+     */
+    @Test
+    fun noGradleFileConfiguresAJvmToolchain() {
+        val problems = scannedGradleFiles().flatMap { path ->
+            toolchainPins(read(path).readLines()).map { "$path: $it" }
+        }
+        assertTrue(
+            problems.isEmpty(),
+            "F-Droid's buildserver has no JDK to satisfy a toolchain pin; set jvmTarget instead:\n" + problems.joinToString("\n"),
+        )
+    }
+
+    /**
+     * Positive control for [noGradleFileConfiguresAJvmToolchain]: the matcher
+     * fires on every pin spelling (call, lambda, Java toolchain block, and the
+     * property form of the latter) and ignores comments, near-miss identifiers,
+     * and the `libs.versions.jvm.toolchain` catalog accessor that feeds
+     * `jvmTarget`.
+     */
+    @Test
+    fun toolchainMatcherFiresOnAPin() {
+        val sample = listOf(
+            "kotlin {",
+            "    jvmToolchain(libs.versions.jvm.toolchain.get().toInt())",
+            "    // jvmToolchain(17) would fail on the buildserver",
+            "    jvmToolchain (17)",
+            "    jvmToolchainless()",
+            "    jvmToolchain {",
+            "    jvmTarget.set(JvmTarget.valueOf(\"JVM_${'$'}{libs.versions.jvm.toolchain.get()}\"))",
+            "}",
+            "java {",
+            "    toolchain {",
+            "    toolchain.languageVersion.set(JavaLanguageVersion.of(17))",
+            "    // toolchain { languageVersion = JavaLanguageVersion.of(17) }",
+            "}",
+        )
+        val expected = listOf(
+            "2: jvmToolchain(libs.versions.jvm.toolchain.get().toInt())",
+            "4: jvmToolchain (17)",
+            "6: jvmToolchain {",
+            "10: toolchain {",
+            "11: toolchain.languageVersion.set(JavaLanguageVersion.of(17))",
+        )
+        assertTrue(toolchainPins(sample) == expected, "matcher returned ${toolchainPins(sample)}")
+    }
+
+    /**
+     * `<line number>: <line>` for every non-comment line that pins a JVM
+     * toolchain: `jvmToolchain(` or `jvmToolchain {` (Kotlin plugin), and
+     * `toolchain {` or `toolchain.languageVersion` (Java plugin extension).
+     * The catalog accessor `libs.versions.jvm.toolchain.get()` is `toolchain.`
+     * followed by `get`, so it does not match.
+     */
+    private fun toolchainPins(lines: List<String>): List<String> {
+        val pin = Regex("""\bjvmToolchain\s*[({]|\btoolchain\s*(?:\{|\.languageVersion)""")
+        return lines.withIndex()
+            .filterNot { (_, line) -> line.trimStart().startsWith("//") }
+            .filter { (_, line) -> pin.containsMatchIn(line) }
+            .map { (index, line) -> "${index + 1}: ${line.trim()}" }
+    }
+
+    /**
+     * `androidApp/version.properties` is what the recipe's UpdateCheckData
+     * regex reads as the versionCode of a tag, so it is held to exactly one
+     * `versionCode=<digits>` line: no comment, no second key, nothing the
+     * regex could match first. The value must name a release that has a
+     * changelog (`fastlane/metadata/android/en-US/changelogs/<value>.txt`,
+     * added by the same release commit), and on a tag checkout it must be
+     * the commit count the build derives versionCode from; between releases
+     * the file names the last tagged release. The Gradle-time
+     * VerifyReleaseVersionFile task makes the shape and tag checks before
+     * every build; this is the test-suite copy of it plus the changelog
+     * pairing.
+     */
+    @Test
+    fun versionFileMatchesTheBuiltCommitOnATagCheckout() {
+        val text = read("androidApp/version.properties").readText()
+        val declared = declaredVersionCode(text)
+        assertTrue(declared != null, "androidApp/version.properties must be exactly one line, versionCode=<digits>, but reads:\n$text")
+        val changelog = "fastlane/metadata/android/en-US/changelogs/$declared.txt"
+        assertTrue(
+            read(changelog).exists(),
+            "androidApp/version.properties declares $declared but there is no $changelog; the release commit adds both",
+        )
+        val tags = TrackedTree.git("tag", "--points-at", "HEAD").lines().filter { it.isNotBlank() }
+        if (tags.isEmpty()) return
+        val count = TrackedTree.git("rev-list", "--count", "HEAD").trim().toInt()
+        assertTrue(
+            declared == count,
+            "Tag ${tags.joinToString()} builds versionCode $count but androidApp/version.properties declares $declared",
+        )
+    }
+
+    /**
+     * Positive control for [versionFileMatchesTheBuiltCommitOnATagCheckout]:
+     * the shape check accepts exactly one LF-terminated (or unterminated)
+     * `versionCode=<digits>` line and rejects a comment line, a second key,
+     * a blank line, leading space, CRLF, and a non-numeric value. CRLF is
+     * rejected on purpose so the check agrees with the per-line sed in the
+     * CI tag step, which anchors on `$` before the newline.
+     */
+    @Test
+    fun versionFileShapeCheckAcceptsOnlyOneLine() {
+        val accepted = mapOf("versionCode=2238\n" to 2238, "versionCode=2238" to 2238)
+        val rejected = listOf(
+            "versionCode=2238\r\n",
+            "# the last release\nversionCode=2238\n",
+            "versionCode=2238\nversionName=0.1.2\n",
+            "versionCode=2238\n\n",
+            " versionCode=2238\n",
+            "versionCode=\n",
+            "versionCode=abc\n",
+            "",
+        )
+        for ((text, expected) in accepted) {
+            assertTrue(declaredVersionCode(text) == expected, "shape check rejected ${text.escaped()}")
+        }
+        for (text in rejected) {
+            assertTrue(declaredVersionCode(text) == null, "shape check accepted ${text.escaped()}")
+        }
+    }
+
+    /**
+     * The versionCode a version file declares, or null when the file is not
+     * exactly one `versionCode=<digits>` line. Mirrored by hand in the
+     * VerifyReleaseVersionFile task in androidApp/build.gradle.kts, which
+     * cannot share test code; keep the two regexes identical.
+     */
+    private fun declaredVersionCode(text: String): Int? =
+        Regex("""versionCode=(\d+)\n?""").matchEntire(text)?.groupValues?.get(1)?.toIntOrNull()
+
+    private fun String.escaped(): String = "\"" + replace("\r", "\\r").replace("\n", "\\n") + "\""
 }

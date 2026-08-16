@@ -30,7 +30,13 @@ kotlin {
         }
     }
 
-    jvm()
+    // Fork: explicit bytecode target, no toolchain pin (see
+    // index-ai/build.gradle.kts).
+    jvm {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
+    }
 
     listOf(
         iosArm64(),

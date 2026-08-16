@@ -2,15 +2,32 @@ name: Build
 
 on: [push]
 
+# The job only builds and asserts; nothing here writes to the repository, so
+# the workflow token gets read access and no more. actions/checkout persists
+# the token in the checkout by default, which is why the scope matters even
+# though no step names it.
+permissions:
+  contents: read
+
 jobs:
   android:
     runs-on: ubuntu-latest
+    # The tree carries no jvmToolchain pin (see DESIGN_NOTES.md, F-Droid), so
+    # the JDK that launches Gradle is the one that compiles. 21 is F-Droid's
+    # buildserver JDK; 17 is the documented floor ("any JDK 17 or newer") and
+    # the bytecode target. Building on both keeps the floor a tested claim: a
+    # dependency or catalog bump that quietly needs 21 fails the 17 leg
+    # instead of only failing whoever still builds on 17 by hand.
+    strategy:
+      fail-fast: false
+      matrix:
+        java-version: [17, 21]
     steps:
       - name: Setup JDK
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: 17
+          java-version: ${{ matrix.java-version }}
       - name: Checkout source
         uses: actions/checkout@v4
         with:
@@ -42,6 +59,24 @@ jobs:
           echo "expected versionName: $expected"
           echo "built:                $badging"
           test "$expected" = "$actual"
+      # androidApp/version.properties is what F-Droid's update checker reads as
+      # the versionCode of a tag. On a tag build the file, the commit count the
+      # build derives versionCode from, and the versionCode in the built APK
+      # must all agree; the Gradle-time VerifyReleaseVersionFile task and
+      # FdroidGuardrailsTest check the same thing from inside the build, this
+      # step checks it from outside against the artifact.
+      - name: Check the version file against the tag
+        if: github.ref_type == 'tag'
+        run: |
+          count="$(git rev-list --count HEAD)"
+          declared="$(sed -n 's/^versionCode=\([0-9][0-9]*\)$/\1/p' androidApp/version.properties)"
+          aapt2="$(ls -d "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -n 1)"
+          badging="$("$aapt2" dump badging androidApp/build/outputs/apk/release/androidApp-release-unsigned.apk | head -n 1)"
+          built="$(printf '%s' "$badging" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")"
+          echo "commit count: $count"
+          echo "version file: $declared"
+          echo "built APK:    $built"
+          test -n "$declared" && test "$count" = "$declared" && test "$count" = "$built"
       # The built manifest is what store scanners read. The source-level pin
       # is NetworkSecurityConfigTest; this catches a library manifest merging
       # usesCleartextTraffic back into the APK, which the source test cannot see.
