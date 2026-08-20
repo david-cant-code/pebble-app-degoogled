@@ -461,11 +461,15 @@ fun LockerScreen(
                     PullToRefreshBox(isRefreshing = viewModel.storeIsRefreshing || viewModel.lockerIsRefreshing, onRefresh = {
                         viewModel.startLockerRefresh(libPebble, sharedViewModel.watchType.value)
                     }) {
-                        val myApps by remember(lockerEntries) {
+                        val active = if (viewModel.type.value == AppType.Watchface) {
+                            activeWatchface
+                        } else {
+                            activeWatchapp
+                        }
+                        val myApps by remember(lockerEntries, active) {
                             derivedStateOf {
                                 lockerEntries.filter {
-                                            it.showOnMainLockerScreen() &&
-                                            (it.uuid != activeWatchface.uuid || it.uuid != lockerEntries.first().uuid)
+                                    it.showOnMainLockerScreen() && it.uuid != active?.uuid
                                 }
                             }
                         }
@@ -486,11 +490,6 @@ fun LockerScreen(
                             }
                         }
 
-                        val active = if (viewModel.type.value == AppType.Watchface) {
-                            activeWatchface
-                        } else {
-                            activeWatchapp
-                        }
                         // Launching an app inserts the "Active" section above everything else.
                         // The list stays anchored to whatever the user was looking at, so the
                         // section arrives off-screen and unnoticed; scroll up to show it, but
@@ -573,7 +572,7 @@ fun LockerScreen(
                                                         topBarParams
                                                     )
                                                     Text(
-                                                        activeWatchface.developerName,
+                                                        active.developerName,
                                                         fontSize = 12.sp,
                                                         color = Color.Gray,
                                                         modifier = Modifier.padding(0.dp)
