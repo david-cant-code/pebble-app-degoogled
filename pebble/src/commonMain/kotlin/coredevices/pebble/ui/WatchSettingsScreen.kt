@@ -1,6 +1,5 @@
 package coredevices.pebble.ui
 
-import AppUpdateTracker
 import CommonRoutes
 import CoreAppVersion
 import NextBugReportContext
@@ -93,6 +92,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
@@ -273,13 +273,11 @@ fun settingsBadgeTotal(): Int {
         AppUpdateState.NoUpdateAvailable -> 0
         is AppUpdateState.UpdateAvailable -> 1
     }
-    val appUpdateTracker: AppUpdateTracker = koinInject()
-    val appWasUpdated by appUpdateTracker.appWasUpdated.collectAsState()
-    val appUpdated = when (appWasUpdated) {
-        true -> 1
-        false -> 0
-    }
-    return permissionBadgeCount + updatesAvailable + appUpdated
+    // Fork: the third slot is an unseen What's-new notice. It keys on
+    // lastSeenWhatsNewVersion, like the About item badge and the popup itself, so
+    // acknowledging the notice anywhere clears all three together.
+    val whatsNewUnseen = if (coreConfig.lastSeenWhatsNewVersion < WHATS_NEW_VERSION) 1 else 0
+    return permissionBadgeCount + updatesAvailable + whatsNewUnseen
 }
 
 private val logger = Logger.withTag("WatchSettingsScreen")
@@ -440,8 +438,25 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     val analyticsBackend: AnalyticsBackend = koinInject()
     val enableExperimentalDevices: EnableExperimentalDevices = koinInject()
     val experimentalDevices by enableExperimentalDevices.enabled.collectAsState()
-    val appUpdateTracker: AppUpdateTracker = koinInject()
-    val showChangelogBadge = remember { appUpdateTracker.appWasUpdated.value }
+    // Fork: About and Support web links open in the user's browser. The changelog
+    // host does not render inside an embedded WebView, and the help centre is
+    // Intercom-backed, so embedding it makes the app's own network traffic include
+    // Intercom's endpoints.
+    val uriHandler = LocalUriHandler.current
+    // Fork: state for reopening the What's-new popup from the About section. The
+    // update-triggered auto-show lives in App (WhatsNewDialog); this path is the
+    // user deliberately opening the same popup, so it is freely dismissable and
+    // stamps the revision as seen on close.
+    var showWhatsNewPopup by remember { mutableStateOf(false) }
+    if (showWhatsNewPopup) {
+        WhatsNewPopup(
+            requireExplicitAck = false,
+            onClose = {
+                coreConfigHolder.update(coreConfig.copy(lastSeenWhatsNewVersion = WHATS_NEW_VERSION))
+                showWhatsNewPopup = false
+            },
+        )
+    }
     val hasOfflineModels by produceState(false) {
         withContext(Dispatchers.Default) {
             // Installed catalog models only: a stale previous-engine dir on
@@ -540,39 +555,35 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     },
                     isDebugSetting = false,
                 ),
-                navBarNav?.let { nav -> basicSettingsActionItem(
+                // Fork: opens the fork's own What's-new popup with Gravel's changes
+                // (the upstream changelog this item linked to describes upstream
+                // releases the fork does not ship). Badged until the current revision
+                // has been seen, here or via the update-triggered popup.
+                basicSettingsActionItem(
                     title = "What’s new in the app",
                     topLevelType = TopLevelType.Phone,
                     section = Section.About,
-                    action = {
-                        nav.navigateTo(CommonRoutes.RoadmapChangelogRoute)
-                    },
-                    actionIcon = Icons.AutoMirrored.Default.Launch,
-                    badge = if (showChangelogBadge) "1" else null,
-                    onDisplayed = {
-                        LaunchedEffect(Unit) {
-                            appUpdateTracker.acknowledgeCurrentVersion()
-                        }
-                    },
-                ) },
-                navBarNav?.let { nav -> basicSettingsActionItem(
+                    action = { showWhatsNewPopup = true },
+                    badge = if (coreConfig.lastSeenWhatsNewVersion < WHATS_NEW_VERSION) "1" else null,
+                ),
+                // Fork: external browser (see uriHandler above for why these three
+                // items no longer use the in-app WebView).
+                basicSettingsActionItem(
                     title = "What’s new in PebbleOS",
                     topLevelType = TopLevelType.Phone,
                     section = Section.About,
-                    action = {
-                        nav.navigateTo(CommonRoutes.PebbleOsChangelogRoute)
-                    },
+                    action = { uriHandler.openUri("https://ndocs.repebble.com/pebbleos-changelog") },
                     actionIcon = Icons.AutoMirrored.Default.Launch,
-                ) },
-                navBarNav?.let { nav -> basicSettingsActionItem(
+                ),
+                // Fork: external browser, keeping the Intercom-backed help centre out
+                // of the app's own network traffic.
+                basicSettingsActionItem(
                     title = "Getting Started & Troubleshooting",
                     topLevelType = TopLevelType.Phone,
                     section = Section.Support,
-                    action = {
-                        nav.navigateTo(CommonRoutes.TroubleshootingRoute)
-                    },
+                    action = { uriHandler.openUri("https://pbl.zip/in-app-getting-started-and-troubleshooting") },
                     actionIcon = Icons.AutoMirrored.Default.Launch,
-                ) },
+                ),
                 navBarNav?.let { nav -> basicSettingsActionItem(
                     title = "New Bug Report",
                     description = "Please report a bug if anything went wrong!",
