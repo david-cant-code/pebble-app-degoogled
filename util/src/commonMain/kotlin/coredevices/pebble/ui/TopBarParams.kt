@@ -33,7 +33,35 @@ data class TopBarParams(
 fun rememberSearchState() = remember { SearchState() }
 
 class SearchState {
-    var query by mutableStateOf("")
+    private val queryState = mutableStateOf("")
+
+    /**
+     * What the field shows. It changes on every keystroke and is meant for
+     * on-device filtering only.
+     */
+    var query: String
+        get() = queryState.value
+        set(value) {
+            queryState.value = value
+            // Emptying the field withdraws the submitted query as well, so no
+            // store results linger for text that is no longer there.
+            if (value.isEmpty()) submittedQuery = ""
+        }
+
+    /**
+     * The text the user committed with the search action. Anything that
+     * leaves the phone (the store search) reads this and never [query], so a
+     * query goes out as the user submitted it and not as each of its
+     * prefixes. Screens compare the two to tell an edited, not yet submitted
+     * field from a submitted one.
+     */
+    var submittedQuery by mutableStateOf("")
+        private set
+
+    fun submit() {
+        submittedQuery = query
+    }
+
     var typing by mutableStateOf(false)
     var show by mutableStateOf(false)
 }

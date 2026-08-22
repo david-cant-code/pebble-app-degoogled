@@ -464,6 +464,7 @@ fun WatchHomeScreen(
                     val focusManager = LocalFocusManager.current
                     val keyboardController = LocalSoftwareKeyboardController.current
                     val onSearchDone = {
+                        params.searchState?.submit()
                         params.searchState?.typing = false
                         keyboardController?.hide()
                         focusManager.clearFocus()

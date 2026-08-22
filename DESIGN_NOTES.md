@@ -285,6 +285,41 @@ WebView routes (`RoadmapChangelogRoute`, `PebbleOsChangelogRoute`,
 `TroubleshootingRoute`) stay registered in `AppNavHost` but are
 unreachable, keeping the upstream merge surface small.
 
+## App store search
+
+Both app store feeds (Core Devices and Rebble) keep their search index on
+Algolia, and upstream queries it straight from the phone with per-feed
+search-only keys (`AppstoreSources.kt`), so every store search is a
+request to a third party, one per enabled feed. The fork keeps the
+feature (neither store offers another search API) and narrows what the
+requests carry:
+
+- The store search runs only on the search action. `SearchState` (in
+  `:util`) keeps the live field text apart from `submittedQuery`, which
+  only `submit()` sets; the locker tab's store search reads the submitted
+  query, the on-device locker filter reads the live text, and the results
+  list shows a hint instead of stale results while the two differ.
+  Emptying the field withdraws the submitted query. `SearchStateTest`
+  pins that contract.
+- `LockerViewModel` debounces search requests (`STORE_SEARCH_DEBOUNCE`,
+  300 ms of quiet) regardless of the caller's cadence, so a caller that
+  asks on every edit (upstream's behaviour, and what an upstream merge
+  would bring back) still cannot stream prefixes, and emptying the field
+  cancels a request still inside the window; `LockerViewModelTest`
+  covers both.
+- `algoliaSearchParams` in `:pebble` is the only place a request is
+  assembled: query analytics and click analytics are off, personalization
+  is off, and no user token is ever attached, so the index owner's
+  Algolia Analytics does not retain the query and nothing in the request
+  links one query to the next. `AppstoreSearchParamsTest` pins the flags
+  on the parameter object and, by driving the real client into a mock
+  engine, on the wire.
+
+What remains is inherent to the feature: the submitted query text and
+the phone's IP reach Algolia's servers, which keep request logs of their
+own. The app listing (the fastlane description and the F-Droid recipe's
+NonFreeNet note) names Algolia for that reason.
+
 ## F-Droid
 
 The fork targets inclusion in F-Droid's main repository. What that means
