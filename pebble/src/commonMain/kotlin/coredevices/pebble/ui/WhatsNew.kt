@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
  * users on update. The popup auto-shows once per user per bump (`WhatsNewDialog` in
  * composeApp) and can be reopened any time from Settings > About.
  */
-const val WHATS_NEW_VERSION = 2
+const val WHATS_NEW_VERSION = 3
 
 /** A single announced change: a short heading and a sentence or two of body. */
 data class WhatsNewEntry(val title: String, val body: String)
@@ -32,6 +32,13 @@ data class WhatsNewEntry(val title: String, val body: String)
  * changelog (that lives in git history and the repo docs).
  */
 val whatsNewEntries: List<WhatsNewEntry> = listOf(
+    WhatsNewEntry(
+        title = "Store search that waits for you",
+        body = "Searching the store now runs when you tap search, not while you type, " +
+            "so the store's search provider (Algolia) only ever sees what you submit, " +
+            "and it is asked not to keep analytics about it. Your own watchfaces and " +
+            "apps still filter as you type.",
+    ),
     WhatsNewEntry(
         title = "Changelogs and help that open properly",
         body = "\"What's new in the app\" in Settings > About now shows Gravel's own " +

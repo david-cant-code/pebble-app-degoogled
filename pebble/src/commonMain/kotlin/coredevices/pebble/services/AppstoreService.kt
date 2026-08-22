@@ -5,7 +5,6 @@ import androidx.paging.PagingState
 import co.touchlab.kermit.Logger
 import com.algolia.client.api.SearchClient
 import com.algolia.client.exception.AlgoliaApiException
-import com.algolia.client.model.search.SearchParamsObject
 import com.algolia.client.model.search.TagFilters
 import coredevices.database.AppstoreCollection
 import coredevices.database.AppstoreCollectionDao
@@ -593,9 +592,7 @@ class AppstoreService(
         return try {
             val response = searchClient.searchSingleIndex(
                 indexName = source.algoliaIndexName!!,
-                searchParams = SearchParamsObject(
-                    query = uuid,
-                ),
+                searchParams = algoliaSearchParams(query = uuid),
             )
             val found = response.hits.mapNotNull {
                 val props = it.additionalProperties ?: return@mapNotNull null
@@ -632,7 +629,7 @@ class AppstoreService(
             searchClient.searchSingleIndex(
                 indexName = source.algoliaIndexName!!,
 //                searchParams = SearchParams.of(SearchParamsString(search)),
-                searchParams = SearchParamsObject(
+                searchParams = algoliaSearchParams(
                     query = search,
                     tagFilters = TagFilters.of(
                         listOf(

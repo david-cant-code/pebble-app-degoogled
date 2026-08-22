@@ -104,14 +104,20 @@ import io.rebble.libpebblecommon.util.getTempFilePath
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.io.files.SystemFileSystem
+import kotlin.time.Duration.Companion.milliseconds
 import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.compose.ui.tooling.preview.Preview
 import org.koin.compose.koinInject
@@ -124,7 +130,16 @@ const val REBBLE_LOGIN_URI = "https://boot.rebble.io"
 
 private val logger = Logger.withTag("LockerScreen")
 
-private data class SearchParams(
+/**
+ * Quiet period a store query has to survive before it is sent. The screen
+ * only asks for a store search on the search action, so in normal use this
+ * adds a short pause after the tap; its job is to hold as a rate cap if a
+ * caller ever asks on every edit again, so a typed word can still only go
+ * out once per window instead of as each of its prefixes.
+ */
+internal val STORE_SEARCH_DEBOUNCE = 300.milliseconds
+
+internal data class SearchParams(
     val query: String,
     val appType: AppType,
     val watchType: WatchType,
@@ -167,6 +182,17 @@ class LockerViewModel(
     var searchPager by mutableStateOf<Flow<PagingData<CommonApp>>?>(null)
         private set
     private var lastSearchParams: SearchParams? = null
+
+    /** The search the current [searchPager] was built for; exposed for tests. */
+    internal val activeSearch: SearchParams? get() = lastSearchParams
+
+    // Search requests land here and are acted on only after
+    // STORE_SEARCH_DEBOUNCE of quiet, whatever the caller's cadence, so a
+    // typed word can reach Algolia once per window and never as a stream of
+    // prefixes. null means the field was emptied and cancels a request still
+    // inside the window.
+    private val searchRequests = MutableStateFlow<SearchParams?>(null)
+    private var searchCollector: Job? = null
     val searchState = SearchState()
     // Held here, not remembered in the composable: the screen is disposed when navigating into an
     // app's detail page, which would otherwise discard the scroll position.
@@ -227,12 +253,38 @@ class LockerViewModel(
     }
 
     fun searchStore(search: String, watchType: WatchType, platform: Platform, appType: AppType) {
-        val params = SearchParams(search, appType, watchType, platform)
+        ensureSearchCollector()
+        searchRequests.value = SearchParams(search, appType, watchType, platform)
+    }
+
+    /** The search field was emptied: drop a query still waiting out the debounce. */
+    fun clearPendingSearch() {
+        searchRequests.value = null
+    }
+
+    // Started lazily: the locker tab creates this view model whether or not
+    // the user ever searches, and nothing may run at construction time.
+    @OptIn(FlowPreview::class)
+    private fun ensureSearchCollector() {
+        if (searchCollector?.isActive == true) return
+        searchCollector = viewModelScope.launch {
+            searchRequests
+                .debounce(STORE_SEARCH_DEBOUNCE)
+                // Placed after the debounce so an emptied field (null)
+                // supersedes a prefix that was still waiting.
+                .filterNotNull()
+                .collect { startSearch(it) }
+        }
+    }
+
+    private fun startSearch(params: SearchParams) {
         if (params == lastSearchParams && searchPager != null) return
         lastSearchParams = params
         searchPager = Pager(
             config = PagingConfig(pageSize = 20, enablePlaceholders = false),
-            pagingSourceFactory = { SearchPagingSource(pebbleWebServices, search, appType, watchType, platform) },
+            pagingSourceFactory = {
+                SearchPagingSource(pebbleWebServices, params.query, params.appType, params.watchType, params.platform)
+            },
         ).flow.cachedIn(viewModelScope)
     }
 }
@@ -337,9 +389,15 @@ fun LockerScreen(
             }
         }
 
-        LaunchedEffect(viewModel.searchState.query, viewModel.type.value) {
-            if (viewModel.searchState.query.isNotEmpty()) {
-                viewModel.searchStore(viewModel.searchState.query, sharedViewModel.watchType.value, platform, viewModel.type.value)
+        // The store search reads the submitted query, so typing alone sends
+        // nothing; the locker filter below stays live on the raw text because
+        // it never leaves the phone.
+        LaunchedEffect(viewModel.searchState.submittedQuery, viewModel.type.value) {
+            val submitted = viewModel.searchState.submittedQuery
+            if (submitted.isNotEmpty()) {
+                viewModel.searchStore(submitted, sharedViewModel.watchType.value, platform, viewModel.type.value)
+            } else {
+                viewModel.clearPendingSearch()
             }
         }
         val currentHearts = currentHearts()
@@ -386,6 +444,7 @@ fun LockerScreen(
                         SearchResultsList(
                             lockerEntries = lockerEntries,
                             storeResults = filteredStoreResults,
+                            storeSearchPending = viewModel.searchState.submittedQuery != viewModel.searchState.query,
                             hasUnfilteredStoreResults = hasUnfilteredStoreResults,
                             navBarNav = navBarNav,
                             topBarParams = topBarParams,
@@ -694,6 +753,8 @@ fun String.toColorKmp(): Color {
 fun SearchResultsList(
     lockerEntries: List<CommonApp>,
     storeResults: LazyPagingItems<CommonApp>?,
+    /** The field holds text that has not been submitted, so [storeResults] (if any) belong to an older query. */
+    storeSearchPending: Boolean,
     hasUnfilteredStoreResults: Boolean,
     navBarNav: NavBarNav,
     topBarParams: TopBarParams,
@@ -704,7 +765,8 @@ fun SearchResultsList(
     sharedViewModel: SharedLockerViewModel,
 ) {
     val scope = rememberCoroutineScope()
-    val isLoadingFirstPage = storeResults == null || (storeResults.loadState.refresh is LoadState.Loading && storeResults.itemCount == 0)
+    val isLoadingFirstPage = !storeSearchPending &&
+            (storeResults == null || (storeResults.loadState.refresh is LoadState.Loading && storeResults.itemCount == 0))
     if (appType == AppType.Watchface) {
         if (isLoadingFirstPage) {
             // Composing the grid before the store results land would measure it with only the
@@ -736,6 +798,10 @@ fun SearchResultsList(
                     }
                 }
                 item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("From the store") }
+                if (storeSearchPending || storeResults == null) {
+                    item(span = { GridItemSpan(maxLineSpan) }) { StoreSearchHint() }
+                    return@LazyVerticalGrid
+                }
                 items(
                     count = storeResults.itemCount,
                     key = storeResults.itemKey { "store_${it.storeId}-${it.uuid}" },
@@ -815,9 +881,11 @@ fun SearchResultsList(
                         CircularProgressIndicator()
                     }
                 }
+            } else if (storeSearchPending || storeResults == null) {
+                item { StoreSearchHint() }
             } else {
                 items(
-                    count = storeResults!!.itemCount,
+                    count = storeResults.itemCount,
                     key = storeResults.itemKey { "store_${it.uuid}" },
                 ) { index ->
                     storeResults[index]?.let { entry ->
@@ -839,7 +907,7 @@ fun SearchResultsList(
                         )
                     }
                 }
-                if (storeResults!!.loadState.append is LoadState.Loading) {
+                if (storeResults.loadState.append is LoadState.Loading) {
                     item {
                         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator()
@@ -1163,6 +1231,17 @@ fun NativeWatchfaceListItem(
             }
         }
     }
+}
+
+/** Shown in the store section until the typed text is submitted with the search action. */
+@Composable
+private fun StoreSearchHint() {
+    Text(
+        "Tap search to search the store",
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
