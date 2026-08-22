@@ -14,6 +14,7 @@ import coredevices.pebble.services.AppstoreSourceInitializer
 import coredevices.pebble.services.AnalyticsHeartbeatQueue
 import coredevices.pebble.services.MemfaultChunkQueue
 import coredevices.pebble.services.PebbleWebServices
+import coredevices.pebble.weather.WeatherFetcher
 import coredevices.util.AppResumed
 import coredevices.util.DoneInitialOnboarding
 import coredevices.util.PermissionRequester
@@ -57,6 +58,7 @@ class PebbleAppDelegate(
     private val analyticsHeartbeatQueue: AnalyticsHeartbeatQueue,
     private val pebbleWebServices: PebbleWebServices,
     private val batteryChargedNotifier: BatteryChargedNotifier,
+    private val weatherFetcher: WeatherFetcher,
 ) {
     private val logger = Logger.withTag("PebbleAppDelegate")
 
@@ -96,6 +98,7 @@ class PebbleAppDelegate(
                 appResumed.appResumed.collect {
                     libPebble.doStuffAfterPermissionsGranted()
                     libPebble.updateTimeIfNeeded()
+                    weatherFetcher.fetchIfNotFetchedYet()
                 }
             }
             GlobalScope.launch {
