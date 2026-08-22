@@ -259,6 +259,32 @@ existing installs rides the incompatible-model sweep in
 user's local mode is stashed, and `SttModelUpdatePrompt` restores it
 once a catalog model is downloaded.
 
+## In-app links and the What's-new popup
+
+Upstream's Settings > About linked "What's new in the app" to its hosted
+changelog in an embedded WebView. That page describes upstream's
+releases, not this fork's, and its host (Notion) refuses to render
+inside a WebView at all, so the fork points the item at its own
+What's-new popup instead. `WhatsNew.kt` in `:pebble` holds the revision
+counter, the entry list, and the popup composable; the update-triggered
+auto-show wrapper (`WhatsNewDialog`) stays in `:composeApp`. One entry
+is prepended per revision bump, and `WhatsNewTest` pins that
+convention. The About item's badge, the Settings tab badge slot, and
+the auto-show all key on `lastSeenWhatsNewVersion`, so acknowledging
+the popup anywhere clears all three; upstream's `AppUpdateTracker`
+(which badged on every version change) is left intact but no longer
+read.
+
+"What's new in PebbleOS" and "Getting Started & Troubleshooting" keep
+their upstream URLs but open in the external browser: the PebbleOS
+notes share the Notion-in-WebView problem, and the help centre is
+Intercom-backed, so loading it in an embedded WebView makes the app's
+own network traffic include Intercom's endpoints, which the app's
+listing does not (and should not need to) disclose. The upstream
+WebView routes (`RoadmapChangelogRoute`, `PebbleOsChangelogRoute`,
+`TroubleshootingRoute`) stay registered in `AppNavHost` but are
+unreachable, keeping the upstream merge surface small.
+
 ## F-Droid
 
 The fork targets inclusion in F-Droid's main repository. What that means

@@ -59,6 +59,7 @@ import coreapp.composeapp.generated.resources.gravel_logo
 import io.rebble.libpebblecommon.connection.LibPebble
 import coredevices.pebble.ui.PebbleRoutes
 import coredevices.pebble.ui.PreviewWrapper
+import coredevices.pebble.ui.WHATS_NEW_VERSION
 import coredevices.ui.PebbleElevatedButton
 import coredevices.ui.SignInButtons
 import coredevices.util.CoreConfig
