@@ -1,0 +1,1 @@
+"What's new in the app" in Settings > About now shows Gravel's own changes, reopenable any time. PebbleOS release notes and the help centre open in your browser, replacing an in-app view that refused to load those pages and keeping the help centre's third-party service out of the app's own network traffic.
