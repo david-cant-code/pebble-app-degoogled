@@ -1,5 +1,23 @@
 # Gravel (de-Googled Pebble app fork)
 
+## Status
+
+De-google work is completed, all telemetry is removed. What remains is polish and features:
+
+- [x] Manual weather location entry
+- [x] Telemetry strip (Crashlytics, analytics, firmware-diagnostics relay)
+- [x] Google Play services / Firebase removal
+- [x] Core watch firmware updates from the public PebbleOS GitHub releases
+- [x] Per-app watchapp permissions (internet + location, deny by default)
+- [x] Free speech engine (whisper.cpp built from source, replacing the
+      proprietary Cactus stack)
+- [ ] Third-party microphone API
+- [ ] Local on-device battery analytics (secondary goal, feasibility open)
+- [ ] Pebble Index 01 (Ring) / Index AI support without Firebase or other
+      cloud services (approach open)
+- [x] F-Droid inclusion (listing live)
+
+
 Gravel is an **unofficial, Android-only fork** of the
 [Pebble mobile app by Core Devices](https://github.com/coredevices/mobileapp).
 This fork is not affiliated with or endorsed by Core Devices. It ships under
@@ -54,23 +72,6 @@ unplugged from the build; the `libindex`/`index-ai`/`mcp` libraries stay
 compiled because the watch UI shares code with them, but their runtime is
 disabled at the dependency-injection seam (verified against the built APK:
 no Ring services, no Ring endpoints, rings can never be scanned or paired).
-
-## Status
-
-De-google work is completed, all telemetry is removed. What remains is polish and features:
-
-- [x] Manual weather location entry
-- [x] Telemetry strip (Crashlytics, analytics, firmware-diagnostics relay)
-- [x] Google Play services / Firebase removal
-- [x] Core watch firmware updates from the public PebbleOS GitHub releases
-- [x] Per-app watchapp permissions (internet + location, deny by default)
-- [x] Free speech engine (whisper.cpp built from source, replacing the
-      proprietary Cactus stack)
-- [ ] Third-party microphone API
-- [ ] Local on-device battery analytics (secondary goal, feasibility open)
-- [ ] Pebble Index 01 (Ring) / Index AI support without Firebase or other
-      cloud services (approach open)
-- [ ] F-Droid inclusion (tree ready; submission pending)
 
 ## Building (Android)
 
