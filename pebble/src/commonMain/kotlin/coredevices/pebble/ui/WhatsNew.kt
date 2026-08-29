@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
  * users on update. The popup auto-shows once per user per bump (`WhatsNewDialog` in
  * composeApp) and can be reopened any time from Settings > About.
  */
-const val WHATS_NEW_VERSION = 3
+const val WHATS_NEW_VERSION = 4
 
 /** A single announced change: a short heading and a sentence or two of body. */
 data class WhatsNewEntry(val title: String, val body: String)
@@ -32,6 +32,14 @@ data class WhatsNewEntry(val title: String, val body: String)
  * changelog (that lives in git history and the repo docs).
  */
 val whatsNewEntries: List<WhatsNewEntry> = listOf(
+    WhatsNewEntry(
+        title = "Pictures on your wrist, and a store of your choosing",
+        body = "Notification images and album art now go to the watch when it asks for " +
+            "them, podcasts get seek instead of skip, and the weather app shows tomorrow " +
+            "hour by hour. You can add your own app store source in Settings; it is " +
+            "fetched only after you confirm it, with no account token and no search " +
+            "traffic. Firmware opened from a file now asks before installing.",
+    ),
     WhatsNewEntry(
         title = "Store search that waits for you",
         body = "Searching the store now runs when you tap search, not while you type, " +
