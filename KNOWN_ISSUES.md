@@ -206,28 +206,6 @@ commit-addressed form, so the digest is the whole fix there), so it is
 deferred as its own change. This entry leaves the file when the catalog
 carries verified digests.
 
-## Sleep blob mixes epoch timestamps with seconds-of-day typicals
-
-**Status: deferred; upstream-inherited display defect, no data at risk.**
-
-Upstream's typical-sleep feature (2026-08 sync) fills the
-`typical_fall_asleep_time` and `typical_wakeup_time` fields of the
-per-weekday sleep blob with circular-mean local seconds-of-day values
-(0..86399), while the `fall_asleep_time` and `wakeup_time` fields sitting
-immediately before them in the same struct carry absolute epoch seconds.
-The watch's sleep summary card compares exactly these fields, so one of
-the two units must be wrong, and nothing in this repository pins which:
-no firmware source is in tree, while the app's own debug UI and unit
-tests treat seconds-of-day as the intended unit, which would make the
-pre-existing epoch fields the wrong ones and the new code correct. Until
-this range the typical fields were hardcoded zero, so the inconsistency
-was inert; the feature activates it. Worst case under either reading is
-a wrong wall-clock time on the watch's sleep display: no crash, no data
-corruption, and no regression relative to the fork's previous state,
-which is why this is deferred rather than patched on a guess. This entry
-leaves the file when upstream clarifies or fixes the expected unit and
-the fork syncs the resolution.
-
 ## Auto-resume of interrupted firmware updates is inert in this fork
 
 **Status: accepted; the fork's own update path never arms it.**
