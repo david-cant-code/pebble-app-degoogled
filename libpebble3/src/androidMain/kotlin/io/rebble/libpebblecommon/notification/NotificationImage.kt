@@ -128,8 +128,9 @@ private fun Uri.asNotificationImage(context: Context): NotificationImage? {
         stream.use { BitmapFactory.decodeStream(it, null, options) }
     } catch (e: Exception) {
         // The listener only holds a read grant while the notification is posted, and the provider
-        // can refuse regardless.
-        logger.d(e) { "couldn't read notification image" }
+        // can refuse regardless. Logged without the throwable: the platform's message carries the
+        // content URI, whose authority names the sending app that this file otherwise obfuscates.
+        logger.d { "couldn't read notification image: ${e::class.simpleName}" }
         return null
     }
     if (options.outWidth <= 0 || options.outHeight <= 0) return null

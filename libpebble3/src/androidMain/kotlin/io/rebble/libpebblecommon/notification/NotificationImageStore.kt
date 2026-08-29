@@ -39,7 +39,9 @@ class NotificationImageStore(
             prune()
             true
         } catch (e: Exception) {
-            logger.w(e) { "failed to cache image for $itemId" }
+            // Logged without the throwable: a content-provider failure's message carries the
+            // source URI, whose authority names the sending app, which the log must not.
+            logger.w { "failed to cache image for $itemId: ${e::class.simpleName}" }
             false
         }
     }
