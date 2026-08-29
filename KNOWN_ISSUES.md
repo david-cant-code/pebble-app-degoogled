@@ -360,6 +360,17 @@ dictation deadline on degraded audio (see the decode-parameter notes
 in `DESIGN_NOTES.md`), so the user-visible cost is wrong words rather
 than hangs or session failures.
 
+A later on-device pass, on watch firmware v4.35.0 with both catalog
+tiers, differed across the three watchapps tried: one app's sessions
+returned single wrong words for a run and then three or four correct
+words, another's returned most of the phrase with the last or a middle
+word dropped, and a third's one session returned a different pattern
+again, all from two to six seconds of audio arriving at the expected
+16 kHz byte rate, with the phone-side decode and transcription path
+unchanged since the earlier pass. Three apps is too few to generalize
+from, so the requesting watchapp joins the firmware revision as a
+variable a capture comparison should hold fixed.
+
 ## Watch-side dictation endpointing misfires in both directions
 
 **Status: open; firmware behavior, app-side mitigation only.**
