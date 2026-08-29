@@ -54,7 +54,9 @@ is dead:
 - fork stubs in `composeApp` replace the `experimental` types the app
   wiring touches, under the same fully-qualified names, so re-plugging
   the `experimental` module trips duplicate-class errors;
-- `CoreConfig.enableIndex` has no reachable set-point.
+- `CoreConfig.enableIndex` has no reachable set-point in a release build
+  (debug builds' adb-driven settings receiver can write it, and a flag
+  flipped that way reaches only the empty stubs).
 
 The Ring satellite library `libindex` compiles against
 (`io.github.coredevices.haversine`, a prebuilt AAR with no public source
@@ -354,9 +356,13 @@ must agree, so both halves are recorded here.
 
 What the tree guarantees, and how it is pinned:
 
-- No binaries are tracked, no dependency comes from a repository outside
-  F-Droid's allowlist, and no dependency line matches F-Droid's "usual
-  suspects" signature database. `FdroidGuardrailsTest` in `:androidApp`
+- Nothing the scanner rejects is tracked: no prebuilt library or binary
+  dependency (the few compiled files in the tree are small `.pbw` and
+  `.pbz` test fixtures under `libpebble3/src/jvmTest/resources`, inputs
+  to JVM tests that never reach an APK and that the scanner does not
+  flag), no dependency comes from a repository outside F-Droid's
+  allowlist, and no dependency line matches F-Droid's "usual suspects"
+  signature database. `FdroidGuardrailsTest` in `:androidApp`
   replicates the buildserver's source scanner (`FdroidScannerReplica`
   holds the checks, `FdroidScannerReplicaTest` proves each one fires) over
   the tracked tree, the whisper.cpp submodule included, minus the paths the

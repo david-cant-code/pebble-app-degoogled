@@ -31,7 +31,11 @@ class NoOpLibIndex : LibIndex {
  * Koin graph (see MainApplication). Everything bound here is a fork-owned
  * no-op: the ring/Index runtime is disabled at the DI seam while upstream
  * call sites keep compiling. CoreConfig.enableIndex stays false (its
- * set-points are suppressed in the UI), so no Index UI is reachable either.
+ * in-app set-points are suppressed in the UI), so no Index UI is reachable
+ * either. Debug builds also carry upstream's adb-driven SetSettingReceiver,
+ * which can rewrite the whole persisted config, enableIndex included, from
+ * the adb shell; release builds drop it, and a flag flipped that way only
+ * reaches the empty stubs bound here.
  */
 val ringStubsModule = module {
     singleOf(::ExperimentalDevices)
