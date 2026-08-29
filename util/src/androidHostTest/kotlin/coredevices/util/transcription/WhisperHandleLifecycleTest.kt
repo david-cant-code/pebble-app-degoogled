@@ -141,9 +141,12 @@ class WhisperHandleLifecycleTest {
     /** Non-zero PCM16 bytes so the fake treats the call as a real transcription. */
     private fun realPcmBytes(): ByteArray = ByteArray(8000) { (it % 100 + 1).toByte() }
 
+    // Generous bound: every wait returns as soon as its condition holds, so
+    // the value only stretches a failing run, and a CI runner sharing its
+    // cores with parallel compilation can stall a passing one for seconds.
     private suspend fun awaitUntil(what: String, condition: () -> Boolean) {
         try {
-            withTimeout(10.seconds) { while (!condition()) delay(10) }
+            withTimeout(60.seconds) { while (!condition()) delay(10) }
         } catch (e: Exception) {
             throw AssertionError("Timed out waiting for: $what", e)
         }

@@ -244,27 +244,33 @@ class HybridTranscriptionService(
                 } catch (e: Exception) {
                     val expected = e is TranscriptionException.NoSpeechDetected ||
                         e is TranscriptionException.TranscriptionInProgress
-                    if (!expected) {
-                        analytics.logTranscriptionFailure("platform", transcriptionFailureReason(e), e.message)
-                    }
-                    throw e
+                    if (expected) throw e
+                    analytics.logTranscriptionFailure("platform", transcriptionFailureReason(e), e.message)
+                    logger.w(e) { "Platform transcription failed, falling back to remote: ${e.message}" }
+                    val result = remote(willFallbackLocal = false)
+                    return RoutedResult(result.text, CactusSTTMode.RemoteOnly, result.modelUsed)
                 }
                 RoutedResult(text, sttMode, PLATFORM_STT_MODEL_NAME)
             }
             CactusSTTMode.RemoteFirst -> {
+                suspend fun localFallback(remoteError: Exception): RoutedResult = try {
+                    val text = whisper.transcribeLocal(audio, sampleRate)
+                    RoutedResult(text, CactusSTTMode.LocalOnly, configuredModel)
+                } catch (_: TranscriptionException.TranscriptionRequiresDownload) {
+                    throw remoteError
+                }
                 try {
                     val result = remote(willFallbackLocal = true)
                     RoutedResult(result.text, sttMode, result.modelUsed)
                 } catch (e: TimeoutCancellationException) {
                     logger.w(e) { "Remote transcription timeout, falling back to local: ${e.message}" }
-                    val text = whisper.transcribeLocal(audio, sampleRate)
-                    RoutedResult(text, CactusSTTMode.LocalOnly, configuredModel)
+                    localFallback(TranscriptionException.TranscriptionNetworkError(e, "wisprflow"))
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
+                    if (e is TranscriptionException.NoSpeechDetected) throw e
                     logger.w(e) { "Remote transcription failed, falling back to local: ${e.message}" }
-                    val text = whisper.transcribeLocal(audio, sampleRate)
-                    RoutedResult(text, CactusSTTMode.LocalOnly, configuredModel)
+                    localFallback(e)
                 }
             }
             CactusSTTMode.LocalFirst -> {

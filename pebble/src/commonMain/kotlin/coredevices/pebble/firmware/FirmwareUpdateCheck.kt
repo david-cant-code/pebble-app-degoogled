@@ -1,6 +1,7 @@
 package coredevices.pebble.firmware
 
 import co.touchlab.kermit.Logger
+import coredevices.analytics.CoreAnalytics
 import coredevices.pebble.services.EngDashOta
 import coredevices.pebble.services.Memfault
 import coredevices.util.CommonBuildKonfig
@@ -26,6 +27,7 @@ class FirmwareUpdateCheck(
     // every check, exactly once per check; see checkForUpdates.
     private val channel: () -> FirmwareUpdateChannel,
     private val coreConfig: CoreConfigFlow,
+    private val coreAnalytics: CoreAnalytics,
     private val clock: Clock = Clock.System,
 ) {
     private val logger = Logger.withTag("FirmwareUpdateCheck")
@@ -37,8 +39,6 @@ class FirmwareUpdateCheck(
     private data class CacheKey(
         val platform: WatchHardwarePlatform,
         val serial: String,
-        val fwVersion: String,
-        val isRecovery: Boolean,
         // Fork: the channel changes what the GitHub checker returns, so it
         // must key the cache, or a channel toggle would keep serving the
         // other channel's cached result until the TTL expires. Null for
@@ -47,7 +47,13 @@ class FirmwareUpdateCheck(
         val channel: FirmwareUpdateChannel?,
     )
 
+    /**
+     * One entry per watch: the running version is an input to the check, so an entry only answers
+     * for the version it was fetched for, and a version change evicts it rather than shadowing it.
+     */
     private data class CacheEntry(
+        val fwVersion: String,
+        val isRecovery: Boolean,
         val result: FirmwareUpdateCheckResult,
         val expiresAt: Instant,
     )
@@ -62,20 +68,19 @@ class FirmwareUpdateCheck(
         // channel's selection under the other channel's key.
         val channelForCheck =
             if (route == Route.GithubReleases) channel() else null
-        val key = CacheKey(
-            platform = watch.platform,
-            serial = watch.serial,
-            fwVersion = watch.runningFwVersion.stringVersion,
-            isRecovery = watch.runningFwVersion.isRecovery,
-            channel = channelForCheck,
-        )
+        val key = CacheKey(platform = watch.platform, serial = watch.serial, channel = channelForCheck)
+        val fwVersion = watch.runningFwVersion.stringVersion
+        val isRecovery = watch.runningFwVersion.isRecovery
         val now = clock.now()
         if (!force) {
             mutex.withLock {
-                cache[key]?.takeIf { it.expiresAt > now }?.let {
-                    logger.v { "Serving FWUP from cache" }
-                    return it.result
-                }
+                cache[key]
+                    ?.takeIf { it.fwVersion == fwVersion && it.isRecovery == isRecovery }
+                    ?.takeIf { it.expiresAt > now }
+                    ?.let {
+                        logger.v { "Serving FWUP from cache" }
+                        return it.result
+                    }
             }
         }
         val result = doCheck(watch, route, channelForCheck)
@@ -83,7 +88,7 @@ class FirmwareUpdateCheck(
         // limit) must retry on the next connect, not be locked in for the TTL.
         if (result !is FirmwareUpdateCheckResult.UpdateCheckFailed) {
             mutex.withLock {
-                cache[key] = CacheEntry(result, now + CACHE_TTL)
+                cache[key] = CacheEntry(fwVersion, isRecovery, result, now + CACHE_TTL)
             }
         }
         return result
@@ -118,6 +123,7 @@ class FirmwareUpdateCheck(
                     return result
                 }
                 logger.w { "eng-dash OTA check failed (${result.error}); falling back" }
+                coreAnalytics.logEvent("core_ota_failed")
             }
         }
         return when (route) {

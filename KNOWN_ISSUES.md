@@ -153,7 +153,11 @@ WebSocket intercept becomes available.
 Watchapps whose developer config pages or PebbleKit JS requests use plain
 `http://` fail even when the app's Network permission is granted: the
 config page shows a load error and JS requests fail with
-`ERR_CLEARTEXT_NOT_PERMITTED`. `https://` is unaffected.
+`ERR_CLEARTEXT_NOT_PERMITTED`. `https://` is unaffected. The same block
+covers user-added appstore sources: the add-source dialog and the
+`pebble://add-store-feed` deep link accept an `http://` feed URL, the
+source is saved, and every fetch from it then fails with nothing shown
+in the source list beyond the empty entry.
 
 The block began as an upstream accident, and is now an active fork
 divergence held on purpose. Upstream's manifest declares
@@ -206,28 +210,6 @@ commit-addressed form, so the digest is the whole fix there), so it is
 deferred as its own change. This entry leaves the file when the catalog
 carries verified digests.
 
-## Sleep blob mixes epoch timestamps with seconds-of-day typicals
-
-**Status: deferred; upstream-inherited display defect, no data at risk.**
-
-Upstream's typical-sleep feature (2026-08 sync) fills the
-`typical_fall_asleep_time` and `typical_wakeup_time` fields of the
-per-weekday sleep blob with circular-mean local seconds-of-day values
-(0..86399), while the `fall_asleep_time` and `wakeup_time` fields sitting
-immediately before them in the same struct carry absolute epoch seconds.
-The watch's sleep summary card compares exactly these fields, so one of
-the two units must be wrong, and nothing in this repository pins which:
-no firmware source is in tree, while the app's own debug UI and unit
-tests treat seconds-of-day as the intended unit, which would make the
-pre-existing epoch fields the wrong ones and the new code correct. Until
-this range the typical fields were hardcoded zero, so the inconsistency
-was inert; the feature activates it. Worst case under either reading is
-a wrong wall-clock time on the watch's sleep display: no crash, no data
-corruption, and no regression relative to the fork's previous state,
-which is why this is deferred rather than patched on a guess. This entry
-leaves the file when upstream clarifies or fixes the expected unit and
-the fork syncs the resolution.
-
 ## Auto-resume of interrupted firmware updates is inert in this fork
 
 **Status: accepted; the fork's own update path never arms it.**
@@ -257,7 +239,9 @@ service. The routing requires a bug-endpoint build config value that this
 fork never sets, a fact the fork's own routing test asserts, so the
 toggle changes nothing on any fork build while its description names a
 firmware source the fork does not use. The toggle stays as upstream
-ships it; hiding it behind the same predicate that makes it functional
+ships it, except that the setting behind it keeps the fork's off
+default where upstream now defaults it on, so an inert control is not
+shown enabled; hiding it behind the same predicate that makes it functional
 remains open as a follow-up, and renaming it would keep an inert control
 under a different label. This entry leaves the file if the toggle is
 hidden behind that predicate or the fork ever sets the endpoint that
@@ -277,6 +261,33 @@ affected device is currently known; if pairing reports surface for older
 or third-party hardware, the toggle default is the first thing to
 revisit. This entry leaves the file if the default changes or the filter
 gains a fallback pass.
+
+## Companion Device Manager association never completes for a BLE watch
+
+**Status: deferred; upstream-inherited, root cause not yet found.**
+
+Tapping Connect on a BLE watch first asks Android's Companion Device
+Manager to associate it (a scan filter on the watch's address, watch
+device profile, single device) and waits up to 30 seconds before
+connecting. The system picker ("Looking for a watch") never lists the
+watch, the wait expires, the app logs `CompanionDeviceManager
+succeeded=false` and connects anyway, and the picker stays on screen
+until dismissed; every later Connect asks again, because no association
+was recorded. Observed on a Pebble Time 2 with this fork and with the
+upstream app before the fork; the association code is upstream's,
+untouched here. The picker scans for an advertisement from the address
+the app itself scanned, so why it never matches is the open question.
+
+Without the association the app does not hold Android's companion role
+for the watch: the role's notification-access prompt never appears, so
+notification access is granted from the system settings page the
+permission warnings link to instead, and the app has none of the
+background-start allowances the role carries. Connecting, syncing,
+notifications, and everything else work once the watch is connected.
+The Connectivity settings carry upstream's "Disable Companion Device
+Manager" toggle, which skips the request entirely. This entry leaves the
+file when the association completes on a BLE watch, or the request is
+dropped or reworked.
 
 ## Notification mute carry-over can mismatch duplicate channel names
 
@@ -348,6 +359,17 @@ the root cause is unconfirmed. The decode path stays within the
 dictation deadline on degraded audio (see the decode-parameter notes
 in `DESIGN_NOTES.md`), so the user-visible cost is wrong words rather
 than hangs or session failures.
+
+A later on-device pass, on watch firmware v4.35.0 with both catalog
+tiers, differed across the three watchapps tried: one app's sessions
+returned single wrong words for a run and then three or four correct
+words, another's returned most of the phrase with the last or a middle
+word dropped, and a third's one session returned a different pattern
+again, all from two to six seconds of audio arriving at the expected
+16 kHz byte rate, with the phone-side decode and transcription path
+unchanged since the earlier pass. Three apps is too few to generalize
+from, so the requesting watchapp joins the firmware revision as a
+variable a capture comparison should hold fixed.
 
 ## Watch-side dictation endpointing misfires in both directions
 

@@ -2,6 +2,7 @@ package coredevices.ring.database.room.repository
 
 import coredevices.indexai.data.entity.LocalRecording
 import coredevices.indexai.data.entity.RecordingEntryEntity
+import coredevices.indexai.data.entity.RecordingEntryErrorType
 import coredevices.indexai.data.entity.RecordingEntryStatus
 import coredevices.indexai.database.dao.LocalRecordingDao
 import coredevices.indexai.database.dao.RecordingEntryDao
@@ -115,14 +116,20 @@ class RecordingRepository(
 
     /** [fileName] keeps the failed entry linked to its local audio file so
      *  the user can still listen to / export the recording. */
-    suspend fun createFailedRecordingEntry(recordingId: Long, errorMessage: String, fileName: String?) =
+    suspend fun createFailedRecordingEntry(
+        recordingId: Long,
+        errorMessage: String,
+        errorType: RecordingEntryErrorType,
+        fileName: String?
+    ) =
         recordingEntryDao.insertRecordingEntry(
             RecordingEntryEntity(
                 recordingId = recordingId,
                 fileName = fileName,
                 status = RecordingEntryStatus.agent_error,
                 transcription = "Error: $errorMessage",
-                error = errorMessage
+                error = errorMessage,
+                errorType = errorType
             )
         )
 

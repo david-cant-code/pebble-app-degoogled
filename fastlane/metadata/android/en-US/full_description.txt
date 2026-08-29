@@ -13,7 +13,7 @@ On top of the de-Googling, Gravel tightens the app's own security posture:
 
 Some watchapps and watchfaces need internet or your location to work, and they will not function fully until you grant them access. That is deliberate: Gravel puts the decision in your hands rather than trusting every watchapp by default.
 
-The app talks to the Core Devices and Rebble web services (app store, weather, timeline, notification icons, language packs), to Algolia, which hosts the app store's search index, whenever you search the store, to the PebbleOS release feed on GitHub for firmware, and to the speech model host on first download; there is no google endpoint.
+The app talks to the Core Devices and Rebble web services (app store, weather, timeline, notification icons, language packs), to Algolia, which hosts the app store's search index, whenever you search the store, to the PebbleOS release feed on GitHub for firmware, and to the speech model host on first download; there is no google endpoint. An app store source you add yourself is the one host you choose: it is fetched only after you confirm it, with no account token and no search traffic.
 
 Permissions Gravel asks for are the ones the watch features need: Bluetooth and location for finding and staying connected to the watch (background location so location-based watchapps and weather keep working while the app is not open), notification access to forward notifications, contacts, call log, and phone state for caller names and call control on the watch, calendar for timeline pins, Health Connect write access to sync the watch's health data, and the list of installed apps for per-app notification settings. Each is requested when the corresponding feature is first set up.
 

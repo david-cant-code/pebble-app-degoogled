@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Release-only manifest overlay. Android merges this file into release
+    builds on top of src/main and every library manifest, and each
+    tools:node="remove" below deletes that element from the merged result.
+
+    Upstream declares these four broadcast receivers for every build as
+    adb-driven QA tooling: write a persisted setting, start the LAN dev
+    connection server, attach a QEMU emulator as a watch, and sideload a
+    firmware file. Each is gated on android.permission.DUMP, which only the
+    system, privileged apps, and the adb shell can hold, so no installed
+    app can reach them. The fork still keeps them out of release: a
+    shipping build carries no settings-write or firmware-sideload hook
+    at all, and the release exported-component allowlist stays exactly
+    what it was. Debug builds keep the receivers as upstream documents
+    them, so an emulator can be driven from adb; the "safe to keep in
+    release builds" wording in upstream's manifest comment and receiver
+    KDocs describes upstream's build, not this one.
+
+    Removing here, rather than editing upstream's declarations, keeps
+    upstream's manifests and classes verbatim; R8 drops the classes from
+    release once nothing references them. If a rename upstream ever makes
+    a removal miss, the receiver lands in the merged manifest exported and
+    VerifyExportedComponents fails the release build.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application>
+        <receiver
+            android:name="coredevices.coreapp.debug.QemuSetupReceiver"
+            tools:node="remove" />
+        <receiver
+            android:name="coredevices.coreapp.debug.DevConnectionReceiver"
+            tools:node="remove" />
+        <receiver
+            android:name="coredevices.coreapp.debug.SetSettingReceiver"
+            tools:node="remove" />
+        <receiver
+            android:name="coredevices.pebble.firmware.FirmwareSideloadReceiver"
+            tools:node="remove" />
+    </application>
+</manifest>

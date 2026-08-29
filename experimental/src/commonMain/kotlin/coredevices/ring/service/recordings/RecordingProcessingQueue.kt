@@ -5,18 +5,21 @@ import coredevices.indexai.data.entity.ConversationMessageEntity
 import coredevices.indexai.data.entity.RecordingDocument
 import coredevices.indexai.data.entity.RecordingEntry
 import coredevices.indexai.data.entity.RecordingEntryEntity
+import coredevices.indexai.data.entity.RecordingEntryErrorType
 import coredevices.indexai.data.entity.RecordingEntryStatus
 import coredevices.indexai.database.dao.ConversationMessageDao
 import coredevices.indexai.database.dao.RecordingEntryDao
-import coredevices.indexai.util.JsonSnake
 import coredevices.ring.database.Preferences
 import coredevices.ring.encryption.DocumentEncryptor
+import coredevices.mcp.BuiltInMcpTool
 import coredevices.mcp.SessionContext
 import coredevices.mcp.data.ToolCallResult
 import coredevices.ring.database.firestore.dao.FirestoreRecordingsDao
 import coredevices.ring.database.firestore.dao.FirestoreTracesDao
 import coredevices.ring.util.trace.TraceSessionExporter
 import coredevices.ring.agent.builtin_servlets.notes.CreateNoteTool
+import coredevices.ring.agent.builtin_servlets.reminders.ReminderTool
+import coredevices.ring.agent.fallbackToolCall
 import coredevices.ring.data.ProcessingTask
 import coredevices.ring.data.RecordingProcessingTask
 import coredevices.ring.data.entity.room.TraceEventData
@@ -52,8 +55,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.encodeToJsonElement
-import kotlinx.serialization.json.jsonObject
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import kotlin.time.Clock
@@ -151,6 +152,7 @@ class RecordingProcessingQueue(
                                     transcription = it.transcription,
                                     transcribedUsingModel = it.transcribedUsingModel,
                                     error = it.error,
+                                    errorType = it.errorType,
                                     ringTransferInfo = it.ringTransferInfo,
                                     userMessageId = it.userMessageId
                                 )
@@ -351,6 +353,7 @@ class RecordingProcessingQueue(
                         transcription = entry.transcription,
                         transcribedUsingModel = entry.transcribedUsingModel,
                         error = entry.error,
+                        errorType = entry.errorType,
                         ringTransferInfo = entry.ringTransferInfo,
                         userMessageId = entry.userMessageId,
                     )
@@ -388,18 +391,10 @@ class RecordingProcessingQueue(
     }
 
     private suspend fun forcedNoteTool(messageText: String, sessionContext: SessionContext): ToolCallResult {
-        val noteTool: CreateNoteTool = get()
-        return noteTool.call(
-            JsonSnake.encodeToString(
-                JsonSnake.encodeToJsonElement(
-                    CreateNoteTool.CreateNoteArgs(
-                        text = messageText,
-                        automatic = true
-                    )
-                ).jsonObject
-            ),
-            sessionContext
-        )
+        val call = get<Preferences>().defaultCaptureType.value.fallbackToolCall(messageText)
+        val tool: BuiltInMcpTool =
+            if (call.toolName == ReminderTool.TOOL_NAME) ReminderTool() else get<CreateNoteTool>()
+        return tool.call(call.arguments, sessionContext)
     }
 
     private suspend fun handleRecording(
@@ -438,7 +433,8 @@ class RecordingProcessingQueue(
                     recordingEntryDao.updateRecordingEntryStatus(
                         stagedEntry.id,
                         status = RecordingEntryStatus.agent_error,
-                        error = "Login required for cloud processing"
+                        error = "Login required for cloud processing",
+                        errorType = RecordingEntryErrorType.login_required
                     )
                     // Keep parity with createFailedRecordingEntry: surface the error
                     // as the transcription text — but never clobber a real transcript.
@@ -456,6 +452,7 @@ class RecordingProcessingQueue(
                     recordingRepository.createFailedRecordingEntry(
                         recordingId = recordingId,
                         errorMessage = "Login required for cloud processing",
+                        errorType = RecordingEntryErrorType.login_required,
                         fileName = fileId
                     )
                 }

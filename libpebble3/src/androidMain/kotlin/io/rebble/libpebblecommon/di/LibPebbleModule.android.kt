@@ -31,7 +31,9 @@ import io.rebble.libpebblecommon.io.rebble.libpebblecommon.notification.AndroidP
 import io.rebble.libpebblecommon.io.rebble.libpebblecommon.notification.NotificationHandler
 import io.rebble.libpebblecommon.io.rebble.libpebblecommon.util.AndroidSystemGeolocation
 import io.rebble.libpebblecommon.music.SystemMusicControl
+import io.rebble.libpebblecommon.imaging.NotificationImageProvider
 import io.rebble.libpebblecommon.notification.NotificationAppsSync
+import io.rebble.libpebblecommon.notification.NotificationImageStore
 import io.rebble.libpebblecommon.notification.NotificationListenerConnection
 import io.rebble.libpebblecommon.notification.processor.BasicNotificationProcessor
 import io.rebble.libpebblecommon.packets.PhoneAppVersion
@@ -53,6 +55,7 @@ actual val platformModule: Module = module {
         PhoneCapabilities(
             CommonPhoneCapabilities + setOf(
                 ProtocolCapsFlag.SupportsExtendedMusicProtocol,
+                ProtocolCapsFlag.SupportsImageFetch,
                 ProtocolCapsFlag.SupportsTwoWayDismissal,
             )
         )
@@ -77,8 +80,9 @@ actual val platformModule: Module = module {
     singleOf(::NotificationCallDetector)
     single { get<AppContext>().context }
     single { get<AppContext>().context as Application }
-    single { NotificationHandler(setOf(get<BasicNotificationProcessor>()), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { NotificationHandler(setOf(get<BasicNotificationProcessor>()), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     singleOf(::BasicNotificationProcessor)
+    singleOf(::NotificationImageStore) bind NotificationImageProvider::class
     single { get<Application>().contentResolver }
     single { PlatformConfig(syncNotificationApps = false) }
     single { BlePlatformConfig(

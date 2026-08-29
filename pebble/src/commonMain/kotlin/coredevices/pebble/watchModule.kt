@@ -240,6 +240,7 @@ val watchModule = module {
             githubReleases = get(),
             channel = { coreConfig.value.firmwareUpdateChannel() },
             coreConfig = coreConfig,
+            coreAnalytics = get(),
             clock = get(),
         )
     }

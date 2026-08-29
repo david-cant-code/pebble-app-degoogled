@@ -19,6 +19,15 @@ class SilentReauthPolicyTest {
     }
 
     @Test
+    fun givesUpOnceAttemptsAreSpentAndNoSilentReauthIsLeft() {
+        assertFalse(shouldGiveUpWaitingForAuth(attempt = AUTH_RESTORE_MAX_ATTEMPTS - 1, silentAttempts = SILENT_REAUTH_MAX_ATTEMPTS, providers = "github.com"))
+        assertTrue(shouldGiveUpWaitingForAuth(attempt = AUTH_RESTORE_MAX_ATTEMPTS, silentAttempts = SILENT_REAUTH_MAX_ATTEMPTS, providers = "github.com"))
+        // A Google account with silent re-auth still to try keeps waiting.
+        assertFalse(shouldGiveUpWaitingForAuth(attempt = AUTH_RESTORE_MAX_ATTEMPTS, silentAttempts = SILENT_REAUTH_MAX_ATTEMPTS - 1, providers = "google.com"))
+        assertTrue(shouldGiveUpWaitingForAuth(attempt = AUTH_RESTORE_MAX_ATTEMPTS, silentAttempts = SILENT_REAUTH_MAX_ATTEMPTS, providers = "google.com"))
+    }
+
+    @Test
     fun onlyForGoogleAccounts() {
         assertTrue(canSilentReauth("google.com"))
         assertTrue(canSilentReauth("password,google.com"))

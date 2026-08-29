@@ -19,7 +19,6 @@ import io.rebble.libpebblecommon.SystemAppIDs.AIRPLANE_MODE_UUID
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import io.rebble.libpebblecommon.SystemAppIDs.BACKLIGHT_UUID
-import io.rebble.libpebblecommon.SystemAppIDs.HEALTH_APP_UUID
 import io.rebble.libpebblecommon.SystemAppIDs.MOTION_BACKLIGHT_UUID
 import io.rebble.libpebblecommon.SystemAppIDs.QUIET_TIME_TOGGLE_UUID
 import io.rebble.libpebblecommon.SystemAppIDs.TIMELINE_FUTURE_UUID
@@ -156,6 +155,7 @@ fun WatchPref<*>.section(): Section = when (this) {
     BoolWatchPref.QuietTimeAutoDismiss -> Section.QuietTime
     BoolWatchPref.MusicShowVolumeControls -> Section.Music
     BoolWatchPref.MusicShowProgressBar -> Section.Music
+    BoolWatchPref.MusicShowAlbumArt -> Section.Music
 }
 
 private fun numberPref(item: WatchPreference<Long>, libPebble: LibPebble): SettingsItem {
@@ -345,8 +345,6 @@ private fun quickLaunchOptions(libPebble: LibPebble): List<QuickLaunchOption> {
                 QuickLaunchOption(AIRPLANE_MODE_UUID, "Airplane Mode") +
                 QuickLaunchOption(TIMELINE_PAST_UUID, "Timeline Past") +
                 QuickLaunchOption(TIMELINE_FUTURE_UUID, "Timeline Future") +
-
-                QuickLaunchOption(HEALTH_APP_UUID, "Health") +
                 installedApps.map { app ->
                     QuickLaunchOption(app.properties.id, app.properties.title)
                 }

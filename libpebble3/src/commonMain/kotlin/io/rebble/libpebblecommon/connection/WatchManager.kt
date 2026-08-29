@@ -375,7 +375,8 @@ class WatchManager(
                     }
 
                     // Goals
-                    if (device.connectGoal && !hasConnectionAttempt && btState.enabled()) {
+                    val btUsable = btState.enabled() || !identifier.requiresBluetooth()
+                    if (device.connectGoal && !hasConnectionAttempt && btUsable) {
                         if (watchConfig.value.multipleConnectedWatchesSupported) {
                             connectTo(device)
                         } else {
@@ -383,7 +384,7 @@ class WatchManager(
                                 connectTo(device)
                             }
                         }
-                    } else if (hasConnectionAttempt && !btState.enabled()) {
+                    } else if (hasConnectionAttempt && !btUsable) {
                         disconnectFrom(device.identifier)
                         device.activeConnection?.cleanup()
                     } else if (!device.connectGoal && hasConnectionAttempt) {

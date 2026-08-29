@@ -94,7 +94,7 @@ fun ViewBugReportScreen(
             if (platform == Platform.Android) {
                 max(calculateBottomPadding - 15.dp, 0.dp)
             } else {
-                0.dp
+                calculateBottomPadding
             }
         }
         val snackBarHostState = remember { SnackbarHostState() }

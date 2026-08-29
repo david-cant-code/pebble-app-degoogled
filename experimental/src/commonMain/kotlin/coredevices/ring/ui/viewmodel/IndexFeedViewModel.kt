@@ -51,7 +51,7 @@ import kotlin.time.Instant
 class IndexFeedViewModel(
     recordingRepo: RecordingRepository,
     private val itemRepo: ItemRepository,
-    listRepo: ListRepository,
+    private val listRepo: ListRepository,
     private val recordingQueue: RecordingProcessingQueue,
     private val ringTransferDao: RingTransferDao,
     private val appScope: LibIndexCoroutineScope,
@@ -108,6 +108,19 @@ class IndexFeedViewModel(
 
     fun clearQuery() {
         query.value = ""
+    }
+
+    private var newListJob: kotlinx.coroutines.Job? = null
+
+    /** Creates a fresh user list and invokes [onCreated] with the new
+     *  doc id so the screen can navigate into rename mode. Rapid re-taps
+     *  while a creation is in flight are ignored. */
+    fun newList(onCreated: (String) -> Unit) {
+        if (newListJob?.isActive == true) return
+        newListJob = viewModelScope.launch(Dispatchers.IO) {
+            val newId = listRepo.createList("New list")
+            withContext(Dispatchers.Main) { onCreated(newId) }
+        }
     }
 
     /** Submit a typed prompt the same way the legacy chat input did —

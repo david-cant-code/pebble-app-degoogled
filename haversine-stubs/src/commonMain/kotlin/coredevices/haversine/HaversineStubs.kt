@@ -18,9 +18,10 @@ import kotlinx.coroutines.flow.StateFlow
  *   dead. Their members are still inert rather than throwing, matching the
  *   `:firebase-stubs` house rule: if an instance ever did escape, callers
  *   degrade to the empty shape instead of crashing a scan or sync path.
- * - The two static entry points that need no instance, the advertisement
- *   fingerprint parser and the failsafe check, answer "no ring here"
- *   (`null` / `false`) so a BLE scan that reaches them ignores the packet.
+ * - The three static entry points that need no instance, the advertisement
+ *   fingerprint parser and the failsafe and production-test-mode checks,
+ *   answer "no ring here" (`null` / `false`) so a BLE scan that reaches them
+ *   ignores the packet.
  * - The two delegate interfaces are mirrored exactly; libindex implements
  *   [CollectionIndexStorage] and only calls [KMPHaversineHacksDelegate]
  *   through a satellite it can never obtain.
@@ -62,11 +63,27 @@ class KMPHaversineAdvertisement private constructor() {
 @Suppress("UNUSED_PARAMETER")
 fun fingerprintMatchesFailsafe(fingerprint: Long): Boolean = false
 
+/**
+ * Same answer for the production-test-mode pattern: libindex's scanner
+ * classifies a ring image from this and the failsafe check, and a fingerprint
+ * that never parses can match neither.
+ */
+@Suppress("UNUSED_PARAMETER")
+fun fingerprintMatchesPTF(fingerprint: Long): Boolean = false
+
 class KMPHaversineSatellite private constructor() {
     val id: String get() = ""
     val name: String? get() = null
     val state: StateFlow<KMPHaversineSatelliteState?> = MutableStateFlow(null)
     suspend fun eraseCollections() {}
+
+    /**
+     * The real call invalidates the ring's primary image to drop it into
+     * failsafe for repair. Inert here for the same reason as the rest of the
+     * instance surface: nothing can hold a satellite, and if one were reached
+     * anyway there is no ring behind it to repair.
+     */
+    suspend fun forceFailsafe() {}
 }
 
 class KMPHaversineSatelliteState private constructor() {

@@ -7,6 +7,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import coredevices.indexai.agent.ServletRepository
 import coredevices.indexai.data.McpServerDefinition
 import coredevices.indexai.data.entity.MessageRole
+import coredevices.indexai.data.entity.RecordingEntryErrorType
 import coredevices.indexai.data.entity.RecordingEntryStatus
 import coredevices.indexai.database.dao.ConversationMessageDao
 import coredevices.indexai.database.dao.RecordingEntryDao
@@ -46,6 +47,7 @@ import coredevices.ring.encryption.EncryptionKeyManager
 import coredevices.ring.storage.RealRecordingStorage
 import coredevices.ring.storage.RecordingStorage
 import coredevices.ring.util.trace.RingTraceSession
+import coredevices.ring.agent.DefaultCaptureType
 import coredevices.ring.agent.LlmMode
 import coredevices.util.models.CactusSTTMode
 import coredevices.util.queue.TaskStatus
@@ -130,6 +132,9 @@ class FakePreferences : Preferences {
         TODO("Not yet implemented")
     }
     override fun setPlatformSttDefaulted() {}
+    override val defaultCaptureType: StateFlow<DefaultCaptureType> =
+        MutableStateFlow(DefaultCaptureType.Note)
+    override fun setDefaultCaptureType(type: DefaultCaptureType) {}
 }
 
 class FakeServletRepository : ServletRepository {
@@ -254,9 +259,15 @@ class RecordingProcessingQueueTest {
                     recordingId: String,
                     transcription: String?,
                     recordedAt: Instant,
-                    trigger: coredevices.ring.external.indexwebhook.IndexWebhookRecordingTrigger?,
+                    gesture: coredevices.ring.service.button.RingGesture,
                 ) {}
-                override val isEnabled: StateFlow<Boolean> = MutableStateFlow(false)
+                override suspend fun sendTestEvent(
+                    gesture: coredevices.ring.service.button.RingGesture,
+                    url: String,
+                    headers: Map<String, String>,
+                ) = coredevices.ring.external.indexwebhook.IndexWebhookRunResult(
+                    ok = true, status = "200 OK", detail = "test event", byteSize = 0, durationMs = 0,
+                )
             }
         } bind IndexWebhookApi::class
         singleOf(::IndexWebhookPreferences)
@@ -472,6 +483,7 @@ class RecordingProcessingQueueTest {
         assertEquals(1, entries.size)
         assertEquals(RecordingEntryStatus.transcription_error, entries[0].status)
         assertNotNull(entries[0].error)
+        assertEquals(RecordingEntryErrorType.no_speech, entries[0].errorType)
     }
 
     @Test

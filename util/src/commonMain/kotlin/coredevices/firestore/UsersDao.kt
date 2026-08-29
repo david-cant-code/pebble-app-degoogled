@@ -139,7 +139,7 @@ class UsersDaoImpl(
                                             silentReauthMutex.unlock()
                                         }
                                     }
-                                    appResumed?.let { resumed ->
+                                    val resumeJob = appResumed?.let { resumed ->
                                         launch {
                                             resumed.appResumed.collect {
                                                 if (canSilentReauth(lastSignInProviders)) trySilentReauth("app_resumed")
@@ -173,13 +173,29 @@ class UsersDaoImpl(
                                                 silentAttempts++
                                                 trySilentReauth("startup_wait")
                                             }
+                                            if (shouldGiveUpWaitingForAuth(attempt, silentAttempts, lastSignInProviders)) {
+                                                resumeJob?.cancel()
+                                                break
+                                            }
                                         }
                                     }
                                 }
+                                // Firebase doesn't repopulate currentUser later in the process, so a
+                                // session that hasn't arrived by now never will (e.g. auth prefs
+                                // restored from another device, whose keystore keys didn't come with
+                                // them). Concede the prior account so we don't wait again next launch.
+                                logger.w { "Gave up waiting for auth restoration, signing in anonymously" }
+                                analytics?.logEvent(
+                                    "auth_restore_gave_up",
+                                    mapOf("anon" to hadAnonymousAccount, "non_anon" to hadNonAnonymousAccount)
+                                )
+                                hadAnonymousAccount = false
+                                hadNonAnonymousAccount = false
+                            } else {
+                                logger.i { "User is null, no prior account, delay=2s before anonymous sign-in" }
+                                delay(2.seconds)
+                                logger.w { "Delay expired without user arriving, falling back to anonymous sign-in" }
                             }
-                            logger.i { "User is null, no prior account (anon=$hadAnonymousAccount, nonAnon=$hadNonAnonymousAccount), delay=2s before anonymous sign-in" }
-                            delay(2.seconds)
-                            logger.w { "Delay expired without user arriving, falling back to anonymous sign-in" }
                         } else {
                             if (hadNonAnonymousAccount) {
                                 logger.i { "User became null post-startup, hadNonAnonymousAccount: true→false" }
@@ -316,6 +332,8 @@ internal const val GOOGLE_PROVIDER_ID = "google.com"
 // Give Firebase's own restoration ~6s (attempts 1-2) before trying silent re-auth.
 internal const val SILENT_REAUTH_MIN_WAIT_ATTEMPT = 3
 internal const val SILENT_REAUTH_MAX_ATTEMPTS = 5
+// ~6 minutes of waiting given the 2s-doubling-to-1m backoff.
+internal const val AUTH_RESTORE_MAX_ATTEMPTS = 10
 
 // Silent re-auth only works for Google accounts (Credential Manager can return a stored
 // Google credential without UI; Apple/GitHub have no equivalent).
@@ -325,6 +343,10 @@ internal fun shouldAttemptSilentReauth(attempt: Int, silentAttempts: Int, provid
     attempt >= SILENT_REAUTH_MIN_WAIT_ATTEMPT &&
         silentAttempts < SILENT_REAUTH_MAX_ATTEMPTS &&
         canSilentReauth(providers)
+
+internal fun shouldGiveUpWaitingForAuth(attempt: Int, silentAttempts: Int, providers: String): Boolean =
+    attempt >= AUTH_RESTORE_MAX_ATTEMPTS &&
+        !shouldAttemptSilentReauth(attempt, silentAttempts, providers)
 
 fun generateRandomUserToken(): String {
     val charPool = "0123456789abcdef"

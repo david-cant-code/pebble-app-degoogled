@@ -32,7 +32,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          # Full history with tags: versionName is `git describe --tags HEAD`
+          # Full history with tags: versionName is `git describe --tags
+          # --first-parent HEAD`
           # and versionCode the commit count, and the check below compares
           # the built values against them.
           fetch-depth: 0
@@ -52,7 +53,7 @@ jobs:
         run: ./gradlew :androidApp:assembleDebug :androidApp:assembleRelease testDebugUnitTest testAndroidHostTest jvmTest lintDebug
       - name: Check the built version against the built commit
         run: |
-          expected="$(git describe --tags HEAD 2>/dev/null || echo unknown)"
+          expected="$(git describe --tags --first-parent HEAD 2>/dev/null || echo unknown)"
           aapt2="$(ls -d "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -n 1)"
           badging="$("$aapt2" dump badging androidApp/build/outputs/apk/release/androidApp-release-unsigned.apk | head -n 1)"
           actual="$(printf '%s' "$badging" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")"

@@ -16,6 +16,27 @@ those calls actually do. Each seam below is additionally built so that
 accidentally re-enabling the removed functionality fails loudly at build
 time instead of quietly coming back.
 
+The same idea applies to the manifest. Upstream declares four adb-driven
+QA receivers (settings write, dev connection server, QEMU watch attach,
+firmware sideload; all gated on `android.permission.DUMP`, which only
+the system, privileged apps, and the adb shell can hold) for every build
+type. The fork keeps them out of release with
+`androidApp/src/release/AndroidManifest.xml`, a release-only overlay
+whose `tools:node="remove"` entries drop the four elements from the
+merged manifest; upstream's declarations and classes stay verbatim,
+debug builds keep the receivers for driving an emulator from adb, and
+the release exported-component allowlist is unchanged. Two things in
+that verbatim upstream text do not hold here: the manifest comment and
+the receiver KDocs call the receivers safe to keep in release builds,
+which describes upstream's build, and their `am broadcast` recipes
+address `coredevices.coreapp`, which is the namespace, not the installed
+package; on a Gravel debug build the package half of `-n` is the
+applicationId, as in
+`-n com.anopticlabs.gravel/coredevices.coreapp.debug.QemuSetupReceiver`. The
+loud failure here is `VerifyExportedComponents`: a removal that misses
+leaves the receiver exported in the merged manifest, which fails the
+release build.
+
 ## Ring / Index AI
 
 The out-of-scope Ring/Index AI feature module (`experimental`) is
@@ -24,21 +45,26 @@ left in place so upstream merges stay cheap.
 
 `libindex`, `index-ai`, and `mcp` stay compiled: the watch UI in `pebble`
 compiles against `libindex`, whose Room schema references `index-ai`
-entities, which need `mcp`. Their runtime is dead:
+entities, which need `mcp`; and `util`'s transcription exception
+hierarchy types its error kind against an `index-ai` enum
+(`api(project(":index-ai"))` in `util/build.gradle.kts`). Their runtime
+is dead:
 
 - a no-op `LibIndex` is bound at the Koin seam;
 - fork stubs in `composeApp` replace the `experimental` types the app
   wiring touches, under the same fully-qualified names, so re-plugging
   the `experimental` module trips duplicate-class errors;
-- `CoreConfig.enableIndex` has no reachable set-point.
+- `CoreConfig.enableIndex` has no reachable set-point in a release build
+  (debug builds' adb-driven settings receiver can write it, and a flag
+  flipped that way reaches only the empty stubs).
 
 The Ring satellite library `libindex` compiles against
 (`io.github.coredevices.haversine`, a prebuilt AAR with no public source
 that bundles two native libraries per ABI) is replaced by the fork module
-`:haversine-stubs`: inert same-FQN stand-ins for the seven symbols
+`:haversine-stubs`: inert same-FQN stand-ins for the eight symbols
 `libindex` references, whose satellite classes have private constructors
 and no factory, so no ring object can exist anywhere in the app
-(`HaversineStubShapeTest` pins that shape, `HaversineStubTest` the two
+(`HaversineStubShapeTest` pins that shape, `HaversineStubTest` the
 static entry points). The wiring is a `dependencySubstitution` rule in
 `settings.gradle.kts`, applied to every project, rather than an edited
 dependency line: the artifact is a transitive runtime dependency of every
@@ -330,9 +356,13 @@ must agree, so both halves are recorded here.
 
 What the tree guarantees, and how it is pinned:
 
-- No binaries are tracked, no dependency comes from a repository outside
-  F-Droid's allowlist, and no dependency line matches F-Droid's "usual
-  suspects" signature database. `FdroidGuardrailsTest` in `:androidApp`
+- Nothing the scanner rejects is tracked: no prebuilt library or binary
+  dependency (the few compiled files in the tree are small `.pbw` and
+  `.pbz` test fixtures under `libpebble3/src/jvmTest/resources`, inputs
+  to JVM tests that never reach an APK and that the scanner does not
+  flag), no dependency comes from a repository outside F-Droid's
+  allowlist, and no dependency line matches F-Droid's "usual suspects"
+  signature database. `FdroidGuardrailsTest` in `:androidApp`
   replicates the buildserver's source scanner (`FdroidScannerReplica`
   holds the checks, `FdroidScannerReplicaTest` proves each one fires) over
   the tracked tree, the whisper.cpp submodule included, minus the paths the
@@ -350,10 +380,16 @@ What the tree guarantees, and how it is pinned:
   (`ndkVersion` 28.2.13676358, that is NDK r28c, and CMake 3.22.1), so a
   build is the same on every machine and the recipe has exact values to
   provision.
-- `versionName` is `git describe --tags HEAD` and `versionCode` the commit
-  count, both functions of the built commit (`androidApp/build.gradle.kts`),
-  so a tag checkout reports exactly the tag name and the values the recipe
-  declares for that tag can be checked against the built APK.
+- `versionName` is `git describe --tags --first-parent HEAD` and
+  `versionCode` the commit count, both functions of the built commit
+  (`androidApp/build.gradle.kts`), so a tag checkout reports exactly the
+  tag name and the values the recipe declares for that tag can be checked
+  against the built APK. The first-parent walk keeps upstream's tags,
+  reachable through every sync merge's second parent, from describing a
+  fork commit (git describe stops after ten candidate tags, so a non-tag
+  build would otherwise report the newest upstream tag); a release tag
+  has to sit on master's first-parent line, which tagging the release
+  commit on master gives.
 - `androidApp/version.properties` holds one line, `versionCode=<digits>`,
   the versionCode of the most recent tagged release. It exists for
   F-Droid's update checker, which reads it from a tag checkout (it cannot

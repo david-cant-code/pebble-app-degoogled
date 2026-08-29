@@ -99,6 +99,10 @@ data class CoreConfig(
     val androidForegroundServiceForWatchConnectionV2: Boolean = true,
     val showWatchConnectionDebugInfo: Boolean = false,
     val notifyWatchFullyCharged: Boolean = true,
+    // Fork: upstream defaults this to true; the fork keeps it false. The
+    // eng-dash route also needs a bug-endpoint build value fork builds never
+    // set, so the setting is inert here either way, and a true default would
+    // show the inert "Use Core OTA service" debug toggle as switched on.
     val useEngDashOta: Boolean = false,
     /**
      * Fork: highest "What's New" changelog revision the user has already seen. Compared

@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Watch
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -328,6 +329,29 @@ fun WatchHomeScreen(
             }
         }
         val deepLinkHandler: PebbleDeepLinkHandler = koinInject()
+        val pendingFirmwareSideload by deepLinkHandler.pendingFirmwareSideload.collectAsState()
+        pendingFirmwareSideload?.let { pending ->
+            AlertDialog(
+                onDismissRequest = deepLinkHandler::dismissPendingFirmwareSideload,
+                title = { Text("Sideload firmware?") },
+                text = {
+                    Text(
+                        "Install ${pending.fileName} on every connected watch? Only install " +
+                                "firmware from sources you trust."
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = deepLinkHandler::confirmPendingFirmwareSideload) {
+                        Text("Install")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = deepLinkHandler::dismissPendingFirmwareSideload) {
+                        Text("Cancel")
+                    }
+                },
+            )
+        }
         LaunchedEffect(Unit) {
             scope.launch {
                 deepLinkHandler.snackBarMessages.collect { message ->
@@ -343,6 +367,7 @@ fun WatchHomeScreen(
                     logger.v { "navigateToPebbleDeepLink: $it" }
                     val tab = when (it.route) {
                         is PebbleNavBarRoutes.LockerAppRoute -> WatchHomeNavTab.WatchFaces
+                        is PebbleNavBarRoutes.AppstoreSettingsRoute -> WatchHomeNavTab.WatchFaces
                         is PebbleNavBarRoutes.IndexRoute -> WatchHomeNavTab.Index
                         is PebbleNavBarRoutes.WatchesRoute -> WatchHomeNavTab.Watches
                         else -> null

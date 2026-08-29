@@ -80,8 +80,9 @@ class RingUnplugTest {
     }
 
     // Kill layer 2 of the ring unplug: enableIndex gates the Index tab and
-    // every Index UI surface, its set-points are suppressed in the fork,
-    // and nothing pins the upstream-owned default. An upstream merge
+    // every Index UI surface, its in-app set-points are suppressed in the
+    // fork (debug builds' adb settings receiver can still write it, into
+    // the empty stubs), and nothing pins the upstream-owned default. An upstream merge
     // flipping it to true would merge conflict-free and re-open the gate
     // even for existing installs (CoreConfigHolder omits defaults from
     // stored JSON), so the default itself is the invariant to hold.

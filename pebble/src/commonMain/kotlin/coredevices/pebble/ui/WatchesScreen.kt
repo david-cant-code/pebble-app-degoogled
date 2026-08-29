@@ -125,11 +125,14 @@ import coredevices.libindex.LibIndex
 import coredevices.libindex.device.DiscoveredIndexDevice
 import coredevices.libindex.device.IndexDevice
 import coredevices.libindex.device.IndexIdentifier
+import coredevices.libindex.device.IndexImage
 import coredevices.libindex.device.IndexPairingResult
 import coredevices.libindex.device.IndexPairingState
 import coredevices.libindex.device.InterviewedIndexDevice
 import coredevices.libindex.device.KnownIndexDevice
 import coredevices.libindex.device.PairingRequestResult
+import coredevices.libindex.device.RepairableIndexDevice
+import coredevices.libindex.device.isFailsafe
 import coredevices.libindex.ui.components.Press
 import coredevices.libindex.ui.components.PressPatternDot
 import coredevices.pebble.PebbleDeepLinkHandler
@@ -689,7 +692,7 @@ fun WatchesPreview() {
                                 override val identifier = IndexIdentifier("1234")
                                 override val name = "Index 01"
                                 override val rssi = -50
-                                override val isFailsafe: Boolean = false
+                                override val currentImage: IndexImage = IndexImage.Primary
                                 override val pairingState: IndexPairingState =
                                     IndexPairingState.NotPaired
 
@@ -775,11 +778,12 @@ fun RingItem(
         },
         supportingContent = {
             val stateText = when (ring) {
-                is DiscoveredIndexDevice -> if (ring.isFailsafe) {
-                    "Failsafe mode"
-                } else {
-                    "Available to pair"
+                is DiscoveredIndexDevice -> when (ring.currentImage) {
+                    IndexImage.Failsafe -> "Failsafe mode"
+                    IndexImage.ProductionTest -> "Production test mode"
+                    IndexImage.Primary -> "Available to pair"
                 }
+                is RepairableIndexDevice -> "Production test mode"
                 is InterviewedIndexDevice if (ring.updating) -> "Updating..."
                 else -> "Ready"
             }
@@ -853,6 +857,25 @@ fun RingItem(
                         ) {
                             Text("Pair")
                         }
+                    }
+                } else if (ring is RepairableIndexDevice) {
+                    var buttonEnabled by remember { mutableStateOf(true) }
+                    Button(
+                        enabled = buttonEnabled,
+                        onClick = {
+                            buttonEnabled = false
+                            scope.launch {
+                                try {
+                                    ring.forceFailsafe()
+                                } catch (e: Exception) {
+                                    logger.e(e) { "Failed to force failsafe: ${e.message}" }
+                                }
+                                buttonEnabled = true
+                            }
+                        },
+                        modifier = Modifier.padding(top = 5.dp)
+                    ) {
+                        Text("Restore firmware")
                     }
                 } else if (ring is InterviewedIndexDevice && ring.updating) {
                     LinearProgressIndicator(
