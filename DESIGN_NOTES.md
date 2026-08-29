@@ -322,11 +322,11 @@ NonFreeNet note) names Algolia for that reason.
 
 ## F-Droid
 
-The fork targets inclusion in F-Droid's main repository. What that means
-in practice is a split between what the tree guarantees on its own and
-what the build recipe (the app's metadata file in F-Droid's `fdroiddata`
-repository, maintained out of tree) has to supply. The two must agree, so
-both halves are recorded here.
+The fork is in F-Droid's main repository, as `com.anopticlabs.gravel`.
+Staying there rests on a split between what the tree guarantees on its
+own and what the build recipe (the app's metadata file in F-Droid's
+`fdroiddata` repository, maintained out of tree) has to supply. The two
+must agree, so both halves are recorded here.
 
 What the tree guarantees, and how it is pinned:
 

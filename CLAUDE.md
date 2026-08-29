@@ -84,16 +84,16 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   before code is written against it: actively maintained, current stable
   version, no known advisories, non-deprecated API surface, and a real need
   that the standard library or existing deps cannot meet.
-- **Stay F-Droid deliverable.** The fork targets inclusion in F-Droid's
-  main repository, so a change must not add non-free dependencies,
-  dependencies from repositories F-Droid does not allow, or prebuilt
-  binaries in the tree. `FdroidGuardrailsTest` in `:androidApp` replicates
-  F-Droid's source scanner over the tracked tree, the whisper.cpp submodule
-  included, minus the paths the F-Droid recipe removes (dependency lines in
-  every gradle file, iOS-only and unplugged modules included; maven URLs;
-  checked-in binaries; lockfile-less dependency manifests), and defines the
-  envelope: it must stay green, and a change that needs it loosened is a
-  change that breaks the target. The recipe contract the tree assumes is in
+- **Stay F-Droid deliverable.** The fork is in F-Droid's main repository,
+  so a change must not add non-free dependencies, dependencies from
+  repositories F-Droid does not allow, or prebuilt binaries in the tree.
+  `FdroidGuardrailsTest` in `:androidApp` replicates F-Droid's source
+  scanner over the tracked tree, the whisper.cpp submodule included, minus
+  the paths the F-Droid recipe removes (dependency lines in every gradle
+  file, iOS-only and unplugged modules included; maven URLs; checked-in
+  binaries; lockfile-less dependency manifests), and defines the envelope:
+  it must stay green, and a change that needs it loosened is a change that
+  breaks the listing. The recipe contract the tree assumes is in
   `DESIGN_NOTES.md` (F-Droid section).
 - **Security first.** No known security flaw ships, however small; genuinely
   deferred issues are documented in `KNOWN_ISSUES.md` with rationale. Any

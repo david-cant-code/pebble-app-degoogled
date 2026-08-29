@@ -54,13 +54,15 @@ a security posture tightened beyond upstream's defaults.
 - **A watch microphone API for third-party applications** documented and
   authorization-gated, rather than locking watch mic audio to first-party
   features.
-- **Distribution through F-Droid.** The fork targets inclusion in F-Droid's
-  main repository. The tree holds no binaries and every dependency is free
-  software from a repository F-Droid allows: the speech engine is built
-  from source, and the Ring satellite library, the last dependency whose
-  native code had no public source, is replaced by a stub. What remains is
-  the submission itself; `DESIGN_NOTES.md` records what the tree
-  guarantees and what the build recipe has to supply.
+- **Distribution through F-Droid.** The fork is in F-Droid's main
+  repository, as
+  [`com.anopticlabs.gravel`](https://f-droid.org/packages/com.anopticlabs.gravel/),
+  and staying there constrains every change: the tree holds no binaries
+  and every dependency is free software from a repository F-Droid allows.
+  The speech engine is built from source, and the Ring satellite library,
+  the last dependency whose native code had no public source, is replaced
+  by a stub. `DESIGN_NOTES.md` records what the tree guarantees and what
+  the build recipe supplies.
 
 Out of scope: iOS (sources remain in-tree but are unmaintained here).
 
