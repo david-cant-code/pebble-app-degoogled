@@ -38,6 +38,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         })
         SpeechAnalyzerBridge.register()
         UNUserNotificationCenter.current().delegate = self
+        // Attaches a QEMU emulator watch for automated testing:
+        //   xcrun simctl launch booted coredevices.coreapp -qemu 127.0.0.1:12344
+        // Launch arguments can only be set by simctl/Xcode, never by another app or a web link,
+        // so this is safe to keep in release builds for CI.
+        if let qemuAddress = UserDefaults.standard.string(forKey: "qemu") {
+            IOSDelegate.shared.addQemuWatch(address: qemuAddress)
+        }
         return res
     }
     

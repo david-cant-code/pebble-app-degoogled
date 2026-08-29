@@ -207,6 +207,9 @@ class WatchManagerTest {
 
         override fun stopClassicScan() {
         }
+
+        override fun addQemuWatch(address: String, connect: Boolean) {
+        }
     }
     private val watchConfig = WatchConfig(multipleConnectedWatchesSupported = false).asFlow()
     private val webServices = object : WebServices {

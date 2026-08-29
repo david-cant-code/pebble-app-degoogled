@@ -34,6 +34,7 @@ class PebbleDeviceFactory {
         languagePackInstallState: LanguagePackInstallState,
         reversePpogVersion: ReversePpogVersion?,
     ): PebbleDevice {
+        val btUsable = bluetoothState.enabled() || !identifier.requiresBluetooth()
         val pebbleDevice = RealPebbleDevice(
             identifier = identifier,
             name = name,
@@ -53,19 +54,19 @@ class PebbleDeviceFactory {
                 capabilities = knownWatchProperties.capabilities,
             )
         }
-        if (bluetoothState.enabled() && !connectGoal && state.isActive()) {
+        if (btUsable && !connectGoal && state.isActive()) {
             return when (knownDevice) {
                 null -> RealDisconnectingPebbleDevice(pebbleDevice)
                 else -> RealDisconnectingKnownPebbleDevice(knownDevice)
             }
         }
         return when {
-            bluetoothState.enabled() && !connectGoal && state.isActive() -> when (knownDevice) {
+            btUsable && !connectGoal && state.isActive() -> when (knownDevice) {
                 null -> RealDisconnectingPebbleDevice(pebbleDevice)
                 else -> RealDisconnectingKnownPebbleDevice(knownDevice)
             }
 
-            bluetoothState.enabled() && state is ConnectingPebbleState.Connected -> {
+            btUsable && state is ConnectingPebbleState.Connected -> {
                 val knownDevice = RealKnownPebbleDevice(
                     runningFwVersion = state.watchInfo.runningFwVersion.stringVersion,
                     serial = state.watchInfo.serial,
@@ -104,7 +105,7 @@ class PebbleDeviceFactory {
                 }
             }
 
-            bluetoothState.enabled() && (state is ConnectingPebbleState.Connecting ||
+            btUsable && (state is ConnectingPebbleState.Connecting ||
                     state is ConnectingPebbleState.Negotiating ||
                     connectGoal) -> when (knownDevice) {
                 null -> RealConnectingPebbleDevice(

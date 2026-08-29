@@ -16,6 +16,19 @@ those calls actually do. Each seam below is additionally built so that
 accidentally re-enabling the removed functionality fails loudly at build
 time instead of quietly coming back.
 
+The same idea applies to the manifest. Upstream declares four adb-driven
+QA receivers (settings write, dev connection server, QEMU watch attach,
+firmware sideload; all gated on `android.permission.DUMP`, so only adb
+and the system can send to them) for every build type. The fork keeps
+them out of release with `androidApp/src/release/AndroidManifest.xml`,
+a release-only overlay whose `tools:node="remove"` entries drop the four
+elements from the merged manifest; upstream's declarations and classes
+stay verbatim, debug builds keep the receivers for driving an emulator
+from adb, and the release exported-component allowlist is unchanged. The
+loud failure here is `VerifyExportedComponents`: a removal that misses
+leaves the receiver exported in the merged manifest, which fails the
+release build.
+
 ## Ring / Index AI
 
 The out-of-scope Ring/Index AI feature module (`experimental`) is
@@ -35,10 +48,10 @@ entities, which need `mcp`. Their runtime is dead:
 The Ring satellite library `libindex` compiles against
 (`io.github.coredevices.haversine`, a prebuilt AAR with no public source
 that bundles two native libraries per ABI) is replaced by the fork module
-`:haversine-stubs`: inert same-FQN stand-ins for the seven symbols
+`:haversine-stubs`: inert same-FQN stand-ins for the eight symbols
 `libindex` references, whose satellite classes have private constructors
 and no factory, so no ring object can exist anywhere in the app
-(`HaversineStubShapeTest` pins that shape, `HaversineStubTest` the two
+(`HaversineStubShapeTest` pins that shape, `HaversineStubTest` the
 static entry points). The wiring is a `dependencySubstitution` rule in
 `settings.gradle.kts`, applied to every project, rather than an edited
 dependency line: the artifact is a transitive runtime dependency of every

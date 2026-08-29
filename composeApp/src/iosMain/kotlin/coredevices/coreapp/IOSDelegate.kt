@@ -27,6 +27,7 @@ import coredevices.coreapp.util.initLogging
 import coredevices.experimentalModule
 import coredevices.pebble.PebbleAppDelegate
 import coredevices.pebble.PebbleDeepLinkHandler
+import io.rebble.libpebblecommon.connection.LibPebble
 import coredevices.pebble.watchModule
 import coredevices.ring.agent.builtin_servlets.reminders.IOSBuiltInReminderIntegration
 import coredevices.ring.reminders.ReminderCompleter
@@ -115,6 +116,17 @@ object IOSDelegate : KoinComponent {
         } else {
             return true
         }
+    }
+
+    /**
+     * Attaches a QEMU emulator watch at "host:port", for automated testing. Reachable only via a
+     * launch argument (see [didFinishLaunching]), which nothing but simctl/Xcode can set, so it is
+     * safe to keep in release builds for CI.
+     */
+    fun addQemuWatch(address: String) {
+        logger.i("adding QEMU watch at $address")
+        val libPebble: LibPebble = get()
+        libPebble.addQemuWatch(address, connect = true)
     }
 
     private fun initPebble() {

@@ -106,6 +106,7 @@ kotlin {
             implementation(libs.kable)
             implementation(libs.kmpio)
             implementation(libs.ktor.client.core)
+            implementation(libs.ktor.network)
             implementation(libs.ktor.server.core)
             implementation(libs.ktor.server.cio)
             implementation(libs.ktor.server.websockets)

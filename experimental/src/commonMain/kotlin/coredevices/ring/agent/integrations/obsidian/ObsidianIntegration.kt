@@ -57,7 +57,7 @@ class ObsidianIntegration(
 
     fun saveConfig(mode: ObsidianMode, targetNote: String, subfolder: String, customTag: String) {
         prefs.setMode(mode)
-        prefs.setTargetNote(targetNote)
+        prefs.setTargetNote(ObsidianNoteFormatter.sanitizeSubfolder(targetNote))
         prefs.setSubfolder(subfolder)
         prefs.setCustomTag(ObsidianNoteFormatter.sanitizeTag(customTag))
     }
@@ -70,11 +70,11 @@ class ObsidianIntegration(
     fun currentSubfolder(): String = prefs.subfolder.value
     fun currentCustomTag(): String = prefs.customTag.value
 
-    /** Lists existing `.md` files in the vault for the "named note" picker (empty if no access). */
+    /** Vault-relative paths of existing `.md` files for the "named note" suggestions (empty if no access). */
     suspend fun listNotes(): List<String> {
         val handle = prefs.vaultHandle.value ?: return emptyList()
         if (!vault.hasAccess(handle)) return emptyList()
-        return vault.listMarkdownFiles(handle)
+        return vault.listMarkdownFilesRecursive(handle)
     }
 
     override suspend fun createNote(content: String, source: ItemSource?): String? = noteMutex.withLock {

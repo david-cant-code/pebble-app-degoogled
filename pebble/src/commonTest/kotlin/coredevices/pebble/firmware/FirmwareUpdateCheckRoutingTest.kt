@@ -1,6 +1,7 @@
 package coredevices.pebble.firmware
 
 import com.russhwolf.settings.MapSettings
+import coredevices.analytics.CoreAnalytics
 import coredevices.pebble.Platform
 import coredevices.pebble.services.EngDashOta
 import coredevices.pebble.services.Memfault
@@ -8,6 +9,8 @@ import coredevices.pebble.services.PebbleAccountProvider
 import coredevices.pebble.services.PebbleHttpClient
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigFlow
+import kotlin.time.Duration
+import kotlin.time.Instant
 import kotlinx.coroutines.flow.MutableStateFlow
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -45,6 +48,21 @@ class FirmwareUpdateCheckRoutingTest {
         install(ContentNegotiation) { json(testJson) }
     }
 
+
+    // Fork builds never enable eng-dash OTA, and the only analytics event the
+    // checker emits is on the eng-dash fallback, so no check here may touch
+    // analytics at all: a call means the eng-dash gate opened.
+    private fun analyticsNeverCalled(): CoreAnalytics = object : CoreAnalytics {
+        override fun logEvent(name: String, parameters: Map<String, Any>?) =
+            fail("analytics event '$name' logged; the eng-dash OTA gate must stay closed in fork builds")
+        override suspend fun logHeartbeatState(name: String, value: Boolean, timestamp: Instant) =
+            fail("analytics touched: logHeartbeatState")
+        override suspend fun processHeartbeat() = fail("analytics touched: processHeartbeat")
+        override fun updateLastConnectedSerial(serial: String?) = fail("analytics touched: updateLastConnectedSerial")
+        override fun updateRingTransferDurationMetric(duration: Duration) = fail("analytics touched: updateRingTransferDurationMetric")
+        override fun updateRingLifetimeCollectionCount(serial: String, count: Int) = fail("analytics touched: updateRingLifetimeCollectionCount")
+    }
+
     private fun memfaultNeverContacted() =
         Memfault(failingClient("Memfault"), MapSettings(), Platform.Android, memfaultToken = null)
 
@@ -80,6 +98,7 @@ class FirmwareUpdateCheckRoutingTest {
             cohorts = testCohorts(failingClient("Cohorts"), expectations),
             githubReleases = GithubReleases(jsonRespondingClient(githubBody), expectations, fixedTestClock),
             channel = { FirmwareUpdateChannel.Soaked },
+            coreAnalytics = analyticsNeverCalled(),
             clock = fixedTestClock,
         )
         val result = check.checkForUpdates(
@@ -100,6 +119,7 @@ class FirmwareUpdateCheckRoutingTest {
             cohorts = testCohorts(jsonRespondingClient(cohortsBody()), expectations),
             githubReleases = GithubReleases(failingClient("GitHub"), expectations, fixedTestClock),
             channel = { FirmwareUpdateChannel.Soaked },
+            coreAnalytics = analyticsNeverCalled(),
             clock = fixedTestClock,
         )
         val result = check.checkForUpdates(
@@ -137,6 +157,7 @@ class FirmwareUpdateCheckRoutingTest {
             cohorts = testCohorts(failingClient("Cohorts"), expectations),
             githubReleases = GithubReleases(client, expectations, fixedTestClock),
             channel = { channel },
+            coreAnalytics = analyticsNeverCalled(),
             clock = fixedTestClock,
         )
         val watch = testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0")
@@ -185,6 +206,7 @@ class FirmwareUpdateCheckRoutingTest {
             cohorts = testCohorts(failingClient("Cohorts"), expectations),
             githubReleases = GithubReleases(client, expectations, fixedTestClock),
             channel = { channel },
+            coreAnalytics = analyticsNeverCalled(),
             clock = fixedTestClock,
         )
         val watch = testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0")
@@ -222,6 +244,7 @@ class FirmwareUpdateCheckRoutingTest {
             cohorts = testCohorts(client, expectations),
             githubReleases = GithubReleases(failingClient("GitHub"), expectations, fixedTestClock),
             channel = { channel },
+            coreAnalytics = analyticsNeverCalled(),
             clock = fixedTestClock,
         )
         val watch = testWatchInfo(WatchHardwarePlatform.PEBBLE_SILK, "v4.0.0")

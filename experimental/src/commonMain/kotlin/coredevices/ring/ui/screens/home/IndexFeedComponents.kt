@@ -82,6 +82,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -104,7 +105,6 @@ import coredevices.ring.service.indexfeed.DefaultListsBootstrap.Companion.LIST_T
 import coredevices.ring.ui.components.chat.IndexComposeBarHost
 import coredevices.ring.ui.navigation.RingRoutes
 import coredevices.ring.ui.theme.IndexTheme
-import coredevices.ring.ui.theme.IndexThemeHost
 import coredevices.ring.ui.theme.indexTextEntryStyle
 import coredevices.ring.ui.viewmodel.IndexFeedViewModel
 import kotlin.time.Clock
@@ -332,6 +332,7 @@ internal fun FeedSectionHeader(
     right: String,
     onClick: (() -> Unit)?,
     topPad: Dp = 12.dp,
+    onAdd: (() -> Unit)? = null,
 ) {
     val colors = IndexTheme.colors
     Row(
@@ -355,6 +356,17 @@ internal fun FeedSectionHeader(
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
         )
+        if (onAdd != null) {
+            Text(
+                "+",
+                color = colors.primary,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clickable(role = Role.Button, onClickLabel = "New note") { onAdd() }
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
     }
 }
 

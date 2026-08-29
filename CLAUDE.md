@@ -52,6 +52,12 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   `toolchain {` block), which is what an upstream sync would bring back.
   CI builds on both 17 and 21; this supersedes upstream's "JDK 17
   required" below.
+- **versionCode is the commit count; versionName is `git describe --tags
+  HEAD`.** Upstream now packs the newest reachable tag into versionCode
+  (its "General editing info" below describes that); the fork keeps the
+  commit count because F-Droid's update checker and the version file
+  below are built on it, and derives versionName from HEAD so a tag
+  checkout reports exactly its own tag.
 - **A release commit bumps `androidApp/version.properties`.** F-Droid's
   update checker reads a tag's versionCode from that one-line file because
   it cannot count commits the way the build does. The commit that gets
@@ -159,7 +165,7 @@ iOS app project: `iosApp/iosApp.xcworkspace` (always open the `.xcworkspace`, no
 
 - Source layout per module follows standard KMP: `src/commonMain/kotlin`, `src/androidMain/kotlin`, `src/iosMain/kotlin`, plus `commonTest` / `androidUnitTest` / `androidInstrumentedTest`.
 - Compose resources are generated under the package `coreapp.composeapp.generated.resources`.
-- `versionCode` is derived from git commit count; `versionName` requires a git tag (e.g. `git tag 1.0.0`) or falls back to `"unknown"`. Both are set lazily in `androidComponents.onVariants` so the git commands don't run during configuration.
+- `versionName` is the most recent tag reachable from HEAD (`git describe --tags --abbrev=0`), so a release branch versions from its own tag; `versionCode` is that tag packed into an int (`1.9.1.3` -> `10901003`, major below 100 and the rest below 1000). A build with no reachable tag fails loudly. Both are set lazily in `androidComponents.onVariants` so the git commands don't run during configuration.
 - DI is Koin (`koin-core`, `koin-compose`, `koin-compose-viewmodel`); navigation uses `androidx.navigation.compose`; logging uses Kermit; HTTP is Ktor (OkHttp on Android, Darwin on iOS).
 - Some dependencies are internally developed and published. You can still ask for the source code of these dependencies to be included in the session if you need more context but don't try looking for it in the filesystem.
 

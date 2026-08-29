@@ -4,7 +4,6 @@ package coredevices.ring.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import coredevices.indexai.data.entity.ListDocument
 import coredevices.ring.data.entity.room.indexfeed.CachedItem
 import coredevices.ring.data.entity.room.indexfeed.CachedList
 import coredevices.ring.data.entity.room.indexfeed.kind
@@ -21,7 +20,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
 /**
@@ -52,23 +50,10 @@ class AllListsViewModel(
     fun setQuery(q: String) { query.value = q }
 
     /** Creates a fresh user list and invokes [onCreated] with the new
-     *  doc id so the screen can navigate into rename mode. The id is
-     *  generated locally from the timestamp; the next "Sync now" will
-     *  push it to Firestore alongside everything else. */
+     *  doc id so the screen can navigate into rename mode. */
     fun newList(onCreated: (String) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
-            val now = Clock.System.now()
-            val newId = "list_${now.toEpochMilliseconds()}"
-            listRepo.setList(
-                newId,
-                ListDocument(
-                    createdAt = now,
-                    updatedAt = now,
-                    title = "New list",
-                    icon = "📝",
-                    listKind = "note",
-                ),
-            )
+            val newId = listRepo.createList("New list")
             // Hop to Main: onCreated navigates, and NavController
             // requires the main thread.
             withContext(Dispatchers.Main) { onCreated(newId) }

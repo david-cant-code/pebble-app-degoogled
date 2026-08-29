@@ -3,6 +3,7 @@ package coredevices.ring.service
 import co.touchlab.kermit.Logger
 import coredevices.indexai.data.entity.MessageRole
 import coredevices.indexai.data.entity.RecordingEntryEntity
+import coredevices.indexai.data.entity.RecordingEntryErrorType
 import coredevices.indexai.data.entity.RecordingEntryStatus
 import coredevices.indexai.database.dao.ConversationMessageDao
 import coredevices.mcp.data.SemanticResult
@@ -159,7 +160,11 @@ class IndexNotificationManager(
                 return InflightIndexNotification.Error(notifId, timestamp, entry.error ?: "Agent processing error")
             }
             RecordingEntryStatus.transcription_error -> {
-                return InflightIndexNotification.Error(notifId, timestamp, "Unable to transcribe Index recording")
+                return if (entry.errorType == RecordingEntryErrorType.no_speech) {
+                    InflightIndexNotification.NoSpeech(notifId, timestamp)
+                } else {
+                    InflightIndexNotification.Error(notifId, timestamp, "Unable to transcribe Index recording")
+                }
             }
             RecordingEntryStatus.completed -> {} // Continue to process
         }
@@ -433,6 +438,16 @@ class IndexNotificationManager(
                                     )
                                 )
                             }
+                            is InflightIndexNotification.NoSpeech -> {
+                                GenericNotification(
+                                    id = notification.id,
+                                    title = "No audio detected",
+                                    contentText = "No speech was detected in your Index 01 recording.",
+                                    inProgress = null,
+                                    localOnly = false,
+                                    deepLink = DEEP_LINK_URI
+                                )
+                            }
                             is InflightIndexNotification.Error -> {
                                 GenericNotification(
                                     id = notification.id,
@@ -454,6 +469,7 @@ class IndexNotificationManager(
                                     is InflightIndexNotification.Transcribing -> "transcribing"
                                     is InflightIndexNotification.AgentRunning -> "agent_running"
                                     is InflightIndexNotification.AgentComplete -> "agent_complete"
+                                    is InflightIndexNotification.NoSpeech -> "no_speech"
                                     is InflightIndexNotification.Error -> "error"
                                     is InflightIndexNotification.Discarded -> "dismissed_discarded"
                                 }
@@ -464,6 +480,7 @@ class IndexNotificationManager(
 
                         if (
                             notification is InflightIndexNotification.AgentComplete ||
+                            notification is InflightIndexNotification.NoSpeech ||
                             notification is InflightIndexNotification.Error ||
                             notification is InflightIndexNotification.Discarded
                         ) {

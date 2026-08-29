@@ -38,13 +38,13 @@ class ReminderTool: BuiltInMcpTool(
                     "date_time_human" to JsonObject(
                         mapOf(
                             "type" to "string",
-                            "description" to "If provided by the user, the date and/or time to remind the user in human readable format, use English keywords e.g. 'tomorrow at 13:00', 'next Monday at 9am', 'on July 5th at 14:30', 'at 3pm'"
+                            "description" to "If provided by the user, the date and/or time to remind the user in human readable format. Must be in English — translate it if the user spoke another language. e.g. 'tomorrow at 13:00', 'next Monday at 9am', 'on July 5th at 14:30', 'at 3pm'"
                         ).toJson()
                     ),
                     "duration_human" to JsonObject(
                         mapOf(
                             "type" to "string",
-                            "description" to "If provided by the user, the duration from now to remind the user in human readable format, use English keywords e.g. 'in 2 hours', 'in 30 minutes', 'in 1 day and 3 hours'"
+                            "description" to "If provided by the user, the duration from now to remind the user in human readable format. Must be in English — translate it if the user spoke another language. e.g. 'in 2 hours', 'in 30 minutes', 'in 1 day and 3 hours'"
                         ).toJson()
                     ),
                     "notification_hours_before" to JsonObject(
@@ -74,7 +74,7 @@ class ReminderTool: BuiltInMcpTool(
 
     companion object Companion {
         const val TOOL_NAME = "create_reminder"
-        const val TOOL_DESCRIPTION = "Set a reminder optionally for a future time. Use when the user requests a reminder or wants to be reminded at a specific time or date."
+        const val TOOL_DESCRIPTION = "Set a reminder optionally for a future time. Use when the user requests a reminder, asks to remember to do something ('remind me to...', 'remember to...'), or wants to be reminded at a specific time or date."
         private val logger = Logger.withTag("ReminderTool")
     }
 
@@ -187,12 +187,15 @@ class ReminderTool: BuiltInMcpTool(
                     }
                 }
                 null -> {
-                    logger.e { "Failed to parse date time: '${remindArgs.date_time_human}'" }
+                    logger.e { "Failed to parse date time: '$dateTimeHuman'" }
                     return ToolCallResult(
                         JsonSnake.encodeToString(
                             RemindResult(
                                 success = false,
-                                errorMessage = "Failed to parse date time: '${remindArgs.date_time_human}'"
+                                errorMessage = "Failed to parse date time: '$dateTimeHuman'. " +
+                                        "Retry with the same date/time rephrased in simple English " +
+                                        "like 'on August 20 at 9am', 'tomorrow at 13:00' or 'in 2 hours'. " +
+                                        "If it cannot be expressed that way, create the reminder without a time."
                             )
                         ),
                         SemanticResult.GenericFailure(

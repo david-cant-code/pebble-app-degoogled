@@ -63,6 +63,7 @@ class HaversineStubShapeTest {
         assertNull(satellite.name)
         assertNull(satellite.state.value)
         runBlocking { satellite.eraseCollections() }
+        runBlocking { satellite.forceFailsafe() }
 
         val state = construct(KMPHaversineSatelliteState::class.java)
         assertEquals("", state.firmwareVersion)

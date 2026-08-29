@@ -39,6 +39,8 @@ class RealCreatePlatformIdentifier(
 
         is PebbleBtClassicIdentifier -> PlatformIdentifier.BtClassicPlatformIdentifier(identifier)
 
+        is PebbleSocketIdentifier -> PlatformIdentifier.SocketPlatformIdentifier(identifier.address)
+
         else -> error("unknown identifier type: $identifier")
     }
 }
