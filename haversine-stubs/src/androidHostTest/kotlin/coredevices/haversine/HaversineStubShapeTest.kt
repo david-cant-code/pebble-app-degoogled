@@ -11,7 +11,7 @@ import kotlinx.coroutines.runBlocking
  * Pins the shape the stub's behavioral contract rests on (see the KDoc on
  * HaversineStubs.kt): the three satellite classes can only ever be
  * constructed privately and nothing hands one out, so no ring object can
- * exist in the app. HaversineStubTest covers what the two static entry
+ * exist in the app. HaversineStubTest covers what the static entry
  * points answer; this test covers the invariant a later edit is most
  * likely to loosen (a constructor made public or a factory added to reach
  * an instance from a test), which no other test in the tree observes.

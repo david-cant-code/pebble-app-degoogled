@@ -18,13 +18,21 @@ time instead of quietly coming back.
 
 The same idea applies to the manifest. Upstream declares four adb-driven
 QA receivers (settings write, dev connection server, QEMU watch attach,
-firmware sideload; all gated on `android.permission.DUMP`, so only adb
-and the system can send to them) for every build type. The fork keeps
-them out of release with `androidApp/src/release/AndroidManifest.xml`,
-a release-only overlay whose `tools:node="remove"` entries drop the four
-elements from the merged manifest; upstream's declarations and classes
-stay verbatim, debug builds keep the receivers for driving an emulator
-from adb, and the release exported-component allowlist is unchanged. The
+firmware sideload; all gated on `android.permission.DUMP`, which only
+the system, privileged apps, and the adb shell can hold) for every build
+type. The fork keeps them out of release with
+`androidApp/src/release/AndroidManifest.xml`, a release-only overlay
+whose `tools:node="remove"` entries drop the four elements from the
+merged manifest; upstream's declarations and classes stay verbatim,
+debug builds keep the receivers for driving an emulator from adb, and
+the release exported-component allowlist is unchanged. Two things in
+that verbatim upstream text do not hold here: the manifest comment and
+the receiver KDocs call the receivers safe to keep in release builds,
+which describes upstream's build, and their `am broadcast` recipes
+address `coredevices.coreapp`, which is the namespace, not the installed
+package; on a Gravel debug build the package half of `-n` is the
+applicationId, as in
+`-n com.anopticlabs.gravel/coredevices.coreapp.debug.QemuSetupReceiver`. The
 loud failure here is `VerifyExportedComponents`: a removal that misses
 leaves the receiver exported in the merged manifest, which fails the
 release build.
@@ -37,7 +45,10 @@ left in place so upstream merges stay cheap.
 
 `libindex`, `index-ai`, and `mcp` stay compiled: the watch UI in `pebble`
 compiles against `libindex`, whose Room schema references `index-ai`
-entities, which need `mcp`. Their runtime is dead:
+entities, which need `mcp`; and `util`'s transcription exception
+hierarchy types its error kind against an `index-ai` enum
+(`api(project(":index-ai"))` in `util/build.gradle.kts`). Their runtime
+is dead:
 
 - a no-op `LibIndex` is bound at the Koin seam;
 - fork stubs in `composeApp` replace the `experimental` types the app

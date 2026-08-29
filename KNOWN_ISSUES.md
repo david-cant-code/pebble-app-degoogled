@@ -153,7 +153,11 @@ WebSocket intercept becomes available.
 Watchapps whose developer config pages or PebbleKit JS requests use plain
 `http://` fail even when the app's Network permission is granted: the
 config page shows a load error and JS requests fail with
-`ERR_CLEARTEXT_NOT_PERMITTED`. `https://` is unaffected.
+`ERR_CLEARTEXT_NOT_PERMITTED`. `https://` is unaffected. The same block
+covers user-added appstore sources: the add-source dialog and the
+`pebble://add-store-feed` deep link accept an `http://` feed URL, the
+source is saved, and every fetch from it then fails with nothing shown
+in the source list beyond the empty entry.
 
 The block began as an upstream accident, and is now an active fork
 divergence held on purpose. Upstream's manifest declares
@@ -235,7 +239,9 @@ service. The routing requires a bug-endpoint build config value that this
 fork never sets, a fact the fork's own routing test asserts, so the
 toggle changes nothing on any fork build while its description names a
 firmware source the fork does not use. The toggle stays as upstream
-ships it; hiding it behind the same predicate that makes it functional
+ships it, except that the setting behind it keeps the fork's off
+default where upstream now defaults it on, so an inert control is not
+shown enabled; hiding it behind the same predicate that makes it functional
 remains open as a follow-up, and renaming it would keep an inert control
 under a different label. This entry leaves the file if the toggle is
 hidden behind that predicate or the fork ever sets the endpoint that

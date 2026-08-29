@@ -48,7 +48,6 @@ class FirmwareUpdateCheckRoutingTest {
         install(ContentNegotiation) { json(testJson) }
     }
 
-
     // Fork builds never enable eng-dash OTA, and the only analytics event the
     // checker emits is on the eng-dash fallback, so no check here may touch
     // analytics at all: a call means the eng-dash gate opened.
@@ -253,5 +252,51 @@ class FirmwareUpdateCheckRoutingTest {
         channel = FirmwareUpdateChannel.Early
         assertIs<FirmwareUpdateCheckResult.FoundUpdate>(check.checkForUpdates(watch, force = false))
         assertEquals(1, cohortsRequests)
+    }
+
+    @Test
+    fun versionChangeReplacesTheCachedEntryInsteadOfShadowingIt() = runTest {
+        // The running version and recovery flag are inputs to the check, so
+        // they live in the cache entry: a check for a different version must
+        // refetch, and its entry must replace the old one, so that going back
+        // to the earlier version (recovery -> main -> recovery) refetches too
+        // rather than finding the earlier answer still cached beside it.
+        var githubRequests = 0
+        val expectations = FirmwareArtifactExpectations()
+        val client = HttpClient(MockEngine { _ ->
+            githubRequests++
+            respond(githubBody, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }) {
+            install(ContentNegotiation) { json(testJson) }
+        }
+        val check = FirmwareUpdateCheck(
+            memfault = memfaultNeverContacted(),
+            engDashOta = engDashNeverContacted(),
+            coreConfig = forkDefaultConfig(),
+            cohorts = testCohorts(failingClient("Cohorts"), expectations),
+            githubReleases = GithubReleases(client, expectations, fixedTestClock),
+            channel = { FirmwareUpdateChannel.Soaked },
+            coreAnalytics = analyticsNeverCalled(),
+            clock = fixedTestClock,
+        )
+        val onRecovery = testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0", isRecovery = true)
+        val onMain = testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0")
+
+        check.checkForUpdates(onRecovery, force = false)
+        assertEquals(1, githubRequests)
+
+        // A different running version is a different check, and its entry
+        // replaces the recovery one.
+        check.checkForUpdates(onMain, force = false)
+        assertEquals(2, githubRequests)
+        check.checkForUpdates(onMain, force = false)
+        assertEquals(2, githubRequests)
+
+        // Back on recovery: the earlier entry is gone, so this refetches; a
+        // stale entry surviving under its own version would answer here.
+        check.checkForUpdates(onRecovery, force = false)
+        assertEquals(3, githubRequests)
+        check.checkForUpdates(onRecovery, force = false)
+        assertEquals(3, githubRequests)
     }
 }

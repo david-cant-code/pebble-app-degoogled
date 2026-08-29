@@ -13,7 +13,9 @@
     shipping build carries no settings-write or firmware-sideload hook
     at all, and the release exported-component allowlist stays exactly
     what it was. Debug builds keep the receivers as upstream documents
-    them, so an emulator can be driven from adb.
+    them, so an emulator can be driven from adb; the "safe to keep in
+    release builds" wording in upstream's manifest comment and receiver
+    KDocs describes upstream's build, not this one.
 
     Removing here, rather than editing upstream's declarations, keeps
     upstream's manifests and classes verbatim; R8 drops the classes from

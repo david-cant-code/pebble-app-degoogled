@@ -43,10 +43,7 @@ class FirmwareUpdateCheck(
         // must key the cache, or a channel toggle would keep serving the
         // other channel's cached result until the TTL expires. Null for
         // every other route: their results ignore the channel, so a toggle
-        // flip must not fragment or evict their cached entries. The running
-        // firmware version is deliberately not part of the key: it lives in
-        // the entry, so a version change replaces the watch's entry instead
-        // of leaving the stale one behind under its own key.
+        // flip must not fragment or evict their cached entries.
         val channel: FirmwareUpdateChannel?,
     )
 
