@@ -262,6 +262,33 @@ or third-party hardware, the toggle default is the first thing to
 revisit. This entry leaves the file if the default changes or the filter
 gains a fallback pass.
 
+## Companion Device Manager association never completes for a BLE watch
+
+**Status: deferred; upstream-inherited, root cause not yet found.**
+
+Tapping Connect on a BLE watch first asks Android's Companion Device
+Manager to associate it (a scan filter on the watch's address, watch
+device profile, single device) and waits up to 30 seconds before
+connecting. The system picker ("Looking for a watch") never lists the
+watch, the wait expires, the app logs `CompanionDeviceManager
+succeeded=false` and connects anyway, and the picker stays on screen
+until dismissed; every later Connect asks again, because no association
+was recorded. Observed on a Pebble Time 2 with this fork and with the
+upstream app before the fork; the association code is upstream's,
+untouched here. The picker scans for an advertisement from the address
+the app itself scanned, so why it never matches is the open question.
+
+Without the association the app does not hold Android's companion role
+for the watch: the role's notification-access prompt never appears, so
+notification access is granted from the system settings page the
+permission warnings link to instead, and the app has none of the
+background-start allowances the role carries. Connecting, syncing,
+notifications, and everything else work once the watch is connected.
+The Connectivity settings carry upstream's "Disable Companion Device
+Manager" toggle, which skips the request entirely. This entry leaves the
+file when the association completes on a BLE watch, or the request is
+dropped or reworked.
+
 ## Notification mute carry-over can mismatch duplicate channel names
 
 **Status: accepted; upstream-inherited, narrow trigger, worth upstreaming.**
