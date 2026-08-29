@@ -374,10 +374,16 @@ What the tree guarantees, and how it is pinned:
   (`ndkVersion` 28.2.13676358, that is NDK r28c, and CMake 3.22.1), so a
   build is the same on every machine and the recipe has exact values to
   provision.
-- `versionName` is `git describe --tags HEAD` and `versionCode` the commit
-  count, both functions of the built commit (`androidApp/build.gradle.kts`),
-  so a tag checkout reports exactly the tag name and the values the recipe
-  declares for that tag can be checked against the built APK.
+- `versionName` is `git describe --tags --first-parent HEAD` and
+  `versionCode` the commit count, both functions of the built commit
+  (`androidApp/build.gradle.kts`), so a tag checkout reports exactly the
+  tag name and the values the recipe declares for that tag can be checked
+  against the built APK. The first-parent walk keeps upstream's tags,
+  reachable through every sync merge's second parent, from describing a
+  fork commit (git describe stops after ten candidate tags, so a non-tag
+  build would otherwise report the newest upstream tag); a release tag
+  has to sit on master's first-parent line, which tagging the release
+  commit on master gives.
 - `androidApp/version.properties` holds one line, `versionCode=<digits>`,
   the versionCode of the most recent tagged release. It exists for
   F-Droid's update checker, which reads it from a tag checkout (it cannot

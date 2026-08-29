@@ -44,9 +44,14 @@ val gitVersionCode = providers.exec {
 // exists reports the newer version and every branch reports the newest tag.
 // F-Droid builds a tag checkout and requires the built versionName to equal
 // the one declared for that tag, which needs the per-commit derivation.
+// The walk follows the first-parent line only: every upstream sync merge
+// makes upstream's tags reachable through its second parent, and git
+// describe gives up after ten candidate tags, so without this a non-tag
+// build reports the newest upstream tag. A release tag therefore sits on
+// master's first-parent line, which tagging the release commit gives.
 val gitVersionName = providers.exec {
     isIgnoreExitValue = true
-    commandLine("git", "describe", "--tags", "HEAD")
+    commandLine("git", "describe", "--tags", "--first-parent", "HEAD")
 }.standardOutput.asText.map { it.trim().ifEmpty { "unknown" } }
 
 android {

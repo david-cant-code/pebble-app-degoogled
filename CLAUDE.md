@@ -53,11 +53,14 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   CI builds on both 17 and 21; this supersedes upstream's "JDK 17
   required" below.
 - **versionCode is the commit count; versionName is `git describe --tags
-  HEAD`.** Upstream now packs the newest reachable tag into versionCode
-  (its "General editing info" below describes that); the fork keeps the
-  commit count because F-Droid's update checker and the version file
-  below are built on it, and derives versionName from HEAD so a tag
-  checkout reports exactly its own tag.
+  --first-parent HEAD`.** Upstream now packs the newest reachable tag
+  into versionCode (its "General editing info" below describes that);
+  the fork keeps the commit count because F-Droid's update checker and
+  the version file below are built on it, and derives versionName from
+  HEAD so a tag checkout reports exactly its own tag. The first-parent
+  walk keeps upstream's tags, reachable through every sync merge, from
+  describing fork commits, so release tags go on master's first-parent
+  line (tag the release commit on master).
 - **A release commit bumps `androidApp/version.properties`.** F-Droid's
   update checker reads a tag's versionCode from that one-line file because
   it cannot count commits the way the build does. The commit that gets
