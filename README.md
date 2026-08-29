@@ -1,7 +1,8 @@
 # Gravel (de-Googled Pebble app fork)
 
 [<img src="https://f-droid.org/badge/get-it-on.png" alt="Get it on F-Droid" height="80">](https://f-droid.org/packages/com.anopticlabs.gravel/)
-[![F-Droid version](https://img.shields.io/f-droid/v/com.anopticlabs.gravel)](https://f-droid.org/packages/com.anopticlabs.gravel/)
+
+[<img src="https://img.shields.io/f-droid/v/com.anopticlabs.gravel" alt="F-Droid version" hspace="13">](https://f-droid.org/packages/com.anopticlabs.gravel/)
 
 ## Status
 
