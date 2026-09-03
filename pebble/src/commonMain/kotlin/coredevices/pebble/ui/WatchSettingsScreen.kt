@@ -130,6 +130,7 @@ import coredevices.ui.M3Dialog
 import coredevices.ui.SignInDialog
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigHolder
+import coredevices.util.isDebugBuild
 import coredevices.util.Permission
 import coredevices.util.PermissionRequester
 import coredevices.util.STTConfig
@@ -1577,6 +1578,42 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                             }
                         }
                     },
+                ),
+                // Fork, debug builds only: test hooks for the watch dictation
+                // deadline work. Offered only when isDebugBuild() is true, and
+                // the transcription service re-checks the build before
+                // honouring either flag (see STTConfig).
+                basicSettingsToggleItem(
+                    title = "Dictation: single engine thread",
+                    description = "Run local speech recognition on one thread so a fast phone reproduces a decode that overruns the watch's 15 second window.",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Speech,
+                    checked = coreConfig.sttConfig.debugSingleThread,
+                    onCheckChanged = {
+                        coreConfigHolder.update(
+                            coreConfig.copy(
+                                sttConfig = coreConfig.sttConfig.copy(debugSingleThread = it)
+                            )
+                        )
+                    },
+                    isDebugSetting = true,
+                    show = { isDebugBuild() },
+                ),
+                basicSettingsToggleItem(
+                    title = "Dictation: keep audio captures",
+                    description = "Write each dictation's audio as a WAV file under the app's private files (last 20 kept) for replay through the engine. Nothing is uploaded.",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Speech,
+                    checked = coreConfig.sttConfig.debugCaptureDump,
+                    onCheckChanged = {
+                        coreConfigHolder.update(
+                            coreConfig.copy(
+                                sttConfig = coreConfig.sttConfig.copy(debugCaptureDump = it)
+                            )
+                        )
+                    },
+                    isDebugSetting = true,
+                    show = { isDebugBuild() },
                 ),
                 navBarNav?.let { nav -> basicSettingsActionItem(
                     title = "Manage Offline Models",

@@ -19,3 +19,13 @@ internal const val MAX_ENGINE_THREADS = 6
  */
 internal fun engineThreadCount(allowedCpus: Int?, onlineCpus: Int): Int =
     (allowedCpus?.takeIf { it > 0 } ?: onlineCpus).coerceIn(1, MAX_ENGINE_THREADS)
+
+/**
+ * The count the engine actually runs with: [measured] from
+ * [engineThreadCount], unless the debug single-thread override is set
+ * and this is a debug build. The build check is repeated here rather
+ * than trusted from the settings UI, so a stored override can never act
+ * in a release install that inherited the debug build's settings.
+ */
+internal fun effectiveThreadCount(singleThreadOverride: Boolean, debugBuild: Boolean, measured: Int): Int =
+    if (singleThreadOverride && debugBuild) 1 else measured

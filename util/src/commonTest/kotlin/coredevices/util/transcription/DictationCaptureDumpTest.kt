@@ -1,0 +1,58 @@
+package coredevices.util.transcription
+
+import kotlin.test.Test
+import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
+
+/**
+ * Pins the WAV layout a replay tool will parse and the prune order that
+ * keeps the newest captures.
+ */
+class DictationCaptureDumpTest {
+
+    private fun ByteArray.leInt(at: Int): Int =
+        (this[at].toInt() and 0xFF) or
+            ((this[at + 1].toInt() and 0xFF) shl 8) or
+            ((this[at + 2].toInt() and 0xFF) shl 16) or
+            ((this[at + 3].toInt() and 0xFF) shl 24)
+
+    private fun ByteArray.leShort(at: Int): Int =
+        (this[at].toInt() and 0xFF) or ((this[at + 1].toInt() and 0xFF) shl 8)
+
+    @Test
+    fun wavHeaderDescribesMono16BitPcm() {
+        val pcm = ByteArray(1000) { it.toByte() }
+        val wav = DictationCaptureDump.wavBytes(pcm, 16_000)
+        assertEquals(44 + pcm.size, wav.size)
+        assertEquals("RIFF", wav.decodeToString(0, 4))
+        assertEquals(36 + pcm.size, wav.leInt(4))
+        assertEquals("WAVE", wav.decodeToString(8, 12))
+        assertEquals("fmt ", wav.decodeToString(12, 16))
+        assertEquals(16, wav.leInt(16))
+        assertEquals(1, wav.leShort(20), "PCM format tag")
+        assertEquals(1, wav.leShort(22), "mono")
+        assertEquals(16_000, wav.leInt(24))
+        assertEquals(32_000, wav.leInt(28), "byte rate")
+        assertEquals(2, wav.leShort(32), "block align")
+        assertEquals(16, wav.leShort(34), "bits per sample")
+        assertEquals("data", wav.decodeToString(36, 40))
+        assertEquals(pcm.size, wav.leInt(40))
+        assertContentEquals(pcm, wav.copyOfRange(44, wav.size))
+    }
+
+    @Test
+    fun pruneKeepsTheNewestCapturesAndIgnoresOtherFiles() {
+        val names = listOf(
+            "dictation-1700000000003.wav",
+            "dictation-1700000000001.wav",
+            "notes.txt",
+            "dictation-1700000000002.wav",
+            "dictation-1700000000004.wav",
+        )
+        assertEquals(
+            listOf("dictation-1700000000001.wav", "dictation-1700000000002.wav"),
+            DictationCaptureDump.captureNamesToPrune(names, keep = 2),
+        )
+        assertEquals(emptyList(), DictationCaptureDump.captureNamesToPrune(names, keep = 10))
+    }
+}

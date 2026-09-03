@@ -4,6 +4,7 @@ import co.touchlab.kermit.Logger
 import coredevices.analytics.CoreAnalytics
 import coredevices.resampler.Resampler
 import coredevices.util.CoreConfigFlow
+import coredevices.util.isDebugBuild
 import coredevices.util.models.CactusSTTMode
 import coredevices.util.models.WhisperModelCatalog
 import coredevices.whisper.isWhisperSupported
@@ -606,7 +607,11 @@ class WhisperTranscriptionService internal constructor(
         // the decode runs, and the line is written from the finally so every
         // exit path, including cancellation by the caller's deadline, reports
         // how long the engine was actually given.
-        val threads = transcriptionThreadCount()
+        val threads = effectiveThreadCount(
+            singleThreadOverride = sttConfig.value.debugSingleThread,
+            debugBuild = isDebugBuild(),
+            measured = transcriptionThreadCount(),
+        )
         val snapshot = engineRuntimeSnapshot()
         val started = TimeSource.Monotonic.markNow()
         var outcome = "error"
@@ -675,6 +680,12 @@ class WhisperTranscriptionService internal constructor(
             throw TranscriptionException.TranscriptionInProgress(modelUsed = sttConfig.value.modelName)
         }
         return try {
+            // Debug builds can archive the exact bytes the engine is about
+            // to see; the write is fenced inside the dumper and cannot fail
+            // the dictation.
+            if (sttConfig.value.debugCaptureDump && isDebugBuild()) {
+                withContext(Dispatchers.IO) { DictationCaptureDump.write(audio, sampleRate) }
+            }
             val pcm = toEngineFloats(audio, sampleRate)
             modelMutex.withLock { runLocalTranscribe(pcm, timeout) }
         } finally {

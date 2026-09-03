@@ -18,6 +18,15 @@ class CoreConfigTest {
     }
 
     @Test
+    fun sttDebugHooksDefaultOffForExistingConfigs() {
+        // A persisted config predating the hooks carries no such fields;
+        // both must read as off, the only state a release build honours.
+        val decoded = json.decodeFromString<CoreConfig>("""{"sttConfig":{"mode":"LocalOnly"}}""")
+        assertEquals(false, decoded.sttConfig.debugSingleThread)
+        assertEquals(false, decoded.sttConfig.debugCaptureDump)
+    }
+
+    @Test
     fun unsetWeatherUnitsFallsBackToDeviceDefault() {
         val decoded = json.decodeFromString<CoreConfig>("{}")
         assertEquals(null, decoded.weatherUnits)

@@ -128,4 +128,17 @@ data class STTConfig(
     val modelName: String? = null,
     /** ISO 639-1 language code. Null means auto-detect. */
     val spokenLanguage: String? = null,
+    /**
+     * Fork, debug builds only: run the engine on one thread so a fast
+     * phone reproduces a decode that overruns the watch's dictation
+     * window. Honoured only when [coredevices.util.isDebugBuild] is true.
+     */
+    val debugSingleThread: Boolean = false,
+    /**
+     * Fork, debug builds only: write each dictation's engine input as a
+     * WAV under the app's private files so degraded captures can be
+     * replayed through the engine. Honoured only when
+     * [coredevices.util.isDebugBuild] is true.
+     */
+    val debugCaptureDump: Boolean = false,
 )

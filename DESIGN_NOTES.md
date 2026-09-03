@@ -268,6 +268,14 @@ The replacement is whisper.cpp (MIT), compiled from source:
   seconds under the default parameters, the bounded configuration
   returns the correct text in under 10 seconds on the slowest catalog
   model.
+- Two debug-only hooks live behind `isDebugBuild()` (util), which reads
+  the application's debuggable flag and fails closed: a single-thread
+  override that makes a fast phone overrun the watch's dictation window
+  on demand, and a capture dump that writes each dictation's engine
+  input as WAV under the app's private files (last 20 kept). The
+  settings toggles are offered only in debug builds and the service
+  re-checks the build before honouring either flag, because debug and
+  release installs share an application id.
 
 Model weights are never checked in. `WhisperModelCatalog` (util) pins
 six models (small, base and tiny, each as the multilingual and the

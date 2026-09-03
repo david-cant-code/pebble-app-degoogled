@@ -29,4 +29,11 @@ class TranscriptionThreadsTest {
         assertEquals(5, engineThreadCount(allowedCpus = null, onlineCpus = 5))
         assertEquals(5, engineThreadCount(allowedCpus = 0, onlineCpus = 5))
     }
+
+    @Test
+    fun singleThreadOverrideActsOnlyInDebugBuilds() {
+        assertEquals(1, effectiveThreadCount(singleThreadOverride = true, debugBuild = true, measured = 6))
+        assertEquals(6, effectiveThreadCount(singleThreadOverride = true, debugBuild = false, measured = 6))
+        assertEquals(6, effectiveThreadCount(singleThreadOverride = false, debugBuild = true, measured = 6))
+    }
 }
