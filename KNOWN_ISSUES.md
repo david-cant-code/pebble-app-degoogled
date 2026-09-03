@@ -382,7 +382,8 @@ still speaking. Both directions were observed repeatedly during
 on-device dictation testing; a fully silent session reliably streams
 the whole window. The endpointer runs in the watch firmware, so the
 app can only shape what it does with the audio it receives: the
-encoder-context trim keeps full-window sessions cheap to decode, and
+voice activity detector cuts a full-window session to the speech it
+holds before the encoder sees it, and
 a truncated session transcribes as the fragment that was actually
 captured. Recorded here so short or slow dictation results are
 attributed correctly during testing.

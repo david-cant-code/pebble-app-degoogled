@@ -15,6 +15,9 @@ import kotlin.time.Instant
 class ReadOnlyModelPathProvider(
     private val modelsDir: File,
     private val sttModelId: String,
+    // Suites that need a long decode to cancel feed synthetic audio, which
+    // the detector rightly rejects as silence; they opt out of it here.
+    private val serveDetector: Boolean = true,
 ) : CactusModelPathProvider {
     private fun installedFile(modelId: String): File? {
         val model = WhisperModelCatalog.byId(modelId) ?: return null
@@ -40,6 +43,16 @@ class ReadOnlyModelPathProvider(
     override fun deleteModel(modelName: String) { /* never delete in tests */ }
     override fun getModelSizeBytes(modelName: String): Long = 0L
     override fun initTelemetry() {}
+
+    private val vadFile: File
+        get() = modelsDir.resolve(WhisperModelCatalog.VAD_MODEL.id).resolve(WhisperModelCatalog.VAD_MODEL.fileName)
+
+    // The detector is read-only here like the models: present means used,
+    // absent means the service decodes untrimmed, never a download.
+    override fun isVadModelInstalled(): Boolean =
+        serveDetector && vadFile.isFile && vadFile.length() == WhisperModelCatalog.VAD_MODEL.sizeBytes
+
+    override suspend fun getVadModelPath(): String? = vadFile.takeIf { isVadModelInstalled() }?.absolutePath
 }
 
 /** No-op analytics for on-device STT tests. */

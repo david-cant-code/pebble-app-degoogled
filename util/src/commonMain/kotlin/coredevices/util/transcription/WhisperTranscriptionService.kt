@@ -15,6 +15,8 @@ import coredevices.whisper.whisperCancel
 import coredevices.whisper.whisperFree
 import coredevices.whisper.whisperInit
 import coredevices.whisper.whisperTranscribe
+import coredevices.whisper.whisperVadFree
+import coredevices.whisper.whisperVadInit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -248,9 +250,12 @@ internal interface WhisperEngine {
         language: String?,
         callId: Long,
         placement: EnginePlacement,
+        vadHandle: Long,
     ): String
     fun cancel(callId: Long)
     fun free(handle: Long)
+    fun vadInit(modelPath: String): Long
+    fun vadFree(handle: Long)
 }
 
 /** The :whisper top-level binding functions, bound 1:1. */
@@ -264,9 +269,12 @@ internal object RealWhisperEngine : WhisperEngine {
         language: String?,
         callId: Long,
         placement: EnginePlacement,
-    ): String = whisperTranscribe(handle, pcm, threads, language, callId, placement)
+        vadHandle: Long,
+    ): String = whisperTranscribe(handle, pcm, threads, language, callId, placement, vadHandle)
     override fun cancel(callId: Long) = whisperCancel(callId)
     override fun free(handle: Long) = whisperFree(handle)
+    override fun vadInit(modelPath: String): Long = whisperVadInit(modelPath)
+    override fun vadFree(handle: Long) = whisperVadFree(handle)
 }
 
 /**
@@ -335,6 +343,17 @@ class WhisperTranscriptionService internal constructor(
 
     @kotlin.concurrent.Volatile
     private var lastInitedModel: String? = null
+
+    // The voice activity detector's native handle. Independent of the
+    // speech model (one detector serves every model), initialized under
+    // modelMutex the first time a model initializes and the detector file
+    // is installed, kept for the process lifetime, never freed while an
+    // engine call could be inside it. Zero means "decode untrimmed".
+    @kotlin.concurrent.Volatile
+    private var vadHandle: Long = 0L
+
+    /** True when the voice activity detector is loaded and trims dictation audio. */
+    val isVadReady get() = vadHandle != 0L
     private val scope = CoroutineScope(Dispatchers.Default)
 
     val lastModelUsed get() = lastInitedModel
@@ -447,7 +466,7 @@ class WhisperTranscriptionService internal constructor(
             spokenLanguage = sttConfig.value.spokenLanguage,
         )
         return withWhisperCancelOnCancel { callId ->
-            engine.transcribe(handle, pcm, threads, language, callId, EnginePlacement.DEFAULT).trim()
+            engine.transcribe(handle, pcm, threads, language, callId, EnginePlacement.DEFAULT, vadHandle).trim()
         }
     }
 
@@ -496,8 +515,12 @@ class WhisperTranscriptionService internal constructor(
                     withWhisperCancelOnCancel { callId ->
                         // Fixed "en": silence has no language to detect,
                         // and detection would only add an extra pass.
+                        // Warm-up bypasses the detector: silence would be
+                        // trimmed to nothing and the engine's one-time
+                        // setup would stay unpaid.
                         engine.transcribe(
-                            handle, silentPcm, transcriptionThreadCount(), "en", callId, EnginePlacement.DEFAULT,
+                            handle, silentPcm, transcriptionThreadCount(), "en", callId,
+                            EnginePlacement.DEFAULT, vadHandle = 0L,
                         )
                     }
                 }
@@ -560,6 +583,26 @@ class WhisperTranscriptionService internal constructor(
                 lastTranscriptionAt = null
                 val initDuration = Clock.System.now() - start
                 logger.d { "Whisper STT model initialized in $initDuration" }
+            }
+            if (vadHandle == 0L) {
+                // Absent detector (an install predating it, or a failed
+                // fetch) means untrimmed decoding, never a failed init: the
+                // provider answers null without downloading, and a load
+                // failure is logged and left for the next init.
+                val vadPath = try {
+                    modelProvider.getVadModelPath()
+                } catch (e: Exception) {
+                    logger.w(e) { "Voice activity detector unavailable; decoding untrimmed" }
+                    null
+                }
+                if (vadPath != null) {
+                    try {
+                        vadHandle = engine.vadInit(vadPath)
+                        logger.d { "Voice activity detector initialized" }
+                    } catch (e: Exception) {
+                        logger.w(e) { "Voice activity detector failed to load; decoding untrimmed" }
+                    }
+                }
             }
         }
     }
@@ -670,6 +713,7 @@ class WhisperTranscriptionService internal constructor(
                     audioSeconds = pcm.size / ENGINE_SAMPLE_RATE.toDouble(),
                     decodeMillis = started.elapsedNow().inWholeMilliseconds,
                     outcome = outcome,
+                    vad = vadHandle != 0L,
                 )
             }
         }

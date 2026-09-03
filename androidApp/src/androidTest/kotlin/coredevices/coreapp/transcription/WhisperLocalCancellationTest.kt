@@ -100,7 +100,9 @@ class WhisperLocalCancellationTest {
                 // Read-only provider points at the existing model and never downloads or deletes,
                 // so a test run can't wipe it; the service uses this for the whole run.
                 val modelsDir = File(context.filesDir, "models")
-                val provider = ReadOnlyModelPathProvider(modelsDir, MODEL_NAME)
+                // No detector: these tests need the synthetic audio to keep
+                // the engine busy, and the detector would trim it to nothing.
+                val provider = ReadOnlyModelPathProvider(modelsDir, MODEL_NAME, serveDetector = false)
 
                 if (!provider.isModelDownloaded(MODEL_NAME)) {
                     println("[whisper-cancel] model missing, downloading $MODEL_NAME (one-time)...")

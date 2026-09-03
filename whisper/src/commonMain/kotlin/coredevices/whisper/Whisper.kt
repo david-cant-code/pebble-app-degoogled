@@ -1,19 +1,21 @@
 package coredevices.whisper
 
 /**
- * The complete engine surface for on-device speech recognition. Six
- * functions on purpose: this is the fork's replacement for a much larger
- * proprietary binding surface, and everything the app needs from the
- * engine fits here. Anything not expressible through these functions
- * belongs in the Kotlin service layer, not in new native entry points.
+ * The complete engine surface for on-device speech recognition. Eight
+ * functions: this is the fork's replacement for a much larger proprietary
+ * binding surface, and everything the app needs from the engine fits
+ * here (six for the speech model, two for the voice activity detector).
+ * Anything not expressible through these functions belongs in the Kotlin
+ * service layer, not in new native entry points.
  *
  * Threading contract: callers serialize [whisperInit], [whisperTranscribe]
- * and [whisperFree] per handle (the transcription service holds a mutex
- * across every native call). [whisperCancel] is the one function safe to
- * call concurrently; it targets a specific in-flight call by its [callId],
- * so a cancellation can never revoke a different call's pending abort (the
- * case that arises when an abandoned wedged call still runs alongside a
- * fresh one).
+ * and [whisperFree] per handle, and [whisperVadInit], [whisperVadFree] and
+ * any [whisperTranscribe] that passes the detector per detector handle
+ * (the transcription service holds one mutex across every native call).
+ * [whisperCancel] is the one function safe to call concurrently; it
+ * targets a specific in-flight call by its [callId], so a cancellation
+ * can never revoke a different call's pending abort (the case that arises
+ * when an abandoned wedged call still runs alongside a fresh one).
  */
 
 /**
@@ -51,12 +53,26 @@ data class EnginePlacement(val cpuMask: Long = 0L, val nice: Int = 0) {
 }
 
 /**
+ * Loads a ggml Silero voice activity detector and returns its handle, or
+ * throws with the engine's error text. The caller owns the handle and
+ * releases it with [whisperVadFree]. Independent of any speech model
+ * handle: one detector serves every model.
+ */
+expect fun whisperVadInit(modelPath: String): Long
+
+/** Releases a detector handle. Safe to call with 0. */
+expect fun whisperVadFree(handle: Long)
+
+/**
  * Transcribes 16 kHz mono float PCM and returns plain text ("" means no
  * speech found). [language] is an ISO 639-1 code; null lets the engine
  * detect the language. [callId] identifies this call for [whisperCancel];
  * it must be unique among all calls that can be in flight at once (the
  * service uses a monotonic counter). [placement] scopes the calling
- * thread's affinity and priority to this call. Throws with the engine's
+ * thread's affinity and priority to this call. With a non-zero
+ * [vadHandle] the audio is cut to its speech segments before the decode
+ * and a clip with no speech returns "" without an encoder pass; a
+ * detector failure decodes the untrimmed audio. Throws with the engine's
  * error text on failure, including cancellation via [whisperCancel].
  */
 expect fun whisperTranscribe(
@@ -66,6 +82,7 @@ expect fun whisperTranscribe(
     language: String?,
     callId: Long,
     placement: EnginePlacement = EnginePlacement.DEFAULT,
+    vadHandle: Long = 0L,
 ): String
 
 /**

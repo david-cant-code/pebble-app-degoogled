@@ -31,6 +31,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 #include "whisper.h"
 
@@ -155,6 +156,65 @@ private:
     bool nice_applied_ = false;
 };
 
+// Voice activity detection ahead of the decode. Whisper always evaluates a
+// padded window, so a dictation session that streams the firmware's full
+// 15 second window with two seconds of speech pays for the whole window;
+// cutting the input to its speech segments before whisper_full makes the
+// encoder cost follow the speech, and a session with no speech at all
+// returns before any encoder pass. The engine's own params.vad path does
+// the same cut but always spawns four VAD threads per 32 ms window and
+// keeps its detector inside the whisper state; this shim owns the detector
+// context instead (one thread, no worker spawn per window) and assembles
+// the trimmed buffer the way the engine does: each speech segment plus the
+// overlap into the next, joined by 100 ms of silence.
+
+// Dictation-tuned segmentation. A pause inside a sentence must not become a
+// cut (min_silence well above the engine's 100 ms default), and word onsets
+// and tails must survive the cut (speech_pad well above the 30 ms default).
+whisper_vad_params dictation_vad_params() {
+    whisper_vad_params p = whisper_vad_default_params();
+    p.threshold               = 0.5f;
+    p.min_speech_duration_ms  = 250;
+    p.min_silence_duration_ms = 500;
+    p.speech_pad_ms           = 200;
+    p.samples_overlap         = 0.1f;
+    return p;
+}
+
+// Speech-only copy of [samples]. Returns false when detection itself
+// failed (the caller then decodes the untrimmed audio); an empty result
+// with true means no speech was detected.
+bool trim_to_speech(whisper_vad_context *vctx, const float *samples, int n_samples,
+                    std::vector<float> &out) {
+    whisper_vad_segments *segments =
+        whisper_vad_segments_from_samples(vctx, dictation_vad_params(), samples, n_samples);
+    if (segments == nullptr) {
+        __android_log_print(ANDROID_LOG_WARN, kLogTag, "vad: detection failed, decoding untrimmed audio");
+        return false;
+    }
+    const int n_segments = whisper_vad_segments_n_segments(segments);
+    const int overlap = static_cast<int>(0.1f * WHISPER_SAMPLE_RATE);
+    const int gap     = static_cast<int>(0.1f * WHISPER_SAMPLE_RATE);
+    out.clear();
+    int speech = 0;
+    for (int i = 0; i < n_segments; ++i) {
+        // Segment bounds are centiseconds on the original timeline.
+        int start = static_cast<int>(whisper_vad_segments_get_segment_t0(segments, i) * (WHISPER_SAMPLE_RATE / 100));
+        int end   = static_cast<int>(whisper_vad_segments_get_segment_t1(segments, i) * (WHISPER_SAMPLE_RATE / 100));
+        if (i < n_segments - 1) end += overlap;
+        start = std::max(0, std::min(start, n_samples - 1));
+        end   = std::max(start, std::min(end, n_samples - 1));
+        if (i > 0) out.insert(out.end(), gap, 0.0f);
+        out.insert(out.end(), samples + start, samples + end);
+        speech += end - start;
+    }
+    whisper_vad_free_segments(segments);
+    __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                        "vad: %d speech segment(s), %.2f s of %.2f s kept",
+                        n_segments, speech / float(WHISPER_SAMPLE_RATE), n_samples / float(WHISPER_SAMPLE_RATE));
+    return true;
+}
+
 // UTF-8 bytes out, exactly as produced; the Kotlin side decodes. Returns
 // null only on allocation failure (a pending OutOfMemoryError).
 jbyteArray utf8_bytes(JNIEnv *env, const std::string &s) {
@@ -195,11 +255,42 @@ Java_coredevices_whisper_WhisperJNI_nativeInit(JNIEnv *env, jclass, jstring mode
     return reinterpret_cast<jlong>(ctx);
 }
 
+extern "C" JNIEXPORT jlong JNICALL
+Java_coredevices_whisper_WhisperJNI_nativeVadInit(JNIEnv *env, jclass, jstring model_path) {
+    install_log_bridge();
+    // ASCII by construction, as for nativeInit: files dir plus catalog id.
+    const char *path = env->GetStringUTFChars(model_path, nullptr);
+    if (path == nullptr) {
+        return 0; // pending OutOfMemoryError
+    }
+    whisper_vad_context_params vparams = whisper_vad_default_context_params();
+    // One thread: the detector's graph is tiny (about 0.7 M multiply-adds
+    // per 32 ms window) and ggml spawns its workers per graph, so any
+    // second thread costs more in thread creation than it saves.
+    vparams.n_threads = 1;
+    vparams.use_gpu   = false;
+    whisper_vad_context *vctx = whisper_vad_init_from_file_with_params(path, vparams);
+    if (vctx == nullptr) {
+        set_last_error(std::string("whisper_vad_init_from_file_with_params failed for ") + path);
+    }
+    env->ReleaseStringUTFChars(model_path, path);
+    return reinterpret_cast<jlong>(vctx);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_coredevices_whisper_WhisperJNI_nativeVadFree(JNIEnv *, jclass, jlong handle) {
+    auto *vctx = reinterpret_cast<whisper_vad_context *>(handle);
+    if (vctx != nullptr) {
+        whisper_vad_free(vctx);
+    }
+}
+
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong handle,
                                                      jfloatArray pcm, jint n_threads,
                                                      jstring language, jlong call_id,
-                                                     jlong cpu_mask, jint nice_value) {
+                                                     jlong cpu_mask, jint nice_value,
+                                                     jlong vad_handle) {
     auto *ctx = reinterpret_cast<whisper_context *>(handle);
     if (ctx == nullptr) {
         set_last_error("transcribe called with a null engine handle");
@@ -211,9 +302,9 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
     // return path so a cancel request for this id cannot linger.
     const int64_t this_call = call_id;
 
-    const jsize n_samples = env->GetArrayLength(pcm);
-    jfloat *samples = env->GetFloatArrayElements(pcm, nullptr);
-    if (samples == nullptr) {
+    const jsize n_pinned = env->GetArrayLength(pcm);
+    jfloat *pinned = env->GetFloatArrayElements(pcm, nullptr);
+    if (pinned == nullptr) {
         // A failed pin leaves a pending OutOfMemoryError; clear it and
         // report through the shim's own error channel instead of passing a
         // null buffer into the engine.
@@ -221,6 +312,24 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
         set_last_error("could not pin the PCM buffer");
         clear_call_cancel(this_call);
         return nullptr;
+    }
+
+    // With a detector, the engine sees the speech-only buffer; without one
+    // (or when detection fails) it sees the pinned input unchanged.
+    std::vector<float> trimmed;
+    const float *samples = pinned;
+    int n_samples = static_cast<int>(n_pinned);
+    auto *vctx = reinterpret_cast<whisper_vad_context *>(vad_handle);
+    if (vctx != nullptr && trim_to_speech(vctx, pinned, n_samples, trimmed)) {
+        if (trimmed.empty()) {
+            // No speech: "" without an encoder pass. The language string is
+            // only pinned further down, so nothing else needs releasing.
+            env->ReleaseFloatArrayElements(pcm, pinned, JNI_ABORT);
+            clear_call_cancel(this_call);
+            return utf8_bytes(env, std::string());
+        }
+        samples   = trimmed.data();
+        n_samples = static_cast<int>(trimmed.size());
     }
 
     // Language codes are ASCII (ISO 639-1), so modified UTF-8 is safe on
@@ -307,7 +416,7 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
     // other in-flight call's pending abort.
     clear_call_cancel(this_call);
 
-    env->ReleaseFloatArrayElements(pcm, samples, JNI_ABORT); // read-only, never copy back
+    env->ReleaseFloatArrayElements(pcm, pinned, JNI_ABORT); // read-only, never copy back
     if (lang != nullptr) {
         env->ReleaseStringUTFChars(language, lang);
     }

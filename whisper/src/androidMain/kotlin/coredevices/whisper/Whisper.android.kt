@@ -54,7 +54,14 @@ private object WhisperJNI {
         callId: Long,
         cpuMask: Long,
         nice: Int,
+        vadHandle: Long,
     ): ByteArray?
+
+    @JvmStatic
+    external fun nativeVadInit(modelPath: String): Long
+
+    @JvmStatic
+    external fun nativeVadFree(handle: Long)
 
     @JvmStatic
     external fun nativeCancel(callId: Long)
@@ -81,11 +88,26 @@ actual fun whisperTranscribe(
     language: String?,
     callId: Long,
     placement: EnginePlacement,
+    vadHandle: Long,
 ): String {
     val bytes = WhisperJNI.nativeTranscribe(
-        handle, pcm, threads, language, callId, placement.cpuMask, placement.nice,
+        handle, pcm, threads, language, callId, placement.cpuMask, placement.nice, vadHandle,
     ) ?: throw RuntimeException("whisper transcription failed: ${whisperGetLastError()}")
     return bytes.decodeToString()
+}
+
+actual fun whisperVadInit(modelPath: String): Long {
+    val handle = WhisperJNI.nativeVadInit(modelPath)
+    if (handle == 0L) {
+        throw RuntimeException("whisper VAD init failed: ${whisperGetLastError()}")
+    }
+    return handle
+}
+
+actual fun whisperVadFree(handle: Long) {
+    if (handle != 0L) {
+        WhisperJNI.nativeVadFree(handle)
+    }
 }
 
 actual fun whisperCancel(callId: Long) {

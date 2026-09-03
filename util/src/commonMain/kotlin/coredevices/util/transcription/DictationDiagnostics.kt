@@ -69,8 +69,10 @@ internal fun formatEngineDiagnostics(
     audioSeconds: Double,
     decodeMillis: Long,
     outcome: String,
+    vad: Boolean,
 ): String = buildString {
     append("dictation engine: model=").append(model ?: "?")
+    append(" vad=").append(if (vad) "on" else "off")
     append(" threads=").append(threads)
     append(" allowedCpus=").append(snapshot.allowedCpus ?: "?")
     append(" cpuset=").append(snapshot.cpuset ?: "?")

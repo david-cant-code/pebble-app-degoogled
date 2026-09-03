@@ -19,8 +19,14 @@ actual fun whisperTranscribe(
     language: String?,
     callId: Long,
     placement: EnginePlacement,
+    vadHandle: Long,
 ): String =
     throw UnsupportedOperationException("The whisper engine is Android-only in this fork")
+
+actual fun whisperVadInit(modelPath: String): Long =
+    throw UnsupportedOperationException("The whisper engine is Android-only in this fork")
+
+actual fun whisperVadFree(handle: Long) = Unit
 
 // No-op rather than a throw: cancellation runs from generic cleanup paths
 // that must stay safe even where no engine ever initializes.
