@@ -97,7 +97,7 @@ class ModelManager(
                 )
             }
             val stale = provider?.getDownloadedModels()
-                ?.filter { WhisperModelCatalog.byId(it) == null }
+                ?.filter { WhisperModelCatalog.byId(it) == null && !WhisperModelCatalog.isVadModelId(it) }
                 ?.map { slug ->
                     val sizeMB = (provider.getModelSizeBytes(slug) / (1024 * 1024)).toInt()
                     ModelInfo(slug = slug, sizeInMB = sizeMB)

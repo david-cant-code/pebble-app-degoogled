@@ -75,14 +75,48 @@ class WhisperModelProvider(
          * installer's workspace, never a model.
          */
         internal fun incompatibleIn(modelsDir: File): List<String> =
-            modelsDir.listFiles()
-                ?.filter { it.isDirectory && it.name != ModelFileInstaller.STAGING_DIR }
-                ?.map { it.name }
-                ?.filter { name ->
+            modelDirNamesIn(modelsDir)
+                .filter { name ->
                     val model = WhisperModelCatalog.byId(name)
                     model == null || !isInstalledShapeIn(modelsDir, model)
                 }
+
+        /**
+         * Directory names under modelsDir that can be models: everything
+         * except the installer's staging workspace and the voice activity
+         * detector's directory, which is an engine auxiliary rather than a
+         * speech model and must never show up as a stale entry, a usable
+         * model, or a sweep candidate (a torn detector install is handled
+         * by its own verified resolve).
+         */
+        internal fun modelDirNamesIn(modelsDir: File): List<String> =
+            modelsDir.listFiles()
+                ?.filter {
+                    it.isDirectory &&
+                        it.name != ModelFileInstaller.STAGING_DIR &&
+                        !WhisperModelCatalog.isVadModelId(it.name)
+                }
+                ?.map { it.name }
                 ?: emptyList()
+
+        /**
+         * [resolveVerifiedModelPath] for an optional file: absent, or
+         * quarantined after failing its load-time re-hash, reads as null
+         * instead of an error, since the caller can run without it. Never
+         * downloads.
+         */
+        internal suspend fun resolveOptionalModelPath(
+            installer: ModelFileInstaller,
+            loadVerified: MutableMap<String, Boolean>,
+            model: WhisperModel,
+        ): String? = try {
+            resolveVerifiedModelPath(installer, loadVerified, model, allowReinstall = false)
+        } catch (e: IllegalStateException) {
+            null
+        } catch (e: SecurityException) {
+            logger.w(e) { "Optional model '${model.id}' failed verification; running without it" }
+            null
+        }
 
         /**
          * Every legitimate model name is a single path segment: a catalog
@@ -173,12 +207,37 @@ class WhisperModelProvider(
      * against.
      */
     override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = withContext(Dispatchers.IO) {
+        // The detector resolves by its own id so the background download
+        // job can fetch it through the same verified path as a speech model.
         val model = WhisperModelCatalog.byId(modelId)
+            ?: WhisperModelCatalog.VAD_MODEL.takeIf { it.id == modelId }
             ?: throw IllegalStateException("No catalog entry for model '$modelId'; refusing to download")
-        mutexFor(model.id).withLock {
+        val path = mutexFor(model.id).withLock {
             resolveVerifiedModelPath(installer, loadVerified, model, allowReinstall)
         }
+        // A speech model download brings the detector along, so a fresh
+        // install never dictates without silence trimming; a detector
+        // failure must not fail the model the user asked for.
+        if (allowReinstall && !WhisperModelCatalog.isVadModelId(model.id)) {
+            try {
+                mutexFor(WhisperModelCatalog.VAD_MODEL.id).withLock {
+                    resolveVerifiedModelPath(installer, loadVerified, WhisperModelCatalog.VAD_MODEL, allowReinstall = true)
+                }
+            } catch (e: Exception) {
+                logger.w(e) { "Voice activity detector install failed; dictation runs without it" }
+            }
+        }
+        path
     }
+
+    override suspend fun getVadModelPath(): String? = withContext(Dispatchers.IO) {
+        mutexFor(WhisperModelCatalog.VAD_MODEL.id).withLock {
+            resolveOptionalModelPath(installer, loadVerified, WhisperModelCatalog.VAD_MODEL)
+        }
+    }
+
+    override fun isVadModelInstalled(): Boolean =
+        isInstalledShapeIn(modelsDir, WhisperModelCatalog.VAD_MODEL)
 
     override suspend fun getSTTModelPath(): String =
         getModelPath(configuredModelId() ?: recommendedDefault().id)
@@ -193,13 +252,10 @@ class WhisperModelProvider(
         return isInstalledShapeIn(modelsDir, model)
     }
 
-    // Raw directory view (minus staging): includes stale engine models on
-    // purpose so they stay visible to the sweep and deletable in the UI.
-    override fun getDownloadedModels(): List<String> =
-        modelsDir.listFiles()
-            ?.filter { it.isDirectory && it.name != ModelFileInstaller.STAGING_DIR }
-            ?.map { it.name }
-            ?: emptyList()
+    // Raw directory view (minus staging and the detector): includes stale
+    // engine models on purpose so they stay visible to the sweep and
+    // deletable in the UI.
+    override fun getDownloadedModels(): List<String> = modelDirNamesIn(modelsDir)
 
     override fun getIncompatibleModels(): List<String> = incompatibleIn(modelsDir)
 

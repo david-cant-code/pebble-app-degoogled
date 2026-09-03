@@ -89,6 +89,29 @@ class WhisperModelCatalogTest {
     }
 
     @Test
+    fun voiceActivityDetectorIsPinnedOutsideTheSpeechList() {
+        // Derived 2026-09-01 via the three-source procedure against the
+        // detector's own repository commit; restated verbatim like the
+        // speech pins. The detector is an engine auxiliary: never a
+        // catalog id, never in the picker, served from its own repository.
+        val vad = WhisperModelCatalog.VAD_MODEL
+        assertEquals("2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987", vad.sha256)
+        assertEquals(885_098L, vad.sizeBytes)
+        assertEquals("ggml-silero-v6.2.0.bin", vad.fileName)
+        assertNull(WhisperModelCatalog.byId(vad.id))
+        assertFalse(vad.id in WhisperModelCatalog.ids)
+        assertTrue(WhisperModelCatalog.isVadModelId(vad.id))
+        assertFalse(WhisperModelCatalog.isVadModelId("whisper-base-en"))
+        assertEquals(
+            "https://huggingface.co/ggml-org/whisper-vad/resolve/" +
+                "9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v6.2.0.bin",
+            WhisperModelCatalog.urlFor(vad),
+        )
+        assertTrue(vad.sha256.matches(Regex("[0-9a-f]{64}")))
+        assertTrue(WhisperModelCatalog.VAD_REPO_COMMIT.matches(Regex("[0-9a-f]{40}")))
+    }
+
+    @Test
     fun tinyTierIsTheFloorAndListedLast() {
         // List order is picker order, and tiny is the last resort for a
         // phone that cannot decode a full dictation window with base inside

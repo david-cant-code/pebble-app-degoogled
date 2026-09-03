@@ -282,7 +282,14 @@ six models (small, base and tiny, each as the multilingual and the
 English-only conversion) from
 the whisper.cpp author's Hugging Face conversions, each with an
 immutable-commit URL, exact byte size, and SHA-256; the catalog KDoc
-records the three-source re-pin procedure. Verification is layered,
+records the three-source re-pin procedure. The Silero voice activity
+detector (whisper.cpp's ggml conversion, MIT) is pinned the same way
+from its own repository commit as `VAD_MODEL`, outside the speech list:
+it installs alongside any speech model download, existing installs
+fetch it once in the background on an unmetered network, its directory
+is excluded from the picker, the "usable model" checks and the
+migration sweep, and its absence means the engine runs without silence
+trimming rather than failing. Verification is layered,
 each layer defensible alone: the commit-pinned URL (a retargeted branch
 or re-uploaded file cannot swap bytes), the download-time streaming
 digest gate in `ModelFileInstaller` (fail closed, mid-stream size

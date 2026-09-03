@@ -30,4 +30,16 @@ interface CactusModelPathProvider {
     fun deleteModel(modelName: String)
     fun getModelSizeBytes(modelName: String): Long
     fun initTelemetry()
+
+    /**
+     * Fork extension: the installed, load-verified path of the voice
+     * activity detector, or null when it is absent or fails verification.
+     * Never downloads; the engine runs without silence trimming when this
+     * is null. Defaults to null so providers without a detector (test
+     * fakes, previews) need no change.
+     */
+    suspend fun getVadModelPath(): String? = null
+
+    /** Fork extension: whether the detector file is present in installed shape. */
+    fun isVadModelInstalled(): Boolean = false
 }

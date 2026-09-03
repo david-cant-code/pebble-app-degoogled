@@ -17,6 +17,8 @@ package coredevices.util.models
  * @param multilingual false for the .en models, which only transcribe
  *   English; the transcription service forces language "en" for those
  *   regardless of the spoken-language setting.
+ * @param repo the Hugging Face repository the file is served from.
+ * @param commit the immutable commit of that repository the URL resolves.
  */
 data class WhisperModel(
     val id: String,
@@ -26,6 +28,8 @@ data class WhisperModel(
     val sizeBytes: Long,
     val minRamBytes: Long,
     val multilingual: Boolean,
+    val repo: String = WhisperModelCatalog.HF_REPO,
+    val commit: String = WhisperModelCatalog.HF_REPO_COMMIT,
 )
 
 /**
@@ -41,14 +45,19 @@ data class WhisperModel(
  * and the received bytes must match the pinned SHA-256 and exact size
  * before a file is installed, fail closed.
  *
- * Re-pin procedure when changing [HF_REPO_COMMIT] or an entry (each step
- * is an independent source; all three must agree before new values land):
- *  1. Pick the new commit from the repository's history and record it in
- *     [HF_REPO_COMMIT].
- *  2. Declared metadata: HEAD `https://huggingface.co/ggerganov/
- *     whisper.cpp/resolve/<commit>/<file>` and read `x-linked-size` and
- *     `x-linked-etag`; the etag is the payload's SHA-256 from HF's
- *     content-addressed storage, declared without downloading anything.
+ * The voice activity detector ([VAD_MODEL]) is pinned the same way from
+ * its own repository and commit; it is not a speech model, so it lives
+ * outside [MODELS] and is never offered in the picker.
+ *
+ * Re-pin procedure when changing a commit or an entry (each step is an
+ * independent source; all three must agree before new values land):
+ *  1. Pick the new commit from the repository's history and record it
+ *     ([HF_REPO_COMMIT] for the speech models, [VAD_REPO_COMMIT] for the
+ *     detector).
+ *  2. Declared metadata: HEAD `https://huggingface.co/<repo>/resolve/
+ *     <commit>/<file>` and read `x-linked-size` and `x-linked-etag`; the
+ *     etag is the payload's SHA-256 from HF's content-addressed storage,
+ *     declared without downloading anything.
  *  3. Independent bytes: download that URL fresh, `sha256sum` it and
  *     byte-count it locally; this pair goes into the table, with 1 and 2
  *     as cross-checks.
@@ -65,10 +74,20 @@ object WhisperModelCatalog {
      */
     const val GENERATION = "whisper-1"
 
-    /** The immutable source revision every entry's URL resolves. */
+    /** The whisper.cpp author's model conversions, source of every speech model. */
+    const val HF_REPO = "ggerganov/whisper.cpp"
+
+    /** The immutable revision of [HF_REPO] every speech model URL resolves. */
     const val HF_REPO_COMMIT = "5359861c739e955e79d9a303bcbc70fb988958b1"
 
+    /** The whisper.cpp project's Silero VAD conversions. */
+    const val VAD_REPO = "ggml-org/whisper-vad"
+
+    /** The immutable revision of [VAD_REPO] the detector URL resolves. */
+    const val VAD_REPO_COMMIT = "9ffd54a1e1ee413ddf265af9913beaf518d1639b"
+
     private const val GIB = 1024L * 1024L * 1024L
+    private const val MIB = 1024L * 1024L
 
     /**
      * Total-device-RAM floor for recommending the small tier over base.
@@ -146,12 +165,35 @@ object WhisperModelCatalog {
         ),
     )
 
+    /**
+     * Silero voice activity detector in whisper.cpp's ggml conversion
+     * (MIT). Installed alongside every speech model and handed to the
+     * engine so silence is trimmed before decoding and silent sessions
+     * are rejected without an encoder pass. Values derived 2026-09-01 via
+     * the three-source procedure; the v6.2.0 conversion is the one the
+     * engine's own test suite exercises at the pinned revision.
+     */
+    val VAD_MODEL = WhisperModel(
+        id = "vad-silero",
+        displayName = "Silero voice activity detector",
+        fileName = "ggml-silero-v6.2.0.bin",
+        sha256 = "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
+        sizeBytes = 885_098,
+        minRamBytes = 64 * MIB,
+        multilingual = true,
+        repo = VAD_REPO,
+        commit = VAD_REPO_COMMIT,
+    )
+
     val ids: Set<String> = MODELS.map { it.id }.toSet()
 
+    /** Speech models only; the detector is not a pickable model (see [VAD_MODEL]). */
     fun byId(id: String): WhisperModel? = MODELS.firstOrNull { it.id == id }
 
+    fun isVadModelId(id: String): Boolean = id == VAD_MODEL.id
+
     fun urlFor(model: WhisperModel): String =
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/$HF_REPO_COMMIT/${model.fileName}"
+        "https://huggingface.co/${model.repo}/resolve/${model.commit}/${model.fileName}"
 
     /**
      * The default pick for a device together with the tier that decision

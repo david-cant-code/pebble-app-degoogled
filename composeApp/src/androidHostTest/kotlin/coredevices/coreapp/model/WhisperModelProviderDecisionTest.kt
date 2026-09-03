@@ -73,6 +73,17 @@ class WhisperModelProviderDecisionTest {
     }
 
     @Test
+    fun detectorDirectoryIsNeitherAModelNorASweepCandidate() {
+        // A torn or missing detector must never be swept as a stale model,
+        // listed as a downloaded model, or mistaken for a usable speech
+        // model; its own verified resolve handles its state.
+        val vadDir = modelsDir.resolve(WhisperModelCatalog.VAD_MODEL.id).also { it.mkdirs() }
+        fileOfSize(vadDir.resolve("garbage.bin"), 10)
+        assertEquals(emptyList(), WhisperModelProvider.incompatibleIn(modelsDir))
+        assertEquals(emptyList(), WhisperModelProvider.modelDirNamesIn(modelsDir))
+    }
+
+    @Test
     fun emptyModelsDirHasNothingToSweep() {
         assertEquals(emptyList(), WhisperModelProvider.incompatibleIn(modelsDir))
     }

@@ -30,8 +30,10 @@ class SttModelMigrationTest {
         var downloaded: List<String> = emptyList(),
         var installed: Set<String> = emptySet(),
         val failDeleteOf: Set<String> = emptySet(),
+        var vadInstalled: Boolean = false,
     ) : CactusModelPathProvider {
         val deleted = mutableListOf<String>()
+        override fun isVadModelInstalled(): Boolean = vadInstalled
         override suspend fun getSTTModelPath(): String = error("unused in these tests")
         override suspend fun getLMModelPath(): String = error("unused in these tests")
         override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = error("unused in these tests")
@@ -164,5 +166,29 @@ class SttModelMigrationTest {
         assertEquals(0, notifications)
         assertFalse(settings.hasKey(STT_MODE_BEFORE_UPDATE_KEY))
         assertTrue(provider.deleted.isEmpty())
+    }
+
+    @Test
+    fun detectorDownloadIsNeededOnlyWithASpeechModelAndNoDetector() {
+        // No speech model: nothing to trim for, no download.
+        assertFalse(vadDownloadNeeded(FakeProvider()))
+        // A stale directory that is not an installed catalog model does not count.
+        assertFalse(vadDownloadNeeded(FakeProvider(downloaded = listOf("parakeet-tdt-0.6b-v3"))))
+        // Installed speech model, no detector: fetch it.
+        assertTrue(
+            vadDownloadNeeded(
+                FakeProvider(downloaded = listOf("whisper-base-en"), installed = setOf("whisper-base-en")),
+            ),
+        )
+        // Detector already present: nothing to do.
+        assertFalse(
+            vadDownloadNeeded(
+                FakeProvider(
+                    downloaded = listOf("whisper-base-en"),
+                    installed = setOf("whisper-base-en"),
+                    vadInstalled = true,
+                ),
+            ),
+        )
     }
 }
