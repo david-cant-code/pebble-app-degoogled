@@ -11,7 +11,6 @@ import coredevices.util.transcription.TranscriptionSessionStatus
 import coredevices.util.transcription.formatSessionDiagnostics
 import io.ktor.utils.io.CancellationException
 import io.rebble.libpebblecommon.connection.LibPebble
-import io.rebble.libpebblecommon.voice.PEBBLE_FW_TRANSCRIPTION_TIMEOUT
 import io.rebble.libpebblecommon.voice.TranscriptionProvider
 import io.rebble.libpebblecommon.voice.TranscriptionResult
 import io.rebble.libpebblecommon.voice.TranscriptionWord
@@ -39,6 +38,15 @@ class HybridTranscription(
     private val coreConfigFlow: CoreConfigFlow,
 ): TranscriptionProvider {
     private val logger = Logger.withTag("HybridTranscription")
+
+    private companion object {
+        /**
+         * Longer than any decode the catalog models take on a phone-class
+         * CPU and than the session manager's replay window, so it never
+         * cuts a decode the watch's retry could still use.
+         */
+        val SAFETY_BOUND = 60.seconds
+    }
 
     override suspend fun canServeSession(): Boolean {
         service.earlyInit()
@@ -84,7 +92,11 @@ class HybridTranscription(
                     it.split(" ", limit = 2)
                 }
             } else null
-            val result = withTimeout(PEBBLE_FW_TRANSCRIPTION_TIMEOUT - 1.seconds) {
+            // The watch's dictation deadline is owned by the session manager
+            // in libpebble3, which reports the loss to the watch and keeps
+            // this decode running for the watch's retry. This bound is only
+            // the backstop against a decode that never returns.
+            val result = withTimeout(SAFETY_BOUND) {
                 service.transcribe(
                     audioStreamFrames = flow {
                         val totalBytes = decodedBuffer.size.toInt()
@@ -113,8 +125,10 @@ class HybridTranscription(
             outcome = "ok:${words.size}words"
             TranscriptionResult.Success(words)
         } catch (_: TimeoutCancellationException) {
-            outcome = "deadline"
-            TranscriptionResult.ConnectionError("Transcription timed out")
+            // Generic failure on the watch; ConnectionError would render as
+            // "No internet connection", which a local decode never is.
+            outcome = "timeout"
+            TranscriptionResult.Error("Transcription timed out")
         } catch (e: CancellationException) {
             outcome = "cancelled"
             throw e

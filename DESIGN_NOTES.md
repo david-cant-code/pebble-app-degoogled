@@ -268,6 +268,23 @@ The replacement is whisper.cpp (MIT), compiled from source:
   seconds under the default parameters, the bounded configuration
   returns the correct text in under 10 seconds on the slowest catalog
   model.
+- The watch's dictation deadline is owned by `VoiceSessionCoordinator`
+  in libpebble3, not by the provider. The firmware gives the phone
+  15 seconds from the end of the recording, drops a later result, and
+  after its error dialog starts a new session on its own; the phone can
+  stop a recording early. So sessions run as independent jobs (the retry
+  must not cancel the decode it replaces), frames are buffered from the
+  moment a setup is accepted, an overrun is reported as a recognizer
+  error one second before the watch's own clock runs out while the
+  decode runs on, and a late transcript is kept for 60 seconds and
+  replayed once into a retry from the same app and session type: the
+  retry's setup is accepted, the late result awaited for up to
+  13 seconds, the watch's recording stopped after at least one second,
+  and the transcript delivered as the retry's result. Anything else
+  falls through to a normal session. `HybridTranscription` keeps only a
+  60 second backstop, mapped to a generic error; the connection-error
+  code is never used for a local decode, since the watch renders it as
+  "No internet connection".
 - The shim owns a Silero voice activity detector context (the catalog's
   `VAD_MODEL`, loaded by the service when installed) and cuts each
   dictation to its speech segments before `whisper_full`, joined by
