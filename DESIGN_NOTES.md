@@ -263,7 +263,8 @@ The replacement is whisper.cpp (MIT), compiled from source:
   model.
 
 Model weights are never checked in. `WhisperModelCatalog` (util) pins
-four models (small, small.en, base, base.en) from
+six models (small, base and tiny, each as the multilingual and the
+English-only conversion) from
 the whisper.cpp author's Hugging Face conversions, each with an
 immutable-commit URL, exact byte size, and SHA-256; the catalog KDoc
 records the three-source re-pin procedure. Verification is layered,

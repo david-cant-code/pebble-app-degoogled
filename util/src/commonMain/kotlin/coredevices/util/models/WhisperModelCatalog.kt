@@ -78,11 +78,17 @@ object WhisperModelCatalog {
      */
     const val STANDARD_TIER_MIN_TOTAL_RAM: Long = 4 * GIB
 
-    // Values derived 2026-08-09 via the three-source procedure above.
-    // No large tier: at the pinned engine revision the large-v3-turbo
-    // q5_0 quant faulted in native inference on the test device, and its
-    // encoder cost cannot meet the watch dictation window on phone-class
-    // CPUs (details in KNOWN_ISSUES); revisit at the next engine re-pin.
+    // Values derived 2026-08-09 (small, base) and 2026-09-01 (tiny) via
+    // the three-source procedure above. List order is the order the model
+    // picker shows. No large tier: at the pinned engine revision the
+    // large-v3-turbo q5_0 quant faulted in native inference on the test
+    // device, and its encoder cost cannot meet the watch dictation window
+    // on phone-class CPUs (details in KNOWN_ISSUES); revisit at the next
+    // engine re-pin. The tiny tier is the floor: watch dictation has a
+    // fixed 15 second budget from the firmware, and a phone whose CPU
+    // cannot decode a full window with base inside it still gets a local
+    // option. RAM never recommends tiny; it is a user's or a speed-based
+    // step-down's pick.
     val MODELS: List<WhisperModel> = listOf(
         WhisperModel(
             id = "whisper-small",
@@ -117,6 +123,24 @@ object WhisperModelCatalog {
             fileName = "ggml-base.en.bin",
             sha256 = "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
             sizeBytes = 147_964_211,
+            minRamBytes = 1 * GIB,
+            multilingual = false,
+        ),
+        WhisperModel(
+            id = "whisper-tiny",
+            displayName = "Whisper Tiny (multilingual)",
+            fileName = "ggml-tiny.bin",
+            sha256 = "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+            sizeBytes = 77_691_713,
+            minRamBytes = 1 * GIB,
+            multilingual = true,
+        ),
+        WhisperModel(
+            id = "whisper-tiny-en",
+            displayName = "Whisper Tiny (English only)",
+            fileName = "ggml-tiny.en.bin",
+            sha256 = "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
+            sizeBytes = 77_704_715,
             minRamBytes = 1 * GIB,
             multilingual = false,
         ),
