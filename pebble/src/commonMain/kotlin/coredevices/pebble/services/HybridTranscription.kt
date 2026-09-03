@@ -1,5 +1,6 @@
 package coredevices.pebble.services
 
+import co.touchlab.kermit.Logger
 import coredevices.speex.SpeexCodec
 import coredevices.speex.SpeexDecodeResult
 import coredevices.util.CoreConfigFlow
@@ -7,6 +8,7 @@ import coredevices.util.transcription.HybridTranscriptionService
 import coredevices.util.transcription.STTLanguage
 import coredevices.util.transcription.TranscriptionException
 import coredevices.util.transcription.TranscriptionSessionStatus
+import coredevices.util.transcription.formatSessionDiagnostics
 import io.ktor.utils.io.CancellationException
 import io.rebble.libpebblecommon.connection.LibPebble
 import io.rebble.libpebblecommon.voice.PEBBLE_FW_TRANSCRIPTION_TIMEOUT
@@ -28,6 +30,7 @@ import kotlinx.io.Buffer
 import kotlinx.io.files.Path
 import kotlinx.io.readByteArray
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 internal expect fun tempTranscriptionDirectory(): Path
 class HybridTranscription(
@@ -35,6 +38,8 @@ class HybridTranscription(
     private val libPebbleLazy: Lazy<LibPebble>,
     private val coreConfigFlow: CoreConfigFlow,
 ): TranscriptionProvider {
+    private val logger = Logger.withTag("HybridTranscription")
+
     override suspend fun canServeSession(): Boolean {
         service.earlyInit()
         return service.isAvailable()
@@ -67,6 +72,12 @@ class HybridTranscription(
                 decodedBuffer.write(pcm)
             }
         }
+        // The firmware's result clock starts when the recording ends, so the
+        // session line measures from here; the engine line (in the whisper
+        // service) covers only the decode itself.
+        val audioSeconds = decodedBuffer.size / (encoderInfo.sampleRate.toDouble() * Short.SIZE_BYTES)
+        val audioEnded = TimeSource.Monotonic.markNow()
+        var outcome = "error"
         return try {
             val recentContacts = if (isNotificationReply) {
                 libPebbleLazy.value.mostRecentNotificationParticipants(limit = 10).first().takeIf { it.isNotEmpty() }?.flatMap {
@@ -93,28 +104,41 @@ class HybridTranscription(
                     encoding = coredevices.util.AudioEncoding.PCM_16BIT,
                 ).filterIsInstance<TranscriptionSessionStatus.Transcription>().first()
             }
-            TranscriptionResult.Success(
-                words = result.text.trim().split(" ").map {
-                    TranscriptionWord(
-                        word = it,
-                        confidence = 0.9f
-                    )
-                }
-            )
+            val words = result.text.trim().split(" ").map {
+                TranscriptionWord(
+                    word = it,
+                    confidence = 0.9f
+                )
+            }
+            outcome = "ok:${words.size}words"
+            TranscriptionResult.Success(words)
         } catch (_: TimeoutCancellationException) {
+            outcome = "deadline"
             TranscriptionResult.ConnectionError("Transcription timed out")
         } catch (e: CancellationException) {
+            outcome = "cancelled"
             throw e
         } catch (_: NoSuchElementException) {
+            outcome = "no_result"
             TranscriptionResult.Error("No transcription result received")
         } catch (_: TranscriptionException.NoSpeechDetected) {
+            outcome = "no_speech"
             TranscriptionResult.Success(emptyList())
         } catch (_: TranscriptionException.TranscriptionRequiresDownload) {
+            outcome = "disabled"
             TranscriptionResult.Disabled
         } catch (e: TranscriptionException) {
+            outcome = "error:${e::class.simpleName}"
             TranscriptionResult.Error("Transcription failed: ${e.message}")
         } finally {
             decodedBuffer.close()
+            logger.i {
+                formatSessionDiagnostics(
+                    audioSeconds = audioSeconds,
+                    sinceAudioEndMillis = audioEnded.elapsedNow().inWholeMilliseconds,
+                    outcome = outcome,
+                )
+            }
         }
     }
 }

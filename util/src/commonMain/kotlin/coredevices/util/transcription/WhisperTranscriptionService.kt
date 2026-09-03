@@ -410,8 +410,12 @@ class WhisperTranscriptionService internal constructor(
         lastInitedModel = null
     }
 
-    /** Run the engine with the memory guard and cancellation support. */
-    private suspend fun cancellableTranscribe(handle: Long, pcm: FloatArray): String {
+    /**
+     * Run the engine with the memory guard and cancellation support.
+     * [threads] is decided by the caller so the diagnostics line reports
+     * the exact count the engine ran with.
+     */
+    private suspend fun cancellableTranscribe(handle: Long, pcm: FloatArray, threads: Int): String {
         val freeMemory = try {
             getFreeMemoryMB()
         } catch (e: Exception) {
@@ -428,7 +432,7 @@ class WhisperTranscriptionService internal constructor(
             spokenLanguage = sttConfig.value.spokenLanguage,
         )
         return withWhisperCancelOnCancel { callId ->
-            engine.transcribe(handle, pcm, transcriptionThreadCount(), language, callId).trim()
+            engine.transcribe(handle, pcm, threads, language, callId).trim()
         }
     }
 
@@ -596,6 +600,16 @@ class WhisperTranscriptionService internal constructor(
     }
 
     private suspend fun runLocalTranscribe(pcm: FloatArray, timeout: Duration? = null): String {
+        // Every engine call leaves one diagnostics line (see
+        // DictationDiagnostics.kt): the scheduling facts are read before the
+        // call because a background process can be promoted or demoted while
+        // the decode runs, and the line is written from the finally so every
+        // exit path, including cancellation by the caller's deadline, reports
+        // how long the engine was actually given.
+        val threads = transcriptionThreadCount()
+        val snapshot = engineRuntimeSnapshot()
+        val started = TimeSource.Monotonic.markNow()
+        var outcome = "error"
         try {
             val handle = modelHandle
             if (handle == 0L) {
@@ -607,21 +621,36 @@ class WhisperTranscriptionService internal constructor(
             inferenceBoost.acquire()
             val text = try {
                 withMaybeTimeout(timeout) {
-                    cancellableTranscribe(handle, pcm)
+                    cancellableTranscribe(handle, pcm, threads)
                 }
             } finally {
                 inferenceBoost.release()
             }
+            outcome = if (text.isBlank()) "no_speech" else "ok"
             analytics.logTranscriptionSuccess("whisper")
             return collapseRepeatedSentences(text)
         } catch (e: TimeoutCancellationException) {
+            outcome = "deadline"
             analytics.logTranscriptionFailure("whisper", transcriptionFailureReason(e), e.message)
             throw e
         } catch (e: CancellationException) {
+            outcome = "cancelled"
             throw e
         } catch (e: Exception) {
+            outcome = "error:${e::class.simpleName}"
             analytics.logTranscriptionFailure("whisper", transcriptionFailureReason(e), e.message)
             throw e
+        } finally {
+            logger.i {
+                formatEngineDiagnostics(
+                    model = sttConfig.value.modelName,
+                    threads = threads,
+                    snapshot = snapshot,
+                    audioSeconds = pcm.size / ENGINE_SAMPLE_RATE.toDouble(),
+                    decodeMillis = started.elapsedNow().inWholeMilliseconds,
+                    outcome = outcome,
+                )
+            }
         }
     }
 
