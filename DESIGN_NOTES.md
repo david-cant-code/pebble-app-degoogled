@@ -268,6 +268,21 @@ The replacement is whisper.cpp (MIT), compiled from source:
   seconds under the default parameters, the bounded configuration
   returns the correct text in under 10 seconds on the slowest catalog
   model.
+- The engine thread count follows the cores the process can actually
+  run on, not the online count: ggml's workers synchronize on spinning
+  barriers, so a count above the usable cores stalls every barrier for a
+  scheduler slice and a decode that takes a second takes half a minute
+  (measured on two chips; `TranscriptionThreads` holds the numbers'
+  conclusions). The count is read at call time from the process affinity
+  mask, since a process that leaves the screen lands in a smaller cpuset
+  on every phone tried, and sized by the fastest frequency tier in that
+  mask (`tieredThreadCount`), capped at four. The engine binding carries
+  an `EnginePlacement` (affinity mask, nice value) that the shim applies
+  to the calling thread for one call; it exists for the on-device
+  placement benchmark and probe under `androidApp/src/androidTest`, and
+  the service always passes the default: pinning gained ten percent at
+  best and can drop below the thread count when the OS moves the allowed
+  set, and a raised priority changed nothing.
 - Two debug-only hooks live behind `isDebugBuild()` (util), which reads
   the application's debuggable flag and fails closed: a single-thread
   override that makes a fast phone overrun the watch's dictation window

@@ -10,10 +10,16 @@ actual suspend fun getFreeMemoryMB(): Long {
 
 actual val PLATFORM_MIN_TRANSCRIPTION_MEMORY_MB: Long = 20
 
-// Policy and bound live in engineThreadCount; this actual only supplies the
-// two platform inputs, read at call time because the mask changes with the
-// process state (foreground service, background) during a session.
-actual fun transcriptionThreadCount(): Int = engineThreadCount(
-    allowedCpus = engineRuntimeSnapshot().allowedCpus,
-    onlineCpus = Runtime.getRuntime().availableProcessors(),
-)
+// Policy and bound live in tieredThreadCount; this actual only supplies the
+// platform inputs. The affinity mask is read at call time because it
+// changes with the process state (foreground service, background) during
+// a session; the per-core frequencies are static. Without a readable mask
+// the count falls back to the online-CPU count under the same cap.
+actual fun transcriptionThreadCount(): Int {
+    val allowed = readAllowedCpuIds()
+    return if (allowed.isNullOrEmpty()) {
+        engineThreadCount(allowedCpus = null, onlineCpus = Runtime.getRuntime().availableProcessors())
+    } else {
+        tieredThreadCount(allowed, cpuMaxFrequenciesKHz())
+    }
+}

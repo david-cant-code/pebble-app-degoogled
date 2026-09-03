@@ -5,10 +5,23 @@ import kotlin.test.assertEquals
 
 /**
  * Pins the thread-count policy: the affinity mask wins over the online
- * count, the bound holds in both directions, and an unreadable mask
- * falls back to the online count instead of to a fixed guess.
+ * count, the bound holds in both directions, an unreadable mask falls
+ * back to the online count instead of to a fixed guess, and the tiered
+ * rule reproduces the fastest measured configuration on the two test
+ * chips' core sets.
  */
 class TranscriptionThreadsTest {
+
+    // Two real topologies (maximum frequency in kHz per CPU): a 4+2+2
+    // chip and a 4+3+1 chip.
+    private val fourTwoTwo = mapOf(
+        0 to 1_803_000L, 1 to 1_803_000L, 2 to 1_803_000L, 3 to 1_803_000L,
+        4 to 2_253_000L, 5 to 2_253_000L, 6 to 2_802_000L, 7 to 2_802_000L,
+    )
+    private val fourThreeOne = mapOf(
+        0 to 1_785_600L, 1 to 1_785_600L, 2 to 1_785_600L, 3 to 1_785_600L,
+        4 to 2_496_000L, 5 to 2_496_000L, 6 to 2_496_000L, 7 to 2_995_200L,
+    )
 
     @Test
     fun maskWinsOverOnlineCount() {
@@ -26,14 +39,47 @@ class TranscriptionThreadsTest {
 
     @Test
     fun unreadableOrEmptyMaskFallsBackToOnlineCount() {
-        assertEquals(5, engineThreadCount(allowedCpus = null, onlineCpus = 5))
-        assertEquals(5, engineThreadCount(allowedCpus = 0, onlineCpus = 5))
+        assertEquals(3, engineThreadCount(allowedCpus = null, onlineCpus = 3))
+        assertEquals(3, engineThreadCount(allowedCpus = 0, onlineCpus = 3))
+    }
+
+    @Test
+    fun tieredCountFollowsTheFastestTierOnTheTwoPlusTwoPlusFourChip() {
+        // All cores: the two big cores alone measured fastest.
+        assertEquals(2, tieredThreadCount((0..7).toList(), fourTwoTwo))
+        // OEM foreground set without the big cores: the two mid cores.
+        assertEquals(2, tieredThreadCount((0..5).toList(), fourTwoTwo))
+        // Little cores only: all four of them.
+        assertEquals(4, tieredThreadCount((0..3).toList(), fourTwoTwo))
+    }
+
+    @Test
+    fun singlePrimeCoreTakesTheNextTierAlong() {
+        // A one-core fastest tier is joined by the next tier: prime plus
+        // three mid cores measured fastest on this chip.
+        assertEquals(4, tieredThreadCount((0..7).toList(), fourThreeOne))
+        // Three little cores (the background set): all three.
+        assertEquals(3, tieredThreadCount((0..2).toList(), fourThreeOne))
+        // Four little plus two mid cores: the two mid cores.
+        assertEquals(2, tieredThreadCount((0..5).toList(), fourThreeOne))
+    }
+
+    @Test
+    fun tieredCountIsBoundedAndFallsBackWithoutTopology() {
+        // Six equal cores would exceed the cap.
+        assertEquals(MAX_ENGINE_THREADS, tieredThreadCount((0..5).toList(), (0..5).associateWith { 2_000_000L }))
+        // No frequency readings: the allowed count under the cap.
+        assertEquals(3, tieredThreadCount(listOf(0, 1, 2), emptyMap()))
+        assertEquals(MAX_ENGINE_THREADS, tieredThreadCount((0..7).toList(), emptyMap()))
+        // No mask at all: a single thread rather than a guess.
+        assertEquals(1, tieredThreadCount(null, fourTwoTwo))
+        assertEquals(1, tieredThreadCount(emptyList(), fourTwoTwo))
     }
 
     @Test
     fun singleThreadOverrideActsOnlyInDebugBuilds() {
-        assertEquals(1, effectiveThreadCount(singleThreadOverride = true, debugBuild = true, measured = 6))
-        assertEquals(6, effectiveThreadCount(singleThreadOverride = true, debugBuild = false, measured = 6))
-        assertEquals(6, effectiveThreadCount(singleThreadOverride = false, debugBuild = true, measured = 6))
+        assertEquals(1, effectiveThreadCount(singleThreadOverride = true, debugBuild = true, measured = 4))
+        assertEquals(4, effectiveThreadCount(singleThreadOverride = true, debugBuild = false, measured = 4))
+        assertEquals(4, effectiveThreadCount(singleThreadOverride = false, debugBuild = true, measured = 4))
     }
 }
