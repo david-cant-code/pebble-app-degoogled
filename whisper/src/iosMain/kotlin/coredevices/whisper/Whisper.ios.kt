@@ -12,7 +12,14 @@ actual fun isWhisperSupported(): Boolean = false
 actual fun whisperInit(modelPath: String): Long =
     throw UnsupportedOperationException("The whisper engine is Android-only in this fork")
 
-actual fun whisperTranscribe(handle: Long, pcm: FloatArray, threads: Int, language: String?, callId: Long): String =
+actual fun whisperTranscribe(
+    handle: Long,
+    pcm: FloatArray,
+    threads: Int,
+    language: String?,
+    callId: Long,
+    placement: EnginePlacement,
+): String =
     throw UnsupportedOperationException("The whisper engine is Android-only in this fork")
 
 // No-op rather than a throw: cancellation runs from generic cleanup paths

@@ -30,25 +30,31 @@ expect fun engineRuntimeSnapshot(): EngineRuntimeSnapshot
  * that is not a well-formed list, so a kernel format surprise reads as
  * "unknown" in the diagnostics rather than as a wrong number.
  */
-internal fun parseCpuListCount(list: String): Int? {
+internal fun parseCpuListCount(list: String): Int? = parseCpuList(list)?.size
+
+/**
+ * The CPU ids named by a Linux cpulist such as `0-3,6`, in ascending
+ * order, or null for anything that is not a well-formed list. This is
+ * the id set an engine placement can choose from.
+ */
+internal fun parseCpuList(list: String): List<Int>? {
     val trimmed = list.trim()
     if (trimmed.isEmpty()) return null
-    var count = 0
+    val ids = ArrayList<Int>()
     for (part in trimmed.split(',')) {
         val range = part.trim()
         if (range.isEmpty()) return null
         val dash = range.indexOf('-')
         if (dash < 0) {
-            range.toIntOrNull()?.takeIf { it >= 0 } ?: return null
-            count += 1
+            ids += range.toIntOrNull()?.takeIf { it >= 0 } ?: return null
         } else {
             val lo = range.substring(0, dash).toIntOrNull() ?: return null
             val hi = range.substring(dash + 1).toIntOrNull() ?: return null
             if (lo < 0 || hi < lo) return null
-            count += hi - lo + 1
+            for (id in lo..hi) ids += id
         }
     }
-    return count
+    return ids.distinct().sorted()
 }
 
 /**

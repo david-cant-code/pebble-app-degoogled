@@ -21,6 +21,13 @@ class DictationDiagnosticsTest {
     }
 
     @Test
+    fun cpuListYieldsSortedDistinctIds() {
+        assertEquals(listOf(0, 1, 2, 3, 6), parseCpuList("0-3,6"))
+        assertEquals(listOf(4, 6, 7), parseCpuList("6-7,4"))
+        assertEquals(listOf(2), parseCpuList("2,2"))
+    }
+
+    @Test
     fun cpuListRejectsMalformedInput() {
         assertNull(parseCpuListCount(""))
         assertNull(parseCpuListCount("   "))

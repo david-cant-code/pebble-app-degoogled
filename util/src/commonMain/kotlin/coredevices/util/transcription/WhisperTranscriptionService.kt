@@ -7,6 +7,7 @@ import coredevices.util.CoreConfigFlow
 import coredevices.util.isDebugBuild
 import coredevices.util.models.CactusSTTMode
 import coredevices.util.models.WhisperModelCatalog
+import coredevices.whisper.EnginePlacement
 import coredevices.whisper.isWhisperSupported
 import coredevices.whisper.pcm16ToShorts
 import coredevices.whisper.shortsToFloats
@@ -240,7 +241,14 @@ internal suspend fun <T> awaitEngineWork(
 internal interface WhisperEngine {
     fun supported(): Boolean
     fun init(modelPath: String): Long
-    fun transcribe(handle: Long, pcm: FloatArray, threads: Int, language: String?, callId: Long): String
+    fun transcribe(
+        handle: Long,
+        pcm: FloatArray,
+        threads: Int,
+        language: String?,
+        callId: Long,
+        placement: EnginePlacement,
+    ): String
     fun cancel(callId: Long)
     fun free(handle: Long)
 }
@@ -249,8 +257,14 @@ internal interface WhisperEngine {
 internal object RealWhisperEngine : WhisperEngine {
     override fun supported(): Boolean = isWhisperSupported()
     override fun init(modelPath: String): Long = whisperInit(modelPath)
-    override fun transcribe(handle: Long, pcm: FloatArray, threads: Int, language: String?, callId: Long): String =
-        whisperTranscribe(handle, pcm, threads, language, callId)
+    override fun transcribe(
+        handle: Long,
+        pcm: FloatArray,
+        threads: Int,
+        language: String?,
+        callId: Long,
+        placement: EnginePlacement,
+    ): String = whisperTranscribe(handle, pcm, threads, language, callId, placement)
     override fun cancel(callId: Long) = whisperCancel(callId)
     override fun free(handle: Long) = whisperFree(handle)
 }
@@ -433,7 +447,7 @@ class WhisperTranscriptionService internal constructor(
             spokenLanguage = sttConfig.value.spokenLanguage,
         )
         return withWhisperCancelOnCancel { callId ->
-            engine.transcribe(handle, pcm, threads, language, callId).trim()
+            engine.transcribe(handle, pcm, threads, language, callId, EnginePlacement.DEFAULT).trim()
         }
     }
 
@@ -482,7 +496,9 @@ class WhisperTranscriptionService internal constructor(
                     withWhisperCancelOnCancel { callId ->
                         // Fixed "en": silence has no language to detect,
                         // and detection would only add an extra pass.
-                        engine.transcribe(handle, silentPcm, transcriptionThreadCount(), "en", callId)
+                        engine.transcribe(
+                            handle, silentPcm, transcriptionThreadCount(), "en", callId, EnginePlacement.DEFAULT,
+                        )
                     }
                 }
             } catch (e: TimeoutCancellationException) {

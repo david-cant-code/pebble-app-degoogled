@@ -20,9 +20,14 @@
 
 #include <jni.h>
 #include <android/log.h>
+#include <sched.h>
+#include <sys/resource.h>
+#include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 #include <string>
 #include <unordered_set>
@@ -94,6 +99,62 @@ void install_log_bridge() {
     });
 }
 
+// Scheduling placement of the calling thread for the duration of one
+// engine call, restored on every exit path by the destructor. ggml creates
+// its worker threads per graph with pthread_create and no attributes, so
+// they inherit whatever affinity mask and nice value the calling thread
+// holds when whisper_full runs; this is the only handle the shim has on
+// where the decode runs, since whisper exposes no threadpool or cpumask
+// control. A zero mask or a zero nice value leaves that dimension alone,
+// and a refused syscall is logged and ignored: the process cannot pin to
+// CPUs outside its cpuset or raise priority past its rlimit, and a decode
+// on the default placement is always better than no decode.
+class ScopedPlacement {
+public:
+    ScopedPlacement(int64_t mask_bits, int nice_value) {
+        if (mask_bits != 0) {
+            cpu_set_t want;
+            CPU_ZERO(&want);
+            for (int cpu = 0; cpu < 64 && cpu < CPU_SETSIZE; ++cpu) {
+                if (mask_bits & (int64_t(1) << cpu)) CPU_SET(cpu, &want);
+            }
+            if (sched_getaffinity(0, sizeof(saved_mask_), &saved_mask_) == 0 &&
+                sched_setaffinity(0, sizeof(want), &want) == 0) {
+                mask_applied_ = true;
+            } else {
+                __android_log_print(ANDROID_LOG_WARN, kLogTag,
+                                    "affinity mask 0x%llx not applied: %s",
+                                    (unsigned long long) mask_bits, strerror(errno));
+            }
+        }
+        if (nice_value != 0) {
+            errno = 0;
+            const int current = getpriority(PRIO_PROCESS, gettid());
+            if (errno == 0 && setpriority(PRIO_PROCESS, gettid(), nice_value) == 0) {
+                saved_nice_ = current;
+                nice_applied_ = true;
+            } else {
+                __android_log_print(ANDROID_LOG_WARN, kLogTag,
+                                    "nice %d not applied: %s", nice_value, strerror(errno));
+            }
+        }
+    }
+
+    ~ScopedPlacement() {
+        if (mask_applied_) sched_setaffinity(0, sizeof(saved_mask_), &saved_mask_);
+        if (nice_applied_) setpriority(PRIO_PROCESS, gettid(), saved_nice_);
+    }
+
+    ScopedPlacement(const ScopedPlacement &) = delete;
+    ScopedPlacement &operator=(const ScopedPlacement &) = delete;
+
+private:
+    cpu_set_t saved_mask_{};
+    bool mask_applied_ = false;
+    int saved_nice_ = 0;
+    bool nice_applied_ = false;
+};
+
 // UTF-8 bytes out, exactly as produced; the Kotlin side decodes. Returns
 // null only on allocation failure (a pending OutOfMemoryError).
 jbyteArray utf8_bytes(JNIEnv *env, const std::string &s) {
@@ -137,7 +198,8 @@ Java_coredevices_whisper_WhisperJNI_nativeInit(JNIEnv *env, jclass, jstring mode
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong handle,
                                                      jfloatArray pcm, jint n_threads,
-                                                     jstring language, jlong call_id) {
+                                                     jstring language, jlong call_id,
+                                                     jlong cpu_mask, jint nice_value) {
     auto *ctx = reinterpret_cast<whisper_context *>(handle);
     if (ctx == nullptr) {
         set_last_error("transcribe called with a null engine handle");
@@ -233,7 +295,13 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
     };
     params.abort_callback_user_data = const_cast<int64_t *>(&this_call);
 
-    const int rc = whisper_full(ctx, params, samples, static_cast<int>(n_samples));
+    int rc;
+    {
+        // Scoped to the engine call alone; the destructor restores the
+        // thread before any JNI call below runs.
+        ScopedPlacement placement(cpu_mask, nice_value);
+        rc = whisper_full(ctx, params, samples, static_cast<int>(n_samples));
+    }
     const bool was_cancelled = is_call_cancelled(this_call);
     // The abort key is per call, so clearing it here cannot revoke any
     // other in-flight call's pending abort.

@@ -32,14 +32,41 @@ expect fun isWhisperSupported(): Boolean
 expect fun whisperInit(modelPath: String): Long
 
 /**
+ * Where one engine call runs. The engine's worker threads inherit the
+ * calling thread's scheduling, so the native side applies this to the
+ * calling thread for the duration of the call and restores it after.
+ *
+ * @property cpuMask bit i set = CPU i allowed; 0 leaves the affinity mask
+ *   untouched. Bits outside the process's cpuset are ignored by the
+ *   kernel, and a mask that leaves nothing is refused and logged.
+ * @property nice nice value for the call (negative is higher priority);
+ *   0 leaves the priority untouched. A refused change is logged and
+ *   ignored.
+ */
+data class EnginePlacement(val cpuMask: Long = 0L, val nice: Int = 0) {
+    companion object {
+        /** Default scheduling: whatever the calling thread already has. */
+        val DEFAULT = EnginePlacement()
+    }
+}
+
+/**
  * Transcribes 16 kHz mono float PCM and returns plain text ("" means no
  * speech found). [language] is an ISO 639-1 code; null lets the engine
  * detect the language. [callId] identifies this call for [whisperCancel];
  * it must be unique among all calls that can be in flight at once (the
- * service uses a monotonic counter). Throws with the engine's error text
- * on failure, including cancellation via [whisperCancel].
+ * service uses a monotonic counter). [placement] scopes the calling
+ * thread's affinity and priority to this call. Throws with the engine's
+ * error text on failure, including cancellation via [whisperCancel].
  */
-expect fun whisperTranscribe(handle: Long, pcm: FloatArray, threads: Int, language: String?, callId: Long): String
+expect fun whisperTranscribe(
+    handle: Long,
+    pcm: FloatArray,
+    threads: Int,
+    language: String?,
+    callId: Long,
+    placement: EnginePlacement = EnginePlacement.DEFAULT,
+): String
 
 /**
  * Requests cancellation of the in-flight [whisperTranscribe] call with the

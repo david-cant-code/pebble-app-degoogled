@@ -80,6 +80,7 @@ class WhisperHandleLifecycleTest {
                 threads: Int,
                 language: String?,
                 callId: Long,
+                placement: coredevices.whisper.EnginePlacement,
             ): String {
                 if (pcm.all { it == 0f }) {
                     synchronized(lock) { warmedUpHandles.add(handle) }
