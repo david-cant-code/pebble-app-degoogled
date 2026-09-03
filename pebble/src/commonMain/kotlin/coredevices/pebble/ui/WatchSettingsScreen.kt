@@ -1600,6 +1600,38 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     show = { isDebugBuild() },
                 ),
                 basicSettingsToggleItem(
+                    title = "Dictation: use the bundled test clip",
+                    description = "Replace the watch's audio with a bundled speech clip, for an emulated watch or a silent room.",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Speech,
+                    checked = coreConfig.sttConfig.debugSubstituteAudio,
+                    onCheckChanged = {
+                        coreConfigHolder.update(
+                            coreConfig.copy(
+                                sttConfig = coreConfig.sttConfig.copy(debugSubstituteAudio = it)
+                            )
+                        )
+                    },
+                    isDebugSetting = true,
+                    show = { isDebugBuild() },
+                ),
+                basicSettingsToggleItem(
+                    title = "Dictation: hold each result for 20 seconds",
+                    description = "Delay every decode past the watch's 15 second window so the deadline report and the retry replay can be watched on any phone.",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Speech,
+                    checked = coreConfig.sttConfig.debugSlowDecode,
+                    onCheckChanged = {
+                        coreConfigHolder.update(
+                            coreConfig.copy(
+                                sttConfig = coreConfig.sttConfig.copy(debugSlowDecode = it)
+                            )
+                        )
+                    },
+                    isDebugSetting = true,
+                    show = { isDebugBuild() },
+                ),
+                basicSettingsToggleItem(
                     title = "Dictation: keep audio captures",
                     description = "Write each dictation's audio as a WAV file under the app's private files (last 20 kept) for replay through the engine. Nothing is uploaded.",
                     topLevelType = TopLevelType.Phone,

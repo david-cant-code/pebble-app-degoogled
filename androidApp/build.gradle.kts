@@ -169,6 +169,11 @@ dependencies {
     // framework-agnostic jar, which has no kotlin.test.Test annotation.
     testImplementation(libs.kotlin.test.junit)
 
+    // Fork: the debug-only SttDebugReceiver (src/debug) resolves the config
+    // holder through Koin and logs through Kermit; neither reaches the app
+    // module's own classpath otherwise.
+    debugImplementation(libs.koin.core)
+    debugImplementation(libs.kermit)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.ktor.client.okhttp)

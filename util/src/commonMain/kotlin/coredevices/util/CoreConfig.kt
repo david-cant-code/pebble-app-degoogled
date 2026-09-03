@@ -141,4 +141,18 @@ data class STTConfig(
      * [coredevices.util.isDebugBuild] is true.
      */
     val debugCaptureDump: Boolean = false,
+    /**
+     * Fork, debug builds only: replace the watch's audio with the bundled
+     * test clip, so an emulated watch (whose microphone is silence) or a
+     * silent room still produces a real transcript. Honoured only when
+     * [coredevices.util.isDebugBuild] is true.
+     */
+    val debugSubstituteAudio: Boolean = false,
+    /**
+     * Fork, debug builds only: hold each dictation's result for a fixed
+     * extra delay after the decode, so the watch's deadline and the retry
+     * replay run deterministically on any phone. Honoured only when
+     * [coredevices.util.isDebugBuild] is true.
+     */
+    val debugSlowDecode: Boolean = false,
 )

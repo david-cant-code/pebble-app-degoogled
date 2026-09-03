@@ -27,6 +27,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
@@ -685,7 +686,16 @@ class WhisperTranscriptionService internal constructor(
             inferenceBoost.acquire()
             val text = try {
                 withMaybeTimeout(timeout) {
-                    cancellableTranscribe(handle, pcm, threads)
+                    val decoded = cancellableTranscribe(handle, pcm, threads)
+                    // Debug-only hold after the decode: cancellable, so a
+                    // caller's deadline still fires, and the result still
+                    // completes afterwards for the session's retry replay.
+                    val hold = debugDecodeDelay(sttConfig.value.debugSlowDecode, isDebugBuild())
+                    if (hold > Duration.ZERO) {
+                        logger.w { "Debug slow-decode hook holding the result for $hold" }
+                        delay(hold)
+                    }
+                    decoded
                 }
             } finally {
                 inferenceBoost.release()

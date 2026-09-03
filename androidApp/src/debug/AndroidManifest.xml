@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Fork: debug-only additions. This overlay is merged into debug builds
+    only; release builds never see these elements.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!--
+            Sets the dictation debug hooks from adb (see SttDebugReceiver).
+            DUMP is held only by the system and the adb shell.
+        -->
+        <receiver
+            android:name="coredevices.coreapp.debug.SttDebugReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="coredevices.coreapp.SET_STT_DEBUG" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

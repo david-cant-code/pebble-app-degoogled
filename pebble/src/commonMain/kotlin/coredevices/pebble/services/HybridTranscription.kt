@@ -7,7 +7,9 @@ import coredevices.util.CoreConfigFlow
 import coredevices.util.transcription.HybridTranscriptionService
 import coredevices.util.transcription.STTLanguage
 import coredevices.util.transcription.TranscriptionException
+import coredevices.util.isDebugBuild
 import coredevices.util.transcription.TranscriptionSessionStatus
+import coredevices.util.transcription.debugSubstituteClip
 import coredevices.util.transcription.formatSessionDiagnostics
 import io.ktor.utils.io.CancellationException
 import io.rebble.libpebblecommon.connection.LibPebble
@@ -79,6 +81,13 @@ class HybridTranscription(
                 }
                 decodedBuffer.write(pcm)
             }
+        }
+        // Debug-only: an emulated watch's microphone is silence, so a debug
+        // build can stand the bundled 16 kHz clip in for whatever arrived.
+        debugSubstituteClip(coreConfigFlow.value.sttConfig.debugSubstituteAudio, isDebugBuild())?.let { clip ->
+            logger.w { "Debug hook replacing ${decodedBuffer.size} bytes of watch audio with the bundled clip (${clip.size} bytes)" }
+            decodedBuffer.clear()
+            decodedBuffer.write(clip)
         }
         // The firmware's result clock starts when the recording ends, so the
         // session line measures from here; the engine line (in the whisper

@@ -312,14 +312,18 @@ The replacement is whisper.cpp (MIT), compiled from source:
   the service always passes the default: pinning gained ten percent at
   best and can drop below the thread count when the OS moves the allowed
   set, and a raised priority changed nothing.
-- Two debug-only hooks live behind `isDebugBuild()` (util), which reads
+- Four debug-only hooks live behind `isDebugBuild()` (util), which reads
   the application's debuggable flag and fails closed: a single-thread
-  override that makes a fast phone overrun the watch's dictation window
-  on demand, and a capture dump that writes each dictation's engine
-  input as WAV under the app's private files (last 20 kept). The
-  settings toggles are offered only in debug builds and the service
-  re-checks the build before honouring either flag, because debug and
-  release installs share an application id.
+  override that slows a fast phone's decode, a capture dump that writes
+  each dictation's engine input as WAV under the app's private files
+  (last 20 kept), a substitute-audio hook that stands the bundled test
+  clip (debug assets only) in for the watch's audio so an emulated watch,
+  whose microphone is silence, still yields a transcript, and a slow-
+  decode hook that holds every result for 20 seconds so the deadline
+  report and the retry replay run on any phone. The settings toggles are
+  offered only in debug builds and the code re-checks the build before
+  honouring any flag, because debug and release installs share an
+  application id.
 
 Model weights are never checked in. `WhisperModelCatalog` (util) pins
 six models (small, base and tiny, each as the multilingual and the
