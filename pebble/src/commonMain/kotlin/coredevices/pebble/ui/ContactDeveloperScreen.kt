@@ -52,6 +52,7 @@ import coredevices.pebble.services.ContactAttachment
 import coredevices.pebble.services.ContactDeveloperApi
 import coredevices.pebble.services.ContactResult
 import coredevices.ui.SignInDialog
+import coredevices.util.FORK_ISSUE_TRACKER_URL
 import coredevices.util.Platform
 import coredevices.util.isIOS
 import dev.gitlive.firebase.Firebase
@@ -69,10 +70,7 @@ private const val MAX_ATTACHMENTS = 3
 private const val MAX_ATTACHMENT_BYTES = 2L * 1024 * 1024
 
 // Fork: where the permanently-signed-out state sends people instead of the
-// dead sign-in dialog. Issues seen on this unofficial build belong on this
-// fork's tracker, not with watchface developers or upstream support.
-private const val FORK_ISSUE_TRACKER_URL =
-    "https://github.com/david-cant-code/pebble-app-degoogled/issues"
+// dead sign-in dialog; the tracker URL is the shared constant in util.
 
 @Composable
 fun ContactDeveloperScreen(

@@ -585,8 +585,13 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     actionIcon = Icons.AutoMirrored.Default.Launch,
                 ),
                 navBarNav?.let { nav -> basicSettingsActionItem(
-                    title = "New Bug Report",
-                    description = "Please report a bug if anything went wrong!",
+                    // Fork: upstream's "New Bug Report". Remote submission
+                    // is gone with the Firebase strip (it needed the
+                    // bug-reports backend and a Firebase ID token), so the
+                    // screen behind this item is the local log export, and
+                    // the item says so.
+                    title = "Export logs",
+                    description = "Save a zip of the app log to attach to an issue. Nothing is sent anywhere.",
                     topLevelType = TopLevelType.Phone,
                     section = Section.Support,
                     action = {
@@ -597,10 +602,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                             )
                         )
                     },
-                    // Fork: hidden, never removed. Remote bug reporting is
-                    // gone with the Firebase strip (submission needed the
-                    // bug-reports backend and a Firebase ID token).
-                    show = { false },
                 ) },
                 navBarNav?.let { nav -> basicSettingsActionItem(
                     title = "View My Bug Reports",
@@ -609,7 +610,8 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     action = {
                         nav.navigateTo(CommonRoutes.ViewMyBugReportsRoute)
                     },
-                    // Fork: hidden with New Bug Report above.
+                    // Fork: hidden, never removed; the list is served by the
+                    // bug-reports backend the fork does not configure.
                     show = { false },
                 ) },
                 navBarNav?.let { nav -> basicSettingsActionItem(

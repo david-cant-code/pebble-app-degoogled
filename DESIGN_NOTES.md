@@ -95,6 +95,13 @@ never-authoritative store). Consequences:
 `UsersDao` is additionally rebound at the Koin seam to the fork's
 `SignedOutUsersDao`.
 
+The bug report screen's upload path needed both a Core account ID token
+and the bug-reports backend (`bugUrl`, empty in this build), so it is
+dead twice over. The screen stays and gates every backend control on
+`BugApi.canUseService()`: with no backend it is the local log export
+reached from Settings > Export logs (zip to the share sheet, no upload
+path), and upstream's screen keeps its behaviour across merges.
+
 ## The FCM exception
 
 The FCM push stack is the one deliberate exception to the seam rule: push

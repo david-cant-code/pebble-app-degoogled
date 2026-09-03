@@ -44,7 +44,10 @@ a security posture tightened beyond upstream's defaults.
   analytics would need a local, on-device reimplementation. The hosts the
   app talks to are fixed in the app, with one exception you control: an
   app store source you add yourself is fetched from the host you entered,
-  with no account token attached and no store search sent to it.
+  with no account token attached and no store search sent to it. Problem
+  reports are a manual export: Settings > Export logs writes a zip (app
+  log, device summary, anything you attach) for you to add to an issue
+  yourself, and nothing in the app can upload it.
 - **Hardening beyond the de-Googling.** The app's own attack surface is in
   scope, not just its Google dependencies. Landed so far: third-party
   watchapps' phone-side code gets no internet or location access unless
