@@ -151,6 +151,14 @@ kotlin {
             }
         }
 
+        getByName("androidHostTest").dependencies {
+            // Ktor's mock engine, so the self-hosted server client's request
+            // shape and error mapping are tested without a network. Same Ktor
+            // version as the client itself, already used by other modules'
+            // host tests.
+            implementation(libs.ktor.client.mock)
+        }
+
         androidMain {
             dependencies {
                 implementation(compose.uiTooling)

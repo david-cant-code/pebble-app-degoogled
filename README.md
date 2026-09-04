@@ -64,6 +64,11 @@ a security posture tightened beyond upstream's defaults.
   measures the phone's speed and shows what a full 15 second dictation
   would cost on each model, and a model that turns out too slow for the
   watch's dictation window prompts a switch to a smaller one.
+- **Dictation through your own server.** A phone too slow for the
+  watch's window can send dictation audio to a self-hosted transcription
+  server instead, or use one as a fallback; see
+  [Using your own transcription server](#using-your-own-transcription-server).
+  Nothing is sent anywhere unless you configure a server.
 - **A watch microphone API for third-party applications** documented and
   authorization-gated, rather than locking watch mic audio to first-party
   features.
@@ -87,6 +92,50 @@ unplugged from the build; the `libindex`/`index-ai`/`mcp` libraries stay
 compiled because the watch UI shares code with them, but their runtime is
 disabled at the dependency-injection seam (verified against the built APK:
 no Ring services, no Ring endpoints, rings can never be scanned or paired).
+
+## Using your own transcription server
+
+Settings, Phone, Speech Recognition, Self-hosted Server takes the full
+URL of a transcription endpoint, an optional model name, and an optional
+bearer token, and then offers three modes in the speech recognition
+dropdown: server only, server with local fallback, and local with server
+fallback. The app sends each dictation as a 16 kHz WAV in a multipart
+POST with `response_format=json` and reads `text` from the reply, which
+is what whisper.cpp's server and OpenAI-compatible servers (Speaches,
+faster-whisper-server, LocalAI and others) expect.
+
+The reference server is whisper.cpp's own, from the same project whose
+engine this app builds. On the machine that will run it:
+
+```
+git clone https://github.com/ggml-org/whisper.cpp && cd whisper.cpp
+cmake -B build && cmake --build build --config Release -j
+./models/download-ggml-model.sh base.en
+./build/bin/whisper-server -m models/ggml-base.en.bin --host 0.0.0.0 --port 8080
+```
+
+The endpoint is then `/inference` on that host. Servers that speak the
+OpenAI API use `/v1/audio/transcriptions` and want a model name.
+
+The app only talks https. Put TLS in front of the server with whatever
+you already use; if you have nothing, a long-lived self-signed
+certificate on a reverse proxy is the simplest:
+
+```
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+  -keyout stt-key.pem -out stt-cert.pem -days 3650 -subj "/CN=stt"
+openssl x509 -in stt-cert.pem -noout -fingerprint -sha256
+```
+
+With Caddy, for example, `stt.home.lan:8443 { tls stt-cert.pem
+stt-key.pem  reverse_proxy 127.0.0.1:8080 }`. On the first "Test
+connection" the app shows the certificate's SHA-256 fingerprint; compare
+it with the second command's output, and trust it. From then on the app
+accepts only that certificate for that host, and refuses if it changes
+until you confirm the new one. A certificate from a public CA, or from a
+CA you have installed on the phone, needs no confirmation. Avoid proxies
+that rotate short-lived certificates (Caddy's internal CA renews every
+12 hours by default): each rotation would ask you to confirm again.
 
 ## Building (Android)
 

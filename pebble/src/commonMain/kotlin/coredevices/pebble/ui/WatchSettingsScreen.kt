@@ -137,6 +137,8 @@ import coredevices.util.STTConfig
 import coredevices.util.WeatherUnit
 import coredevices.util.emailOrNull
 import coredevices.util.models.CactusSTTMode
+import coredevices.util.transcription.serverHostPort
+import coredevices.util.transcription.validateServerUrl
 import coredevices.util.models.ModelDownloadStatus
 import coredevices.util.models.ModelInfo
 import coredevices.util.models.ModelManager
@@ -344,7 +346,13 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     var debugOptionsEnabled by remember { mutableStateOf(settings.showDebugOptions()) }
     var pendingSTTModeDialog by remember { mutableStateOf<CactusSTTMode?>(null) }
     var showSpokenLanguageDialog by remember { mutableStateOf(false) }
+    var showServerDialog by remember { mutableStateOf(false) }
+    // Fork: the server modes are offered only while a valid server URL is set.
+    val serverConfigured = coreConfig.sttConfig.serverUrl?.let { validateServerUrl(it) == null } == true
     val modelDownloadState by modelManager.modelDownloadStatus.collectAsState()
+    if (showServerDialog) {
+        SelfHostedServerDialog(onDismissRequest = { showServerDialog = false })
+    }
     if (showSpokenLanguageDialog) {
         SpokenLanguagePickerDialog(
             selectedCode = coreConfig.sttConfig.spokenLanguage,
@@ -1499,13 +1507,13 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                             CactusSTTMode.RebbleFirst,
                             CactusSTTMode.RebbleFallback -> rebbleVoiceAvailable
                             CactusSTTMode.PlatformOnly -> platformSttAvailable
-                            // Fork: the Core cloud STT modes need a Core-account
-                            // sign-in this build removed (their selection gate
-                            // below could only offer a dialog of disabled
-                            // providers), so they are never offered.
+                            // Fork: the remote modes run against the user's
+                            // self-hosted server, so they appear once one is
+                            // configured; the Core cloud they were built for
+                            // needs a sign-in this build removed.
                             CactusSTTMode.RemoteOnly,
                             CactusSTTMode.RemoteFirst,
-                            CactusSTTMode.LocalFirst -> false
+                            CactusSTTMode.LocalFirst -> serverConfigured
                             else -> true
                         }
                     },
@@ -1526,7 +1534,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                             snackbarDisplay.showSnackbar("This device doesn't support system speech recognition")
                         } else if (it != CactusSTTMode.RemoteOnly && !isPlatform && !whisperSupported) {
                             snackbarDisplay.showSnackbar("This device doesn't support local speech recognition")
-                        } else if (it != CactusSTTMode.LocalOnly && !isPlatform && !isRebble && coreUser == null) {
+                        } else if (it != CactusSTTMode.LocalOnly && !isPlatform && !isRebble && !serverConfigured && coreUser == null) {
                             snackbarDisplay.showSnackbar("You need to be signed in to use cloud speech recognition")
                             showSignInDialog = true
                         } else if (needsLocal && !hasOfflineModels) {
@@ -1551,10 +1559,10 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     },
                     itemText = { mode ->
                         when (mode) {
-                            CactusSTTMode.RemoteOnly -> "Cloud Only"
-                            CactusSTTMode.RemoteFirst -> "Cloud (with Local Fallback)"
+                            CactusSTTMode.RemoteOnly -> "Server Only"
+                            CactusSTTMode.RemoteFirst -> "Server (with Local Fallback)"
                             CactusSTTMode.LocalOnly -> "Local Only"
-                            CactusSTTMode.LocalFirst -> "Local (with Cloud Fallback)"
+                            CactusSTTMode.LocalFirst -> "Local (with Server Fallback)"
                             CactusSTTMode.RebbleOnly -> "Rebble Only"
                             CactusSTTMode.RebbleFirst -> "Rebble (with Local Fallback)"
                             CactusSTTMode.RebbleFallback -> "Local (with Rebble Fallback)"
@@ -1671,6 +1679,14 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                         nav.navigateTo(PebbleNavBarRoutes.OfflineModelsRoute)
                     },
                 ) },
+                basicSettingsActionItem(
+                    title = "Self-hosted Server",
+                    description = coreConfig.sttConfig.serverUrl?.let { serverHostPort(it) ?: "Invalid URL" } ?: "Not set",
+                    keywords = "server self-hosted whisper stt speech recognition remote https",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Speech,
+                    action = { showServerDialog = true },
+                ),
                 basicSettingsActionItem(
                     title = "Spoken Language",
                     description = coreConfig.sttConfig.spokenLanguage

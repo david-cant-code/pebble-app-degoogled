@@ -29,6 +29,13 @@ class CoreConfigTest {
     }
 
     @Test
+    fun selfHostedServerIsUnsetForExistingConfigs() {
+        val decoded = json.decodeFromString<CoreConfig>("""{"sttConfig":{"mode":"LocalOnly"}}""")
+        assertEquals(null, decoded.sttConfig.serverUrl)
+        assertEquals(null, decoded.sttConfig.serverModel)
+    }
+
+    @Test
     fun unsetWeatherUnitsFallsBackToDeviceDefault() {
         val decoded = json.decodeFromString<CoreConfig>("{}")
         assertEquals(null, decoded.weatherUnits)

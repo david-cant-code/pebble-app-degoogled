@@ -36,6 +36,9 @@ class HybridTranscriptionService(
     private val kirinki: KirinkiTranscriptionService,
     private val analytics: CoreAnalytics,
     private val platform: PlatformSpeechRecognizer,
+    // Fork: the user's self-hosted server, the remote backend that stands
+    // in for the cloud pair above, which cannot sign in here.
+    private val selfHosted: SelfHostedTranscriptionService? = null,
 ) : TranscriptionService {
     companion object {
         private val logger = Logger.withTag("HybridTranscriptionService")
@@ -70,17 +73,60 @@ class HybridTranscriptionService(
 
     override suspend fun isAvailable(): Boolean {
         return when (configuredMode) {
-            CactusSTTMode.RemoteOnly -> wisprFlow.isAvailable() || kirinki.isAvailable()
+            CactusSTTMode.RemoteOnly -> serverAvailable() || wisprFlow.isAvailable() || kirinki.isAvailable()
             CactusSTTMode.LocalOnly -> whisper.isLocalAvailable()
             CactusSTTMode.RemoteFirst, CactusSTTMode.LocalFirst ->
-                wisprFlow.isAvailable() || kirinki.isAvailable() || whisper.isModelReady
+                serverAvailable() || wisprFlow.isAvailable() || kirinki.isAvailable() || whisper.isModelReady
             CactusSTTMode.PlatformOnly ->
                 (platform.isAvailable() && platform.isAuthorized()) ||
-                    wisprFlow.isAvailable() || kirinki.isAvailable()
+                    serverAvailable() || wisprFlow.isAvailable() || kirinki.isAvailable()
             // Rebble modes are dispatched by STTRouter and never reach this service.
             CactusSTTMode.RebbleOnly,
             CactusSTTMode.RebbleFirst,
             CactusSTTMode.RebbleFallback -> false
+        }
+    }
+
+    private suspend fun serverAvailable(): Boolean = selfHosted?.isAvailable() == true
+
+    /**
+     * Fork: the self-hosted server takes the remote slot whenever one is
+     * configured. A server that does not answer inside [initialTimeout] is
+     * unreachable for this session, so the timeout is reported as a network
+     * failure rather than as a cancellation: the fallback modes go local and
+     * the session layer reports a failure to the watch.
+     */
+    private suspend fun serverTranscribe(
+        audio: ByteArray,
+        sampleRate: Int,
+        language: STTLanguage,
+        conversationContext: STTConversationContext?,
+        dictionaryContext: List<String>?,
+        contentContext: String?,
+        initialTimeout: Duration,
+    ): TranscriptionSessionStatus.Transcription {
+        val server = checkNotNull(selfHosted)
+        return try {
+            withTimeout(initialTimeout) {
+                server.transcribe(
+                    audioStreamFrames = flowOf(audio),
+                    sampleRate = sampleRate,
+                    language = language,
+                    conversationContext = conversationContext,
+                    dictionaryContext = dictionaryContext,
+                    contentContext = contentContext,
+                ).filterIsInstance<TranscriptionSessionStatus.Transcription>().first()
+            }.also { analytics.logTranscriptionSuccess("server") }
+        } catch (e: TimeoutCancellationException) {
+            analytics.logTranscriptionFailure("server", transcriptionFailureReason(e), e.message)
+            throw TranscriptionException.TranscriptionNetworkError(e, SelfHostedTranscriptionService.MODEL)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (e !is TranscriptionException.NoSpeechDetected) {
+                analytics.logTranscriptionFailure("server", transcriptionFailureReason(e), e.message)
+            }
+            throw e
         }
     }
 
@@ -105,6 +151,11 @@ class HybridTranscriptionService(
         willFallbackLocal: Boolean,
         initialTimeout: Duration = if (willFallbackLocal) 7.seconds else 10.seconds // We reduce the timeout if we have the potential to fall back locally since some consumers (e.g. pebble firmware) have hard timeouts.
     ): TranscriptionSessionStatus.Transcription {
+        if (serverAvailable()) {
+            return serverTranscribe(
+                audio, sampleRate, language, conversationContext, dictionaryContext, contentContext, initialTimeout,
+            )
+        }
         suspend fun transcribeKirinki() = try {
             kirinki.transcribe(
                 audioStreamFrames = flowOf(audio),

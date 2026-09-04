@@ -155,4 +155,18 @@ data class STTConfig(
      * [coredevices.util.isDebugBuild] is true.
      */
     val debugSlowDecode: Boolean = false,
+    /**
+     * Fork: a self-hosted transcription server, the remote backend that
+     * stands in for the removed cloud one. The full https URL of the
+     * endpoint (whisper.cpp's server listens on `/inference`, OpenAI-style
+     * servers on `/v1/audio/transcriptions`); null means no server. The
+     * bearer token is a secret and lives in the encrypted setting, never
+     * here.
+     */
+    val serverUrl: String? = null,
+    /**
+     * Model name sent with each server request. Servers that host one
+     * model ignore it; OpenAI-style servers require it. Null sends none.
+     */
+    val serverModel: String? = null,
 )

@@ -270,6 +270,31 @@ The replacement is whisper.cpp (MIT), compiled from source:
   offers the switch, naming the watch's error text and where the model
   can be changed later; keeping the current model is remembered per
   model, so each model asks at most once.
+- A self-hosted transcription server is the fork's remote backend, at
+  the seam where upstream's cloud pair sits: `HybridTranscriptionService`
+  keeps upstream's three remote modes and their fallback timing, and
+  when a server URL is configured `SelfHostedTranscriptionService` takes
+  the remote slot (the cloud pair stays for merge parity and can never
+  sign in here). One request shape serves whisper.cpp's own server and
+  OpenAI-style servers: a multipart POST of the session audio as a
+  16 kHz mono WAV with `response_format=json`, the model name when set
+  and the spoken language when known, answered with JSON `text`; the
+  URL is used as entered, path included. The bearer token is a secret
+  and goes through the keystore-backed encrypted setting
+  (`SelfHostedServerStore`). Transport is https only, like every other
+  connection in the app; the trust rule (`decideServerTrust`) is
+  platform trust first (system and user-installed CAs, matching host
+  name), then a certificate the user pinned by trust on first use, then
+  refusal. The pin is the leaf certificate's SHA-256 fingerprint,
+  confirmed in the settings dialog against what the server prints, and
+  keyed by `host:port`; a pinned certificate that changes is refused
+  and called out as such until re-confirmed, and a pinned certificate
+  also satisfies host-name verification, since a self-signed
+  certificate is often issued to no name. The dialog's connection test
+  probes the certificate first and only then sends a one-second silent
+  request, so a wrong token or path is found before saving. Everything
+  above the TLS glue is pure and host-tested; the glue is tested against
+  two self-signed fixtures.
 - `WhisperTranscriptionService` (util) keeps the Cactus-era service's
   proven shape: config-driven re-initialization, the two-mutex warm-up
   design, the memory guard, and the InferenceBoost foreground-priority
