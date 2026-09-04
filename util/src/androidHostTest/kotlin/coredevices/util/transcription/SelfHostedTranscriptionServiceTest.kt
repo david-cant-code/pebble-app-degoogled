@@ -76,10 +76,10 @@ class SelfHostedTranscriptionServiceTest {
     @Test
     fun postsAMultipartWavWithTheFieldsBothServerFamiliesRead() = runBlocking {
         val h = Harness(model = "whisper-1", token = "tok-123") {
-            respond(jsonOk(" Hello there. "), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+            respond(jsonOk(" Hello there.\\n Second line. "), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
         }
         val result = h.transcribe(language = STTLanguage.Specific(setOf("iw")))
-        assertEquals("Hello there.", result.text)
+        assertEquals("Hello there. Second line.", result.text)
         assertEquals(SelfHostedTranscriptionService.MODEL, result.modelUsed)
 
         val request = h.requests.single()

@@ -55,6 +55,15 @@ private val serverJson = Json { ignoreUnknownKeys = true }
 fun parseServerTranscript(body: String): String? =
     runCatching { serverJson.decodeFromString<ServerTranscriptionResponse>(body).text }.getOrNull()
 
+private val whitespaceRun = Regex("\\s+")
+
+/**
+ * One line of single-spaced words. whisper.cpp's server joins its segments
+ * with newlines, and the watch refuses a dictation result whose words
+ * carry them, so every run of whitespace becomes one space.
+ */
+fun normalizeServerTranscript(text: String): String = text.trim().replace(whitespaceRun, " ")
+
 /** Outcome of checking one server certificate against platform trust and the pin. */
 enum class ServerTrust { Trusted, UnknownCertificate, ChangedCertificate }
 

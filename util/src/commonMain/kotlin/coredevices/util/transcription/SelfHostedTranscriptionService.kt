@@ -111,7 +111,7 @@ class SelfHostedTranscriptionService(
             ?: throw TranscriptionException.TranscriptionServiceError("Server reply had no text field", modelUsed = MODEL)
         emit(
             TranscriptionSessionStatus.Transcription(
-                text.trim().ifBlank { throw TranscriptionException.NoSpeechDetected("empty_result", MODEL) },
+                normalizeServerTranscript(text).ifBlank { throw TranscriptionException.NoSpeechDetected("empty_result", MODEL) },
                 MODEL,
             ),
         )

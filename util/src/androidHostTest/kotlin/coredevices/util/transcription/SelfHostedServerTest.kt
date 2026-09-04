@@ -50,6 +50,15 @@ class SelfHostedServerTest {
     }
 
     @Test
+    fun transcriptsAreOneLineOfSingleSpacedWords() {
+        assertEquals(
+            "Text Eric, the kids have breaded shrimp. Period. We need raw shrimp.",
+            normalizeServerTranscript(" Text Eric, the kids have breaded shrimp.\n Period.  We need raw shrimp.\n"),
+        )
+        assertEquals("", normalizeServerTranscript(" \n\t "))
+    }
+
+    @Test
     fun trustIsPlatformFirstThenPinThenRefusal() {
         val a = "AA:BB"
         val b = "CC:DD"
