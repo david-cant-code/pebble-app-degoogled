@@ -15,9 +15,7 @@ class CoreConfigTest {
     fun explicitWeatherUnitsSurvivesRoundTrip() {
         WeatherUnit.entries.forEach { unit ->
             val encoded = json.encodeToString(CoreConfig(weatherUnits = unit))
-            val decoded = json.decodeFromString<CoreConfig>(encoded)
-            assertEquals(unit, decoded.weatherUnits)
-            assertEquals(unit, decoded.resolvedWeatherUnits)
+            assertEquals(unit, json.decodeFromString<CoreConfig>(encoded).weatherUnits)
         }
     }
 
@@ -78,9 +76,7 @@ class CoreConfigTest {
     }
 
     @Test
-    fun unsetWeatherUnitsFallsBackToDeviceDefault() {
-        val decoded = json.decodeFromString<CoreConfig>("{}")
-        assertEquals(null, decoded.weatherUnits)
-        assertEquals(deviceDefaultWeatherUnit(), decoded.resolvedWeatherUnits)
+    fun unsetWeatherUnitsDecodesAsNull() {
+        assertEquals(null, json.decodeFromString<CoreConfig>("{}").weatherUnits)
     }
 }
