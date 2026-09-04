@@ -20,6 +20,7 @@ actual fun whisperTranscribe(
     callId: Long,
     placement: EnginePlacement,
     vadHandle: Long,
+    stats: TranscribeStats?,
 ): String =
     throw UnsupportedOperationException("The whisper engine is Android-only in this fork")
 
@@ -35,3 +36,6 @@ actual fun whisperCancel(callId: Long) = Unit
 actual fun whisperFree(handle: Long) = Unit
 
 actual fun whisperGetLastError(): String = "The whisper engine is Android-only in this fork"
+
+actual fun whisperBenchmark(threads: Int, placement: EnginePlacement): Long =
+    throw UnsupportedOperationException("The whisper engine is Android-only in this fork")

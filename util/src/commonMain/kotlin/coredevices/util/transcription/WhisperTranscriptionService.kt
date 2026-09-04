@@ -8,6 +8,7 @@ import coredevices.util.isDebugBuild
 import coredevices.util.models.CactusSTTMode
 import coredevices.util.models.WhisperModelCatalog
 import coredevices.whisper.EnginePlacement
+import coredevices.whisper.TranscribeStats
 import coredevices.whisper.isWhisperSupported
 import coredevices.whisper.pcm16ToShorts
 import coredevices.whisper.shortsToFloats
@@ -252,6 +253,7 @@ internal interface WhisperEngine {
         callId: Long,
         placement: EnginePlacement,
         vadHandle: Long,
+        stats: TranscribeStats?,
     ): String
     fun cancel(callId: Long)
     fun free(handle: Long)
@@ -271,7 +273,8 @@ internal object RealWhisperEngine : WhisperEngine {
         callId: Long,
         placement: EnginePlacement,
         vadHandle: Long,
-    ): String = whisperTranscribe(handle, pcm, threads, language, callId, placement, vadHandle)
+        stats: TranscribeStats?,
+    ): String = whisperTranscribe(handle, pcm, threads, language, callId, placement, vadHandle, stats)
     override fun cancel(callId: Long) = whisperCancel(callId)
     override fun free(handle: Long) = whisperFree(handle)
     override fun vadInit(modelPath: String): Long = whisperVadInit(modelPath)
@@ -300,6 +303,8 @@ class WhisperTranscriptionService internal constructor(
     private val analytics: CoreAnalytics,
     private val inferenceBoost: InferenceBoost,
     private val engine: WhisperEngine,
+    // Fed after every successful dictation; null in tests that do not care.
+    private val speedTracker: DictationSpeedTracker? = null,
 ) {
     /** Production entry point: the real native engine. */
     constructor(
@@ -307,7 +312,8 @@ class WhisperTranscriptionService internal constructor(
         modelProvider: CactusModelPathProvider,
         analytics: CoreAnalytics,
         inferenceBoost: InferenceBoost = NoOpInferenceBoost(),
-    ) : this(coreConfigFlow, modelProvider, analytics, inferenceBoost, RealWhisperEngine)
+        speedTracker: DictationSpeedTracker? = null,
+    ) : this(coreConfigFlow, modelProvider, analytics, inferenceBoost, RealWhisperEngine, speedTracker)
 
     companion object {
         private val logger = Logger.withTag("WhisperTranscriptionService")
@@ -450,7 +456,12 @@ class WhisperTranscriptionService internal constructor(
      * [threads] is decided by the caller so the diagnostics line reports
      * the exact count the engine ran with.
      */
-    private suspend fun cancellableTranscribe(handle: Long, pcm: FloatArray, threads: Int): String {
+    private suspend fun cancellableTranscribe(
+        handle: Long,
+        pcm: FloatArray,
+        threads: Int,
+        stats: TranscribeStats? = null,
+    ): String {
         val freeMemory = try {
             getFreeMemoryMB()
         } catch (e: Exception) {
@@ -467,7 +478,7 @@ class WhisperTranscriptionService internal constructor(
             spokenLanguage = sttConfig.value.spokenLanguage,
         )
         return withWhisperCancelOnCancel { callId ->
-            engine.transcribe(handle, pcm, threads, language, callId, EnginePlacement.DEFAULT, vadHandle).trim()
+            engine.transcribe(handle, pcm, threads, language, callId, EnginePlacement.DEFAULT, vadHandle, stats).trim()
         }
     }
 
@@ -521,7 +532,7 @@ class WhisperTranscriptionService internal constructor(
                         // setup would stay unpaid.
                         engine.transcribe(
                             handle, silentPcm, transcriptionThreadCount(), "en", callId,
-                            EnginePlacement.DEFAULT, vadHandle = 0L,
+                            EnginePlacement.DEFAULT, vadHandle = 0L, stats = null,
                         )
                     }
                 }
@@ -608,6 +619,10 @@ class WhisperTranscriptionService internal constructor(
         }
     }
 
+    /** Seconds of audio the engine decoded, null when the call never reported. */
+    private fun TranscribeStats.speechSeconds(): Double? =
+        decodedSamples.takeIf { it >= 0 }?.let { it / ENGINE_SAMPLE_RATE.toDouble() }
+
     private fun modelExists(): Boolean =
         sttConfig.value.modelName?.let { modelProvider.isModelDownloaded(it) } ?: false
 
@@ -667,14 +682,13 @@ class WhisperTranscriptionService internal constructor(
         // the decode runs, and the line is written from the finally so every
         // exit path, including cancellation by the caller's deadline, reports
         // how long the engine was actually given.
-        val threads = effectiveThreadCount(
-            singleThreadOverride = sttConfig.value.debugSingleThread,
-            debugBuild = isDebugBuild(),
-            measured = transcriptionThreadCount(),
-        )
+        val threads = dictationThreadCount(sttConfig.value)
         val snapshot = engineRuntimeSnapshot()
         val started = TimeSource.Monotonic.markNow()
         var outcome = "error"
+        // What the engine was actually given (after the detector's cut),
+        // for the speed record and the diagnostics line.
+        val stats = TranscribeStats()
         try {
             val handle = modelHandle
             if (handle == 0L) {
@@ -686,7 +700,7 @@ class WhisperTranscriptionService internal constructor(
             inferenceBoost.acquire()
             val text = try {
                 withMaybeTimeout(timeout) {
-                    val decoded = cancellableTranscribe(handle, pcm, threads)
+                    val decoded = cancellableTranscribe(handle, pcm, threads, stats)
                     // Debug-only hold after the decode: cancellable, so a
                     // caller's deadline still fires, and the result still
                     // completes afterwards for the session's retry replay.
@@ -702,6 +716,15 @@ class WhisperTranscriptionService internal constructor(
             }
             outcome = if (text.isBlank()) "no_speech" else "ok"
             analytics.logTranscriptionSuccess("whisper")
+            // The speed record behind the model nudge: time to a result per
+            // second of engine input, on successful dictations only. The
+            // debug hold counts, so the slow-decode hook exercises the nudge
+            // the way a slow phone would.
+            val speechSeconds = stats.speechSeconds()
+            if (text.isNotBlank() && speechSeconds != null) {
+                val resultMs = started.elapsedNow().inWholeMilliseconds
+                sttConfig.value.modelName?.let { speedTracker?.recordDecode(it, speechSeconds, resultMs) }
+            }
             return collapseRepeatedSentences(text)
         } catch (e: TimeoutCancellationException) {
             outcome = "deadline"
@@ -721,6 +744,7 @@ class WhisperTranscriptionService internal constructor(
                     threads = threads,
                     snapshot = snapshot,
                     audioSeconds = pcm.size / ENGINE_SAMPLE_RATE.toDouble(),
+                    speechSeconds = stats.speechSeconds(),
                     decodeMillis = started.elapsedNow().inWholeMilliseconds,
                     outcome = outcome,
                     vad = vadHandle != 0L,

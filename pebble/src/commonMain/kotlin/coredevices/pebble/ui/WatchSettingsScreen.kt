@@ -344,7 +344,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     var debugOptionsEnabled by remember { mutableStateOf(settings.showDebugOptions()) }
     var pendingSTTModeDialog by remember { mutableStateOf<CactusSTTMode?>(null) }
     var showSpokenLanguageDialog by remember { mutableStateOf(false) }
-    val recommendedSTTModel = modelManager.getRecommendedSTTModel()
     val modelDownloadState by modelManager.modelDownloadStatus.collectAsState()
     if (showSpokenLanguageDialog) {
         SpokenLanguagePickerDialog(
@@ -361,24 +360,26 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
         )
     }
     pendingSTTModeDialog?.let { pendingSTTMode ->
-        val recommendedModel by produceState<ModelInfo?>(null) {
+        val recommendation by produceState<Pair<RecommendedModel, ModelInfo>?>(null) {
             withContext(Dispatchers.Default) {
+                // The speed probe runs once per install before the first
+                // pick, so a slow phone is offered a tier it can run.
+                modelManager.ensureSpeedMeasured()
+                val recommendedSTTModel = modelManager.getRecommendedSTTModel()
                 val models = modelManager.getAvailableSTTModels()
-                value = models.firstOrNull { it.slug == recommendedSTTModel.modelSlug }
-                    ?: run {
-                        snackbarDisplay.showSnackbar("Error occurred. Please try again later.")
-                        logger.e { "Recommended model $recommendedSTTModel not found in available models: ${models.map { it.slug }}" }
-                        pendingSTTModeDialog = null
-                        null
-                    }
+                val info = models.firstOrNull { it.slug == recommendedSTTModel.modelSlug }
+                if (info == null) {
+                    snackbarDisplay.showSnackbar("Error occurred. Please try again later.")
+                    logger.e { "Recommended model $recommendedSTTModel not found in available models: ${models.map { it.slug }}" }
+                    pendingSTTModeDialog = null
+                } else {
+                    value = recommendedSTTModel to info
+                }
             }
         }
-        val recommendedModelFinal = recommendedModel
-        if (recommendedModelFinal == null) {
-            return@let
-        }
+        val (recommendedSTTModel, recommendedModelFinal) = recommendation ?: return@let
         ModelDownloadPromptDialog(
-            isLite = recommendedSTTModel is RecommendedModel.Lite,
+            recommended = recommendedSTTModel,
             downloadSizeInMb = recommendedModelFinal.sizeInMB,
             onGetRecommended = {
                 scope.launch {

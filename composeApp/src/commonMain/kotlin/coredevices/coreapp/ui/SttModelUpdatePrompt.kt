@@ -53,7 +53,9 @@ fun SttModelUpdatePrompt() {
     val settings: Settings = koinInject()
     val platformContext: PlatformContext = koinInject()
     val scope = rememberCoroutineScope()
-    val targetModel = remember { modelManager.getRecommendedSTTModel().modelSlug }
+    // Chosen after the speed probe, so a slow phone is offered a tier it
+    // can run inside the watch's dictation window.
+    var targetModel by remember { mutableStateOf<String?>(null) }
 
     var needsUpdate by remember { mutableStateOf(false) }
     var downloading by remember { mutableStateOf(false) }
@@ -64,17 +66,23 @@ fun SttModelUpdatePrompt() {
         modelProvider.getDownloadedModels().any { modelProvider.isModelDownloaded(it) }
 
     LaunchedEffect(Unit) {
-        needsUpdate = isWhisperSupported() &&
+        val required = isWhisperSupported() &&
             settings.hasKey(STT_MODE_BEFORE_UPDATE_KEY) &&
             withContext(Dispatchers.IO) { !anyModelInstalled() }
+        if (required) {
+            modelManager.ensureSpeedMeasured()
+            targetModel = modelManager.getRecommendedSTTModel().modelSlug
+        }
+        needsUpdate = required
     }
 
     LaunchedEffect(downloadStatus) {
+        val target = targetModel ?: return@LaunchedEffect
         if (!downloading) return@LaunchedEffect
         when (downloadStatus) {
             is ModelDownloadStatus.Idle -> {
                 val installed = withContext(Dispatchers.IO) {
-                    modelProvider.isModelDownloaded(targetModel)
+                    modelProvider.isModelDownloaded(target)
                 }
                 if (!installed) {
                     failed = true
@@ -86,7 +94,7 @@ fun SttModelUpdatePrompt() {
                         configHolder.config.value.copy(
                             sttConfig = configHolder.config.value.sttConfig.copy(
                                 mode = restored,
-                                modelName = targetModel,
+                                modelName = target,
                             )
                         )
                     )
@@ -103,7 +111,8 @@ fun SttModelUpdatePrompt() {
         }
     }
 
-    if (!needsUpdate) return
+    val target = targetModel
+    if (!needsUpdate || target == null) return
 
     fun startDownload() {
         failed = false
@@ -111,7 +120,7 @@ fun SttModelUpdatePrompt() {
         // starts the download; same behavior via the fork's notification seam.
         cancelNotifyLocal(platformContext, STT_UPDATE_NOTIFICATION_ID)
         scope.launch {
-            val info = modelManager.getAvailableSTTModels().firstOrNull { it.slug == targetModel }
+            val info = modelManager.getAvailableSTTModels().firstOrNull { it.slug == target }
             if (info != null && modelManager.downloadSTTModel(info, allowMetered = true)) {
                 downloading = true
             } else {

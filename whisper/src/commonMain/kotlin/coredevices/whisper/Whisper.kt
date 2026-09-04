@@ -1,12 +1,13 @@
 package coredevices.whisper
 
 /**
- * The complete engine surface for on-device speech recognition. Eight
+ * The complete engine surface for on-device speech recognition. Nine
  * functions: this is the fork's replacement for a much larger proprietary
  * binding surface, and everything the app needs from the engine fits
- * here (six for the speech model, two for the voice activity detector).
- * Anything not expressible through these functions belongs in the Kotlin
- * service layer, not in new native entry points.
+ * here (six for the speech model, two for the voice activity detector,
+ * one model-free speed probe). Anything not expressible through these
+ * functions belongs in the Kotlin service layer, not in new native entry
+ * points.
  *
  * Threading contract: callers serialize [whisperInit], [whisperTranscribe]
  * and [whisperFree] per handle, and [whisperVadInit], [whisperVadFree] and
@@ -64,6 +65,20 @@ expect fun whisperVadInit(modelPath: String): Long
 expect fun whisperVadFree(handle: Long)
 
 /**
+ * What one [whisperTranscribe] call reports back about itself when the
+ * caller passes an instance.
+ *
+ * @property decodedSamples the samples the engine was given after the
+ *   detector's cut (the input size without a detector, 0 for a clip the
+ *   detector found no speech in); -1 until the call reaches that point.
+ *   Decode cost follows this count, not the input length, which is what
+ *   makes a per-second-of-speech timing possible on a padded recording.
+ */
+class TranscribeStats {
+    var decodedSamples: Int = -1
+}
+
+/**
  * Transcribes 16 kHz mono float PCM and returns plain text ("" means no
  * speech found). [language] is an ISO 639-1 code; null lets the engine
  * detect the language. [callId] identifies this call for [whisperCancel];
@@ -72,8 +87,9 @@ expect fun whisperVadFree(handle: Long)
  * thread's affinity and priority to this call. With a non-zero
  * [vadHandle] the audio is cut to its speech segments before the decode
  * and a clip with no speech returns "" without an encoder pass; a
- * detector failure decodes the untrimmed audio. Throws with the engine's
- * error text on failure, including cancellation via [whisperCancel].
+ * detector failure decodes the untrimmed audio. [stats], when given, is
+ * filled in by the call. Throws with the engine's error text on failure,
+ * including cancellation via [whisperCancel].
  */
 expect fun whisperTranscribe(
     handle: Long,
@@ -83,6 +99,7 @@ expect fun whisperTranscribe(
     callId: Long,
     placement: EnginePlacement = EnginePlacement.DEFAULT,
     vadHandle: Long = 0L,
+    stats: TranscribeStats? = null,
 ): String
 
 /**
@@ -95,6 +112,17 @@ expect fun whisperCancel(callId: Long)
 
 /** Releases an engine handle. Safe to call with 0. */
 expect fun whisperFree(handle: Long)
+
+/**
+ * Times one synthetic encoder block (the base model's shape over 512
+ * frames, random weights, no model file) on [threads] engine threads and
+ * returns the median nanoseconds per evaluation: a measure of how fast
+ * this phone runs the engine, which the service layer calibrates into
+ * per-model dictation estimates before any model is downloaded. Runs for
+ * about a second of CPU. [placement] scopes the calling thread as for
+ * [whisperTranscribe]. Throws with the engine's error text on failure.
+ */
+expect fun whisperBenchmark(threads: Int, placement: EnginePlacement = EnginePlacement.DEFAULT): Long
 
 /** The engine's last recorded failure reason, for error propagation. */
 expect fun whisperGetLastError(): String

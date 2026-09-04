@@ -244,11 +244,32 @@ The replacement is whisper.cpp (MIT), compiled from source:
   time, with no runtime dispatch), so a tiny baseline-architecture
   probe, `libwhispercpu.so`, checks the hwcaps first, and no engine code
   is mapped until it passes.
-- `:whisper` holds the Kotlin bindings: an eight-function expect/actual
+- `:whisper` holds the Kotlin bindings: a nine-function expect/actual
   surface whose iOS actuals are unsupported stubs, keeping commonMain
   compiling for the unmaintained iOS targets. Engine strings cross JNI
   as UTF-8 byte arrays: engine output can be byte sequences that are
   invalid modified UTF-8, which NewStringUTF aborts on under CheckJNI.
+- The ninth function is a model-free speed probe: the shim times one
+  encoder block of the base model's shape, built on ggml with random
+  weights, on the thread count a dictation would get. `DeviceSpeedEstimator`
+  (util) runs it once per install and caches the score;
+  `WhisperSpeedCalibration` turns the score into "seconds for a full 15 s
+  dictation" per catalog tier from constants measured on the reference
+  phone (the calibration procedure is in its KDoc, the instrumented
+  `WhisperSpeedCalibrationBenchmark` produces the numbers). The model
+  picker shows the estimate on every row, and the default pick steps
+  down a tier while its estimate exceeds the watch's window, to the tiny
+  floor at most.
+- The probe is a forecast; real dictations are the record. The engine
+  reports how many samples it decoded after the detector's cut
+  (`TranscribeStats`), the service records seconds of decode per second
+  of speech after each successful dictation, smoothed per model in
+  settings (`DictationSpeedTracker`), and `DictationSpeedPolicy` predicts
+  a full window from it. When that prediction misses the session
+  coordinator's deadline and a cheaper tier exists, `SttSpeedNudgePrompt`
+  offers the switch, naming the watch's error text and where the model
+  can be changed later; keeping the current model is remembered per
+  model, so each model asks at most once.
 - `WhisperTranscriptionService` (util) keeps the Cactus-era service's
   proven shape: config-driven re-initialization, the two-mutex warm-up
   design, the memory guard, and the InferenceBoost foreground-priority

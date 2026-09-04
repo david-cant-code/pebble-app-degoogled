@@ -55,6 +55,7 @@ private object WhisperJNI {
         cpuMask: Long,
         nice: Int,
         vadHandle: Long,
+        stats: IntArray?,
     ): ByteArray?
 
     @JvmStatic
@@ -71,6 +72,9 @@ private object WhisperJNI {
 
     @JvmStatic
     external fun nativeGetLastError(): ByteArray
+
+    @JvmStatic
+    external fun nativeBenchmark(threads: Int, cpuMask: Long, nice: Int): Long
 }
 
 actual fun whisperInit(modelPath: String): Long {
@@ -89,11 +93,19 @@ actual fun whisperTranscribe(
     callId: Long,
     placement: EnginePlacement,
     vadHandle: Long,
+    stats: TranscribeStats?,
 ): String {
-    val bytes = WhisperJNI.nativeTranscribe(
-        handle, pcm, threads, language, callId, placement.cpuMask, placement.nice, vadHandle,
-    ) ?: throw RuntimeException("whisper transcription failed: ${whisperGetLastError()}")
-    return bytes.decodeToString()
+    // The shim writes into a one-slot array; the stats object is filled
+    // from it on every exit so a failed call still reports what it decoded.
+    val slots = if (stats != null) intArrayOf(-1) else null
+    try {
+        val bytes = WhisperJNI.nativeTranscribe(
+            handle, pcm, threads, language, callId, placement.cpuMask, placement.nice, vadHandle, slots,
+        ) ?: throw RuntimeException("whisper transcription failed: ${whisperGetLastError()}")
+        return bytes.decodeToString()
+    } finally {
+        if (stats != null && slots != null) stats.decodedSamples = slots[0]
+    }
 }
 
 actual fun whisperVadInit(modelPath: String): Long {
@@ -121,3 +133,11 @@ actual fun whisperFree(handle: Long) {
 }
 
 actual fun whisperGetLastError(): String = WhisperJNI.nativeGetLastError().decodeToString()
+
+actual fun whisperBenchmark(threads: Int, placement: EnginePlacement): Long {
+    val ns = WhisperJNI.nativeBenchmark(threads, placement.cpuMask, placement.nice)
+    if (ns <= 0L) {
+        throw RuntimeException("whisper benchmark failed: ${whisperGetLastError()}")
+    }
+    return ns
+}

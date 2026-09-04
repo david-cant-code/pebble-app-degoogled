@@ -1,5 +1,8 @@
 package coredevices.util.transcription
 
+import coredevices.util.STTConfig
+import coredevices.util.isDebugBuild
+
 /**
  * Upper bound on engine threads for one transcription. Measured on two
  * phone-class chips, no core set decoded faster with more than four
@@ -54,3 +57,15 @@ internal fun tieredThreadCount(allowedCpuIds: List<Int>?, maxFreqKHzByCpu: Map<I
  */
 internal fun effectiveThreadCount(singleThreadOverride: Boolean, debugBuild: Boolean, measured: Int): Int =
     if (singleThreadOverride && debugBuild) 1 else measured
+
+/**
+ * The count a dictation would run with right now, read fresh from the
+ * process's allowed CPUs: the one entry point for the transcription
+ * service and the speed probe, so the probe measures the same threading
+ * the decode gets.
+ */
+fun dictationThreadCount(config: STTConfig): Int = effectiveThreadCount(
+    singleThreadOverride = config.debugSingleThread,
+    debugBuild = isDebugBuild(),
+    measured = transcriptionThreadCount(),
+)

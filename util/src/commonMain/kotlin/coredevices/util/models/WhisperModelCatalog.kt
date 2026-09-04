@@ -1,11 +1,26 @@
 package coredevices.util.models
 
 /**
+ * Whisper size tiers in the catalog, largest first. Each tier is one
+ * architecture, so the multilingual and English-only entries of a tier
+ * cost the same to run; [cheaper] walks toward the floor, which is how
+ * the speed-based recommendation steps down.
+ */
+enum class WhisperTier {
+    Small, Base, Tiny;
+
+    /** The next tier down, or null at the floor. */
+    fun cheaper(): WhisperTier? = entries.getOrNull(ordinal + 1)
+}
+
+/**
  * Everything the installer must know to obtain and verify one whisper
  * model file before it is allowed anywhere near the native parser.
  *
  * @param id catalog identity and the on-disk directory name; stable
  *   contract with existing installs, never rename casually.
+ * @param tier the size tier, null only for the voice activity detector,
+ *   which is not a speech model.
  * @param displayName what the model picker shows.
  * @param fileName the ggml file inside the source repository, and the on-
  *   disk file name under the model directory.
@@ -22,6 +37,7 @@ package coredevices.util.models
  */
 data class WhisperModel(
     val id: String,
+    val tier: WhisperTier? = null,
     val displayName: String,
     val fileName: String,
     val sha256: String,
@@ -111,6 +127,7 @@ object WhisperModelCatalog {
     val MODELS: List<WhisperModel> = listOf(
         WhisperModel(
             id = "whisper-small",
+            tier = WhisperTier.Small,
             displayName = "Whisper Small (multilingual)",
             fileName = "ggml-small.bin",
             sha256 = "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
@@ -120,6 +137,7 @@ object WhisperModelCatalog {
         ),
         WhisperModel(
             id = "whisper-small-en",
+            tier = WhisperTier.Small,
             displayName = "Whisper Small (English only)",
             fileName = "ggml-small.en.bin",
             sha256 = "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
@@ -129,6 +147,7 @@ object WhisperModelCatalog {
         ),
         WhisperModel(
             id = "whisper-base",
+            tier = WhisperTier.Base,
             displayName = "Whisper Base (multilingual)",
             fileName = "ggml-base.bin",
             sha256 = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
@@ -138,6 +157,7 @@ object WhisperModelCatalog {
         ),
         WhisperModel(
             id = "whisper-base-en",
+            tier = WhisperTier.Base,
             displayName = "Whisper Base (English only)",
             fileName = "ggml-base.en.bin",
             sha256 = "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
@@ -147,6 +167,7 @@ object WhisperModelCatalog {
         ),
         WhisperModel(
             id = "whisper-tiny",
+            tier = WhisperTier.Tiny,
             displayName = "Whisper Tiny (multilingual)",
             fileName = "ggml-tiny.bin",
             sha256 = "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
@@ -156,6 +177,7 @@ object WhisperModelCatalog {
         ),
         WhisperModel(
             id = "whisper-tiny-en",
+            tier = WhisperTier.Tiny,
             displayName = "Whisper Tiny (English only)",
             fileName = "ggml-tiny.en.bin",
             sha256 = "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
@@ -194,6 +216,15 @@ object WhisperModelCatalog {
 
     fun urlFor(model: WhisperModel): String =
         "https://huggingface.co/${model.repo}/resolve/${model.commit}/${model.fileName}"
+
+    /**
+     * The entry one tier cheaper than [model] with the same language
+     * coverage, or null when [model] is already the floor.
+     */
+    fun stepDown(model: WhisperModel): WhisperModel? {
+        val next = model.tier?.cheaper() ?: return null
+        return MODELS.firstOrNull { it.tier == next && it.multilingual == model.multilingual }
+    }
 
     /**
      * The default pick for a device together with the tier that decision

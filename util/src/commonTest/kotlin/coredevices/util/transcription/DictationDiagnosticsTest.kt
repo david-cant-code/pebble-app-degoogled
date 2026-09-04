@@ -44,13 +44,14 @@ class DictationDiagnosticsTest {
             threads = 4,
             snapshot = EngineRuntimeSnapshot(allowedCpus = 8, cpuset = "/foreground", importance = 125),
             audioSeconds = 3.456,
+            speechSeconds = 2.0,
             decodeMillis = 1234,
             outcome = "ok",
             vad = true,
         )
         assertEquals(
             "dictation engine: model=whisper-base-en vad=on threads=4 allowedCpus=8 " +
-                "cpuset=/foreground importance=125 audioSec=3.46 decodeMs=1234 outcome=ok",
+                "cpuset=/foreground importance=125 audioSec=3.46 speechSec=2.00 decodeMs=1234 outcome=ok",
             line,
         )
     }
@@ -62,13 +63,14 @@ class DictationDiagnosticsTest {
             threads = 1,
             snapshot = EngineRuntimeSnapshot(null, null, null),
             audioSeconds = 15.0,
+            speechSeconds = null,
             decodeMillis = 0,
             outcome = "error:IllegalStateException",
             vad = false,
         )
         assertEquals(
             "dictation engine: model=? vad=off threads=1 allowedCpus=? cpuset=? importance=? " +
-                "audioSec=15.00 decodeMs=0 outcome=error:IllegalStateException",
+                "audioSec=15.00 speechSec=? decodeMs=0 outcome=error:IllegalStateException",
             line,
         )
     }

@@ -85,6 +85,7 @@ class WhisperHandleLifecycleTest {
                 callId: Long,
                 placement: coredevices.whisper.EnginePlacement,
                 vadHandle: Long,
+                stats: coredevices.whisper.TranscribeStats?,
             ): String {
                 if (pcm.all { it == 0f }) {
                     synchronized(lock) { warmedUpHandles.add(handle) }

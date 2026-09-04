@@ -1,6 +1,8 @@
 package coredevices.util.models
 
 import coredevices.util.transcription.CactusModelPathProvider
+import coredevices.util.transcription.SpeedScore
+import coredevices.util.transcription.WhisperSpeedCalibration
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -76,5 +78,47 @@ class ModelManagerLogicTest {
         assertEquals(406, stale.sizeInMB)
         // A downloaded catalog model is not double-listed as stale.
         assertEquals(1, available.count { it.slug == "whisper-base-en" })
+    }
+
+    private val eightGiB = 8L * 1024 * 1024 * 1024
+    private val twoGiB = 2L * 1024 * 1024 * 1024
+
+    /** A score at which [tier] is estimated at [seconds] for a full window on this phone. */
+    private fun scoreFor(tier: WhisperTier, seconds: Double): SpeedScore {
+        val reference = WhisperSpeedCalibration.referenceWindowSeconds(tier)!!
+        val ratio = seconds / (reference * WhisperSpeedCalibration.BACKGROUND_MARGIN)
+        return SpeedScore((WhisperSpeedCalibration.REFERENCE_SCORE_NS * ratio).toLong(), threads = 2, measuredAtEpochMs = 0L)
+    }
+
+    @Test
+    fun recommendationWithoutAScoreIsTheRamTier() {
+        assertEquals(RecommendedModel.Standard("whisper-small-en"), ModelManager.recommendedModel(eightGiB, true, null))
+        assertEquals(RecommendedModel.Standard("whisper-small"), ModelManager.recommendedModel(eightGiB, false, null))
+        assertEquals(RecommendedModel.Lite("whisper-base-en"), ModelManager.recommendedModel(twoGiB, true, null))
+    }
+
+    @Test
+    fun recommendationStepsDownWhileTheEstimateExceedsTheWindow() {
+        // Small at 20 s exceeds; base is several times cheaper and fits.
+        val slow = scoreFor(WhisperTier.Small, 20.0)
+        assertEquals(RecommendedModel.Lite("whisper-base-en"), ModelManager.recommendedModel(eightGiB, true, slow))
+        assertEquals(RecommendedModel.Lite("whisper-base"), ModelManager.recommendedModel(eightGiB, false, slow))
+        // Base at 20 s exceeds too: the walk ends on the tiny floor.
+        val verySlow = scoreFor(WhisperTier.Base, 20.0)
+        assertEquals(RecommendedModel.Minimal("whisper-tiny-en"), ModelManager.recommendedModel(eightGiB, true, verySlow))
+        assertEquals(RecommendedModel.Minimal("whisper-tiny-en"), ModelManager.recommendedModel(twoGiB, true, verySlow))
+        // Tiny exceeding as well still yields tiny: there is nothing cheaper.
+        val glacial = scoreFor(WhisperTier.Tiny, 20.0)
+        assertEquals(RecommendedModel.Minimal("whisper-tiny"), ModelManager.recommendedModel(eightGiB, false, glacial))
+    }
+
+    @Test
+    fun availableModelsCarryEstimatesOnlyWithAScore() {
+        val without = ModelManager.availableSTTModels(FakeProvider())
+        assertTrue(without.all { it.estimatedWindowSeconds == null })
+        val score = scoreFor(WhisperTier.Base, 4.0)
+        val with = ModelManager.availableSTTModels(FakeProvider(), score)
+        assertEquals(4.0, with.first { it.slug == "whisper-base-en" }.estimatedWindowSeconds!!, 1e-6)
+        assertTrue(with.first { it.slug == "whisper-small" }.estimatedWindowSeconds!! > 4.0)
     }
 }

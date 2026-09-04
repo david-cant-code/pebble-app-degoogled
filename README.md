@@ -60,7 +60,10 @@ a security posture tightened beyond upstream's defaults.
 - **Free on-device dictation.** Voice dictation runs on whisper.cpp,
   built from source as a pinned git submodule, with a choice of
   integrity-pinned model downloads; the proprietary speech engine
-  upstream bundles as a prebuilt binary is gone.
+  upstream bundles as a prebuilt binary is gone. The model picker
+  measures the phone's speed and shows what a full 15 second dictation
+  would cost on each model, and a model that turns out too slow for the
+  watch's dictation window prompts a switch to a smaller one.
 - **A watch microphone API for third-party applications** documented and
   authorization-gated, rather than locking watch mic audio to first-party
   features.

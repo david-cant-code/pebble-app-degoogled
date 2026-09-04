@@ -49,6 +49,7 @@ class WhisperVadLifecycleTest {
                 callId: Long,
                 placement: EnginePlacement,
                 vadHandle: Long,
+                stats: coredevices.whisper.TranscribeStats?,
             ): String {
                 if (pcm.all { it == 0f }) {
                     warmUpVadHandles += vadHandle

@@ -67,6 +67,7 @@ internal fun formatEngineDiagnostics(
     threads: Int,
     snapshot: EngineRuntimeSnapshot,
     audioSeconds: Double,
+    speechSeconds: Double?,
     decodeMillis: Long,
     outcome: String,
     vad: Boolean,
@@ -78,6 +79,9 @@ internal fun formatEngineDiagnostics(
     append(" cpuset=").append(snapshot.cpuset ?: "?")
     append(" importance=").append(snapshot.importance ?: "?")
     append(" audioSec=").append(formatSeconds(audioSeconds))
+    // What the engine decoded after the detector's cut; "?" when the call
+    // never reached the engine.
+    append(" speechSec=").append(speechSeconds?.let(::formatSeconds) ?: "?")
     append(" decodeMs=").append(decodeMillis)
     append(" outcome=").append(outcome)
 }
