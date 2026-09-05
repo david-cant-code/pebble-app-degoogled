@@ -386,7 +386,7 @@ class WhisperTranscriptionService internal constructor(
             if (it.modelName != lastInitedModel) {
                 initJob = performInit()
             }
-            val captureDumpOn = it.debugCaptureDump && debugBuild()
+            val captureDumpOn = debugCaptureDumpApplies(it.debugCaptureDump, debugBuild())
             if (captureDumpShouldClear(captureDumpWasOn, captureDumpOn)) {
                 withContext(Dispatchers.IO) { clearCaptures() }
             }
@@ -712,8 +712,13 @@ class WhisperTranscriptionService internal constructor(
         // What the engine was actually given (after the detector's cut),
         // for the speed record and the diagnostics line.
         val stats = TranscribeStats()
+        // The handle and the model it holds are read together: a switch made
+        // during this decode changes the config at once but re-initializes
+        // only after the mutex is released, so the record and the line must
+        // name the model that ran.
+        val handle = modelHandle
+        val model = lastInitedModel
         try {
-            val handle = modelHandle
             if (handle == 0L) {
                 if (!engine.supported()) {
                     throw TranscriptionException.TranscriptionServiceUnavailable(modelUsed = sttConfig.value.modelName)
@@ -746,7 +751,7 @@ class WhisperTranscriptionService internal constructor(
             val speechSeconds = stats.speechSeconds()
             if (text.isNotBlank() && speechSeconds != null) {
                 val resultMs = started.elapsedNow().inWholeMilliseconds
-                sttConfig.value.modelName?.let { speedTracker?.recordDecode(it, speechSeconds, resultMs) }
+                model?.let { speedTracker?.recordDecode(it, speechSeconds, resultMs) }
             }
             return collapseRepeatedSentences(text)
         } catch (e: TimeoutCancellationException) {
@@ -763,7 +768,7 @@ class WhisperTranscriptionService internal constructor(
         } finally {
             logger.i {
                 formatEngineDiagnostics(
-                    model = sttConfig.value.modelName,
+                    model = model,
                     threads = threads,
                     snapshot = snapshot,
                     audioSeconds = pcm.size / ENGINE_SAMPLE_RATE.toDouble(),
@@ -800,7 +805,7 @@ class WhisperTranscriptionService internal constructor(
             // Debug builds can archive the exact bytes the engine is about
             // to see; the write is fenced inside the dumper and cannot fail
             // the dictation.
-            if (sttConfig.value.debugCaptureDump && debugBuild()) {
+            if (debugCaptureDumpApplies(sttConfig.value.debugCaptureDump, debugBuild())) {
                 withContext(Dispatchers.IO) { DictationCaptureDump.write(audio, sampleRate) }
             }
             val pcm = toEngineFloats(audio, sampleRate)

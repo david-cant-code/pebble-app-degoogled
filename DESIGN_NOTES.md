@@ -252,7 +252,8 @@ The replacement is whisper.cpp (MIT), compiled from source:
 - The ninth function is a model-free speed probe: the shim times one
   encoder block of the base model's shape, built on ggml with random
   weights, on the thread count a dictation would get. `DeviceSpeedEstimator`
-  (util) runs it once per install and caches the score;
+  (util) runs it once per install (callers arriving during a probe wait
+  for it and take its score) and caches the score;
   `WhisperSpeedCalibration` turns the score into "seconds for a full 15 s
   dictation" per catalog tier from constants measured on the reference
   phone (the calibration procedure is in its KDoc, the instrumented
@@ -262,14 +263,21 @@ The replacement is whisper.cpp (MIT), compiled from source:
   floor at most.
 - The probe is a forecast; real dictations are the record. The engine
   reports how many samples it decoded after the detector's cut
-  (`TranscribeStats`), the service records seconds of decode per second
-  of speech after each successful dictation, smoothed per model in
-  settings (`DictationSpeedTracker`), and `DictationSpeedPolicy` predicts
-  a full window from it. When that prediction misses the session
-  coordinator's deadline and a cheaper tier exists, `SttSpeedNudgePrompt`
-  offers the switch, naming the watch's error text and where the model
-  can be changed later; keeping the current model is remembered per
-  model, so each model asks at most once.
+  (`TranscribeStats`), the service records the time to a result per
+  second of engine input after each successful dictation, under the
+  model that ran the decode, smoothed per model in settings
+  (`DictationSpeedTracker`), and `DictationSpeedPolicy` predicts a full
+  window from it. Engine input counts the encoder's fixed floor (the
+  shim's 64 extra context positions, 1.28 s of audio) on top of the
+  speech, since every call pays it and a short reply would otherwise
+  read as a slow model; dictations under two seconds of speech are not
+  recorded at all. When that prediction misses the session coordinator's
+  deadline and a cheaper tier exists, `SttSpeedNudgePrompt` offers the
+  switch, naming the watch's error text and where the model can be
+  changed later; keeping the current model is remembered per model, so
+  each model asks at most once, and the pending offer is held while the
+  prompt downloads its target, so a dictation finishing mid-download
+  neither replaces nor withdraws it.
 - A self-hosted transcription server is the fork's remote backend, at
   the seam where upstream's cloud pair sits: `HybridTranscriptionService`
   keeps upstream's three remote modes and their fallback timing, and

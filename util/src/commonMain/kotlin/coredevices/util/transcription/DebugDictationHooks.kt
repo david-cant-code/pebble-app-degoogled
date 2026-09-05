@@ -32,6 +32,9 @@ expect fun debugDictationClip(): ByteArray?
 fun debugSubstituteClip(substituteAudio: Boolean, debugBuild: Boolean): ByteArray? =
     if (substituteAudio && debugBuild) debugDictationClip() else null
 
+/** Whether the capture dump writes for a dictation: the flag and a debug build, like every other hook. */
+fun debugCaptureDumpApplies(captureDump: Boolean, debugBuild: Boolean): Boolean = captureDump && debugBuild
+
 /**
  * Whether the capture directory must be emptied on a config emission:
  * whenever the hook is not on and was not already known to be off, so
@@ -48,5 +51,5 @@ fun captureDumpShouldClear(wasOn: Boolean?, on: Boolean): Boolean = !on && wasOn
  * decoded-audio dump so the two files of one dictation share a stamp.
  */
 fun debugArchiveDictationFrames(captureDump: Boolean, debugBuild: Boolean, frames: List<ByteArray>) {
-    if (captureDump && debugBuild && frames.isNotEmpty()) DictationCaptureDump.writeFrames(frames)
+    if (debugCaptureDumpApplies(captureDump, debugBuild) && frames.isNotEmpty()) DictationCaptureDump.writeFrames(frames)
 }

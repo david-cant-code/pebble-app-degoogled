@@ -10,6 +10,7 @@ import coredevices.util.transcription.TranscriptionException
 import coredevices.util.isDebugBuild
 import coredevices.util.transcription.TranscriptionSessionStatus
 import coredevices.util.transcription.debugArchiveDictationFrames
+import coredevices.util.transcription.debugCaptureDumpApplies
 import coredevices.util.transcription.debugSubstituteClip
 import coredevices.util.transcription.formatSessionDiagnostics
 import io.ktor.utils.io.CancellationException
@@ -78,7 +79,7 @@ class HybridTranscription(
         val pcm = ByteArray(encoderInfo.frameSize * Short.SIZE_BYTES)
         // Debug-only: keep the frames as received so the capture dump can
         // pair the decoded audio with the codec input that produced it.
-        val archiveFrames = coreConfigFlow.value.sttConfig.debugCaptureDump && isDebugBuild()
+        val archiveFrames = debugCaptureDumpApplies(coreConfigFlow.value.sttConfig.debugCaptureDump, isDebugBuild())
         val rawFrames = if (archiveFrames) mutableListOf<ByteArray>() else null
         withContext(Dispatchers.IO) {
             audioFrames.collect { frame ->

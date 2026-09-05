@@ -3,6 +3,8 @@ package coredevices.util.transcription
 import coredevices.analytics.CoreAnalytics
 import coredevices.whisper.EnginePlacement
 import coredevices.whisper.TranscribeStats
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.time.Duration
 import kotlin.time.Instant
 
@@ -34,10 +36,18 @@ internal class FakeModelProvider(@Volatile var vadPath: String? = null) : Cactus
 /**
  * An engine that answers [reply] for real audio and "" for the all-zero
  * warm-up pass, counting the real calls so a test can tell whether the
- * local model ran.
+ * local model ran. It reports [decodedSamples] through the stats slot the
+ * way the shim does, and a real call blocks on [gate] while one is set,
+ * so a test can act while a decode is in flight.
  */
 internal class FakeWhisperEngine(@Volatile var reply: String = "hello world") {
     @Volatile var realCalls = 0
+    @Volatile var decodedSamples: Int = -1
+    @Volatile var gate: CountDownLatch? = null
+    @Volatile var inRealTranscribe = false
+
+    /** How long a real call takes; the speed record ignores a decode of zero milliseconds. */
+    @Volatile var decodeMillis: Long = 0
 
     val engine = object : WhisperEngine {
         override fun supported(): Boolean = true
@@ -56,6 +66,15 @@ internal class FakeWhisperEngine(@Volatile var reply: String = "hello world") {
         ): String {
             if (pcm.all { it == 0f }) return ""
             realCalls++
+            if (decodedSamples >= 0) stats?.decodedSamples = decodedSamples
+            inRealTranscribe = true
+            try {
+                if (decodeMillis > 0) Thread.sleep(decodeMillis)
+                // Bounded so a deadlocked test fails instead of hanging the run.
+                gate?.await(20, TimeUnit.SECONDS)
+            } finally {
+                inRealTranscribe = false
+            }
             return reply
         }
         override fun cancel(callId: Long) {}

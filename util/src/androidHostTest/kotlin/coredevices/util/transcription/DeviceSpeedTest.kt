@@ -3,7 +3,13 @@ package coredevices.util.transcription
 import com.russhwolf.settings.MapSettings
 import com.russhwolf.settings.Settings
 import coredevices.util.models.WhisperTier
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -46,6 +52,19 @@ class DeviceSpeedTest {
         estimator.cachedOrMeasure()
         estimator.cachedOrMeasure()
         assertEquals(1, runs)
+    }
+
+    @Test
+    fun callersArrivingDuringAProbeShareItsScore() = runBlocking(Dispatchers.Default) {
+        val gate = CountDownLatch(1)
+        val runs = AtomicInteger()
+        val estimator = estimator(probe = { runs.incrementAndGet(); gate.await(10, TimeUnit.SECONDS); 10L })
+        val first = async { estimator.cachedOrMeasure() }
+        val second = async { estimator.cachedOrMeasure() }
+        delay(200)
+        gate.countDown()
+        assertEquals(first.await(), second.await())
+        assertEquals(1, runs.get(), "the second caller must wait for the running probe, not start its own")
     }
 
     @Test

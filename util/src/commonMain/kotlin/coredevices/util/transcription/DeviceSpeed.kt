@@ -13,6 +13,8 @@ import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import kotlin.time.Clock
@@ -56,7 +58,12 @@ object WhisperSpeedCalibration {
     /** Bump when the native probe graph changes; cached scores from an older probe are discarded. */
     const val PROBE_VERSION = 1
 
-    /** Reference phone probe score (ns per block), app on screen, two engine threads (measured 2026-09-02). */
+    /**
+     * Reference phone probe score (ns per block), app on screen, two engine
+     * threads (measured 2026-09-02). While re-calibrating, 0 here or an
+     * absent tier below marks a value not yet re-measured: the estimate is
+     * null for it, and the host suite stays red until it is filled in.
+     */
     const val REFERENCE_SCORE_NS = 92_931_000L
 
     /** Reference phone full-window decode per tier (seconds), app on screen, detector off. */
@@ -66,7 +73,7 @@ object WhisperSpeedCalibration {
         WhisperTier.Small to 4.68,
     )
 
-    /** The reference phone's full-window seconds for [tier], null when uncalibrated. */
+    /** The reference phone's full-window seconds for [tier], null while it is not yet re-measured (0 or absent). */
     fun referenceWindowSeconds(tier: WhisperTier): Double? = referenceWindowSeconds[tier]?.takeIf { it > 0.0 }
 
     /** Factor applied to every estimate for the app not being on screen. */
@@ -122,9 +129,12 @@ fun modelRowText(sizeInMB: Int, estimatedWindowSeconds: Double?): String {
  * measurement per install (and per [WhisperSpeedCalibration.PROBE_VERSION]),
  * repeated only on demand from the model screen, since a second of
  * engine-grade CPU is not free on the phones the estimate matters for.
- * The probe shares no lock with the transcription service; a dictation
- * running at the same time makes both slower, which only ever pushes an
- * estimate toward "too slow".
+ * Probes never overlap each other: callers that arrive while one runs
+ * wait for it and take its score, since two probes' spinning worker
+ * pools would each time the other and cache the slower figure. The probe
+ * shares no lock with the transcription service; a dictation running at
+ * the same time makes both slower, which only ever pushes an estimate
+ * toward "too slow".
  *
  * [threadCount] must be the count a dictation gets at the moment of the
  * call ([dictationThreadCount]), so the score reflects the same threading
@@ -161,12 +171,16 @@ class DeviceSpeedEstimator(
         return SpeedScore(ns, threads, at)
     }
 
+    private val measureMutex = Mutex()
+
     /**
      * Runs the probe now and caches the result. Returns the previous
      * score unchanged when the engine is unsupported or the probe fails,
      * so a transient failure never erases a good measurement.
      */
-    suspend fun measure(): SpeedScore? {
+    suspend fun measure(): SpeedScore? = measureMutex.withLock { measureLocked() }
+
+    private suspend fun measureLocked(): SpeedScore? {
         if (!supported()) return _score.value
         val threads = threadCount()
         // The probe and the settings writes both belong off the main
@@ -189,6 +203,6 @@ class DeviceSpeedEstimator(
         return measured
     }
 
-    /** The cached score, measuring once when there is none. */
-    suspend fun cachedOrMeasure(): SpeedScore? = cached() ?: measure()
+    /** The cached score, measuring once when there is none; a probe already running serves every waiting caller. */
+    suspend fun cachedOrMeasure(): SpeedScore? = cached() ?: measureMutex.withLock { cached() ?: measureLocked() }
 }

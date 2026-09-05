@@ -21,6 +21,13 @@ class DebugDictationHooksTest {
     }
 
     @Test
+    fun captureDumpWritesOnlyInDebugBuilds() {
+        assertTrue(debugCaptureDumpApplies(captureDump = true, debugBuild = true))
+        assertFalse(debugCaptureDumpApplies(captureDump = true, debugBuild = false))
+        assertFalse(debugCaptureDumpApplies(captureDump = false, debugBuild = true))
+    }
+
+    @Test
     fun capturesAreClearedWhenTheHookGoesOffAndOnceAtStartWhenItIsOff() {
         assertTrue(captureDumpShouldClear(wasOn = null, on = false), "first emission with the hook off")
         assertFalse(captureDumpShouldClear(wasOn = null, on = true))

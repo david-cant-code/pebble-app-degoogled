@@ -50,8 +50,12 @@ fun SttSpeedNudgePrompt() {
     val nudge by tracker.nudge.collectAsState()
     val current = nudge ?: return
     val copy = remember(current) { speedNudgeCopy(current) }
-    var downloading by remember(current) { mutableStateOf(false) }
-    var failed by remember(current) { mutableStateOf(false) }
+    // Keyed on the offer, not the nudge value: the tracker holds the nudge
+    // during a switch, and a re-scored copy for the same pair must not
+    // reset a download in progress.
+    val pair = current.currentModelId to current.targetModelId
+    var downloading by remember(pair) { mutableStateOf(false) }
+    var failed by remember(pair) { mutableStateOf(false) }
     val downloadStatus by modelManager.modelDownloadStatus.collectAsState()
 
     fun select(modelId: String) {
@@ -67,12 +71,18 @@ fun SttSpeedNudgePrompt() {
                 val installed = withContext(Dispatchers.IO) {
                     modelProvider.isModelDownloaded(current.targetModelId)
                 }
-                if (installed) select(current.targetModelId) else failed = true
+                if (installed) {
+                    select(current.targetModelId)
+                } else {
+                    failed = true
+                    tracker.endSwitch()
+                }
                 downloading = false
             }
             is ModelDownloadStatus.Failed -> {
                 failed = true
                 downloading = false
+                tracker.endSwitch()
             }
             else -> {}
         }
@@ -90,6 +100,7 @@ fun SttSpeedNudgePrompt() {
             }
             val info = modelManager.getAvailableSTTModels().firstOrNull { it.slug == current.targetModelId }
             if (info != null && modelManager.downloadSTTModel(info, allowMetered = true)) {
+                tracker.beginSwitch()
                 downloading = true
             } else {
                 failed = true
@@ -121,6 +132,7 @@ fun SttSpeedNudgePrompt() {
                 TextButton(onClick = {
                     modelManager.cancelDownload()
                     downloading = false
+                    tracker.endSwitch()
                 }) { Text("Cancel") }
             } else {
                 TextButton(onClick = { switchModel() }) { Text(if (failed) "Retry" else copy.switchLabel) }
