@@ -66,7 +66,7 @@ object WhisperSpeedCalibration {
      */
     const val REFERENCE_SCORE_NS = 92_931_000L
 
-    /** Reference phone full-window decode per tier (seconds), app on screen, detector off. */
+    /** Reference phone full-window decode per tier (seconds), app on screen. */
     private val referenceWindowSeconds: Map<WhisperTier, Double> = mapOf(
         WhisperTier.Tiny to 0.77,
         WhisperTier.Base to 1.41,

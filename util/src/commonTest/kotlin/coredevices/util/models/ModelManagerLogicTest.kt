@@ -55,11 +55,6 @@ class ModelManagerLogicTest {
         assertEquals(465, ModelManager.modelInfoFor(WhisperModelCatalog.byId("whisper-small-en")!!).sizeInMB)
         assertEquals(141, ModelManager.modelInfoFor(WhisperModelCatalog.byId("whisper-base-en")!!).sizeInMB)
         assertEquals(74, ModelManager.modelInfoFor(WhisperModelCatalog.byId("whisper-tiny-en")!!).sizeInMB)
-        // The detector is 885 KB; a truncating conversion would send the download job a zero estimate.
-        val detector = ModelManager.modelInfoFor(WhisperModelCatalog.VAD_MODEL)
-        assertEquals(1, detector.sizeInMB)
-        assertEquals(WhisperModelCatalog.VAD_MODEL.id, detector.slug)
-        assertEquals(WhisperModelCatalog.urlFor(WhisperModelCatalog.VAD_MODEL), detector.url)
     }
 
     @Test

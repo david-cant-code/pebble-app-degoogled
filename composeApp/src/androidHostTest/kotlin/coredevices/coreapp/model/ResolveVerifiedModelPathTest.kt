@@ -1,6 +1,7 @@
 package coredevices.coreapp.model
 
 import coredevices.util.models.WhisperModel
+import coredevices.util.models.WhisperTier
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -41,6 +42,7 @@ class ResolveVerifiedModelPathTest {
 
     private val model = WhisperModel(
         id = "whisper-base-en",
+        tier = WhisperTier.Base,
         displayName = "Test model",
         fileName = "ggml-test.bin",
         sha256 = sha256Hex(payload),

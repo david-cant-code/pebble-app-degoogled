@@ -1,18 +1,16 @@
 package coredevices.whisper
 
 /**
- * The complete engine surface for on-device speech recognition. Nine
+ * The complete engine surface for on-device speech recognition. Seven
  * functions: this is the fork's replacement for a much larger proprietary
  * binding surface, and everything the app needs from the engine fits
- * here (six for the speech model, two for the voice activity detector,
- * one model-free speed probe). Anything not expressible through these
- * functions belongs in the Kotlin service layer, not in new native entry
- * points.
+ * here (six for the speech model, one model-free speed probe). Anything
+ * not expressible through these functions belongs in the Kotlin service
+ * layer, not in new native entry points.
  *
  * Threading contract: callers serialize [whisperInit], [whisperTranscribe]
- * and [whisperFree] per handle, and [whisperVadInit], [whisperVadFree] and
- * any [whisperTranscribe] that passes the detector per detector handle
- * (the transcription service holds one mutex across every native call).
+ * and [whisperFree] per handle (the transcription service holds one mutex
+ * across every native call).
  * [whisperCancel] is the one function safe to call concurrently; it
  * targets a specific in-flight call by its [callId], so a cancellation
  * can never revoke a different call's pending abort (the case that arises
@@ -54,25 +52,12 @@ data class EnginePlacement(val cpuMask: Long = 0L, val nice: Int = 0) {
 }
 
 /**
- * Loads a ggml Silero voice activity detector and returns its handle, or
- * throws with the engine's error text. The caller owns the handle and
- * releases it with [whisperVadFree]. Independent of any speech model
- * handle: one detector serves every model.
- */
-expect fun whisperVadInit(modelPath: String): Long
-
-/** Releases a detector handle. Safe to call with 0. */
-expect fun whisperVadFree(handle: Long)
-
-/**
  * What one [whisperTranscribe] call reports back about itself when the
  * caller passes an instance.
  *
- * @property decodedSamples the samples the engine was given: the span
- *   left after the detector's cut, or the input size when there is no
- *   detector or it found no speech; -1 until the call reaches that point.
- *   Decode cost follows this count, not the input length, which is what
- *   makes a per-second-of-speech timing possible on a padded recording.
+ * @property decodedSamples the samples the engine was given, which is the
+ *   input size; -1 until the call reaches that point. Decode cost follows
+ *   this count, which is what makes a per-second-of-input timing possible.
  */
 class TranscribeStats {
     var decodedSamples: Int = -1
@@ -84,12 +69,8 @@ class TranscribeStats {
  * detect the language. [callId] identifies this call for [whisperCancel];
  * it must be unique among all calls that can be in flight at once (the
  * service uses a monotonic counter). [placement] scopes the calling
- * thread's affinity and priority to this call. With a non-zero
- * [vadHandle] the audio is cut to the span from the first detected
- * speech to the last before the decode, interior gaps kept; a clip in
- * which the detector finds no speech, or a detector failure, decodes the
- * untrimmed audio (`trim_to_speech` in `whisper_jni.cpp` states the
- * rule). [stats], when given, is filled in by the call. Throws with the
+ * thread's affinity and priority to this call. The audio is decoded as
+ * given. [stats], when given, is filled in by the call. Throws with the
  * engine's error text on failure, including cancellation via
  * [whisperCancel].
  */
@@ -100,7 +81,6 @@ expect fun whisperTranscribe(
     language: String?,
     callId: Long,
     placement: EnginePlacement = EnginePlacement.DEFAULT,
-    vadHandle: Long = 0L,
     stats: TranscribeStats? = null,
 ): String
 

@@ -251,7 +251,7 @@ The replacement is whisper.cpp (MIT), compiled from source:
   time, with no runtime dispatch), so a tiny baseline-architecture
   probe, `libwhispercpu.so`, checks the hwcaps first, and no engine code
   is mapped until it passes.
-- `:whisper` holds the Kotlin bindings: a nine-function expect/actual
+- `:whisper` holds the Kotlin bindings: a seven-function expect/actual
   surface whose iOS actuals are unsupported stubs, keeping commonMain
   compiling for the unmaintained iOS targets. Engine strings cross JNI
   as UTF-8 byte arrays: engine output can be byte sequences that are
@@ -269,8 +269,8 @@ The replacement is whisper.cpp (MIT), compiled from source:
   down a tier while its estimate exceeds the watch's window, to the tiny
   floor at most.
 - The probe is a forecast; real dictations are the record. The engine
-  reports how many samples it decoded after the detector's cut
-  (`TranscribeStats`), the service records the time to a result per
+  reports how many samples it decoded (`TranscribeStats`), the service
+  records the time to a result per
   second of engine input after each successful dictation, under the
   model that ran the decode, smoothed per model in settings
   (`DictationSpeedTracker`), and `DictationSpeedPolicy` predicts a full
@@ -348,13 +348,13 @@ The replacement is whisper.cpp (MIT), compiled from source:
   returns the correct text in under 10 seconds on the slowest catalog
   model.
 - Nothing CI runs reaches `whisper_jni.cpp`: the host suites stop at the
-  binding's Kotlin side, so the shim's semantics (detector trimming and
-  the sample count it reports, cancellation, cold-start init) are guarded
-  only by the instrumented `WhisperVadTrimTest`,
-  `WhisperLocalCancellationTest` and `WhisperColdStartRaceTest` under
-  `androidApp/src/androidTest`, run one class at a time on a device with
-  the model installed (each KDoc carries the command). An engine bump or
-  a shim edit gets a device run of those three before it merges.
+  binding's Kotlin side, so the shim's semantics (the sample count it
+  reports, cancellation, cold-start init) are guarded only by the
+  instrumented `WhisperLocalCancellationTest` and
+  `WhisperColdStartRaceTest` under `androidApp/src/androidTest`, run one
+  class at a time on a device with the model installed (each KDoc carries
+  the command). An engine bump or a shim edit gets a device run of those
+  two before it merges.
 - The watch's dictation deadline is owned by `VoiceSessionCoordinator`
   in libpebble3, not by the provider. The firmware records for at most
   15 seconds, gives the phone 15 seconds from the end of the recording,
@@ -376,21 +376,18 @@ The replacement is whisper.cpp (MIT), compiled from source:
   mapped to a generic error; the connection-error code is never used
   for a local decode, since the watch renders it as "No internet
   connection".
-- The shim owns a Silero voice activity detector context (the catalog's
-  `VAD_MODEL`, loaded by the service when installed, or by the next
-  dictation when the install finishes after the model init) and cuts
-  each dictation to the span from its first speech segment to its last
-  before `whisper_full`. The detector's verdict never decides a
-  dictation: when it finds no speech, or fails, the untrimmed audio is
-  decoded, and interior gaps are never cut, because watch microphone
-  captures sit far below the levels the detector was trained on and it
-  has missed whole dictations the engine transcribed in full. The shim
-  runs the detector on one thread: its graph is tiny and ggml spawns
-  workers per graph, so the engine's built-in path, which uses four,
-  spends more on thread creation than on detection. Segmentation is
-  tuned for dictation (500 ms of silence to end a segment, 200 ms of
-  padding around speech) so word edges survive the cut. The warm-up
-  bypasses the detector.
+- Nothing gates on level before the decode: the engine receives each
+  dictation exactly as the watch sent it. A Silero detector once cut
+  the audio to its detected speech; on Speex watch audio with speech
+  near -25 dBFS it found either nothing or a fragment and cut the rest,
+  and cost half a second per dictation. A level-based edge trim was
+  tried in its place and dropped: on the Core Time 2 the microphone
+  opens with a 60 to 120 ms burst and lifts post-speech ambient to
+  -43 dBFS, so no real capture had a tail it could cut, and removing
+  half a second of non-speech before the first word changed marginal
+  decodes, once from a correct sentence to nothing. The decode cost of
+  a full 15 second window is bounded instead by the thread policy below
+  and by the model choice the picker's estimate and the nudge steer.
 - The engine thread count follows the cores the process can actually
   run on, not the phone's CPU count: ggml's workers synchronize on
   spinning barriers (sourced at `MAX_ENGINE_THREADS` in
@@ -426,14 +423,7 @@ six models (small, base and tiny, each as the multilingual and the
 English-only conversion) from
 the whisper.cpp author's Hugging Face conversions, each with an
 immutable-commit URL, exact byte size, and SHA-256; the catalog KDoc
-records the three-source re-pin procedure. The Silero voice activity
-detector (whisper.cpp's ggml conversion, MIT) is pinned the same way
-from its own repository commit as `VAD_MODEL`, outside the speech list:
-it installs alongside any speech model download, existing installs
-fetch it once in the background on an unmetered network, its directory
-is excluded from the picker, the "usable model" checks and the
-migration sweep, and its absence means the engine runs without silence
-trimming rather than failing. Verification is layered,
+records the three-source re-pin procedure. Verification is layered,
 each layer defensible alone: the commit-pinned URL (a retargeted branch
 or re-uploaded file cannot swap bytes), the download-time streaming
 digest gate in `ModelFileInstaller` (fail closed, mid-stream size

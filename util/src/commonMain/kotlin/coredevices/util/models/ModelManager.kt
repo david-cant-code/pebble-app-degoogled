@@ -35,10 +35,6 @@ class ModelManager(
         return modelDownloadManager.downloadSTTModel(modelInfo, allowMetered)
     }
 
-    /** Fetches the voice activity detector through the same verified, notification-visible job a speech model uses. */
-    fun downloadDetector(allowMetered: Boolean): Boolean =
-        downloadSTTModel(modelInfoFor(WhisperModelCatalog.VAD_MODEL), allowMetered)
-
     fun cancelDownload() {
         modelDownloadManager.cancelDownload()
     }
@@ -95,8 +91,8 @@ class ModelManager(
 
         /**
          * A catalog entry as the download job and the picker carry it. The
-         * size is rounded to the nearest MiB: the download job's traffic
-         * estimate reads it, and the detector's 885 KB would truncate to 0.
+         * size is rounded to the nearest MiB for the download job's traffic
+         * estimate.
          */
         internal fun modelInfoFor(model: WhisperModel, estimatedWindowSeconds: Double? = null): ModelInfo = ModelInfo(
             slug = model.id,
@@ -127,7 +123,7 @@ class ModelManager(
                 modelInfoFor(model, WhisperSpeedCalibration.estimateWindowSeconds(model.id, score))
             }
             val stale = provider?.getDownloadedModels()
-                ?.filter { WhisperModelCatalog.byId(it) == null && !WhisperModelCatalog.isVadModelId(it) }
+                ?.filter { WhisperModelCatalog.byId(it) == null }
                 ?.map { slug ->
                     val sizeMB = (provider.getModelSizeBytes(slug) / (1024 * 1024)).toInt()
                     ModelInfo(slug = slug, sizeInMB = sizeMB)
@@ -151,7 +147,7 @@ class ModelManager(
             while (WhisperSpeedCalibration.fitOf(model.id, score) == WindowFit.Exceeds) {
                 model = WhisperModelCatalog.stepDown(model) ?: break
             }
-            return when (requireNotNull(model.tier) { "speech models carry a tier" }) {
+            return when (model.tier) {
                 WhisperTier.Small -> RecommendedModel.Standard(model.id)
                 WhisperTier.Base -> RecommendedModel.Lite(model.id)
                 WhisperTier.Tiny -> RecommendedModel.Minimal(model.id)

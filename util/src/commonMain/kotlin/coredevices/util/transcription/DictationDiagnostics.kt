@@ -70,17 +70,14 @@ internal fun formatEngineDiagnostics(
     speechSeconds: Double?,
     decodeMillis: Long,
     outcome: String,
-    vad: Boolean,
 ): String = buildString {
     append("dictation engine: model=").append(model ?: "?")
-    append(" vad=").append(if (vad) "on" else "off")
     append(" threads=").append(threads)
     append(" allowedCpus=").append(snapshot.allowedCpus ?: "?")
     append(" cpuset=").append(snapshot.cpuset ?: "?")
     append(" importance=").append(snapshot.importance ?: "?")
     append(" audioSec=").append(formatSeconds(audioSeconds))
-    // What the engine decoded after the detector's cut; "?" when the call
-    // never reached the engine.
+    // What the engine reported decoding; "?" when the call never reached it.
     append(" speechSec=").append(speechSeconds?.let(::formatSeconds) ?: "?")
     append(" decodeMs=").append(decodeMillis)
     append(" outcome=").append(outcome)

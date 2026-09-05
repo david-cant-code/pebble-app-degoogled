@@ -7,14 +7,14 @@ On top of the de-Googling, Gravel tightens the app's own security posture:
 - The app's exported Android interfaces are authorization-gated or removed
 - Plain-HTTP (cleartext) traffic is blocked app-wide
 - Core watch firmware updates are fetched from the public PebbleOS releases and integrity-verified before install
-- On-device voice dictation with the whisper.cpp speech engine, built from source; the speech model is an optional, integrity-pinned download you start yourself, and an install that has one fetches the small speech detector from the same host in the background, on unmetered networks only
+- On-device voice dictation with the whisper.cpp speech engine, built from source; the speech model is an optional, integrity-pinned download you start yourself
 - Optional dictation through your own transcription server over https, with the server's certificate pinned on first use; nothing is sent unless you configure one
 - Manual latitude/longitude entry replaces the play-services place search for weather
 - App store searches leave the phone only when you tap search, never while you type, and are sent with Algolia's query analytics and personalization switched off and no user token
 
 Some watchapps and watchfaces need internet or your location to work, and they will not function fully until you grant them access. That is deliberate: Gravel puts the decision in your hands rather than trusting every watchapp by default.
 
-The app talks to the Core Devices and Rebble web services (app store, weather, timeline, notification icons, language packs), to Algolia, which hosts the app store's search index, whenever you search the store, to the PebbleOS release feed on GitHub for firmware, and to the speech model host for the models and the detector above; there is no google endpoint. Two hosts are yours to choose: an app store source you add yourself is fetched only after you confirm it, with no account token and no search traffic, and a transcription server you configure receives your dictation audio and nothing else.
+The app talks to the Core Devices and Rebble web services (app store, weather, timeline, notification icons, language packs), to Algolia, which hosts the app store's search index, whenever you search the store, to the PebbleOS release feed on GitHub for firmware, and to the speech model host when you download a model; there is no google endpoint. Two hosts are yours to choose: an app store source you add yourself is fetched only after you confirm it, with no account token and no search traffic, and a transcription server you configure receives your dictation audio and nothing else.
 
 Permissions Gravel asks for are the ones the watch features need: Bluetooth and location for finding and staying connected to the watch (background location so location-based watchapps and weather keep working while the app is not open), notification access to forward notifications, contacts, call log, and phone state for caller names and call control on the watch, calendar for timeline pins, Health Connect write access to sync the watch's health data, and the list of installed apps for per-app notification settings. Each is requested when the corresponding feature is first set up.
 

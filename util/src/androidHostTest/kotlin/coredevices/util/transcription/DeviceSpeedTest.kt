@@ -115,7 +115,7 @@ class DeviceSpeedTest {
             assertEquals(atReference * 2, assertNotNull(WhisperSpeedCalibration.estimateWindowSeconds(id, twiceAsSlow)), 1e-9)
         }
         assertNull(WhisperSpeedCalibration.estimateWindowSeconds("whisper-base-en", null))
-        assertNull(WhisperSpeedCalibration.estimateWindowSeconds("vad-silero", reference))
+        assertNull(WhisperSpeedCalibration.estimateWindowSeconds("not-a-model", reference))
         assertNull(WhisperSpeedCalibration.estimateWindowSeconds("not-a-model", reference))
     }
 

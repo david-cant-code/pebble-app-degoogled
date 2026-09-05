@@ -19,7 +19,6 @@ import coredevices.pebble.account.FirestoreLocker
 import coredevices.pebble.health.PlatformHealthSync
 import coredevices.pebble.services.PebbleAccountProvider
 import coredevices.pebble.weather.WeatherFetcher
-import coredevices.util.models.ModelManager
 import coredevices.util.models.WhisperModelCatalog
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigHolder
@@ -47,16 +46,6 @@ internal const val STT_MODE_BEFORE_UPDATE_KEY = "stt_mode_before_update"
 internal val STT_UPDATE_NOTIFICATION_ID = "stt_update_notif".hashCode()
 
 private val sttMigrationLogger = Logger.withTag("SttModelMigration")
-
-/**
- * Whether the voice activity detector should be fetched in the background:
- * only when at least one catalog speech model is installed (a device with
- * no local dictation has no use for it) and the detector itself is not.
- * Static so the decision is under host tests with a fake provider.
- */
-internal fun vadDownloadNeeded(provider: CactusModelPathProvider): Boolean =
-    !provider.isVadModelInstalled() &&
-        provider.getDownloadedModels().any { provider.isModelDownloaded(it) }
 
 /**
  * Startup pass over the on-device STT models; every install runs it on
@@ -189,17 +178,6 @@ class CommonAppDelegate(
             }
         } catch (e: Exception) {
             logger.w(e) { "STT model check skipped" }
-        }
-        // Installs that predate the voice activity detector have speech
-        // models but no detector; fetch it once through the same verified,
-        // notification-visible download job a model uses, on unmetered
-        // networks only (885 KB, no consent prompt of its own).
-        try {
-            if (vadDownloadNeeded(modelProvider)) {
-                org.koin.mp.KoinPlatform.getKoin().get<ModelManager>().downloadDetector(allowMetered = false)
-            }
-        } catch (e: Exception) {
-            logger.w(e) { "Voice activity detector download not scheduled" }
         }
     }
 

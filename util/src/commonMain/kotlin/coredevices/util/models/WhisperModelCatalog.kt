@@ -19,8 +19,7 @@ enum class WhisperTier {
  *
  * @param id catalog identity and the on-disk directory name; stable
  *   contract with existing installs, never rename casually.
- * @param tier the size tier, null only for the voice activity detector,
- *   which is not a speech model.
+ * @param tier the size tier.
  * @param displayName what the model picker shows.
  * @param fileName the ggml file inside the source repository, and the on-
  *   disk file name under the model directory.
@@ -37,7 +36,7 @@ enum class WhisperTier {
  */
 data class WhisperModel(
     val id: String,
-    val tier: WhisperTier? = null,
+    val tier: WhisperTier,
     val displayName: String,
     val fileName: String,
     val sha256: String,
@@ -61,15 +60,10 @@ data class WhisperModel(
  * and the received bytes must match the pinned SHA-256 and exact size
  * before a file is installed, fail closed.
  *
- * The voice activity detector ([VAD_MODEL]) is pinned the same way from
- * its own repository and commit; it is not a speech model, so it lives
- * outside [MODELS] and is never offered in the picker.
- *
  * Re-pin procedure when changing a commit or an entry (each step is an
  * independent source; all three must agree before new values land):
  *  1. Pick the new commit from the repository's history and record it
- *     ([HF_REPO_COMMIT] for the speech models, [VAD_REPO_COMMIT] for the
- *     detector).
+ *     ([HF_REPO_COMMIT]).
  *  2. Declared metadata: HEAD `https://huggingface.co/<repo>/resolve/
  *     <commit>/<file>` and read `x-linked-size` and `x-linked-etag`; the
  *     etag is the payload's SHA-256 from HF's content-addressed storage,
@@ -95,12 +89,6 @@ object WhisperModelCatalog {
 
     /** The immutable revision of [HF_REPO] every speech model URL resolves. */
     const val HF_REPO_COMMIT = "5359861c739e955e79d9a303bcbc70fb988958b1"
-
-    /** The whisper.cpp project's Silero VAD conversions. */
-    const val VAD_REPO = "ggml-org/whisper-vad"
-
-    /** The immutable revision of [VAD_REPO] the detector URL resolves. */
-    const val VAD_REPO_COMMIT = "9ffd54a1e1ee413ddf265af9913beaf518d1639b"
 
     private const val GIB = 1024L * 1024L * 1024L
     private const val MIB = 1024L * 1024L
@@ -187,32 +175,9 @@ object WhisperModelCatalog {
         ),
     )
 
-    /**
-     * Silero voice activity detector in whisper.cpp's ggml conversion
-     * (MIT). Installed alongside every speech model and handed to the
-     * engine so leading and trailing silence is trimmed before decoding;
-     * its verdict never rejects a dictation. Values derived 2026-09-01 via
-     * the three-source procedure; the v6.2.0 conversion is the one the
-     * engine's own test suite exercises at the pinned revision.
-     */
-    val VAD_MODEL = WhisperModel(
-        id = "vad-silero",
-        displayName = "Silero voice activity detector",
-        fileName = "ggml-silero-v6.2.0.bin",
-        sha256 = "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
-        sizeBytes = 885_098,
-        minRamBytes = 64 * MIB,
-        multilingual = true,
-        repo = VAD_REPO,
-        commit = VAD_REPO_COMMIT,
-    )
-
     val ids: Set<String> = MODELS.map { it.id }.toSet()
 
-    /** Speech models only; the detector is not a pickable model (see [VAD_MODEL]). */
     fun byId(id: String): WhisperModel? = MODELS.firstOrNull { it.id == id }
-
-    fun isVadModelId(id: String): Boolean = id == VAD_MODEL.id
 
     fun urlFor(model: WhisperModel): String =
         "https://huggingface.co/${model.repo}/resolve/${model.commit}/${model.fileName}"
@@ -222,7 +187,7 @@ object WhisperModelCatalog {
      * coverage, or null when [model] is already the floor.
      */
     fun stepDown(model: WhisperModel): WhisperModel? {
-        val next = model.tier?.cheaper() ?: return null
+        val next = model.tier.cheaper() ?: return null
         return MODELS.firstOrNull { it.tier == next && it.multilingual == model.multilingual }
     }
 

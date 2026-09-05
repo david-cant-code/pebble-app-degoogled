@@ -343,7 +343,7 @@ the smaller models passed.
 
 ## Watch dictation accuracy varies sharply between sessions
 
-**Status: open; capture-chain investigation pending.**
+**Status: open; the variance is in the watch's microphone capture.**
 
 On-device testing found dictation accuracy varying between
 back-to-back sessions under identical conditions: the same sentence
@@ -371,20 +371,32 @@ unchanged since the earlier pass. Three apps is too few to generalize
 from, so the requesting watchapp joins the firmware revision as a
 variable a capture comparison should hold fixed.
 
+A capture pass with the phone-side path held fixed placed the variance
+ahead of the phone. In one afternoon, on one watch and one build, the
+share of captures the engine hears as noise before the app touches them
+swung between rounds minutes apart, from one in five to eleven in
+fifteen; the failing captures are as loud as the good ones or louder,
+but carry little energy in the speech band and no voiced pitch, the
+low-frequency signature the earlier pass found, and a standalone decode
+labels them as scraping, footsteps or crickets while the good captures
+from the same minutes transcribe correctly. Nothing on the phone can
+restore speech the capture never carried. The candidates are on the
+watch: the microphone port covered while the watch is held to the
+mouth, debris or moisture in the port, and the firmware's microphone
+or gain state.
+
 ## A silent dictation can transcribe as a stray word
 
-**Status: open; engine behavior, matches the app before the detector.**
+**Status: open; engine behavior.**
 
 The engine decodes ten seconds of digital silence to " The" on the
 base English model, and a near-silent watch recording can come back as
 a single short word instead of the "Missed that" the watch shows for
-an empty result. The speech detector's verdict is no longer allowed to
-reject a dictation, because on real watch audio it has missed whole
-dictations the engine transcribed correctly, so it cannot be the
-silence gate either. A gate on the audio itself (a level floor measured
-after the microphone's start-up transient, or the engine's own
-per-segment no-speech probability) needs captures from more than one
-watch before its threshold can be set.
+an empty result. Nothing gates on level before the engine, so a silent
+recording reaches it whole. A gate on the audio itself (an absolute
+level floor measured after the microphone's start-up transient, or the
+engine's own per-segment no-speech probability) needs captures from
+more than one watch before its threshold can be set.
 
 ## A provider that fails before the recording ends is answered only after it
 
@@ -413,63 +425,28 @@ sometimes ends the session after one to two seconds while the user is
 still speaking. Both directions were observed repeatedly during
 on-device dictation testing; a fully silent session reliably streams
 the whole window. The endpointer runs in the watch firmware, so the
-app can only shape what it does with the audio it receives: the
-voice activity detector cuts a full-window session to the speech it
-holds before the encoder sees it, and
-a truncated session transcribes as the fragment that was actually
-captured. Recorded here so short or slow dictation results are
+app can only shape what it does with the audio it receives: a
+full-window session costs a full-window decode, and a truncated session
+transcribes as the fragment that was actually captured. Recorded here so short or slow dictation results are
 attributed correctly during testing.
 
-## The detector's background fetch shows up as a model download
-
-**Status: accepted; one bounded episode per upgrading install.**
-
-An install that already holds a speech model but no voice activity
-detector schedules the detector's fetch at startup, on unmetered
-networks only, through the same download job a speech model uses (the
-whisper section of DESIGN_NOTES). The job is the user-facing one, so
-the fetch is visible in ways that fit a model better than an 885 KB
-helper file: the "Downloading Model" notification names the detector
-by its internal id (`vad-silero`) and says it could take a few
-minutes, the completion notification stays in the shade until
-dismissed, the shared download status disables every download button
-on the offline models screen and shows "Downloading in the
-background..." under the speech setting while the job runs, a failure
-raises the "Failed to download model" snackbar and is retried at the
-next launch until the detector is in place, and scheduling the job
-cancels any other download still pending at that moment, so a model
-download the user started that is still pending when the process
-restarts on such an install has to be started again. Nothing else is
-affected: the file is integrity-pinned and comes from the host the
-model itself came from, and a fresh install fetches the detector
-inside the model's own download, so it never takes this path. The job
-is shared so an unrequested fetch stays visible and goes through the
-same verification as a model. The fix, when the download UI is next
-touched, is a display name in the notification copy and a status
-channel of the detector's own.
-
-## Downgrading past the detector resets local dictation for one launch
+## Downgrading past the tiny tier resets local dictation for one launch
 
 **Status: accepted; the sweep that does it ships in the older versions.**
 
-Versions before the voice activity detector and the tiny tier (0.1.6
-and earlier) sweep the model directory at every launch and treat any
-directory they do not recognise as a leftover of the previous speech
-engine: the directory is deleted, the selected model is cleared, and a
-local mode is stashed and replaced by cloud-only. This version installs
-the detector in a directory of its own next to the models, so nearly
-every install that used local dictation on it has one. A downgrade to
-one of those versions therefore deletes the detector and any tiny model
-on the first launch and leaves dictation without a working mode until
-the next launch, when the sweep finds the stash and a model it knows,
-restores the mode, and selects the first installed model the directory
-listing returns, which may not be the one selected before. The detector
-is fetched again in the background on a later upgrade; a tiny model has
-to be downloaded again. This version's own sweep skips the detector
-directory and knows the tiny tier, so a downgrade from a later version
-to this one is safe for both. The rule itself remains: a later version
-that adds a model directory name repeats the episode on a downgrade to
-this one. Closing that means resetting the mode only when the selected
-model itself is gone, or deleting only directories in the previous
-engine's layout, each with a migration test; deferred because no such
-addition is planned.
+Versions before the tiny tier (0.1.6 and earlier) sweep the model
+directory at every launch and treat any directory they do not recognise
+as a leftover of the previous speech engine: the directory is deleted,
+the selected model is cleared, and a local mode is stashed and replaced
+by cloud-only. A downgrade to one of those versions from an install
+that holds a tiny model therefore deletes it on the first launch and
+leaves dictation without a working mode until the next launch, when the
+sweep finds the stash and a model it knows, restores the mode, and
+selects the first installed model the directory listing returns, which
+may not be the one selected before; the tiny model has to be downloaded
+again. Installs holding only small or base models are unaffected. The
+rule itself remains: a later version that adds a model directory name
+repeats the episode on a downgrade to this one. Closing that means
+resetting the mode only when the selected model itself is gone, or
+deleting only directories in the previous engine's layout, each with a
+migration test; deferred because no such addition is planned.

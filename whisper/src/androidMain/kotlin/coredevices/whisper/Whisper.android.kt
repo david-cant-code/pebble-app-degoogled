@@ -54,15 +54,8 @@ private object WhisperJNI {
         callId: Long,
         cpuMask: Long,
         nice: Int,
-        vadHandle: Long,
         stats: IntArray?,
     ): ByteArray?
-
-    @JvmStatic
-    external fun nativeVadInit(modelPath: String): Long
-
-    @JvmStatic
-    external fun nativeVadFree(handle: Long)
 
     @JvmStatic
     external fun nativeCancel(callId: Long)
@@ -92,7 +85,6 @@ actual fun whisperTranscribe(
     language: String?,
     callId: Long,
     placement: EnginePlacement,
-    vadHandle: Long,
     stats: TranscribeStats?,
 ): String {
     // The shim writes into a one-slot array; the stats object is filled
@@ -100,25 +92,11 @@ actual fun whisperTranscribe(
     val slots = if (stats != null) intArrayOf(-1) else null
     try {
         val bytes = WhisperJNI.nativeTranscribe(
-            handle, pcm, threads, language, callId, placement.cpuMask, placement.nice, vadHandle, slots,
+            handle, pcm, threads, language, callId, placement.cpuMask, placement.nice, slots,
         ) ?: throw RuntimeException("whisper transcription failed: ${whisperGetLastError()}")
         return bytes.decodeToString()
     } finally {
         if (stats != null && slots != null) stats.decodedSamples = slots[0]
-    }
-}
-
-actual fun whisperVadInit(modelPath: String): Long {
-    val handle = WhisperJNI.nativeVadInit(modelPath)
-    if (handle == 0L) {
-        throw RuntimeException("whisper VAD init failed: ${whisperGetLastError()}")
-    }
-    return handle
-}
-
-actual fun whisperVadFree(handle: Long) {
-    if (handle != 0L) {
-        WhisperJNI.nativeVadFree(handle)
     }
 }
 

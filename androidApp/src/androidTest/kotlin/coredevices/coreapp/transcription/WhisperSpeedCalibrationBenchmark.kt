@@ -32,7 +32,7 @@ import kotlin.time.TimeSource
  * quarter of each other. With the app's activity on screen (the state the
  * reference numbers are defined in) it prints the probe score and, for
  * every installed tier, the median decode of a full 15 second window of
- * speech with the detector off, which are the constants the calibration
+ * speech, which are the constants the calibration
  * object records. It also prints what the current constants predict, so
  * a second phone cross-checks them. Pass `-e download true` to install a
  * missing tier through the production provider first. The spread

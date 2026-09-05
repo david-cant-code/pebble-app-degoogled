@@ -18,8 +18,8 @@ internal object NoopAnalytics : CoreAnalytics {
     override fun updateRingLifetimeCollectionCount(serial: String, count: Int) {}
 }
 
-/** A provider with one installed model and, when [vadPath] is set, the detector. */
-internal class FakeModelProvider(@Volatile var vadPath: String? = null) : CactusModelPathProvider {
+/** A provider with one installed model. */
+internal class FakeModelProvider : CactusModelPathProvider {
     override suspend fun getSTTModelPath(): String = "/fake/model"
     override suspend fun getLMModelPath(): String = error("no language model")
     override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = "/fake/$modelId"
@@ -29,8 +29,6 @@ internal class FakeModelProvider(@Volatile var vadPath: String? = null) : Cactus
     override fun deleteModel(modelName: String) {}
     override fun getModelSizeBytes(modelName: String): Long = 0L
     override fun initTelemetry() {}
-    override suspend fun getVadModelPath(): String? = vadPath
-    override fun isVadModelInstalled(): Boolean = vadPath != null
 }
 
 /**
@@ -52,8 +50,6 @@ internal class FakeWhisperEngine(@Volatile var reply: String = "hello world") {
     val engine = object : WhisperEngine {
         override fun supported(): Boolean = true
         override fun init(modelPath: String): Long = 1L
-        override fun vadInit(modelPath: String): Long = 7L
-        override fun vadFree(handle: Long) {}
         override fun transcribe(
             handle: Long,
             pcm: FloatArray,
@@ -61,7 +57,6 @@ internal class FakeWhisperEngine(@Volatile var reply: String = "hello world") {
             language: String?,
             callId: Long,
             placement: EnginePlacement,
-            vadHandle: Long,
             stats: TranscribeStats?,
         ): String {
             if (pcm.all { it == 0f }) return ""

@@ -9,7 +9,6 @@ import coredevices.util.models.prefersEnglishModels
 import coredevices.util.models.totalRamBytes
 import coredevices.util.transcription.CactusModelPathProvider
 import io.ktor.client.HttpClient
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -85,40 +84,13 @@ class WhisperModelProvider(
 
         /**
          * Directory names under modelsDir that can be models: everything
-         * except the installer's staging workspace and the voice activity
-         * detector's directory, which is an engine auxiliary rather than a
-         * speech model and must never show up as a stale entry, a usable
-         * model, or a sweep candidate (a torn detector install is handled
-         * by its own verified resolve).
+         * except the installer's staging workspace.
          */
         internal fun modelDirNamesIn(modelsDir: File): List<String> =
             modelsDir.listFiles()
-                ?.filter {
-                    it.isDirectory &&
-                        it.name != ModelFileInstaller.STAGING_DIR &&
-                        !WhisperModelCatalog.isVadModelId(it.name)
-                }
+                ?.filter { it.isDirectory && it.name != ModelFileInstaller.STAGING_DIR }
                 ?.map { it.name }
                 ?: emptyList()
-
-        /**
-         * [resolveVerifiedModelPath] for an optional file: absent, or
-         * quarantined after failing its load-time re-hash, reads as null
-         * instead of an error, since the caller can run without it. Never
-         * downloads.
-         */
-        internal suspend fun resolveOptionalModelPath(
-            installer: ModelFileInstaller,
-            loadVerified: MutableMap<String, Boolean>,
-            model: WhisperModel,
-        ): String? = try {
-            resolveVerifiedModelPath(installer, loadVerified, model, allowReinstall = false)
-        } catch (e: IllegalStateException) {
-            null
-        } catch (e: SecurityException) {
-            logger.w(e) { "Optional model '${model.id}' failed verification; running without it" }
-            null
-        }
 
         /**
          * Every legitimate model name is a single path segment: a catalog
@@ -188,46 +160,6 @@ class WhisperModelProvider(
             }
             return installer.installedFile(model).absolutePath
         }
-        /**
-         * The catalog entry a download or resolve may target: a speech
-         * model, or the detector by its own id so the background download
-         * job fetches it through the same verified path; null for anything
-         * else, since there is no pin to verify such a download against.
-         */
-        internal fun catalogModelForDownload(modelId: String): WhisperModel? =
-            WhisperModelCatalog.byId(modelId) ?: WhisperModelCatalog.VAD_MODEL.takeIf { it.id == modelId }
-
-        /**
-         * Resolves [model] through [resolveVerifiedModelPath] under its own
-         * mutex and, on the download path, brings [detector] along under
-         * the detector's mutex, so a fresh install never dictates without
-         * trimming; a detector failure never fails the model the user asked
-         * for. Static so the orchestration is under host tests with a mock
-         * installer.
-         */
-        internal suspend fun resolveModelWithDetector(
-            installer: ModelFileInstaller,
-            loadVerified: MutableMap<String, Boolean>,
-            model: WhisperModel,
-            allowReinstall: Boolean,
-            detector: WhisperModel = WhisperModelCatalog.VAD_MODEL,
-        ): String {
-            val path = mutexFor(model.id).withLock {
-                resolveVerifiedModelPath(installer, loadVerified, model, allowReinstall)
-            }
-            if (allowReinstall && model.id != detector.id) {
-                try {
-                    mutexFor(detector.id).withLock {
-                        resolveVerifiedModelPath(installer, loadVerified, detector, allowReinstall = true)
-                    }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    logger.w(e) { "Voice activity detector install failed; dictation runs without it" }
-                }
-            }
-            return path
-        }
     }
 
     private val modelsDir: File get() = context.filesDir.resolve("models").also { it.mkdirs() }
@@ -249,19 +181,12 @@ class WhisperModelProvider(
      * against.
      */
     override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = withContext(Dispatchers.IO) {
-        val model = catalogModelForDownload(modelId)
+        val model = WhisperModelCatalog.byId(modelId)
             ?: throw IllegalStateException("No catalog entry for model '$modelId'; refusing to download")
-        resolveModelWithDetector(installer, loadVerified, model, allowReinstall)
-    }
-
-    override suspend fun getVadModelPath(): String? = withContext(Dispatchers.IO) {
-        mutexFor(WhisperModelCatalog.VAD_MODEL.id).withLock {
-            resolveOptionalModelPath(installer, loadVerified, WhisperModelCatalog.VAD_MODEL)
+        mutexFor(model.id).withLock {
+            resolveVerifiedModelPath(installer, loadVerified, model, allowReinstall)
         }
     }
-
-    override fun isVadModelInstalled(): Boolean =
-        isInstalledShapeIn(modelsDir, WhisperModelCatalog.VAD_MODEL)
 
     override suspend fun getSTTModelPath(): String =
         getModelPath(configuredModelId() ?: recommendedDefault().id)
@@ -276,7 +201,7 @@ class WhisperModelProvider(
         return isInstalledShapeIn(modelsDir, model)
     }
 
-    // Raw directory view (minus staging and the detector): includes stale
+    // Raw directory view (minus staging): includes stale
     // engine models on purpose so they stay visible to the sweep and
     // deletable in the UI.
     override fun getDownloadedModels(): List<String> = modelDirNamesIn(modelsDir)

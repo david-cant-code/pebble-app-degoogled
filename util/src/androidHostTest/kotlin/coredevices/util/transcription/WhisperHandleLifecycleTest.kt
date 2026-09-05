@@ -74,9 +74,6 @@ class WhisperHandleLifecycleTest {
                 nextHandle - 1
             }
 
-            override fun vadInit(modelPath: String): Long = 0L
-            override fun vadFree(handle: Long) {}
-
             override fun transcribe(
                 handle: Long,
                 pcm: FloatArray,
@@ -84,7 +81,6 @@ class WhisperHandleLifecycleTest {
                 language: String?,
                 callId: Long,
                 placement: coredevices.whisper.EnginePlacement,
-                vadHandle: Long,
                 stats: coredevices.whisper.TranscribeStats?,
             ): String {
                 if (pcm.all { it == 0f }) {

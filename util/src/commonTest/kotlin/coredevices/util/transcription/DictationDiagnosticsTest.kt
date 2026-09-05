@@ -47,10 +47,9 @@ class DictationDiagnosticsTest {
             speechSeconds = 2.0,
             decodeMillis = 1234,
             outcome = "ok",
-            vad = true,
         )
         assertEquals(
-            "dictation engine: model=whisper-base-en vad=on threads=4 allowedCpus=8 " +
+            "dictation engine: model=whisper-base-en threads=4 allowedCpus=8 " +
                 "cpuset=/foreground importance=125 audioSec=3.46 speechSec=2.00 decodeMs=1234 outcome=ok",
             line,
         )
@@ -66,10 +65,9 @@ class DictationDiagnosticsTest {
             speechSeconds = null,
             decodeMillis = 0,
             outcome = "error:IllegalStateException",
-            vad = false,
         )
         assertEquals(
-            "dictation engine: model=? vad=off threads=1 allowedCpus=? cpuset=? importance=? " +
+            "dictation engine: model=? threads=1 allowedCpus=? cpuset=? importance=? " +
                 "audioSec=15.00 speechSec=? decodeMs=0 outcome=error:IllegalStateException",
             line,
         )
