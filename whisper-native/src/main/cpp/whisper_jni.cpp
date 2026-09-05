@@ -240,6 +240,10 @@ bool trim_to_speech(whisper_vad_context *vctx, const float *samples, int n_sampl
 // than carved from the context per call (ggml_graph_compute_with_ctx
 // allocates a new one on every call, which would exhaust any fixed budget
 // inside the timing loop).
+// Fallback for a non-positive thread count; the Kotlin side always sends
+// a positive one, so this only ever serves a direct native caller.
+constexpr int kDefaultThreads = 4;
+
 constexpr int kBenchState  = 512;   // base model width
 constexpr int kBenchHeads  = 8;
 constexpr int kBenchCtx    = 512;   // frames (a multiple of 256, as the engine pads to)
@@ -364,6 +368,13 @@ int64_t run_benchmark(int n_threads) {
         ggml_free(mctx);
     }
 
+    // The shim's one large, variable-size allocation (tens of MB, sized
+    // from the dry build above), and the one with a caller that has a
+    // failure contract: the estimator keeps its last score. Every other
+    // allocation here and in the engine it calls is unguarded on purpose:
+    // they are small or fixed, whisper_full allocates far more inside
+    // code this file cannot wrap, and a process refused a sub-MB block
+    // aborts either way.
     std::vector<uint8_t> data, work;
     try {
         data.resize(data_bytes);
@@ -488,7 +499,7 @@ Java_coredevices_whisper_WhisperJNI_nativeBenchmark(JNIEnv *, jclass, jint n_thr
     install_log_bridge();
     // Same placement as a decode, so the score reflects where dictation runs.
     ScopedPlacement placement(cpu_mask, nice_value);
-    return run_benchmark(n_threads > 0 ? n_threads : 4);
+    return run_benchmark(n_threads > 0 ? n_threads : kDefaultThreads);
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL
@@ -562,7 +573,7 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
     }
 
     whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-    params.n_threads       = n_threads > 0 ? n_threads : 4;
+    params.n_threads       = n_threads > 0 ? n_threads : kDefaultThreads;
     params.language        = lang;
     params.translate       = false;
     params.no_timestamps   = true;  // dictation wants plain text

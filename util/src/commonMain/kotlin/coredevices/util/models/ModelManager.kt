@@ -35,6 +35,10 @@ class ModelManager(
         return modelDownloadManager.downloadSTTModel(modelInfo, allowMetered)
     }
 
+    /** Fetches the voice activity detector through the same verified, notification-visible job a speech model uses. */
+    fun downloadDetector(allowMetered: Boolean): Boolean =
+        downloadSTTModel(modelInfoFor(WhisperModelCatalog.VAD_MODEL), allowMetered)
+
     fun cancelDownload() {
         modelDownloadManager.cancelDownload()
     }
@@ -87,6 +91,20 @@ class ModelManager(
     )
 
     companion object {
+        private const val MIB = 1024L * 1024L
+
+        /**
+         * A catalog entry as the download job and the picker carry it. The
+         * size is rounded to the nearest MiB: the download job's traffic
+         * estimate reads it, and the detector's 885 KB would truncate to 0.
+         */
+        internal fun modelInfoFor(model: WhisperModel, estimatedWindowSeconds: Double? = null): ModelInfo = ModelInfo(
+            slug = model.id,
+            sizeInMB = ((model.sizeBytes + MIB / 2) / MIB).toInt(),
+            url = WhisperModelCatalog.urlFor(model),
+            estimatedWindowSeconds = estimatedWindowSeconds,
+        )
+
         /**
          * Catalog models actually installed and usable by the engine.
          * Static and provider-parameterized so the install filter stays
@@ -106,12 +124,7 @@ class ModelManager(
             score: SpeedScore? = null,
         ): List<ModelInfo> {
             val catalog = WhisperModelCatalog.MODELS.map { model ->
-                ModelInfo(
-                    slug = model.id,
-                    sizeInMB = (model.sizeBytes / (1024 * 1024)).toInt(),
-                    url = WhisperModelCatalog.urlFor(model),
-                    estimatedWindowSeconds = WhisperSpeedCalibration.estimateWindowSeconds(model.id, score),
-                )
+                modelInfoFor(model, WhisperSpeedCalibration.estimateWindowSeconds(model.id, score))
             }
             val stale = provider?.getDownloadedModels()
                 ?.filter { WhisperModelCatalog.byId(it) == null && !WhisperModelCatalog.isVadModelId(it) }

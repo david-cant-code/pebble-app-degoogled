@@ -14,11 +14,17 @@ actual val PLATFORM_MIN_TRANSCRIPTION_MEMORY_MB: Long = 20
 // platform inputs. The affinity mask is read at call time because it
 // changes with the process state (foreground service, background) during
 // a session; the per-core frequencies are static. Without a readable mask
-// the count falls back to the online-CPU count under the same cap.
+// the count falls back to the possible-CPU count under the same cap:
+// `Runtime.availableProcessors` on Android returns
+// `sysconf(_SC_NPROCESSORS_CONF)` (AOSP libcore
+// `ojluni/src/main/java/java/lang/Runtime.java`, `availableProcessors`),
+// which bionic serves from `/sys/devices/system/cpu/possible`
+// (`libc/bionic/sysinfo.cpp`, `get_nprocs_conf`): every CPU the kernel
+// could bring up, whether online or not, and never the affinity mask.
 actual fun transcriptionThreadCount(): Int {
     val allowed = readAllowedCpuIds()
     return if (allowed.isNullOrEmpty()) {
-        engineThreadCount(allowedCpus = null, onlineCpus = Runtime.getRuntime().availableProcessors())
+        engineThreadCount(allowedCpus = null, possibleCpus = Runtime.getRuntime().availableProcessors())
     } else {
         tieredThreadCount(allowed, cpuMaxFrequenciesKHz())
     }

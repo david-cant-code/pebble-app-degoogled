@@ -8,8 +8,8 @@ package coredevices.util.transcription
  * field is null when the platform could not answer, never a guess.
  *
  * @property allowedCpus number of CPUs in the process affinity mask; a
- *   restricted cpuset shrinks this below the online-CPU count that
- *   `availableProcessors` reports.
+ *   restricted cpuset shrinks this below the number of CPUs the phone
+ *   has.
  * @property cpuset the cgroup cpuset path the process sits in (for example
  *   `/top-app`, `/foreground`, `/background`).
  * @property importance the platform's process importance value at the time

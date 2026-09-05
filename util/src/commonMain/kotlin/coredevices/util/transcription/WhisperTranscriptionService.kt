@@ -542,7 +542,7 @@ class WhisperTranscriptionService internal constructor(
                         // trimmed to nothing and the engine's one-time
                         // setup would stay unpaid.
                         engine.transcribe(
-                            handle, silentPcm, transcriptionThreadCount(), "en", callId,
+                            handle, silentPcm, dictationThreadCount(sttConfig.value), "en", callId,
                             EnginePlacement.DEFAULT, vadHandle = 0L, stats = null,
                         )
                     }
@@ -616,10 +616,14 @@ class WhisperTranscriptionService internal constructor(
      * Called under [modelMutex]. An absent detector (an install predating
      * it, a fetch still running, or a failed one) means untrimmed decoding,
      * never a failed init: the provider answers null without downloading,
-     * and a load failure is logged and left for the next attempt.
+     * and a load failure is logged and left for the next attempt. The
+     * file check comes first because the provider's resolve takes the
+     * detector's own mutex, which its download job holds for the whole
+     * transfer, and this runs under [modelMutex] on every dictation.
      */
     private suspend fun loadDetectorIfMissing() {
         if (vadHandle != 0L) return
+        if (!modelProvider.isVadModelInstalled()) return
         val vadPath = try {
             modelProvider.getVadModelPath()
         } catch (e: Exception) {

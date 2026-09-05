@@ -2,11 +2,12 @@ package coredevices.util.transcription
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 /**
- * Pins the thread-count policy: the affinity mask wins over the online
+ * Pins the thread-count policy: the affinity mask wins over the possible
  * count, the bound holds in both directions, an unreadable mask falls
- * back to the online count instead of to a fixed guess, and the tiered
+ * back to the possible count instead of to a fixed guess, and the tiered
  * rule reproduces the fastest measured configuration on the two test
  * chips' core sets.
  */
@@ -24,23 +25,23 @@ class TranscriptionThreadsTest {
     )
 
     @Test
-    fun maskWinsOverOnlineCount() {
-        assertEquals(4, engineThreadCount(allowedCpus = 4, onlineCpus = 8))
-        assertEquals(2, engineThreadCount(allowedCpus = 2, onlineCpus = 8))
+    fun maskWinsOverPossibleCount() {
+        assertEquals(4, engineThreadCount(allowedCpus = 4, possibleCpus = 8))
+        assertEquals(2, engineThreadCount(allowedCpus = 2, possibleCpus = 8))
     }
 
     @Test
     fun boundedAboveAndBelow() {
-        assertEquals(MAX_ENGINE_THREADS, engineThreadCount(allowedCpus = 12, onlineCpus = 12))
-        assertEquals(MAX_ENGINE_THREADS, engineThreadCount(allowedCpus = null, onlineCpus = 16))
-        assertEquals(1, engineThreadCount(allowedCpus = 1, onlineCpus = 8))
-        assertEquals(1, engineThreadCount(allowedCpus = null, onlineCpus = 0))
+        assertEquals(MAX_ENGINE_THREADS, engineThreadCount(allowedCpus = 12, possibleCpus = 12))
+        assertEquals(MAX_ENGINE_THREADS, engineThreadCount(allowedCpus = null, possibleCpus = 16))
+        assertEquals(1, engineThreadCount(allowedCpus = 1, possibleCpus = 8))
+        assertEquals(1, engineThreadCount(allowedCpus = null, possibleCpus = 0))
     }
 
     @Test
-    fun unreadableOrEmptyMaskFallsBackToOnlineCount() {
-        assertEquals(3, engineThreadCount(allowedCpus = null, onlineCpus = 3))
-        assertEquals(3, engineThreadCount(allowedCpus = 0, onlineCpus = 3))
+    fun unreadableOrEmptyMaskFallsBackToPossibleCount() {
+        assertEquals(3, engineThreadCount(allowedCpus = null, possibleCpus = 3))
+        assertEquals(3, engineThreadCount(allowedCpus = 0, possibleCpus = 3))
     }
 
     @Test
@@ -71,9 +72,8 @@ class TranscriptionThreadsTest {
         // No frequency readings: the allowed count under the cap.
         assertEquals(3, tieredThreadCount(listOf(0, 1, 2), emptyMap()))
         assertEquals(MAX_ENGINE_THREADS, tieredThreadCount((0..7).toList(), emptyMap()))
-        // No mask at all: a single thread rather than a guess.
-        assertEquals(1, tieredThreadCount(null, fourTwoTwo))
-        assertEquals(1, tieredThreadCount(emptyList(), fourTwoTwo))
+        // An unreadable mask is the caller's fallback, never a silent count.
+        assertFailsWith<IllegalArgumentException> { tieredThreadCount(emptyList(), fourTwoTwo) }
     }
 
     @Test

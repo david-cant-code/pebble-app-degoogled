@@ -29,7 +29,10 @@ internal fun readAllowedCpuIds(): List<Int>? = runCatching {
 
 // Maximum frequency per CPU from sysfs, read once: the values are static
 // hardware facts, and the file is world-readable on the devices that
-// matter. A CPU whose file cannot be read is simply absent from the map.
+// matter. The id range is the possible-CPU count (see the Android
+// transcriptionThreadCount for what availableProcessors reports), so every
+// id an affinity mask can name is covered. A CPU whose file cannot be read
+// is simply absent from the map.
 private val cpuMaxFrequencies: Map<Int, Long> by lazy {
     val cpus = Runtime.getRuntime().availableProcessors()
     (0 until cpus).mapNotNull { cpu ->
@@ -39,7 +42,7 @@ private val cpuMaxFrequencies: Map<Int, Long> by lazy {
     }.toMap()
 }
 
-/** Maximum frequency in kHz per online CPU id, empty when sysfs is unreadable. */
+/** Maximum frequency in kHz per possible CPU id, empty when sysfs is unreadable. */
 internal fun cpuMaxFrequenciesKHz(): Map<Int, Long> = cpuMaxFrequencies
 
 private fun readCpuset(): String? = runCatching {

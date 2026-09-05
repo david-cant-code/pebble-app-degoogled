@@ -377,11 +377,12 @@ The replacement is whisper.cpp (MIT), compiled from source:
   padding around speech) so word edges survive the cut. The warm-up
   bypasses the detector.
 - The engine thread count follows the cores the process can actually
-  run on, not the online count: ggml's workers synchronize on spinning
-  barriers, so a count above the usable cores stalls every barrier for a
-  scheduler slice and a decode that takes a second takes half a minute
-  (measured on two chips; `TranscriptionThreads` holds the numbers'
-  conclusions). The count is read at call time from the process affinity
+  run on, not the phone's CPU count: ggml's workers synchronize on
+  spinning barriers (sourced at `MAX_ENGINE_THREADS` in
+  `TranscriptionThreads`), so a count above the usable cores stalls
+  every barrier for a scheduler slice and a decode that takes a second
+  takes half a minute (measured on two chips; `TranscriptionThreads`
+  holds the numbers' conclusions). The count is read at call time from the process affinity
   mask, since a process that leaves the screen lands in a smaller cpuset
   on every phone tried, and sized by the fastest frequency tier in that
   mask (`tieredThreadCount`), capped at four. The engine binding carries

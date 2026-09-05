@@ -9,6 +9,7 @@ import coredevices.util.models.prefersEnglishModels
 import coredevices.util.models.totalRamBytes
 import coredevices.util.transcription.CactusModelPathProvider
 import io.ktor.client.HttpClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -186,6 +187,46 @@ class WhisperModelProvider(
             }
             return installer.installedFile(model).absolutePath
         }
+        /**
+         * The catalog entry a download or resolve may target: a speech
+         * model, or the detector by its own id so the background download
+         * job fetches it through the same verified path; null for anything
+         * else, since there is no pin to verify such a download against.
+         */
+        internal fun catalogModelForDownload(modelId: String): WhisperModel? =
+            WhisperModelCatalog.byId(modelId) ?: WhisperModelCatalog.VAD_MODEL.takeIf { it.id == modelId }
+
+        /**
+         * Resolves [model] through [resolveVerifiedModelPath] under its own
+         * mutex and, on the download path, brings [detector] along under
+         * the detector's mutex, so a fresh install never dictates without
+         * trimming; a detector failure never fails the model the user asked
+         * for. Static so the orchestration is under host tests with a mock
+         * installer.
+         */
+        internal suspend fun resolveModelWithDetector(
+            installer: ModelFileInstaller,
+            loadVerified: MutableMap<String, Boolean>,
+            model: WhisperModel,
+            allowReinstall: Boolean,
+            detector: WhisperModel = WhisperModelCatalog.VAD_MODEL,
+        ): String {
+            val path = mutexFor(model.id).withLock {
+                resolveVerifiedModelPath(installer, loadVerified, model, allowReinstall)
+            }
+            if (allowReinstall && model.id != detector.id) {
+                try {
+                    mutexFor(detector.id).withLock {
+                        resolveVerifiedModelPath(installer, loadVerified, detector, allowReinstall = true)
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logger.w(e) { "Voice activity detector install failed; dictation runs without it" }
+                }
+            }
+            return path
+        }
     }
 
     private val modelsDir: File get() = context.filesDir.resolve("models").also { it.mkdirs() }
@@ -207,27 +248,9 @@ class WhisperModelProvider(
      * against.
      */
     override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = withContext(Dispatchers.IO) {
-        // The detector resolves by its own id so the background download
-        // job can fetch it through the same verified path as a speech model.
-        val model = WhisperModelCatalog.byId(modelId)
-            ?: WhisperModelCatalog.VAD_MODEL.takeIf { it.id == modelId }
+        val model = catalogModelForDownload(modelId)
             ?: throw IllegalStateException("No catalog entry for model '$modelId'; refusing to download")
-        val path = mutexFor(model.id).withLock {
-            resolveVerifiedModelPath(installer, loadVerified, model, allowReinstall)
-        }
-        // A speech model download brings the detector along, so a fresh
-        // install never dictates without silence trimming; a detector
-        // failure must not fail the model the user asked for.
-        if (allowReinstall && !WhisperModelCatalog.isVadModelId(model.id)) {
-            try {
-                mutexFor(WhisperModelCatalog.VAD_MODEL.id).withLock {
-                    resolveVerifiedModelPath(installer, loadVerified, WhisperModelCatalog.VAD_MODEL, allowReinstall = true)
-                }
-            } catch (e: Exception) {
-                logger.w(e) { "Voice activity detector install failed; dictation runs without it" }
-            }
-        }
-        path
+        resolveModelWithDetector(installer, loadVerified, model, allowReinstall)
     }
 
     override suspend fun getVadModelPath(): String? = withContext(Dispatchers.IO) {

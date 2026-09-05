@@ -19,7 +19,6 @@ import coredevices.pebble.account.FirestoreLocker
 import coredevices.pebble.health.PlatformHealthSync
 import coredevices.pebble.services.PebbleAccountProvider
 import coredevices.pebble.weather.WeatherFetcher
-import coredevices.util.models.ModelInfo
 import coredevices.util.models.ModelManager
 import coredevices.util.models.WhisperModelCatalog
 import coredevices.util.CoreConfig
@@ -197,12 +196,7 @@ class CommonAppDelegate(
         // networks only (885 KB, no consent prompt of its own).
         try {
             if (vadDownloadNeeded(modelProvider)) {
-                val modelManager = org.koin.mp.KoinPlatform.getKoin().get<ModelManager>()
-                val vad = WhisperModelCatalog.VAD_MODEL
-                modelManager.downloadSTTModel(
-                    ModelInfo(slug = vad.id, sizeInMB = 1, url = WhisperModelCatalog.urlFor(vad)),
-                    allowMetered = false,
-                )
+                org.koin.mp.KoinPlatform.getKoin().get<ModelManager>().downloadDetector(allowMetered = false)
             }
         } catch (e: Exception) {
             logger.w(e) { "Voice activity detector download not scheduled" }
