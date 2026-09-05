@@ -23,8 +23,9 @@ import kotlin.time.Instant
  * Pins the voice activity detector's lifecycle in [WhisperTranscriptionService]
  * through the engine seam: loaded once alongside the first model init when
  * the provider has the file, handed to every real transcription and never
- * to the warm-up, and simply absent (untrimmed decoding, no failure) when
- * the provider has nothing.
+ * to the warm-up, simply absent (untrimmed decoding, no failure) when the
+ * provider has nothing, and picked up by the next transcription once an
+ * install that finished after the model init has put the file in place.
  */
 class WhisperVadLifecycleTest {
 
@@ -63,7 +64,7 @@ class WhisperVadLifecycleTest {
         }
     }
 
-    private class FakeProvider(private val vadPath: String?) : CactusModelPathProvider {
+    private class FakeProvider(@Volatile var vadPath: String?) : CactusModelPathProvider {
         override suspend fun getSTTModelPath(): String = "/fake/model"
         override suspend fun getLMModelPath(): String = error("no language model")
         override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = "/fake/$modelId"
@@ -86,11 +87,11 @@ class WhisperVadLifecycleTest {
         override fun updateRingLifetimeCollectionCount(serial: String, count: Int) {}
     }
 
-    private fun serviceWith(fake: FakeEngine, vadPath: String?) = WhisperTranscriptionService(
+    private fun serviceWith(fake: FakeEngine, provider: FakeProvider) = WhisperTranscriptionService(
         coreConfigFlow = CoreConfigFlow(
             MutableStateFlow(CoreConfig(sttConfig = STTConfig(mode = CactusSTTMode.LocalOnly, modelName = "model-a"))),
         ),
-        modelProvider = FakeProvider(vadPath),
+        modelProvider = provider,
         analytics = NoopAnalytics,
         inferenceBoost = NoOpInferenceBoost(),
         engine = fake.engine,
@@ -109,7 +110,7 @@ class WhisperVadLifecycleTest {
     @Test
     fun detectorLoadsWithTheModelAndReachesEveryRealTranscription() = runBlocking(Dispatchers.Default) {
         val fake = FakeEngine()
-        val service = serviceWith(fake, vadPath = "/fake/vad-silero/ggml-silero.bin")
+        val service = serviceWith(fake, FakeProvider("/fake/vad-silero/ggml-silero.bin"))
         awaitUntil("model init") { service.isModelReady }
         awaitUntil("detector init") { service.isVadReady }
         assertEquals(listOf("/fake/vad-silero/ggml-silero.bin"), fake.vadInits)
@@ -124,12 +125,30 @@ class WhisperVadLifecycleTest {
     @Test
     fun absentDetectorMeansUntrimmedDecodingNotFailure() = runBlocking(Dispatchers.Default) {
         val fake = FakeEngine()
-        val service = serviceWith(fake, vadPath = null)
+        val service = serviceWith(fake, FakeProvider(null))
         awaitUntil("model init") { service.isModelReady }
         delay(200)
         assertFalse(service.isVadReady)
         assertEquals("hello world", service.transcribeLocal(realPcmBytes(), sampleRate = 16_000))
         assertEquals(listOf(0L), fake.transcribeVadHandles)
         assertTrue(fake.vadInits.isEmpty())
+    }
+
+    @Test
+    fun detectorInstalledAfterTheModelIsLoadedByTheNextTranscription() = runBlocking(Dispatchers.Default) {
+        val fake = FakeEngine()
+        val provider = FakeProvider(null)
+        val service = serviceWith(fake, provider)
+        awaitUntil("model init") { service.isModelReady }
+        delay(200)
+        assertFalse(service.isVadReady)
+        assertEquals("hello world", service.transcribeLocal(realPcmBytes(), sampleRate = 16_000))
+        assertEquals(listOf(0L), fake.transcribeVadHandles, "no detector yet: untrimmed")
+
+        provider.vadPath = "/fake/vad-silero/ggml-silero.bin"
+        assertEquals("hello world", service.transcribeLocal(realPcmBytes(), sampleRate = 16_000))
+        assertTrue(service.isVadReady)
+        assertEquals(listOf("/fake/vad-silero/ggml-silero.bin"), fake.vadInits)
+        assertEquals(listOf(0L, 7L), fake.transcribeVadHandles, "the late detector reaches the next transcription")
     }
 }

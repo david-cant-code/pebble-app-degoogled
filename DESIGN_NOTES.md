@@ -332,8 +332,9 @@ The replacement is whisper.cpp (MIT), compiled from source:
   code is never used for a local decode, since the watch renders it as
   "No internet connection".
 - The shim owns a Silero voice activity detector context (the catalog's
-  `VAD_MODEL`, loaded by the service when installed) and cuts each
-  dictation to the span from its first speech segment to its last
+  `VAD_MODEL`, loaded by the service when installed, or by the next
+  dictation when the install finishes after the model init) and cuts
+  each dictation to the span from its first speech segment to its last
   before `whisper_full`. The detector's verdict never decides a
   dictation: when it finds no speech, or fails, the untrimmed audio is
   decoded, and interior gaps are never cut, because watch microphone

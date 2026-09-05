@@ -596,25 +596,31 @@ class WhisperTranscriptionService internal constructor(
                 val initDuration = Clock.System.now() - start
                 logger.d { "Whisper STT model initialized in $initDuration" }
             }
-            if (vadHandle == 0L) {
-                // Absent detector (an install predating it, or a failed
-                // fetch) means untrimmed decoding, never a failed init: the
-                // provider answers null without downloading, and a load
-                // failure is logged and left for the next init.
-                val vadPath = try {
-                    modelProvider.getVadModelPath()
-                } catch (e: Exception) {
-                    logger.w(e) { "Voice activity detector unavailable; decoding untrimmed" }
-                    null
-                }
-                if (vadPath != null) {
-                    try {
-                        vadHandle = engine.vadInit(vadPath)
-                        logger.d { "Voice activity detector initialized" }
-                    } catch (e: Exception) {
-                        logger.w(e) { "Voice activity detector failed to load; decoding untrimmed" }
-                    }
-                }
+            loadDetectorIfMissing()
+        }
+    }
+
+    /**
+     * Loads the detector when none is held and the provider has the file.
+     * Called under [modelMutex]. An absent detector (an install predating
+     * it, a fetch still running, or a failed one) means untrimmed decoding,
+     * never a failed init: the provider answers null without downloading,
+     * and a load failure is logged and left for the next attempt.
+     */
+    private suspend fun loadDetectorIfMissing() {
+        if (vadHandle != 0L) return
+        val vadPath = try {
+            modelProvider.getVadModelPath()
+        } catch (e: Exception) {
+            logger.w(e) { "Voice activity detector unavailable; decoding untrimmed" }
+            null
+        }
+        if (vadPath != null) {
+            try {
+                vadHandle = engine.vadInit(vadPath)
+                logger.d { "Voice activity detector initialized" }
+            } catch (e: Exception) {
+                logger.w(e) { "Voice activity detector failed to load; decoding untrimmed" }
             }
         }
     }
@@ -665,6 +671,12 @@ class WhisperTranscriptionService internal constructor(
             }
         }
         withTimeout(initTimeout) { initJob?.join() }
+        // The detector's install can finish after the model came up (both
+        // start on a fresh install), so a dictation re-checks for it rather
+        // than waiting for the next model change to run the init path.
+        if (modelHandle != 0L && vadHandle == 0L) {
+            modelMutex.withLock { loadDetectorIfMissing() }
+        }
     }
 
     private suspend fun <T> withMaybeTimeout(timeout: Duration?, block: suspend () -> T): T {
