@@ -33,6 +33,16 @@ fun debugSubstituteClip(substituteAudio: Boolean, debugBuild: Boolean): ByteArra
     if (substituteAudio && debugBuild) debugDictationClip() else null
 
 /**
+ * Whether the capture directory must be emptied on a config emission:
+ * whenever the hook is not on and was not already known to be off, so
+ * the captures go when the toggle is turned off, and once at start in a
+ * build that cannot honour the hook (a debug install's captures survive
+ * into a release install of the same package). [wasOn] is null on the
+ * first emission.
+ */
+fun captureDumpShouldClear(wasOn: Boolean?, on: Boolean): Boolean = !on && wasOn != false
+
+/**
  * Archives the watch's codec frames for one dictation when the capture
  * dump hook is on in a debug build; a no-op otherwise. Lives beside the
  * decoded-audio dump so the two files of one dictation share a stamp.

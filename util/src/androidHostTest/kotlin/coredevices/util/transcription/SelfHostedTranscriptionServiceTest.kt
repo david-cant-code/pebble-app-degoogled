@@ -25,13 +25,15 @@ import java.io.IOException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
  * The server client against a mock engine: the request shape both server
- * families read, the bearer header, and the mapping of each failure onto
- * the exception the router acts on.
+ * families read, the bearer header, the mapping of each failure onto the
+ * exception the router acts on (with the server's address kept out of
+ * it), the bound on a reply, and the connection test's own client.
  */
 class SelfHostedTranscriptionServiceTest {
 
@@ -132,6 +134,39 @@ class SelfHostedTranscriptionServiceTest {
 
         val insecure = Harness(url = "http://stt.example.net/inference") { respond(jsonOk("x"), HttpStatusCode.OK) }
         assertEquals(false, insecure.service.isAvailable())
+    }
+
+    @Test
+    fun transportFailuresReachTheRouterWithoutTheServersAddress() = runBlocking {
+        val h = Harness { throw java.net.ConnectException("Failed to connect to stt.example.net/10.0.0.5:443") }
+        val error = assertFailsWith<TranscriptionException.TranscriptionNetworkError> { h.transcribe() }
+        val printed = error.stackTraceToString()
+        assertFalse(printed.contains("example.net"), printed)
+        assertFalse(printed.contains("10.0.0.5"), printed)
+        assertEquals("connection refused", error.cause?.message)
+    }
+
+    @Test
+    fun anOversizedReplyIsRefusedAsAServiceError(): Unit = runBlocking {
+        val declared = Harness { respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentLength, "1000000")) }
+        assertTrue(assertFailsWith<TranscriptionException.TranscriptionServiceError> { declared.transcribe() }.message!!.contains("too large"))
+
+        val undeclared = Harness { respond(jsonOk("a ".repeat(SelfHostedTranscriptionService.MAX_REPLY_BYTES)), HttpStatusCode.OK) }
+        assertTrue(assertFailsWith<TranscriptionException.TranscriptionServiceError> { undeclared.transcribe() }.message!!.contains("too large"))
+
+        // At the bound the reply is still read in full.
+        val padding = " ".repeat(SelfHostedTranscriptionService.MAX_REPLY_BYTES - jsonOk("ok").length)
+        val atTheBound = Harness { respond(jsonOk("ok") + padding, HttpStatusCode.OK) }
+        assertEquals("ok", atTheBound.transcribe().text)
+    }
+
+    @Test
+    fun theConnectionTestRunsOnItsOwnClient() = runBlocking {
+        val h = Harness { respond(jsonOk("ok"), HttpStatusCode.OK) }
+        h.transcribe()
+        h.service.testConnection("https://stt.example.net/inference", model = null, token = null)
+        h.transcribe()
+        assertEquals(listOf("stt.example.net:443", "stt.example.net:443"), h.hostPorts, "one cached client for dictation, one per test")
     }
 
     @Test

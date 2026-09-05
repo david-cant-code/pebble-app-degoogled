@@ -54,14 +54,36 @@ internal fun serverTestStatusText(status: Int): String = when (status) {
 }
 
 /**
+ * The token a request from the dialog carries, and the one kept on save:
+ * the typed one, else the saved one only while [hostPort] is the host and
+ * port it was saved with. A token is a credential for one server, so an
+ * edited URL never carries it to another.
+ */
+internal fun effectiveServerToken(typed: String, clearToken: Boolean, saved: String?, savedHostPort: String?, hostPort: String?): String? = when {
+    clearToken -> null
+    typed.isNotBlank() -> typed.trim()
+    saved != null && hostPort != null && hostPort == savedHostPort -> saved
+    else -> null
+}
+
+/** The token field's label: whether a saved token exists, and whether it applies to the host and port typed. */
+internal fun tokenFieldLabel(typed: String, clearToken: Boolean, hasSaved: Boolean, savedHostPort: String?, hostPort: String?): String = when {
+    typed.isNotBlank() || clearToken || !hasSaved -> "Bearer token (optional)"
+    hostPort == savedHostPort -> "Bearer token (saved; type to replace)"
+    else -> "Bearer token (the saved one stays with the previous server)"
+}
+
+/**
  * Configures the self-hosted transcription server: URL, optional model
  * name and bearer token, and the certificate trust. "Test connection"
  * first probes the TLS certificate; one the platform does not trust is
  * shown by fingerprint for the user to compare with the server's own
  * before it is pinned, and a pinned certificate that changed is called
  * out as such. Only then is a request sent, so a wrong token or path is
- * found before saving. Saving an empty URL removes the server and drops
- * its token and pin.
+ * found before saving. The saved token belongs to the host and port it
+ * was saved with: a URL edited to another server is tested and saved
+ * without it unless a new one is typed. Saving an empty URL removes the
+ * server and drops its token and pin.
  */
 @Composable
 fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
@@ -84,13 +106,10 @@ fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
 
     val urlProblem = validateServerUrl(url).takeUnless { it == ServerUrlProblem.Empty }
     val hostPort = serverHostPort(url)
+    val savedHostPort = remember { initial.serverUrl?.let(::serverHostPort) }
     val pinned = remember(hostPort, pinVersion) { hostPort?.let { store.pinnedFingerprint(it) } }
 
-    fun effectiveToken(): String? = when {
-        clearToken -> null
-        token.isNotBlank() -> token.trim()
-        else -> store.token()
-    }
+    fun effectiveToken(): String? = effectiveServerToken(token, clearToken, store.token(), savedHostPort, hostPort)
 
     fun runRequestTest() {
         scope.launch {
@@ -153,11 +172,8 @@ fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
                 ),
             ),
         )
-        when {
-            clearToken || cleaned == null -> store.setToken(null)
-            token.isNotBlank() -> store.setToken(token)
-        }
-        if (cleaned == null) initial.serverUrl?.let(::serverHostPort)?.let(store::forget)
+        store.setToken(effectiveServerToken(token, clearToken, store.token(), savedHostPort, cleaned?.let(::serverHostPort)))
+        if (cleaned == null) savedHostPort?.let(store::forget)
         onDismissRequest()
     }
 
@@ -200,12 +216,12 @@ fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
             OutlinedTextField(
                 value = token,
                 onValueChange = { token = it; clearToken = false },
-                label = { Text(if (hasStoredToken && !clearToken) "Bearer token (saved; type to replace)" else "Bearer token (optional)") },
+                label = { Text(tokenFieldLabel(token, clearToken, hasStoredToken, savedHostPort, hostPort)) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
             )
-            if (hasStoredToken && !clearToken) {
+            if (hasStoredToken && !clearToken && hostPort == savedHostPort) {
                 TextButton(onClick = { clearToken = true; token = "" }) { Text("Clear saved token") }
             }
             Spacer(Modifier.height(8.dp))

@@ -3,6 +3,8 @@ package coredevices.util
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class CoreConfigTest {
     private val json = Json { ignoreUnknownKeys = true }
@@ -33,6 +35,16 @@ class CoreConfigTest {
         val decoded = json.decodeFromString<CoreConfig>("""{"sttConfig":{"mode":"LocalOnly"}}""")
         assertEquals(null, decoded.sttConfig.serverUrl)
         assertEquals(null, decoded.sttConfig.serverModel)
+    }
+
+    @Test
+    fun sttConfigNeverPrintsTheServerUrl() {
+        val printed = STTConfig(serverUrl = "https://stt.example.net:8443/inference", serverModel = "whisper-1").toString()
+        assertFalse(printed.contains("example.net"), printed)
+        assertFalse(printed.contains("8443"), printed)
+        assertTrue(printed.contains("serverUrl=[set]"), printed)
+        assertTrue(printed.contains("mode=LocalOnly") && printed.contains("serverModel=whisper-1"), printed)
+        assertTrue(STTConfig().toString().contains("serverUrl=null"))
     }
 
     @Test

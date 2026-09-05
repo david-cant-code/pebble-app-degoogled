@@ -305,6 +305,9 @@ class WhisperTranscriptionService internal constructor(
     private val engine: WhisperEngine,
     // Fed after every successful dictation; null in tests that do not care.
     private val speedTracker: DictationSpeedTracker? = null,
+    // The build check behind the debug hooks and the capture clear, injected so host tests can drive both.
+    private val debugBuild: () -> Boolean = ::isDebugBuild,
+    private val clearCaptures: () -> Unit = { DictationCaptureDump.clear() },
 ) {
     /** Production entry point: the real native engine. */
     constructor(
@@ -374,12 +377,20 @@ class WhisperTranscriptionService internal constructor(
         initialValue = coreConfigFlow.value.sttConfig
     )
 
+    // Null until the first config emission; see captureDumpShouldClear.
+    private var captureDumpWasOn: Boolean? = null
+
     init {
         sttConfig.onEach {
             logger.i { "STT config changed: $it" }
             if (it.modelName != lastInitedModel) {
                 initJob = performInit()
             }
+            val captureDumpOn = it.debugCaptureDump && debugBuild()
+            if (captureDumpShouldClear(captureDumpWasOn, captureDumpOn)) {
+                withContext(Dispatchers.IO) { clearCaptures() }
+            }
+            captureDumpWasOn = captureDumpOn
         }.launchIn(scope)
     }
 
@@ -716,7 +727,7 @@ class WhisperTranscriptionService internal constructor(
                     // Debug-only hold after the decode: cancellable, so a
                     // caller's deadline still fires, and the result still
                     // completes afterwards, as a real overrun's would.
-                    val hold = debugDecodeDelay(sttConfig.value.debugSlowDecode, isDebugBuild())
+                    val hold = debugDecodeDelay(sttConfig.value.debugSlowDecode, debugBuild())
                     if (hold > Duration.ZERO) {
                         logger.w { "Debug slow-decode hook holding the result for $hold" }
                         delay(hold)
@@ -789,7 +800,7 @@ class WhisperTranscriptionService internal constructor(
             // Debug builds can archive the exact bytes the engine is about
             // to see; the write is fenced inside the dumper and cannot fail
             // the dictation.
-            if (sttConfig.value.debugCaptureDump && isDebugBuild()) {
+            if (sttConfig.value.debugCaptureDump && debugBuild()) {
                 withContext(Dispatchers.IO) { DictationCaptureDump.write(audio, sampleRate) }
             }
             val pcm = toEngineFloats(audio, sampleRate)

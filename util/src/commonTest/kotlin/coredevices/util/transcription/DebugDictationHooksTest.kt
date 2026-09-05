@@ -2,7 +2,9 @@ package coredevices.util.transcription
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlin.time.Duration
 
 /**
@@ -16,6 +18,15 @@ class DebugDictationHooksTest {
         assertEquals(DEBUG_SLOW_DECODE_DELAY, debugDecodeDelay(slowDecode = true, debugBuild = true))
         assertEquals(Duration.ZERO, debugDecodeDelay(slowDecode = true, debugBuild = false))
         assertEquals(Duration.ZERO, debugDecodeDelay(slowDecode = false, debugBuild = true))
+    }
+
+    @Test
+    fun capturesAreClearedWhenTheHookGoesOffAndOnceAtStartWhenItIsOff() {
+        assertTrue(captureDumpShouldClear(wasOn = null, on = false), "first emission with the hook off")
+        assertFalse(captureDumpShouldClear(wasOn = null, on = true))
+        assertTrue(captureDumpShouldClear(wasOn = true, on = false), "the toggle went off")
+        assertFalse(captureDumpShouldClear(wasOn = false, on = false), "already known to be off")
+        assertFalse(captureDumpShouldClear(wasOn = true, on = true))
     }
 
     @Test

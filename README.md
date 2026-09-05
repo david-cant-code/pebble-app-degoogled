@@ -131,11 +131,17 @@ With Caddy, for example, `stt.home.lan:8443 { tls stt-cert.pem
 stt-key.pem  reverse_proxy 127.0.0.1:8080 }`. On the first "Test
 connection" the app shows the certificate's SHA-256 fingerprint; compare
 it with the second command's output, and trust it. From then on the app
-accepts only that certificate for that host, and refuses if it changes
-until you confirm the new one. A certificate from a public CA, or from a
-CA you have installed on the phone, needs no confirmation. Avoid proxies
-that rotate short-lived certificates (Caddy's internal CA renews every
-12 hours by default): each rotation would ask you to confirm again.
+accepts only that certificate for that host and port, and refuses if it
+changes until you confirm the new one, even when the replacement comes
+from a CA the phone trusts. A certificate from a public CA, or from a
+CA you have installed on the phone, needs no confirmation as long as
+nothing is pinned for that host; to move a pinned server to such a
+certificate, tap "Forget trusted certificate" in the dialog first, after
+which renewals do not ask again. Avoid proxies that rotate short-lived
+certificates (Caddy's internal CA renews every 12 hours by default):
+each rotation would ask you to confirm again. The bearer token belongs
+to the server it was saved with: a URL edited to another host or port is
+tested and saved without it unless you type one.
 
 ## Building (Android)
 

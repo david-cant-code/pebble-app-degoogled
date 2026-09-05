@@ -10,7 +10,8 @@ import kotlin.test.assertNull
 /**
  * Pins the self-hosted server rules that carry security weight: the URL
  * policy, the trust-on-first-use decision, the fingerprint format the
- * user compares by eye, and the store's token and pin handling.
+ * user compares by eye, the store's token and pin handling, and the
+ * address-free wording of a transport failure.
  */
 class SelfHostedServerTest {
 
@@ -59,16 +60,40 @@ class SelfHostedServerTest {
     }
 
     @Test
-    fun trustIsPlatformFirstThenPinThenRefusal() {
+    fun aPinDecidesAloneAndPlatformTrustAppliesOnlyWithoutOne() {
         val a = "AA:BB"
         val b = "CC:DD"
         assertEquals(ServerTrust.Trusted, decideServerTrust(platformTrusted = true, pinned = null, presented = a))
-        assertEquals(ServerTrust.Trusted, decideServerTrust(platformTrusted = true, pinned = b, presented = a))
         assertEquals(ServerTrust.UnknownCertificate, decideServerTrust(platformTrusted = false, pinned = null, presented = a))
         assertEquals(ServerTrust.Trusted, decideServerTrust(platformTrusted = false, pinned = a, presented = a))
         assertEquals(ServerTrust.Trusted, decideServerTrust(platformTrusted = false, pinned = a.lowercase(), presented = a))
         assertEquals(ServerTrust.ChangedCertificate, decideServerTrust(platformTrusted = false, pinned = b, presented = a))
+        // A CA-issued certificate for the pinned host is the interception case, so the pin still refuses it.
+        assertEquals(ServerTrust.ChangedCertificate, decideServerTrust(platformTrusted = true, pinned = b, presented = a))
+        assertEquals(ServerTrust.Trusted, decideServerTrust(platformTrusted = true, pinned = a, presented = a))
     }
+
+    private class Refusal(override val fingerprint: String, override val changed: Boolean) : Exception(), ServerCertificateRefusal
+
+    @Test
+    fun transportFailuresAreDescribedWithoutTheAddress() {
+        val url = "https://stt.example.net:8443/inference"
+        assertEquals("timed out", describeTransportFailure(java.net.SocketTimeoutException("Read timed out [url=$url]")))
+        assertEquals("timed out", describeTransportFailure(Exception("Connect timeout has expired [url=$url]", ConnectTimeoutStandIn())))
+        assertEquals("host name not found", describeTransportFailure(java.net.UnknownHostException("Unable to resolve host \"stt.example.net\"")))
+        assertEquals("connection refused", describeTransportFailure(java.net.ConnectException("Failed to connect to stt.example.net/10.0.0.5:8443")))
+        assertEquals(
+            "certificate is not for this host",
+            describeTransportFailure(javax.net.ssl.SSLPeerUnverifiedException("Hostname stt.example.net not verified")),
+        )
+        assertEquals("TLS handshake failed", describeTransportFailure(javax.net.ssl.SSLHandshakeException("PKIX path building failed")))
+        // A refused certificate keeps its own words, wherever it sits in the cause chain.
+        val refused = javax.net.ssl.SSLHandshakeException("handshake").apply { initCause(Refusal("AA:BB", changed = true)) }
+        assertEquals("server certificate changed, SHA-256 AA:BB", describeTransportFailure(refused))
+        assertEquals("IOException", describeTransportFailure(java.io.IOException("unexpected end of stream on $url")))
+    }
+
+    private class ConnectTimeoutStandIn : Exception("Connect timeout has expired")
 
     @Test
     fun fingerprintMatchesTheOpensslLayout() {

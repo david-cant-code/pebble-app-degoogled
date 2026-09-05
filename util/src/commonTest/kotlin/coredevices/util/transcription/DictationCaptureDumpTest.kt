@@ -1,12 +1,18 @@
 package coredevices.util.transcription
 
+import kotlinx.io.buffered
+import kotlinx.io.files.Path
+import kotlinx.io.files.SystemFileSystem
+import kotlinx.io.files.SystemTemporaryDirectory
+import kotlinx.io.writeString
+import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 
 /**
- * Pins the WAV layout a replay tool will parse and the prune order that
- * keeps the newest captures.
+ * Pins the WAV layout a replay tool will parse, the prune order that
+ * keeps the newest captures, and the clear that leaves none.
  */
 class DictationCaptureDumpTest {
 
@@ -66,6 +72,19 @@ class DictationCaptureDumpTest {
         assertEquals(0, bytes.leShort(5))
         assertEquals(1, bytes.leShort(7))
         assertEquals(9, bytes[9].toInt())
+    }
+
+    @Test
+    fun clearDeletesEveryCaptureAndNothingElse() {
+        val directory = Path(SystemTemporaryDirectory, "captures-${Random.nextLong()}")
+        SystemFileSystem.createDirectories(directory)
+        for (name in listOf("dictation-1700000000001.wav", "dictation-1700000000002.wav", "dictation-1700000000001.spx", "notes.txt")) {
+            SystemFileSystem.sink(Path(directory, name)).buffered().use { it.writeString("x") }
+        }
+        DictationCaptureDump.clear(directory)
+        assertEquals(listOf("notes.txt"), SystemFileSystem.list(directory).map { it.name })
+        // A directory that never existed is not an error.
+        DictationCaptureDump.clear(Path(directory, "missing"))
     }
 
     @Test

@@ -4,7 +4,6 @@ import java.security.cert.CertificateException
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLSession
-import javax.net.ssl.X509TrustManager
 import javax.security.cert.Certificate
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -13,11 +12,13 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * The TLS glue behind trust on first use, on two self-signed test
- * certificates (fixtures under resources/selfhosted, with the fingerprints
- * openssl printed for them): refusal with the fingerprint when unpinned,
- * acceptance once pinned, the "changed" refusal when the pin differs, and
- * the pin standing in for the host name.
+ * The trust manager and host-name verifier behind trust on first use, on
+ * two self-signed test certificates (fixtures under resources/selfhosted,
+ * with the fingerprints openssl printed for them): refusal with the
+ * fingerprint when unpinned, acceptance once pinned, the "changed" refusal
+ * when the pin differs (a platform-trusted replacement included), and the
+ * pin standing in for the host name. The client and probe built on them
+ * are driven against a local TLS server in SelfHostedTlsGlueTest.
  */
 class PinningTrustManagerTest {
 
@@ -31,19 +32,22 @@ class PinningTrustManagerTest {
             it.readBytes().decodeToString().trim()
         }
 
-    /** A platform that trusts nothing, which is what a self-signed certificate meets. */
-    private val distrusting = object : X509TrustManager {
-        override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) =
+    /** A platform that trusts nothing and matches no name, which is what a self-signed certificate meets. */
+    private val distrusting = object : PlatformServerTrust {
+        override val acceptedIssuers: Array<X509Certificate> = emptyArray()
+        override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String, host: String) =
             throw CertificateException("unknown issuer")
-        override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
-        override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+        override fun verifyHostname(host: String, session: SSLSession): Boolean = false
     }
 
-    private val trusting = object : X509TrustManager {
-        override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) = Unit
-        override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
-        override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+    /** A platform that trusts every chain for every name: a CA-issued certificate for the dialled host. */
+    private val trusting = object : PlatformServerTrust {
+        override val acceptedIssuers: Array<X509Certificate> = emptyArray()
+        override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String, host: String) = Unit
+        override fun verifyHostname(host: String, session: SSLSession): Boolean = true
     }
+
+    private val host = "10.0.0.5"
 
     @Test
     fun fingerprintMatchesWhatOpensslPrints() {
@@ -53,7 +57,7 @@ class PinningTrustManagerTest {
 
     @Test
     fun unpinnedSelfSignedIsRefusedWithItsFingerprint() {
-        val manager = PinningTrustManager(distrusting) { null }
+        val manager = PinningTrustManager(distrusting, host) { null }
         val refusal = assertFailsWith<UntrustedServerCertificateException> {
             manager.checkServerTrusted(arrayOf(certificate("server-a")), "EC")
         }
@@ -64,7 +68,7 @@ class PinningTrustManagerTest {
     @Test
     fun pinnedSelfSignedIsAcceptedAndADifferentOneIsAChange() {
         var pin: String? = opensslFingerprint("server-a")
-        val manager = PinningTrustManager(distrusting) { pin }
+        val manager = PinningTrustManager(distrusting, host) { pin }
         manager.checkServerTrusted(arrayOf(certificate("server-a")), "EC")
         val changed = assertFailsWith<UntrustedServerCertificateException> {
             manager.checkServerTrusted(arrayOf(certificate("server-b")), "EC")
@@ -78,13 +82,36 @@ class PinningTrustManagerTest {
 
     @Test
     fun platformTrustedChainsPassWithoutAPin() {
-        PinningTrustManager(trusting) { null }.checkServerTrusted(arrayOf(certificate("server-a")), "EC")
+        PinningTrustManager(trusting, host) { null }.checkServerTrusted(arrayOf(certificate("server-a")), "EC")
+    }
+
+    @Test
+    fun aPinRefusesAPlatformTrustedReplacement() {
+        val manager = PinningTrustManager(trusting, host) { opensslFingerprint("server-a") }
+        manager.checkServerTrusted(arrayOf(certificate("server-a")), "EC")
+        val changed = assertFailsWith<UntrustedServerCertificateException> {
+            manager.checkServerTrusted(arrayOf(certificate("server-b")), "EC")
+        }
+        assertTrue(changed.changed)
+        assertEquals(opensslFingerprint("server-b"), changed.fingerprint)
+    }
+
+    @Test
+    fun theHostReachesThePlatformCheck() {
+        var seen: String? = null
+        val recording = object : PlatformServerTrust {
+            override val acceptedIssuers: Array<X509Certificate> = emptyArray()
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String, host: String) { seen = host }
+            override fun verifyHostname(host: String, session: SSLSession): Boolean = true
+        }
+        PinningTrustManager(recording, "stt.example.net") { null }.checkServerTrusted(arrayOf(certificate("server-a")), "EC")
+        assertEquals("stt.example.net", seen)
     }
 
     @Test
     fun clientCertificatesAreRefused() {
         assertFailsWith<CertificateException> {
-            PinningTrustManager(trusting) { null }.checkClientTrusted(arrayOf(certificate("server-a")), "EC")
+            PinningTrustManager(trusting, host) { null }.checkClientTrusted(arrayOf(certificate("server-a")), "EC")
         }
     }
 
@@ -92,9 +119,25 @@ class PinningTrustManagerTest {
     fun hostnameVerifierAcceptsAPinnedCertificateForAnyName() {
         val session = sessionPresenting(certificate("server-a"))
         // The fixture is issued to stt-server-a.test, never to this host; only the pin can accept it.
-        assertTrue(pinAwareHostnameVerifier { opensslFingerprint("server-a") }.verify("10.0.0.5", session))
-        assertFalse(pinAwareHostnameVerifier { opensslFingerprint("server-b") }.verify("10.0.0.5", session))
-        assertFalse(pinAwareHostnameVerifier { null }.verify("10.0.0.5", session))
+        assertTrue(pinAwareHostnameVerifier(distrusting) { opensslFingerprint("server-a") }.verify(host, session))
+        assertFalse(pinAwareHostnameVerifier(distrusting) { opensslFingerprint("server-b") }.verify(host, session))
+        assertFalse(pinAwareHostnameVerifier(distrusting) { null }.verify(host, session))
+    }
+
+    @Test
+    fun hostnameVerifierFollowsThePlatformOnlyWithoutAPin() {
+        val session = sessionPresenting(certificate("server-a"))
+        assertTrue(pinAwareHostnameVerifier(trusting) { null }.verify(host, session))
+        // With a pin, a name the platform would accept is not enough: the certificate must be the pinned one.
+        assertFalse(pinAwareHostnameVerifier(trusting) { opensslFingerprint("server-b") }.verify(host, session))
+        assertTrue(pinAwareHostnameVerifier(trusting) { opensslFingerprint("server-a") }.verify(host, session))
+    }
+
+    @Test
+    fun probeAuthTypeIsALegalTlsName() {
+        assertEquals("ECDHE_ECDSA", tlsAuthType("EC"))
+        assertEquals("ECDHE_RSA", tlsAuthType("RSA"))
+        assertEquals("UNKNOWN", tlsAuthType("EdDSA"))
     }
 
     /** Only the peer certificate is read from the session. */

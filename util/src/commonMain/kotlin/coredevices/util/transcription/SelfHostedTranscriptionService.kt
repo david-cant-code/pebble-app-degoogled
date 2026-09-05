@@ -5,13 +5,19 @@ import coredevices.util.AudioEncoding
 import coredevices.util.CoreConfigFlow
 import io.ktor.client.HttpClient
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
-import io.ktor.client.request.forms.submitFormWithBinaryData
+import io.ktor.client.request.prepareRequest
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
-import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentLength
 import io.ktor.http.isSuccess
+import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -34,9 +40,12 @@ import kotlin.time.Duration
  * included. The bearer token, when set, goes in the Authorization header.
  *
  * Transport failures surface as [TranscriptionException.TranscriptionNetworkError]
- * (a refused certificate included), non-2xx answers and unreadable bodies as
- * [TranscriptionException.TranscriptionServiceError], and an empty
- * transcript as [TranscriptionException.NoSpeechDetected].
+ * (a refused certificate included), non-2xx answers, unreadable bodies and
+ * oversized replies as [TranscriptionException.TranscriptionServiceError],
+ * and an empty transcript as [TranscriptionException.NoSpeechDetected].
+ * The app log never learns the server's address from this class: transport
+ * failures are logged by exception class, and the cause handed to the
+ * router is rebuilt without it.
  *
  * The client is built per `host:port` through [clientFactory] (the
  * certificate-pinning client on Android) and rebuilt when the host
@@ -55,7 +64,18 @@ class SelfHostedTranscriptionService(
 
         /** One second of 16 kHz silence: the connection test's payload. */
         private const val TEST_SAMPLE_RATE = 16_000
+
+        /**
+         * The most a reply may be before it is refused unread. A transcript
+         * of the watch's recording window is a few hundred bytes; the peer
+         * is whatever answers at the configured URL, so its reply is never
+         * buffered whole.
+         */
+        internal const val MAX_REPLY_BYTES = 64 * 1024
     }
+
+    /** What a request came back with, the body already bounded. */
+    private class ServerReply(val status: HttpStatusCode, val body: String)
 
     override val onInitialized: Channel<Boolean> = Channel()
 
@@ -103,11 +123,11 @@ class SelfHostedTranscriptionService(
         frames.collect { buffer.write(it) }
         if (buffer.size == 0L) throw TranscriptionException.NoSpeechDetected("No audio data received", MODEL)
         val wav = DictationCaptureDump.wavBytes(buffer.readByteArray(), sampleRate)
-        val response = post(url, wav, config.serverModel, store.token(), languageCode(language))
-        if (!response.status.isSuccess()) {
-            throw TranscriptionException.TranscriptionServiceError("Server returned HTTP ${response.status.value}", modelUsed = MODEL)
+        val reply = post(clientFor(url), url, wav, config.serverModel, store.token(), languageCode(language))
+        if (!reply.status.isSuccess()) {
+            throw TranscriptionException.TranscriptionServiceError("Server returned HTTP ${reply.status.value}", modelUsed = MODEL)
         }
-        val text = parseServerTranscript(response.bodyAsText())
+        val text = parseServerTranscript(reply.body)
             ?: throw TranscriptionException.TranscriptionServiceError("Server reply had no text field", modelUsed = MODEL)
         emit(
             TranscriptionSessionStatus.Transcription(
@@ -121,14 +141,29 @@ class SelfHostedTranscriptionService(
      * The settings dialog's connection test: one second of silence to
      * [url] with the given credentials (the dialog's unsaved values), so a
      * wrong token or path is found before saving. Returns the HTTP status;
-     * throws the same mapped exceptions a dictation would.
+     * throws the same mapped exceptions a dictation would. Runs on a
+     * client of its own, closed here, so the cached one is never replaced
+     * or closed under a dictation's request.
      */
     suspend fun testConnection(url: String, model: String?, token: String?): Int {
-        val wav = DictationCaptureDump.wavBytes(ByteArray(TEST_SAMPLE_RATE * 2), TEST_SAMPLE_RATE)
-        return post(url, wav, model, token, language = null).status.value
+        val hostPort = serverHostPort(url) ?: throw TranscriptionException.TranscriptionServiceUnavailable(MODEL)
+        val client = clientFactory(hostPort) { store.pinnedFingerprint(hostPort) }
+        return try {
+            val wav = DictationCaptureDump.wavBytes(ByteArray(TEST_SAMPLE_RATE * 2), TEST_SAMPLE_RATE)
+            post(client, url, wav, model, token, language = null).status.value
+        } finally {
+            client.close()
+        }
     }
 
-    private suspend fun post(url: String, wav: ByteArray, model: String?, token: String?, language: String?): HttpResponse {
+    private suspend fun post(
+        client: HttpClient,
+        url: String,
+        wav: ByteArray,
+        model: String?,
+        token: String?,
+        language: String?,
+    ): ServerReply {
         val parts = formData {
             append(
                 "file", wav,
@@ -142,18 +177,44 @@ class SelfHostedTranscriptionService(
             language?.let { append("language", it) }
         }
         return try {
-            clientFor(url).submitFormWithBinaryData(url, parts) {
+            // A prepared request streams the reply, so the body is read
+            // through the bound below and never buffered whole by the client.
+            client.prepareRequest(url) {
+                method = HttpMethod.Post
+                setBody(MultiPartFormDataContent(parts))
                 token?.takeIf { it.isNotBlank() }?.let { bearerAuth(it) }
-            }
+            }.execute { response -> ServerReply(response.status, boundedBody(response)) }
         } catch (e: CancellationException) {
+            throw e
+        } catch (e: TranscriptionException) {
             throw e
         } catch (e: IOException) {
             // Connection refused, DNS, TLS refusal (an unpinned certificate
             // included), timeouts: the server is unreachable for this call.
-            logger.w { "Server request failed: ${e::class.simpleName}: ${e.message}" }
-            throw TranscriptionException.TranscriptionNetworkError(e, MODEL)
+            logger.w { "Server request failed: ${e::class.simpleName}" }
+            throw TranscriptionException.TranscriptionNetworkError(ServerUnreachableException(describeTransportFailure(e)), MODEL)
         } catch (e: Exception) {
-            throw TranscriptionException.TranscriptionServiceError("Server request failed: ${e.message}", e, MODEL)
+            logger.w { "Server request failed: ${e::class.simpleName}" }
+            throw TranscriptionException.TranscriptionServiceError("Server request failed: ${e::class.simpleName}", modelUsed = MODEL)
         }
+    }
+
+    /**
+     * The reply body under [MAX_REPLY_BYTES]: a declared length past it is
+     * refused unread, and a body that runs past it is refused at that
+     * point with the rest left on the wire.
+     */
+    private suspend fun boundedBody(response: HttpResponse): String {
+        val declared = response.contentLength()
+        if (declared != null && declared > MAX_REPLY_BYTES) {
+            throw TranscriptionException.TranscriptionServiceError("Server reply too large ($declared bytes)", modelUsed = MODEL)
+        }
+        val channel = response.bodyAsChannel()
+        val bytes = channel.readRemaining((MAX_REPLY_BYTES + 1).toLong()).readByteArray()
+        if (bytes.size > MAX_REPLY_BYTES) {
+            channel.cancel(null)
+            throw TranscriptionException.TranscriptionServiceError("Server reply too large", modelUsed = MODEL)
+        }
+        return bytes.decodeToString()
     }
 }

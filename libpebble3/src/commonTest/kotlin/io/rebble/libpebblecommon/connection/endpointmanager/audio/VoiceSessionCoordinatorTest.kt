@@ -251,6 +251,18 @@ class VoiceSessionCoordinatorTest {
     }
 
     @Test
+    fun aTranscriptPastTheProtocolBoundsIsDeliveredAsAnError() = runTest {
+        val h = harness()
+        h.setupRequests.emit(request(1))
+        runCurrent()
+        h.frame(1u); h.endRecording(1u); runCurrent()
+        h.calls.single().second.complete(TranscriptionResult.Success(List(300) { TranscriptionWord("a", 0.9f) }))
+        runCurrent()
+        assertEquals("result:1:error", h.log.last())
+        assertEquals(listOf("1:error"), h.ended)
+    }
+
+    @Test
     fun aProviderFailureIsDeliveredAsAnError() = runTest {
         val h = harness()
         h.failure = IllegalStateException("codec")

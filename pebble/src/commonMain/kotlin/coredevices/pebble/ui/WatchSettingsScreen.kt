@@ -1642,7 +1642,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                 ),
                 basicSettingsToggleItem(
                     title = "Dictation: keep audio captures",
-                    description = "Write each dictation's audio as a WAV file under the app's private files (last 20 kept) for replay through the engine. Nothing is uploaded.",
+                    description = "Write each dictation's audio and codec frames under the app's private files (last 20 of each kept) for replay through the engine. Nothing is uploaded or backed up; the files are deleted when this is turned off.",
                     topLevelType = TopLevelType.Phone,
                     section = Section.Speech,
                     checked = coreConfig.sttConfig.debugCaptureDump,

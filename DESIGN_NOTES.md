@@ -281,20 +281,38 @@ The replacement is whisper.cpp (MIT), compiled from source:
   and the spoken language when known, answered with JSON `text`; the
   URL is used as entered, path included. The bearer token is a secret
   and goes through the keystore-backed encrypted setting
-  (`SelfHostedServerStore`). Transport is https only, like every other
-  connection in the app; the trust rule (`decideServerTrust`) is
-  platform trust first (system and user-installed CAs, matching host
-  name), then a certificate the user pinned by trust on first use, then
-  refusal. The pin is the leaf certificate's SHA-256 fingerprint,
-  confirmed in the settings dialog against what the server prints, and
-  keyed by `host:port`; a pinned certificate that changes is refused
-  and called out as such until re-confirmed, and a pinned certificate
-  also satisfies host-name verification, since a self-signed
-  certificate is often issued to no name. The dialog's connection test
-  probes the certificate first and only then sends a one-second silent
-  request, so a wrong token or path is found before saving. Everything
-  above the TLS glue is pure and host-tested; the glue is tested against
-  two self-signed fixtures.
+  (`SelfHostedServerStore`), and belongs to the host and port it was
+  saved with: a URL edited to another server is tested and saved
+  without it unless a new one is typed. Transport is https only, like
+  every other connection in the app; the trust rule
+  (`decideServerTrust`) is: a pin for the host and port, once one
+  exists, decides alone, and any other certificate is refused as changed
+  even when the platform trusts its chain, since a CA-issued certificate
+  for the same name is what an interceptor would present; with no pin,
+  platform trust (system and user-installed CAs, matching host name)
+  passes and anything else is refused until the user pins it. The pin
+  is the leaf certificate's SHA-256 fingerprint, confirmed in the
+  settings dialog against what the server prints, and keyed by
+  `host:port`; forgetting it in the dialog returns the host to platform
+  trust, which is how a server moves to a CA-issued certificate. A
+  pinned certificate also satisfies host-name verification, since a
+  self-signed certificate is often issued to no name. Every platform
+  check goes through Android's hostname-aware trust extension, the form
+  the platform requires once a network security config carries
+  per-domain entries. The dialog's connection test probes the
+  certificate first and only then sends a one-second silent request on
+  a client of its own, so a wrong token or path is found before saving
+  and the dictation path's client is never closed under a request. A
+  reply is read through a 64 KB bound, and every transcript, from the
+  server or the Rebble path alike, passes a word-count and word-length
+  bound in libpebble3 before it is encoded for the watch. The app log
+  never carries the server's address: the config line prints the URL as
+  set or unset, and transport failures reach the log by exception
+  class, with the cause the router sees rebuilt without it. Everything
+  above the TLS glue is pure and host-tested; the trust manager and
+  verifier are tested against two self-signed fixtures, and the client
+  and probe against a local TLS server whose key pair the test generates
+  with the JDK's keytool, so no key material is tracked.
 - `WhisperTranscriptionService` (util) keeps the Cactus-era service's
   proven shape: config-driven re-initialization, the two-mutex warm-up
   design, the memory guard, and the InferenceBoost foreground-priority
@@ -369,13 +387,15 @@ The replacement is whisper.cpp (MIT), compiled from source:
   the application's debuggable flag and fails closed: a single-thread
   override that slows a fast phone's decode, a capture dump that writes
   each dictation's engine input as WAV under the app's private files
-  (last 20 kept), a substitute-audio hook that stands the bundled test
-  clip (debug assets only) in for the watch's audio so an emulated watch,
-  whose microphone is silence, still yields a transcript, and a slow-
-  decode hook that holds every result for 20 seconds so the deadline
-  report runs on any phone. The settings toggles are offered only in
-  debug builds and the code re-checks the build before honouring any
-  flag, because debug and release installs share an application id.
+  (last 20 kept, excluded from backups and device transfer, deleted when
+  the hook goes off or at start in a build that cannot honour it), a
+  substitute-audio hook that stands the bundled test clip (debug assets
+  only) in for the watch's audio so an emulated watch, whose microphone
+  is silence, still yields a transcript, and a slow-decode hook that
+  holds every result for 20 seconds so the deadline report runs on any
+  phone. The settings toggles are offered only in debug builds and the
+  code re-checks the build before honouring any flag, because debug and
+  release installs share an application id.
 
 Model weights are never checked in. `WhisperModelCatalog` (util) pins
 six models (small, base and tiny, each as the multilingual and the

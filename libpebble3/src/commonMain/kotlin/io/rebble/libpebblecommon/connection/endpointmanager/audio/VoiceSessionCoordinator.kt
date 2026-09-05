@@ -11,6 +11,7 @@ import io.rebble.libpebblecommon.voice.PEBBLE_FW_RECORDING_CAP
 import io.rebble.libpebblecommon.voice.PEBBLE_FW_TRANSCRIPTION_TIMEOUT
 import io.rebble.libpebblecommon.voice.TranscriptionProvider
 import io.rebble.libpebblecommon.voice.TranscriptionResult
+import io.rebble.libpebblecommon.voice.boundedForProtocol
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -141,7 +142,7 @@ internal class VoiceSessionCoordinator(
             onSessionEnded(request, TranscriptionResult.Failed)
             return
         }
-        val result = withTimeoutOrNull(deadline) { transcription.await() }
+        val result = withTimeoutOrNull(deadline) { transcription.await() }?.boundedForProtocol()
         if (result != null) {
             logger.i { "Voice session ${request.sessionId} completed with result: ${describe(result)}" }
             sendDictationResult(sessionId, result, request.appUuid)

@@ -64,9 +64,23 @@ internal object DictationCaptureDump {
         }.onFailure { logger.w(it) { "Could not write the dictation frame capture" } }.getOrNull()
     }
 
-    private fun prune(directory: Path, suffix: String) {
+    /** Deletes every capture: the hook that wrote them is off, so none may stay behind. */
+    fun clear() {
+        dictationCaptureDirectory()?.let { clear(Path(it)) }
+    }
+
+    internal fun clear(directory: Path) {
+        runCatching {
+            if (SystemFileSystem.exists(directory)) {
+                prune(directory, SUFFIX, keep = 0)
+                prune(directory, FRAMES_SUFFIX, keep = 0)
+            }
+        }.onFailure { logger.w(it) { "Could not clear the dictation captures" } }
+    }
+
+    private fun prune(directory: Path, suffix: String, keep: Int = KEEP) {
         val names = SystemFileSystem.list(directory).map { it.name }
-        for (stale in captureNamesToPrune(names, KEEP, suffix)) {
+        for (stale in captureNamesToPrune(names, keep, suffix)) {
             SystemFileSystem.delete(Path(directory, stale), mustExist = false)
         }
     }

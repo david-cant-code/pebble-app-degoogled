@@ -6,6 +6,7 @@ import coredevices.util.security.SecretCipher
 import io.ktor.client.HttpClient
 import io.ktor.http.URLProtocol
 import io.ktor.http.Url
+import kotlinx.io.IOException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -64,22 +65,67 @@ private val whitespaceRun = Regex("\\s+")
  */
 fun normalizeServerTranscript(text: String): String = text.trim().replace(whitespaceRun, " ")
 
-/** Outcome of checking one server certificate against platform trust and the pin. */
+/** Outcome of checking one server certificate against the pin and platform trust. */
 enum class ServerTrust { Trusted, UnknownCertificate, ChangedCertificate }
 
 /**
- * Trust on first use for the server's certificate. A chain the platform
- * trusts (a system or user-installed CA, with a matching host name)
- * passes as it would anywhere else. Otherwise the presented leaf
- * certificate must equal the fingerprint the user confirmed earlier;
- * with no pin the certificate is unknown, and with a different pin it has
- * changed, which is the case the user must look at before accepting.
+ * Trust on first use for the server's certificate. Once the user has
+ * pinned a fingerprint for the host and port, the pin decides alone: the
+ * presented leaf certificate must equal it, and any other certificate
+ * has changed, which the user must look at before accepting, even when
+ * the platform trusts its chain, since a certificate for the same name
+ * from a CA is exactly what an interceptor would present. With no pin, a
+ * chain the platform trusts (a system or user-installed CA, with a
+ * matching host name) passes as it would anywhere else, and anything
+ * else is unknown until the user pins it. Forgetting the pin returns the
+ * host to platform trust, which is the path for a deliberate move to a
+ * CA-issued certificate.
  */
 fun decideServerTrust(platformTrusted: Boolean, pinned: String?, presented: String): ServerTrust = when {
+    pinned != null -> if (pinned.equals(presented, ignoreCase = true)) ServerTrust.Trusted else ServerTrust.ChangedCertificate
     platformTrusted -> ServerTrust.Trusted
-    pinned == null -> ServerTrust.UnknownCertificate
-    pinned.equals(presented, ignoreCase = true) -> ServerTrust.Trusted
-    else -> ServerTrust.ChangedCertificate
+    else -> ServerTrust.UnknownCertificate
+}
+
+/** A certificate the trust rule refused, as the handshake reports it to the caller. */
+interface ServerCertificateRefusal {
+    /** SHA-256 fingerprint of the presented leaf certificate, in [formatFingerprint]'s layout. */
+    val fingerprint: String
+
+    /** True when a pin existed and the certificate differs from it; false when nothing was pinned. */
+    val changed: Boolean
+}
+
+/** The refusal in the words the settings dialog and the log show; the fingerprint is public to any client that connects. */
+fun ServerCertificateRefusal.describe(): String =
+    if (changed) "server certificate changed, SHA-256 $fingerprint" else "server certificate not trusted, SHA-256 $fingerprint"
+
+/**
+ * A transport failure with the peer's address removed. Ktor's and OkHttp's
+ * own messages carry the URL, host and port, and the app log that "Export
+ * logs" ships must not, so this stands in as the cause of the reported
+ * network error.
+ */
+class ServerUnreachableException(reason: String) : IOException(reason)
+
+/**
+ * Why a request to the server failed at the transport, in words that name
+ * neither the URL nor the address: a certificate refusal by its own
+ * description, otherwise a category read off the exception classes in
+ * the cause chain.
+ */
+fun describeTransportFailure(failure: Throwable): String {
+    val chain = generateSequence(failure) { it.cause?.takeIf { cause -> cause !== it } }.toList()
+    chain.firstNotNullOfOrNull { it as? ServerCertificateRefusal }?.let { return it.describe() }
+    val names = chain.map { it::class.simpleName.orEmpty() }
+    return when {
+        names.any { it.contains("Timeout") } -> "timed out"
+        names.any { it == "UnknownHostException" } -> "host name not found"
+        names.any { it == "ConnectException" } -> "connection refused"
+        names.any { it == "SSLPeerUnverifiedException" } -> "certificate is not for this host"
+        names.any { it.startsWith("SSL") } -> "TLS handshake failed"
+        else -> names.firstOrNull { it.isNotEmpty() } ?: "network error"
+    }
 }
 
 /** `AB:CD:...` upper-case hex, the form `openssl x509 -fingerprint -sha256` prints, so the user can compare. */
@@ -133,10 +179,10 @@ expect suspend fun probeServerCertificate(host: String, port: Int): ServerCertif
 
 /**
  * An HTTP client for the self-hosted server whose certificate check is
- * [decideServerTrust]: platform trust first, the pinned fingerprint
- * second, refusal otherwise, and host-name verification that also accepts
- * a pinned certificate for a name it was not issued to. [pinnedFingerprint]
- * is read on every handshake so a fresh pin takes effect without a new
- * client.
+ * [decideServerTrust]: the pinned fingerprint once one exists, platform
+ * trust otherwise, refusal for the rest, and host-name verification that
+ * a pinned certificate satisfies whatever name it was issued to.
+ * [pinnedFingerprint] is read on every handshake so a fresh pin takes
+ * effect without a new client.
  */
 expect fun selfHostedHttpClient(hostPort: String, pinnedFingerprint: () -> String?): HttpClient
