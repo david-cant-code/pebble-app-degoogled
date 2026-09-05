@@ -6,6 +6,8 @@ import coredevices.util.models.WhisperModelCatalog
 import coredevices.util.models.WhisperTier
 import coredevices.whisper.isWhisperSupported
 import coredevices.whisper.whisperBenchmark
+import io.rebble.libpebblecommon.voice.DICTATION_DEADLINE
+import io.rebble.libpebblecommon.voice.PEBBLE_FW_RECORDING_CAP
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import kotlin.time.Clock
+import kotlin.time.DurationUnit
 
 /**
  * One result of the engine's model-free speed probe (`whisperBenchmark`
@@ -47,8 +50,8 @@ enum class WindowFit { Fits, Marginal, Exceeds }
  * factors.
  */
 object WhisperSpeedCalibration {
-    /** The watch firmware's recording cap: the longest dictation the phone must decode. */
-    const val WINDOW_SECONDS = 15.0
+    /** The watch firmware's recording cap in seconds: the longest dictation the phone must decode. */
+    val WINDOW_SECONDS = PEBBLE_FW_RECORDING_CAP.toDouble(DurationUnit.SECONDS)
 
     /** Bump when the native probe graph changes; cached scores from an older probe are discarded. */
     const val PROBE_VERSION = 1
@@ -72,8 +75,8 @@ object WhisperSpeedCalibration {
     /** At or under this the window fits with room for the session's other steps. */
     const val FITS_LIMIT_SECONDS = 10.0
 
-    /** At or under this it can still fit; the watch gives up at 15. */
-    const val MARGINAL_LIMIT_SECONDS = 15.0
+    /** At or under this it can still fit: the deadline the session coordinator reports failure at. */
+    val MARGINAL_LIMIT_SECONDS = DICTATION_DEADLINE.toDouble(DurationUnit.SECONDS)
 
     /**
      * Estimated seconds to decode a full window on [modelId], or null when

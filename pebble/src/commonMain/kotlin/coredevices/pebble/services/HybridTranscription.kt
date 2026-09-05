@@ -44,9 +44,12 @@ class HybridTranscription(
 
     private companion object {
         /**
-         * Longer than any decode the catalog models take on a phone-class
-         * CPU and than the session manager's replay window, so it never
-         * cuts a decode the watch's retry could still use.
+         * Backstop against a decode that never returns, counted from the
+         * end of the recording: longer than any decode the catalog models
+         * take on a phone-class CPU, and well past the session
+         * coordinator's deadline, so a decode that overruns the watch's
+         * clock still finishes and its real duration reaches the speed
+         * record.
          */
         val SAFETY_BOUND = 60.seconds
     }
@@ -111,10 +114,10 @@ class HybridTranscription(
                     it.split(" ", limit = 2)
                 }
             } else null
-            // The watch's dictation deadline is owned by the session manager
-            // in libpebble3, which reports the loss to the watch and keeps
-            // this decode running for the watch's retry. This bound is only
-            // the backstop against a decode that never returns.
+            // The watch's dictation deadline is owned by the session
+            // coordinator in libpebble3, which reports the loss to the watch
+            // and lets this decode run on for the speed record. This bound
+            // is only the backstop against a decode that never returns.
             val result = withTimeout(SAFETY_BOUND) {
                 service.transcribe(
                     audioStreamFrames = flow {

@@ -3,10 +3,12 @@ package coredevices.util.transcription
 import co.touchlab.kermit.Logger
 import com.russhwolf.settings.Settings
 import coredevices.util.models.WhisperModelCatalog
+import io.rebble.libpebblecommon.voice.DICTATION_DEADLINE
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.roundToInt
+import kotlin.time.DurationUnit
 
 /**
  * A prompt to switch models because real dictations on [currentModelId]
@@ -27,12 +29,8 @@ data class SpeedNudge(val currentModelId: String, val targetModelId: String, val
  * the probe was optimistic.
  */
 object DictationSpeedPolicy {
-    /**
-     * Seconds the phone has after the recording ends before the session
-     * coordinator reports failure to the watch (one under the firmware's
-     * 15 s result timeout).
-     */
-    const val DEADLINE_SECONDS = 14.0
+    /** Seconds the phone has after the recording ends before the session coordinator reports failure to the watch. */
+    val DEADLINE_SECONDS = DICTATION_DEADLINE.toDouble(DurationUnit.SECONDS)
 
     /** Weight of the newest dictation in the smoothed factor. */
     const val NEWEST_WEIGHT = 0.3

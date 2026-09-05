@@ -1626,7 +1626,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                 ),
                 basicSettingsToggleItem(
                     title = "Dictation: hold each result for 20 seconds",
-                    description = "Delay every decode past the watch's 15 second window so the deadline report and the retry replay can be watched on any phone.",
+                    description = "Delay every decode past the watch's 15 second window so the deadline report can be watched on any phone.",
                     topLevelType = TopLevelType.Phone,
                     section = Section.Speech,
                     checked = coreConfig.sttConfig.debugSlowDecode,

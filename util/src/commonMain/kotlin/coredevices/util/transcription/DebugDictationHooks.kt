@@ -1,5 +1,6 @@
 package coredevices.util.transcription
 
+import io.rebble.libpebblecommon.voice.PEBBLE_FW_TRANSCRIPTION_TIMEOUT
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -12,11 +13,10 @@ import kotlin.time.Duration.Companion.seconds
 
 /**
  * The fixed hold added after a decode when the slow-decode hook is on:
- * past the watch's 15 second window by a margin, and inside the retry's
- * replay window, so one dictation exercises the deadline report and the
- * replay in sequence.
+ * past the watch's result window by a margin, so one dictation exercises
+ * the deadline report on any phone.
  */
-internal val DEBUG_SLOW_DECODE_DELAY: Duration = 20.seconds
+internal val DEBUG_SLOW_DECODE_DELAY: Duration = PEBBLE_FW_TRANSCRIPTION_TIMEOUT + 5.seconds
 
 /** Extra delay to hold a decode result for, zero unless the hook applies. */
 internal fun debugDecodeDelay(slowDecode: Boolean, debugBuild: Boolean): Duration =

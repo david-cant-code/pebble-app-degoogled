@@ -386,6 +386,23 @@ after the microphone's start-up transient, or the engine's own
 per-segment no-speech probability) needs captures from more than one
 watch before its threshold can be set.
 
+## A provider that fails before the recording ends is answered only after it
+
+**Status: open; no current provider can reach it.**
+
+The dictation session coordinator waits for the watch to end the
+recording before it looks at the provider's result, because the
+watch's result clock starts at that moment. A provider that returns or
+throws before it has read the recording would therefore be answered
+only when the recording ends, up to the firmware's recording cap
+later, while the user keeps speaking into a session that has already
+failed. Every provider in the tree reads the whole recording before it
+can fail, and the only encoder the firmware sends is the one they all
+accept, so the case has no trigger today. If a second encoder or a
+provider that fails before reading ever lands, the coordinator needs
+to race the provider against the end of the recording and stop the
+watch's transfer on an early failure, with a coordinator test for it.
+
 ## Watch-side dictation endpointing misfires in both directions
 
 **Status: open; firmware behavior, app-side mitigation only.**

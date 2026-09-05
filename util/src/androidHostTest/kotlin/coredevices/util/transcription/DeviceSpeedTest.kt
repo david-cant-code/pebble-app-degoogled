@@ -77,8 +77,10 @@ class DeviceSpeedTest {
     fun classificationFollowsTheWatchBudget() {
         assertEquals(WindowFit.Fits, WhisperSpeedCalibration.classify(10.0))
         assertEquals(WindowFit.Marginal, WhisperSpeedCalibration.classify(10.01))
-        assertEquals(WindowFit.Marginal, WhisperSpeedCalibration.classify(15.0))
-        assertEquals(WindowFit.Exceeds, WhisperSpeedCalibration.classify(15.01))
+        // The band ends where the phone reports the loss, one margin under the watch's 15 s.
+        assertEquals(WindowFit.Marginal, WhisperSpeedCalibration.classify(14.0))
+        assertEquals(WindowFit.Exceeds, WhisperSpeedCalibration.classify(14.01))
+        assertEquals(WindowFit.Exceeds, WhisperSpeedCalibration.classify(15.0))
     }
 
     @Test

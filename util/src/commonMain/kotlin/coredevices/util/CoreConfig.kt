@@ -150,8 +150,8 @@ data class STTConfig(
     val debugSubstituteAudio: Boolean = false,
     /**
      * Fork, debug builds only: hold each dictation's result for a fixed
-     * extra delay after the decode, so the watch's deadline and the retry
-     * replay run deterministically on any phone. Honoured only when
+     * extra delay after the decode, so the watch's deadline report runs
+     * deterministically on any phone. Honoured only when
      * [coredevices.util.isDebugBuild] is true.
      */
     val debugSlowDecode: Boolean = false,

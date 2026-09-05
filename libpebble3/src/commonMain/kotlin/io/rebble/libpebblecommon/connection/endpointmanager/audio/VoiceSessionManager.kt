@@ -1,7 +1,6 @@
 package io.rebble.libpebblecommon.connection.endpointmanager.audio
 
 import io.rebble.libpebblecommon.di.ConnectionCoroutineScope
-import io.rebble.libpebblecommon.packets.AudioStream
 import io.rebble.libpebblecommon.packets.DictationResult
 import io.rebble.libpebblecommon.packets.Result
 import io.rebble.libpebblecommon.packets.Sentence
@@ -26,8 +25,9 @@ import kotlin.uuid.Uuid
 /**
  * Protocol adapter for watch dictation: decodes the frame stream and
  * encodes the setup and dictation result packets, and hands the session
- * logic itself to [VoiceSessionCoordinator] (deadline, retry replay, and
- * the rule that sessions never cancel each other).
+ * logic itself to [VoiceSessionCoordinator] (the deadline, the bound on a
+ * recording the watch never ends, and the rule that sessions never cancel
+ * each other).
  */
 class VoiceSessionManager(
     private val voiceService: VoiceService,
@@ -114,9 +114,6 @@ class VoiceSessionManager(
                     appUuid = appUuid,
                 )
             )
-        },
-        sendAudioStop = { sessionId ->
-            audioStreamService.send(AudioStream.StopTransfer(sessionId))
         },
         provider = transcriptionProvider,
         onSessionStarted = { request ->

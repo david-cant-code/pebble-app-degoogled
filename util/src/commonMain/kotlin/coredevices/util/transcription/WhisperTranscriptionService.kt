@@ -715,7 +715,7 @@ class WhisperTranscriptionService internal constructor(
                     val decoded = cancellableTranscribe(handle, pcm, threads, stats)
                     // Debug-only hold after the decode: cancellable, so a
                     // caller's deadline still fires, and the result still
-                    // completes afterwards for the session's retry replay.
+                    // completes afterwards, as a real overrun's would.
                     val hold = debugDecodeDelay(sttConfig.value.debugSlowDecode, isDebugBuild())
                     if (hold > Duration.ZERO) {
                         logger.w { "Debug slow-decode hook holding the result for $hold" }
