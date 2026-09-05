@@ -90,7 +90,7 @@ fun speedNudgeCopy(nudge: SpeedNudge): SpeedNudgeCopy {
         body = "$currentName needs about $predicted seconds for a full 15 second dictation on this " +
             "phone. The watch gives up after 15 seconds and shows \"Error occurred. Try again.\" " +
             "$targetName is faster, with somewhat lower accuracy. Either way, the model can be " +
-            "changed later under Settings, Speech Recognition, Manage Offline Models.",
+            "changed later under Settings > Speech Recognition > Manage Offline Models.",
         switchLabel = "Switch to $targetName",
         keepLabel = "Keep $currentName",
     )

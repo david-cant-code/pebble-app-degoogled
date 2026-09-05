@@ -25,7 +25,13 @@ type. The fork keeps them out of release with
 whose `tools:node="remove"` entries drop the four elements from the
 merged manifest; upstream's declarations and classes stay verbatim,
 debug builds keep the receivers for driving an emulator from adb, and
-the release exported-component allowlist is unchanged. Two things in
+the release exported-component allowlist is unchanged. The fork adds one
+receiver of the same kind, declared only in the debug overlay
+`androidApp/src/debug/AndroidManifest.xml`: `SttDebugReceiver`, gated on
+the same permission, sets the four dictation debug hooks from adb and
+can post a reply-capable test notification for driving an emulated
+watch; release builds never declare it, so there is nothing to remove.
+Two things in
 that verbatim upstream text do not hold here: the manifest comment and
 the receiver KDocs call the receivers safe to keep in release builds,
 which describes upstream's build, and their `am broadcast` recipes
@@ -99,8 +105,9 @@ The bug report screen's upload path needed both a Core account ID token
 and the bug-reports backend (`bugUrl`, empty in this build), so it is
 dead twice over. The screen stays and gates every backend control on
 `BugApi.canUseService()`: with no backend it is the local log export
-reached from Settings > Export logs (zip to the share sheet, no upload
-path), and upstream's screen keeps its behaviour across merges.
+reached from Settings > Get Help > Export logs (zip to the share sheet,
+no upload path), and upstream's screen keeps its behaviour across
+merges.
 
 ## The FCM exception
 
@@ -340,6 +347,14 @@ The replacement is whisper.cpp (MIT), compiled from source:
   seconds under the default parameters, the bounded configuration
   returns the correct text in under 10 seconds on the slowest catalog
   model.
+- Nothing CI runs reaches `whisper_jni.cpp`: the host suites stop at the
+  binding's Kotlin side, so the shim's semantics (detector trimming and
+  the sample count it reports, cancellation, cold-start init) are guarded
+  only by the instrumented `WhisperVadTrimTest`,
+  `WhisperLocalCancellationTest` and `WhisperColdStartRaceTest` under
+  `androidApp/src/androidTest`, run one class at a time on a device with
+  the model installed (each KDoc carries the command). An engine bump or
+  a shim edit gets a device run of those three before it merges.
 - The watch's dictation deadline is owned by `VoiceSessionCoordinator`
   in libpebble3, not by the provider. The firmware records for at most
   15 seconds, gives the phone 15 seconds from the end of the recording,

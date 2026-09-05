@@ -35,7 +35,12 @@ import kotlin.time.TimeSource
  * speech with the detector off, which are the constants the calibration
  * object records. It also prints what the current constants predict, so
  * a second phone cross-checks them. Pass `-e download true` to install a
- * missing tier through the production provider first.
+ * missing tier through the production provider first. The spread
+ * assertion is advisory: a warm or busy phone can exceed it. Run on its
+ * own:
+ *   adb shell am instrument -w \
+ *     -e class coredevices.coreapp.transcription.WhisperSpeedCalibrationBenchmark \
+ *     com.anopticlabs.gravel.test/androidx.test.runner.AndroidJUnitRunner
  */
 class WhisperSpeedCalibrationBenchmark {
 

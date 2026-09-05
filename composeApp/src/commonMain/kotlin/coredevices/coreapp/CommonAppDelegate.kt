@@ -49,6 +49,16 @@ internal val STT_UPDATE_NOTIFICATION_ID = "stt_update_notif".hashCode()
 private val sttMigrationLogger = Logger.withTag("SttModelMigration")
 
 /**
+ * Whether the voice activity detector should be fetched in the background:
+ * only when at least one catalog speech model is installed (a device with
+ * no local dictation has no use for it) and the detector itself is not.
+ * Static so the decision is under host tests with a fake provider.
+ */
+internal fun vadDownloadNeeded(provider: CactusModelPathProvider): Boolean =
+    !provider.isVadModelInstalled() &&
+        provider.getDownloadedModels().any { provider.isModelDownloaded(it) }
+
+/**
  * Startup pass over the on-device STT models; every install runs it on
  * every launch, and it is the only path that migrates a previous-engine
  * install. When stale installs exist (previous-engine directories, torn
@@ -67,16 +77,6 @@ private val sttMigrationLogger = Logger.withTag("SttModelMigration")
  * exactly once per user in the field, so a regression here is
  * unrecoverable and invisible.
  */
-/**
- * Whether the voice activity detector should be fetched in the background:
- * only when at least one catalog speech model is installed (a device with
- * no local dictation has no use for it) and the detector itself is not.
- * Static so the decision is under host tests with a fake provider.
- */
-internal fun vadDownloadNeeded(provider: CactusModelPathProvider): Boolean =
-    !provider.isVadModelInstalled() &&
-        provider.getDownloadedModels().any { provider.isModelDownloaded(it) }
-
 internal fun runSttModelMigration(
     modelProvider: CactusModelPathProvider,
     settings: Settings,

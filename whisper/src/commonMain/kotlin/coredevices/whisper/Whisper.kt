@@ -68,9 +68,9 @@ expect fun whisperVadFree(handle: Long)
  * What one [whisperTranscribe] call reports back about itself when the
  * caller passes an instance.
  *
- * @property decodedSamples the samples the engine was given after the
- *   detector's cut (the input size without a detector, 0 for a clip the
- *   detector found no speech in); -1 until the call reaches that point.
+ * @property decodedSamples the samples the engine was given: the span
+ *   left after the detector's cut, or the input size when there is no
+ *   detector or it found no speech; -1 until the call reaches that point.
  *   Decode cost follows this count, not the input length, which is what
  *   makes a per-second-of-speech timing possible on a padded recording.
  */
@@ -85,11 +85,13 @@ class TranscribeStats {
  * it must be unique among all calls that can be in flight at once (the
  * service uses a monotonic counter). [placement] scopes the calling
  * thread's affinity and priority to this call. With a non-zero
- * [vadHandle] the audio is cut to its speech segments before the decode
- * and a clip with no speech returns "" without an encoder pass; a
- * detector failure decodes the untrimmed audio. [stats], when given, is
- * filled in by the call. Throws with the engine's error text on failure,
- * including cancellation via [whisperCancel].
+ * [vadHandle] the audio is cut to the span from the first detected
+ * speech to the last before the decode, interior gaps kept; a clip in
+ * which the detector finds no speech, or a detector failure, decodes the
+ * untrimmed audio (`trim_to_speech` in `whisper_jni.cpp` states the
+ * rule). [stats], when given, is filled in by the call. Throws with the
+ * engine's error text on failure, including cancellation via
+ * [whisperCancel].
  */
 expect fun whisperTranscribe(
     handle: Long,

@@ -42,8 +42,9 @@ import java.util.concurrent.ConcurrentHashMap
 class WhisperModelProvider(
     private val context: Context,
     private val httpClient: HttpClient,
-    // Same RAM/locale source the ModelManager recommendation uses, so the
-    // two recommendation paths cannot diverge near the tier boundary.
+    // RAM/locale source for the legacy default below; the ModelManager's
+    // recommendation reads the same source and steps down on the speed
+    // score as well.
     private val platform: Platform,
     // Handed in by the DI wiring so the provider can resolve "the
     // configured model" without owning config plumbing; null means nothing
@@ -303,11 +304,13 @@ class WhisperModelProvider(
     }
 
     /**
-     * Device-appropriate default when nothing is configured: the same
-     * single [WhisperModelCatalog.recommended] decision the ModelManager
-     * uses, over the same [Platform] RAM/locale source, so a bare
-     * getSTTModelPath and the recommendation prompt can never pick
-     * different models for one device.
+     * Default when nothing is configured: the RAM/locale tier from
+     * [WhisperModelCatalog.recommended] without the speed step-down the
+     * ModelManager applies, so on a slow phone it can sit one tier above
+     * the picker's recommendation. Reached only through the legacy
+     * [getSTTModelPath], whose one caller is a dialog the unplugged Ring
+     * module used; the dictation path resolves the configured model by
+     * name.
      */
     private fun recommendedDefault(): WhisperModel {
         val model = WhisperModelCatalog.recommended(

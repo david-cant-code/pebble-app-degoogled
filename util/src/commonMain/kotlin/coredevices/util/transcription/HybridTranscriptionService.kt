@@ -26,8 +26,10 @@ import kotlin.time.Instant
 
 /**
  * Mode-aware [TranscriptionService] that routes between the local whisper model
- * ([WhisperTranscriptionService]) and the remote backends (WisprFlow with Kirinki as backup),
- * and owns the fallback behaviour for the [CactusSTTMode] options.
+ * ([WhisperTranscriptionService]) and the remote slot, and owns the fallback behaviour for
+ * the [CactusSTTMode] options. The remote slot is the user's self-hosted server whenever one
+ * is configured ([SelfHostedTranscriptionService]); upstream's cloud pair (WisprFlow with
+ * Kirinki as backup) stays for merge parity and cannot sign in here.
  */
 class HybridTranscriptionService(
     private val coreConfigFlow: CoreConfigFlow,
@@ -137,9 +139,11 @@ class HybridTranscriptionService(
     )
 
     /**
-     * Run remote transcription via WisprFlow.
+     * Run remote transcription: through the self-hosted server when one is configured, else via
+     * WisprFlow.
      *
-     * When [willFallbackLocal] is false kirinki is used as a backup and timeouts are more lenient.
+     * When [willFallbackLocal] is false timeouts are more lenient and, on the cloud path, kirinki
+     * is used as a backup.
      */
     private suspend fun remoteTranscribe(
         audio: ByteArray,

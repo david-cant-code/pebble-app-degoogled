@@ -33,9 +33,9 @@ import org.koin.core.component.inject
  * which an instrumentation run would not (it restarts the process). The
  * app needs POST_NOTIFICATIONS granted for the notification to show.
  *
- * Guarded by android.permission.DUMP in the manifest, which only the
- * system and the adb shell hold. The hooks themselves re-check the build
- * type before acting (see STTConfig).
+ * Guarded by android.permission.DUMP in the manifest like upstream's adb
+ * receivers (DESIGN_NOTES describes the gate once). The hooks themselves
+ * re-check the build type before acting (see STTConfig).
  */
 class SttDebugReceiver : BroadcastReceiver(), KoinComponent {
     private val coreConfigHolder: CoreConfigHolder by inject()

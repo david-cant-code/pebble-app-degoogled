@@ -77,8 +77,8 @@ class HybridTranscription(
         )
         val decodedBuffer = Buffer()
         val pcm = ByteArray(encoderInfo.frameSize * Short.SIZE_BYTES)
-        // Debug-only: keep the frames as received so the capture dump can
-        // pair the decoded audio with the codec input that produced it.
+        // Debug-only: keep the frames as received so the capture dump holds
+        // the codec input next to the decoded audio it produced.
         val archiveFrames = debugCaptureDumpApplies(coreConfigFlow.value.sttConfig.debugCaptureDump, isDebugBuild())
         val rawFrames = if (archiveFrames) mutableListOf<ByteArray>() else null
         withContext(Dispatchers.IO) {

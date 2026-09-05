@@ -42,12 +42,14 @@ a security posture tightened beyond upstream's defaults.
   screen is a server-rendered page fed by that relay, so it has no data
   source in this fork and its entry points are disabled; usable battery
   analytics would need a local, on-device reimplementation. The hosts the
-  app talks to are fixed in the app, with one exception you control: an
+  app talks to are fixed in the app, with two exceptions you control: an
   app store source you add yourself is fetched from the host you entered,
-  with no account token attached and no store search sent to it. Problem
-  reports are a manual export: Settings > Export logs writes a zip (app
-  log, device summary, anything you attach) for you to add to an issue
-  yourself, and nothing in the app can upload it.
+  with no account token attached and no store search sent to it, and a
+  transcription server you configure receives your dictation audio
+  (nothing is sent unless you set one up). Problem reports are a manual
+  export: Settings > Get Help > Export logs writes a zip (app log, device
+  summary, anything you attach) for you to add to an issue yourself, and
+  nothing in the app can upload it.
 - **Hardening beyond the de-Googling.** The app's own attack surface is in
   scope, not just its Google dependencies. Landed so far: third-party
   watchapps' phone-side code gets no internet or location access unless
@@ -60,7 +62,11 @@ a security posture tightened beyond upstream's defaults.
 - **Free on-device dictation.** Voice dictation runs on whisper.cpp,
   built from source as a pinned git submodule, with a choice of
   integrity-pinned model downloads; the proprietary speech engine
-  upstream bundles as a prebuilt binary is gone. The model picker
+  upstream bundles as a prebuilt binary is gone. A small voice activity
+  detector (under 1 MB) comes from the same model host: it is installed
+  with each model, and an install that already holds a model fetches it
+  in the background on an unmetered network, without asking, until it is
+  in place. The model picker
   measures the phone's speed and shows what a full 15 second dictation
   would cost on each model, and a model that turns out too slow for the
   watch's dictation window prompts a switch to a smaller one.
@@ -95,8 +101,8 @@ no Ring services, no Ring endpoints, rings can never be scanned or paired).
 
 ## Using your own transcription server
 
-Settings, Phone, Speech Recognition, Self-hosted Server takes the full
-URL of a transcription endpoint, an optional model name, and an optional
+Settings > Speech Recognition > Self-hosted Server takes the full URL
+of a transcription endpoint, an optional model name, and an optional
 bearer token, and then offers three modes in the speech recognition
 dropdown: server only, server with local fallback, and local with server
 fallback. The app sends each dictation as a 16 kHz WAV in a multipart

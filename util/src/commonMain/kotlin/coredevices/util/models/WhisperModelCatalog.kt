@@ -190,8 +190,8 @@ object WhisperModelCatalog {
     /**
      * Silero voice activity detector in whisper.cpp's ggml conversion
      * (MIT). Installed alongside every speech model and handed to the
-     * engine so silence is trimmed before decoding and silent sessions
-     * are rejected without an encoder pass. Values derived 2026-09-01 via
+     * engine so leading and trailing silence is trimmed before decoding;
+     * its verdict never rejects a dictation. Values derived 2026-09-01 via
      * the three-source procedure; the v6.2.0 conversion is the one the
      * engine's own test suite exercises at the pinned revision.
      */

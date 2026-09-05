@@ -23,7 +23,11 @@ import kotlin.time.TimeSource
  * show what a dictation pays when the app is not on screen and what the
  * thread-count and placement changes buy back. The clip must decode
  * successfully under every configuration; timings are reported through
- * the instrumentation output and logcat under the tag below.
+ * the instrumentation output and logcat under the tag below. Run on its
+ * own, against a persistent install with the model:
+ *   adb shell am instrument -w \
+ *     -e class coredevices.coreapp.transcription.EnginePlacementBenchmark \
+ *     com.anopticlabs.gravel.test/androidx.test.runner.AndroidJUnitRunner
  */
 class EnginePlacementBenchmark {
 

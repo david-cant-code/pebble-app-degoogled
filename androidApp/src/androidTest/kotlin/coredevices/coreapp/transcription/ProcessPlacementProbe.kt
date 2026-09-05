@@ -17,7 +17,10 @@ import java.io.File
  * launcher while the service is still held. The last one is the
  * reporter's configuration: a foreground-service process that is not
  * visible. Instrumentation itself can lift the process, so the first
- * line is the baseline every later line is read against.
+ * line is the baseline every later line is read against. Run on its own:
+ *   adb shell am instrument -w \
+ *     -e class coredevices.coreapp.transcription.ProcessPlacementProbe \
+ *     com.anopticlabs.gravel.test/androidx.test.runner.AndroidJUnitRunner
  */
 class ProcessPlacementProbe {
 

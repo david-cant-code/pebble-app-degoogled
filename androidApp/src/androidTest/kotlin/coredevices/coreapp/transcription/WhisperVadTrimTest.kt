@@ -35,6 +35,13 @@ import kotlin.time.TimeSource
  * than rejected on the detector's verdict. The detector file is downloaded
  * once through the production provider if absent, like the speech model
  * in the other suites.
+ *
+ * Run one class at a time against a persistent install; a
+ * `connectedAndroidTest` run reinstalls the app, which wipes the model,
+ * and the test then skips:
+ *   adb shell am instrument -w \
+ *     -e class coredevices.coreapp.transcription.WhisperVadTrimTest \
+ *     com.anopticlabs.gravel.test/androidx.test.runner.AndroidJUnitRunner
  */
 class WhisperVadTrimTest {
 

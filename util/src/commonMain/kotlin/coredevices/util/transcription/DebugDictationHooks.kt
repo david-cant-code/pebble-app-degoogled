@@ -56,8 +56,10 @@ fun debugArchiveDictationAudio(captureDump: Boolean, debugBuild: Boolean, pcm16:
 
 /**
  * Archives the watch's codec frames for one dictation when the capture
- * dump hook is on in a debug build; a no-op otherwise. Lives beside the
- * decoded-audio dump so the two files of one dictation share a stamp.
+ * dump hook is on in a debug build; a no-op otherwise. Written under the
+ * same prefix as the decoded-audio dump but with its own stamp, taken
+ * before the decode is routed: pair a `.wav` with the nearest earlier
+ * `.spx`. A dictation routed to a server leaves no `.wav`.
  */
 fun debugArchiveDictationFrames(captureDump: Boolean, debugBuild: Boolean, frames: List<ByteArray>) {
     if (debugCaptureDumpApplies(captureDump, debugBuild) && frames.isNotEmpty()) DictationCaptureDump.writeFrames(frames)

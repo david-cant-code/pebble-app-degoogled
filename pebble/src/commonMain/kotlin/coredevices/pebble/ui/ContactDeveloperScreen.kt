@@ -69,9 +69,6 @@ private const val MAX_BODY = 5000
 private const val MAX_ATTACHMENTS = 3
 private const val MAX_ATTACHMENT_BYTES = 2L * 1024 * 1024
 
-// Fork: where the permanently-signed-out state sends people instead of the
-// dead sign-in dialog; the tracker URL is the shared constant in util.
-
 @Composable
 fun ContactDeveloperScreen(
     coreNav: CoreNav,

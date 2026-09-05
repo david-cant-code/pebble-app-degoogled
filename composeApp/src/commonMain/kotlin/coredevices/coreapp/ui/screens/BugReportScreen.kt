@@ -627,7 +627,7 @@ fun BugReportScreen(
                         "Nothing is sent anywhere. Export creates a zip with the app log, " +
                             "a device summary and anything you attach here, for you to add " +
                             "to an issue yourself. The log leaves out personal content " +
-                            "unless you turn that on under Debug settings.",
+                            "unless you turn that on under Diagnostics settings.",
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         fontSize = 13.sp
