@@ -371,6 +371,21 @@ unchanged since the earlier pass. Three apps is too few to generalize
 from, so the requesting watchapp joins the firmware revision as a
 variable a capture comparison should hold fixed.
 
+## A silent dictation can transcribe as a stray word
+
+**Status: open; engine behavior, matches the app before the detector.**
+
+The engine decodes ten seconds of digital silence to " The" on the
+base English model, and a near-silent watch recording can come back as
+a single short word instead of the "Missed that" the watch shows for
+an empty result. The speech detector's verdict is no longer allowed to
+reject a dictation, because on real watch audio it has missed whole
+dictations the engine transcribed correctly, so it cannot be the
+silence gate either. A gate on the audio itself (a level floor measured
+after the microphone's start-up transient, or the engine's own
+per-segment no-speech probability) needs captures from more than one
+watch before its threshold can be set.
+
 ## Watch-side dictation endpointing misfires in both directions
 
 **Status: open; firmware behavior, app-side mitigation only.**

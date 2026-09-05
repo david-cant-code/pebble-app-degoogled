@@ -162,14 +162,16 @@ private:
 // Voice activity detection ahead of the decode. Whisper always evaluates a
 // padded window, so a dictation session that streams the firmware's full
 // 15 second window with two seconds of speech pays for the whole window;
-// cutting the input to its speech segments before whisper_full makes the
-// encoder cost follow the speech, and a session with no speech at all
-// returns before any encoder pass. The engine's own params.vad path does
-// the same cut but always spawns four VAD threads per 32 ms window and
-// keeps its detector inside the whisper state; this shim owns the detector
-// context instead (one thread, no worker spawn per window) and assembles
-// the trimmed buffer the way the engine does: each speech segment plus the
-// overlap into the next, joined by 100 ms of silence.
+// cutting the leading and trailing silence before whisper_full makes the
+// encoder cost follow the speech. The detector's verdict never decides a
+// dictation: audio in which it finds no speech decodes untrimmed, because
+// watch microphone captures sit far below the levels the detector was
+// trained on and it has missed dictations the engine transcribed in full.
+// For the same reason nothing inside the span is cut; the engine's own
+// params.vad path removes interior gaps and would drop quiet words. The
+// engine's path also spawns four VAD threads per 32 ms window and keeps
+// its detector inside the whisper state; this shim owns the detector
+// context instead (one thread, no worker spawn per window).
 
 // Dictation-tuned segmentation. A pause inside a sentence must not become a
 // cut (min_silence well above the engine's 100 ms default), and word onsets
@@ -184,9 +186,9 @@ whisper_vad_params dictation_vad_params() {
     return p;
 }
 
-// Speech-only copy of [samples]. Returns false when detection itself
-// failed (the caller then decodes the untrimmed audio); an empty result
-// with true means no speech was detected.
+// Copy of [samples] from the first detected speech segment to the last,
+// interior gaps included. Returns false when nothing was cut: detection
+// failed or found no speech, and the caller decodes the untrimmed audio.
 bool trim_to_speech(whisper_vad_context *vctx, const float *samples, int n_samples,
                     std::vector<float> &out) {
     whisper_vad_segments *segments =
@@ -196,25 +198,25 @@ bool trim_to_speech(whisper_vad_context *vctx, const float *samples, int n_sampl
         return false;
     }
     const int n_segments = whisper_vad_segments_n_segments(segments);
-    const int overlap = static_cast<int>(0.1f * WHISPER_SAMPLE_RATE);
-    const int gap     = static_cast<int>(0.1f * WHISPER_SAMPLE_RATE);
-    out.clear();
-    int speech = 0;
-    for (int i = 0; i < n_segments; ++i) {
-        // Segment bounds are centiseconds on the original timeline.
-        int start = static_cast<int>(whisper_vad_segments_get_segment_t0(segments, i) * (WHISPER_SAMPLE_RATE / 100));
-        int end   = static_cast<int>(whisper_vad_segments_get_segment_t1(segments, i) * (WHISPER_SAMPLE_RATE / 100));
-        if (i < n_segments - 1) end += overlap;
-        start = std::max(0, std::min(start, n_samples - 1));
-        end   = std::max(start, std::min(end, n_samples - 1));
-        if (i > 0) out.insert(out.end(), gap, 0.0f);
-        out.insert(out.end(), samples + start, samples + end);
-        speech += end - start;
+    if (n_segments == 0) {
+        whisper_vad_free_segments(segments);
+        __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                            "vad: no speech detected in %.2f s, decoding untrimmed audio",
+                            n_samples / float(WHISPER_SAMPLE_RATE));
+        return false;
     }
+    // Segment bounds are centiseconds on the original timeline, already
+    // padded by speech_pad_ms on both sides.
+    int start = static_cast<int>(whisper_vad_segments_get_segment_t0(segments, 0) * (WHISPER_SAMPLE_RATE / 100));
+    int end   = static_cast<int>(whisper_vad_segments_get_segment_t1(segments, n_segments - 1) * (WHISPER_SAMPLE_RATE / 100));
     whisper_vad_free_segments(segments);
+    start = std::max(0, std::min(start, n_samples - 1));
+    end   = std::max(start, std::min(end, n_samples));
+    out.assign(samples + start, samples + end);
     __android_log_print(ANDROID_LOG_INFO, kLogTag,
-                        "vad: %d speech segment(s), %.2f s of %.2f s kept",
-                        n_segments, speech / float(WHISPER_SAMPLE_RATE), n_samples / float(WHISPER_SAMPLE_RATE));
+                        "vad: %d speech segment(s), kept %.2f s to %.2f s of %.2f s",
+                        n_segments, start / float(WHISPER_SAMPLE_RATE), end / float(WHISPER_SAMPLE_RATE),
+                        n_samples / float(WHISPER_SAMPLE_RATE));
     return true;
 }
 
@@ -528,21 +530,13 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
         return nullptr;
     }
 
-    // With a detector, the engine sees the speech-only buffer; without one
-    // (or when detection fails) it sees the pinned input unchanged.
+    // With a detector that found speech, the engine sees the buffer cut to
+    // that span; otherwise it sees the pinned input unchanged.
     std::vector<float> trimmed;
     const float *samples = pinned;
     int n_samples = static_cast<int>(n_pinned);
     auto *vctx = reinterpret_cast<whisper_vad_context *>(vad_handle);
     if (vctx != nullptr && trim_to_speech(vctx, pinned, n_samples, trimmed)) {
-        if (trimmed.empty()) {
-            // No speech: "" without an encoder pass. The language string is
-            // only pinned further down, so nothing else needs releasing.
-            env->ReleaseFloatArrayElements(pcm, pinned, JNI_ABORT);
-            clear_call_cancel(this_call);
-            report_decoded(0);
-            return utf8_bytes(env, std::string());
-        }
         samples   = trimmed.data();
         n_samples = static_cast<int>(trimmed.size());
     }

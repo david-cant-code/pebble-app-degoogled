@@ -5,6 +5,7 @@ import coredevices.coreapp.model.WhisperModelProvider
 import coredevices.coreapp.testsupport.ReadOnlyModelPathProvider
 import coredevices.util.models.WhisperModelCatalog
 import coredevices.whisper.EnginePlacement
+import coredevices.whisper.TranscribeStats
 import coredevices.whisper.isWhisperSupported
 import coredevices.whisper.pcm16ToFloats
 import coredevices.whisper.whisperFree
@@ -28,9 +29,12 @@ import kotlin.time.TimeSource
  * Exercises the voice activity detector through the engine binding on the
  * real engine: a speech clip padded with silence decodes to the same
  * keyword with the detector on, in less time than the padded clip takes
- * without it; a silence-only clip returns "" without an encoder pass.
- * The detector file is downloaded once through the production provider
- * if absent, like the speech model in the other suites.
+ * without it, and the decoded sample count shows the padding went; a clip
+ * with a long silent gap between two utterances keeps the gap (only the
+ * edges are ever cut); a silence-only clip is decoded untrimmed rather
+ * than rejected on the detector's verdict. The detector file is downloaded
+ * once through the production provider if absent, like the speech model
+ * in the other suites.
  */
 class WhisperVadTrimTest {
 
@@ -39,6 +43,7 @@ class WhisperVadTrimTest {
         const val CLIP_ASSET = "eval_shopping_list_shrimp.raw"
         const val KEYWORD = "shrimp"
         const val PAD_SECONDS = 6
+        const val GAP_SECONDS = 5
     }
 
     private fun log(line: String) {
@@ -53,7 +58,7 @@ class WhisperVadTrimTest {
     }
 
     @Test
-    fun paddedClipDecodesFasterWithTheDetectorAndSilenceReturnsNothing() {
+    fun detectorCutsOnlyTheEdgesAndNeverRejectsAudio() {
         Assume.assumeTrue("engine unsupported on this CPU", isWhisperSupported())
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -76,6 +81,8 @@ class WhisperVadTrimTest {
         val clip = pcm16ToFloats(instrumentation.context.assets.open(CLIP_ASSET).use { it.readBytes() })
         val pad = FloatArray(PAD_SECONDS * 16_000)
         val padded = pad + clip + pad
+        val gap = FloatArray(GAP_SECONDS * 16_000)
+        val gapped = clip + gap + clip
         val silence = FloatArray(10 * 16_000)
 
         val handle = whisperInit(runBlocking { provider.getModelPath(MODEL_NAME) })
@@ -86,14 +93,27 @@ class WhisperVadTrimTest {
             whisperTranscribe(handle, clip, 4, "en", callId++, EnginePlacement.DEFAULT)
 
             val (plainText, plainMs) = timed { whisperTranscribe(handle, padded, 4, "en", callId++, EnginePlacement.DEFAULT) }
-            val (vadText, vadMs) = timed { whisperTranscribe(handle, padded, 4, "en", callId++, EnginePlacement.DEFAULT, vad) }
-            val (silenceText, silenceMs) = timed { whisperTranscribe(handle, silence, 4, "en", callId++, EnginePlacement.DEFAULT, vad) }
-            log("padded ${padded.size / 16_000}s: untrimmed ${plainMs} ms '$plainText'; trimmed ${vadMs} ms '$vadText'; silence ${silenceMs} ms '$silenceText'")
+            val vadStats = TranscribeStats()
+            val (vadText, vadMs) = timed { whisperTranscribe(handle, padded, 4, "en", callId++, EnginePlacement.DEFAULT, vad, vadStats) }
+            val gapStats = TranscribeStats()
+            val (gapText, gapMs) = timed { whisperTranscribe(handle, gapped, 4, "en", callId++, EnginePlacement.DEFAULT, vad, gapStats) }
+            val silenceStats = TranscribeStats()
+            val (silenceText, silenceMs) = timed { whisperTranscribe(handle, silence, 4, "en", callId++, EnginePlacement.DEFAULT, vad, silenceStats) }
+            log("padded ${padded.size / 16_000}s: untrimmed ${plainMs} ms '$plainText'; trimmed ${vadMs} ms '$vadText' (${vadStats.decodedSamples} samples)")
+            log("gapped ${gapped.size / 16_000}s: ${gapMs} ms '$gapText' (${gapStats.decodedSamples} samples); silence ${silenceMs} ms '$silenceText' (${silenceStats.decodedSamples} samples)")
 
             assertTrue(vadText.lowercase().contains(KEYWORD), "trimmed decode lost the keyword: '$vadText'")
             assertTrue(vadMs < plainMs, "trimmed decode ($vadMs ms) was not faster than untrimmed ($plainMs ms)")
-            assertEquals("", silenceText, "silence must decode to nothing")
-            assertTrue(silenceMs < 1500, "silence rejection took $silenceMs ms; it must not run the encoder")
+            assertTrue(
+                vadStats.decodedSamples in 1 until clip.size + 16_000,
+                "padding must be cut: decoded ${vadStats.decodedSamples} of ${padded.size} for a ${clip.size}-sample clip",
+            )
+            assertTrue(gapText.lowercase().contains(KEYWORD), "gapped decode lost the keyword: '$gapText'")
+            assertTrue(
+                gapStats.decodedSamples > 2 * clip.size + (GAP_SECONDS - 1) * 16_000,
+                "the interior gap must be kept: decoded ${gapStats.decodedSamples} of ${gapped.size}",
+            )
+            assertEquals(silence.size, silenceStats.decodedSamples, "silence must be decoded untrimmed, not rejected by the detector")
         } finally {
             whisperVadFree(vad)
             whisperFree(handle)

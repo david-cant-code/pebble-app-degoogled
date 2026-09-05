@@ -333,16 +333,18 @@ The replacement is whisper.cpp (MIT), compiled from source:
   "No internet connection".
 - The shim owns a Silero voice activity detector context (the catalog's
   `VAD_MODEL`, loaded by the service when installed) and cuts each
-  dictation to its speech segments before `whisper_full`, joined by
-  100 ms of silence the way the engine's own `vad` mode does; a session
-  with no speech returns "" before any encoder pass, and a detector
-  failure decodes the untrimmed audio. The shim runs the detector on one
-  thread: its graph is tiny and ggml spawns workers per graph, so the
-  engine's built-in path, which uses four, spends more on thread creation
-  than on detection. Segmentation is tuned for dictation (500 ms of
-  silence to cut, 200 ms of padding around speech) so a pause inside a
-  sentence is not a cut and word edges survive one. The warm-up bypasses
-  the detector, since silence would trim to nothing.
+  dictation to the span from its first speech segment to its last
+  before `whisper_full`. The detector's verdict never decides a
+  dictation: when it finds no speech, or fails, the untrimmed audio is
+  decoded, and interior gaps are never cut, because watch microphone
+  captures sit far below the levels the detector was trained on and it
+  has missed whole dictations the engine transcribed in full. The shim
+  runs the detector on one thread: its graph is tiny and ggml spawns
+  workers per graph, so the engine's built-in path, which uses four,
+  spends more on thread creation than on detection. Segmentation is
+  tuned for dictation (500 ms of silence to end a segment, 200 ms of
+  padding around speech) so word edges survive the cut. The warm-up
+  bypasses the detector.
 - The engine thread count follows the cores the process can actually
   run on, not the online count: ggml's workers synchronize on spinning
   barriers, so a count above the usable cores stalls every barrier for a
