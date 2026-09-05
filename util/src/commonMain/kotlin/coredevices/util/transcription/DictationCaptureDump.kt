@@ -4,6 +4,7 @@ import co.touchlab.kermit.Logger
 import kotlinx.io.buffered
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
+import kotlinx.io.readByteArray
 import kotlinx.io.writeIntLe
 import kotlinx.io.writeShortLe
 import kotlinx.io.writeString
@@ -23,6 +24,8 @@ internal object DictationCaptureDump {
 
     private const val PREFIX = "dictation-"
     private const val SUFFIX = ".wav"
+    /** Raw codec frames as the watch sent them, next to the decoded WAV. */
+    private const val FRAMES_SUFFIX = ".spx"
     private val logger = Logger.withTag("DictationCaptureDump")
 
     /**
@@ -38,12 +41,49 @@ internal object DictationCaptureDump {
             SystemFileSystem.createDirectories(directory)
             val file = Path(directory, "$PREFIX${Clock.System.now().toEpochMilliseconds()}$SUFFIX")
             SystemFileSystem.sink(file).buffered().use { it.write(wavBytes(pcm16, sampleRate)) }
-            val names = SystemFileSystem.list(directory).map { it.name }
-            for (stale in captureNamesToPrune(names, KEEP)) {
-                SystemFileSystem.delete(Path(directory, stale), mustExist = false)
-            }
+            prune(directory, SUFFIX)
             file.toString()
         }.onFailure { logger.w(it) { "Could not write the dictation capture" } }.getOrNull()
+    }
+
+    /**
+     * Writes the codec [frames] of one dictation exactly as they arrived
+     * from the watch, so a capture that decodes badly can be re-decoded
+     * outside the app and the frame bytes themselves inspected. Layout is
+     * [framesBytes]; pruning and failure handling mirror [write].
+     */
+    fun writeFrames(frames: List<ByteArray>): String? {
+        val dir = dictationCaptureDirectory() ?: return null
+        return runCatching {
+            val directory = Path(dir)
+            SystemFileSystem.createDirectories(directory)
+            val file = Path(directory, "$PREFIX${Clock.System.now().toEpochMilliseconds()}$FRAMES_SUFFIX")
+            SystemFileSystem.sink(file).buffered().use { it.write(framesBytes(frames)) }
+            prune(directory, FRAMES_SUFFIX)
+            file.toString()
+        }.onFailure { logger.w(it) { "Could not write the dictation frame capture" } }.getOrNull()
+    }
+
+    private fun prune(directory: Path, suffix: String) {
+        val names = SystemFileSystem.list(directory).map { it.name }
+        for (stale in captureNamesToPrune(names, KEEP, suffix)) {
+            SystemFileSystem.delete(Path(directory, stale), mustExist = false)
+        }
+    }
+
+    /**
+     * Each frame as a little-endian 16-bit byte count followed by its
+     * bytes, in arrival order; a frame longer than that field can carry is
+     * truncated to it, which no watch codec frame approaches.
+     */
+    internal fun framesBytes(frames: List<ByteArray>): ByteArray {
+        val out = kotlinx.io.Buffer()
+        for (frame in frames) {
+            val length = minOf(frame.size, 0xFFFF)
+            out.writeShortLe(length.toShort())
+            out.write(frame, 0, length)
+        }
+        return out.readByteArray()
     }
 
     /**
@@ -51,8 +91,8 @@ internal object DictationCaptureDump {
      * epoch-millisecond stamp in the name orders them, so the lexically
      * smallest are the oldest. Non-capture names are left alone.
      */
-    internal fun captureNamesToPrune(names: Collection<String>, keep: Int): List<String> =
-        names.filter { it.startsWith(PREFIX) && it.endsWith(SUFFIX) }
+    internal fun captureNamesToPrune(names: Collection<String>, keep: Int, suffix: String = SUFFIX): List<String> =
+        names.filter { it.startsWith(PREFIX) && it.endsWith(suffix) }
             .sorted()
             .dropLast(keep)
 

@@ -31,3 +31,12 @@ expect fun debugDictationClip(): ByteArray?
 /** Whether the substitute-audio hook applies, and a clip exists to substitute. */
 fun debugSubstituteClip(substituteAudio: Boolean, debugBuild: Boolean): ByteArray? =
     if (substituteAudio && debugBuild) debugDictationClip() else null
+
+/**
+ * Archives the watch's codec frames for one dictation when the capture
+ * dump hook is on in a debug build; a no-op otherwise. Lives beside the
+ * decoded-audio dump so the two files of one dictation share a stamp.
+ */
+fun debugArchiveDictationFrames(captureDump: Boolean, debugBuild: Boolean, frames: List<ByteArray>) {
+    if (captureDump && debugBuild && frames.isNotEmpty()) DictationCaptureDump.writeFrames(frames)
+}

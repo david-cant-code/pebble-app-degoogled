@@ -55,4 +55,31 @@ class DictationCaptureDumpTest {
         )
         assertEquals(emptyList(), DictationCaptureDump.captureNamesToPrune(names, keep = 10))
     }
+
+    @Test
+    fun framesAreLengthPrefixedInArrivalOrder() {
+        val frames = listOf(byteArrayOf(1, 2, 3), byteArrayOf(), byteArrayOf(9))
+        val bytes = DictationCaptureDump.framesBytes(frames)
+        assertEquals(2 + 3 + 2 + 0 + 2 + 1, bytes.size)
+        assertEquals(3, bytes.leShort(0))
+        assertContentEquals(byteArrayOf(1, 2, 3), bytes.copyOfRange(2, 5))
+        assertEquals(0, bytes.leShort(5))
+        assertEquals(1, bytes.leShort(7))
+        assertEquals(9, bytes[9].toInt())
+    }
+
+    @Test
+    fun pruneIsPerSuffix() {
+        val names = listOf(
+            "dictation-1700000000001.wav",
+            "dictation-1700000000001.spx",
+            "dictation-1700000000002.spx",
+            "dictation-1700000000003.spx",
+        )
+        assertEquals(
+            listOf("dictation-1700000000001.spx"),
+            DictationCaptureDump.captureNamesToPrune(names, keep = 2, suffix = ".spx"),
+        )
+        assertEquals(emptyList(), DictationCaptureDump.captureNamesToPrune(names, keep = 2))
+    }
 }

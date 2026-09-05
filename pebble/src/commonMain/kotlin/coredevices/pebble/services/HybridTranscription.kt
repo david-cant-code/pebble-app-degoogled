@@ -9,6 +9,7 @@ import coredevices.util.transcription.STTLanguage
 import coredevices.util.transcription.TranscriptionException
 import coredevices.util.isDebugBuild
 import coredevices.util.transcription.TranscriptionSessionStatus
+import coredevices.util.transcription.debugArchiveDictationFrames
 import coredevices.util.transcription.debugSubstituteClip
 import coredevices.util.transcription.formatSessionDiagnostics
 import io.ktor.utils.io.CancellationException
@@ -72,15 +73,24 @@ class HybridTranscription(
         )
         val decodedBuffer = Buffer()
         val pcm = ByteArray(encoderInfo.frameSize * Short.SIZE_BYTES)
+        // Debug-only: keep the frames as received so the capture dump can
+        // pair the decoded audio with the codec input that produced it.
+        val archiveFrames = coreConfigFlow.value.sttConfig.debugCaptureDump && isDebugBuild()
+        val rawFrames = if (archiveFrames) mutableListOf<ByteArray>() else null
         withContext(Dispatchers.IO) {
             audioFrames.collect { frame ->
+                val bytes = frame.asByteArray()
+                rawFrames?.add(bytes.copyOf())
                 val result =
-                    speex.decodeFrame(frame.asByteArray(), pcm, hasHeaderByte = true)
+                    speex.decodeFrame(bytes, pcm, hasHeaderByte = true)
                 if (result != SpeexDecodeResult.Success) {
                     error("Failed to decode Speex frame: $result")
                 }
                 decodedBuffer.write(pcm)
             }
+        }
+        rawFrames?.let { frames ->
+            withContext(Dispatchers.IO) { debugArchiveDictationFrames(archiveFrames, isDebugBuild(), frames) }
         }
         // Debug-only: an emulated watch's microphone is silence, so a debug
         // build can stand the bundled 16 kHz clip in for whatever arrived.
