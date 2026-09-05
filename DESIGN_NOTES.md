@@ -570,7 +570,8 @@ What the tree guarantees, and how it is pinned:
   APK carries no dependency-metadata signing block; both are checked by
   the packaging-time `VerifyApkContents` task in
   `androidApp/build.gradle.kts`, which also asserts the excluded assets and
-  the replaced native libraries are absent from every APK. CI builds the
+  the replaced native libraries are absent from every APK and the debug
+  variant's dictation test clip from the release one. CI builds the
   release variant on a keystore-less checkout and compares the built
   `versionName` with `git describe` of the built commit.
 

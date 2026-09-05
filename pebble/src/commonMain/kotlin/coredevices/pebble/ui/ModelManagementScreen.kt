@@ -56,6 +56,7 @@ import coredevices.util.models.ModelDownloadStatus
 import coredevices.util.models.ModelInfo
 import coredevices.util.models.ModelManager
 import coredevices.util.models.RecommendedModel
+import coredevices.util.models.awaitModelDownloadSettled
 import coredevices.util.transcription.SpeedScore
 import coredevices.util.transcription.modelRowText
 import kotlinx.coroutines.delay
@@ -66,7 +67,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -79,15 +79,11 @@ import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Completes a just-scheduled model download: waits for it to settle and
- * selects the model only if it actually installed. Settling means the
- * first non-Downloading status after the replayed current one (Idle on
- * success and on Android cancel, Cancelled on iOS cancel, Failed on
- * error); waiting on Idle alone would leave a failed download's coroutine
- * alive to select its model on the next unrelated download's Idle. The
- * install check guards the cancel/failure cases: selecting an absent
- * model strands config pointing at nothing, and the engine then skips
- * init for it, so local dictation dies at the next process restart.
+ * Completes a just-scheduled model download: waits for it to settle (see
+ * [awaitModelDownloadSettled]) and selects the model only if it actually
+ * installed. The install check guards the cancel/failure cases: selecting
+ * an absent model strands config pointing at nothing, and the engine then
+ * skips init for it, so local dictation dies at the next process restart.
  * Static so the settle/select decision stays under host tests.
  */
 internal suspend fun settleDownloadThenSelect(
@@ -96,7 +92,7 @@ internal suspend fun settleDownloadThenSelect(
     refresh: () -> Unit,
     select: () -> Unit,
 ) {
-    status.drop(1).firstOrNull { it !is ModelDownloadStatus.Downloading }
+    awaitModelDownloadSettled(status)
     refresh()
     if (isInstalled()) select()
 }

@@ -130,7 +130,6 @@ import coredevices.ui.M3Dialog
 import coredevices.ui.SignInDialog
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigHolder
-import coredevices.util.isDebugBuild
 import coredevices.util.Permission
 import coredevices.util.PermissionRequester
 import coredevices.util.STTConfig
@@ -1588,74 +1587,8 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                         }
                     },
                 ),
-                // Fork, debug builds only: test hooks for the watch dictation
-                // deadline work. Offered only when isDebugBuild() is true, and
-                // the transcription service re-checks the build before
-                // honouring either flag (see STTConfig).
-                basicSettingsToggleItem(
-                    title = "Dictation: single engine thread",
-                    description = "Run local speech recognition on one thread so a fast phone reproduces a decode that overruns the watch's 15 second window.",
-                    topLevelType = TopLevelType.Phone,
-                    section = Section.Speech,
-                    checked = coreConfig.sttConfig.debugSingleThread,
-                    onCheckChanged = {
-                        coreConfigHolder.update(
-                            coreConfig.copy(
-                                sttConfig = coreConfig.sttConfig.copy(debugSingleThread = it)
-                            )
-                        )
-                    },
-                    isDebugSetting = true,
-                    show = { isDebugBuild() },
-                ),
-                basicSettingsToggleItem(
-                    title = "Dictation: use the bundled test clip",
-                    description = "Replace the watch's audio with a bundled speech clip, for an emulated watch or a silent room.",
-                    topLevelType = TopLevelType.Phone,
-                    section = Section.Speech,
-                    checked = coreConfig.sttConfig.debugSubstituteAudio,
-                    onCheckChanged = {
-                        coreConfigHolder.update(
-                            coreConfig.copy(
-                                sttConfig = coreConfig.sttConfig.copy(debugSubstituteAudio = it)
-                            )
-                        )
-                    },
-                    isDebugSetting = true,
-                    show = { isDebugBuild() },
-                ),
-                basicSettingsToggleItem(
-                    title = "Dictation: hold each result for 20 seconds",
-                    description = "Delay every decode past the watch's 15 second window so the deadline report can be watched on any phone.",
-                    topLevelType = TopLevelType.Phone,
-                    section = Section.Speech,
-                    checked = coreConfig.sttConfig.debugSlowDecode,
-                    onCheckChanged = {
-                        coreConfigHolder.update(
-                            coreConfig.copy(
-                                sttConfig = coreConfig.sttConfig.copy(debugSlowDecode = it)
-                            )
-                        )
-                    },
-                    isDebugSetting = true,
-                    show = { isDebugBuild() },
-                ),
-                basicSettingsToggleItem(
-                    title = "Dictation: keep audio captures",
-                    description = "Write each dictation's audio and codec frames under the app's private files (last 20 of each kept) for replay through the engine. Nothing is uploaded or backed up; the files are deleted when this is turned off.",
-                    topLevelType = TopLevelType.Phone,
-                    section = Section.Speech,
-                    checked = coreConfig.sttConfig.debugCaptureDump,
-                    onCheckChanged = {
-                        coreConfigHolder.update(
-                            coreConfig.copy(
-                                sttConfig = coreConfig.sttConfig.copy(debugCaptureDump = it)
-                            )
-                        )
-                    },
-                    isDebugSetting = true,
-                    show = { isDebugBuild() },
-                ),
+                // Fork, debug builds only: the dictation test hook toggles.
+                *forkDictationDebugItems(coreConfig, coreConfigHolder).toTypedArray(),
                 navBarNav?.let { nav -> basicSettingsActionItem(
                     title = "Manage Offline Models",
                     description = if (coreConfig.sttConfig.mode == CactusSTTMode.LocalOnly ||

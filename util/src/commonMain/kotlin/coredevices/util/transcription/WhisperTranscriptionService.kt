@@ -363,7 +363,7 @@ class WhisperTranscriptionService internal constructor(
     private var vadHandle: Long = 0L
 
     /** True when the voice activity detector is loaded and trims dictation audio. */
-    val isVadReady get() = vadHandle != 0L
+    internal val isVadReady get() = vadHandle != 0L
     private val scope = CoroutineScope(Dispatchers.Default)
 
     val lastModelUsed get() = lastInitedModel
@@ -806,11 +806,9 @@ class WhisperTranscriptionService internal constructor(
             throw TranscriptionException.TranscriptionInProgress(modelUsed = sttConfig.value.modelName)
         }
         return try {
-            // Debug builds can archive the exact bytes the engine is about
-            // to see; the write is fenced inside the dumper and cannot fail
-            // the dictation.
-            if (debugCaptureDumpApplies(sttConfig.value.debugCaptureDump, debugBuild())) {
-                withContext(Dispatchers.IO) { DictationCaptureDump.write(audio, sampleRate) }
+            // Debug builds can archive the exact bytes the engine is about to see.
+            withContext(Dispatchers.IO) {
+                debugArchiveDictationAudio(sttConfig.value.debugCaptureDump, debugBuild(), audio, sampleRate)
             }
             val pcm = toEngineFloats(audio, sampleRate)
             modelMutex.withLock { runLocalTranscribe(pcm, timeout) }

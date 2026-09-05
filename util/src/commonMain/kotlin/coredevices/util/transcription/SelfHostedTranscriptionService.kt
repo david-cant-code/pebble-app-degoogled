@@ -3,6 +3,7 @@ package coredevices.util.transcription
 import co.touchlab.kermit.Logger
 import coredevices.util.AudioEncoding
 import coredevices.util.CoreConfigFlow
+import coredevices.util.writeWavHeader
 import io.ktor.client.HttpClient
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.forms.MultiPartFormDataContent
@@ -122,7 +123,7 @@ class SelfHostedTranscriptionService(
         val buffer = Buffer()
         frames.collect { buffer.write(it) }
         if (buffer.size == 0L) throw TranscriptionException.NoSpeechDetected("No audio data received", MODEL)
-        val wav = DictationCaptureDump.wavBytes(buffer.readByteArray(), sampleRate)
+        val wav = wavOf(buffer.readByteArray(), sampleRate)
         val reply = post(clientFor(url), url, wav, config.serverModel, store.token(), languageCode(language))
         if (!reply.status.isSuccess()) {
             throw TranscriptionException.TranscriptionServiceError("Server returned HTTP ${reply.status.value}", modelUsed = MODEL)
@@ -149,12 +150,19 @@ class SelfHostedTranscriptionService(
         val hostPort = serverHostPort(url) ?: throw TranscriptionException.TranscriptionServiceUnavailable(MODEL)
         val client = clientFactory(hostPort) { store.pinnedFingerprint(hostPort) }
         return try {
-            val wav = DictationCaptureDump.wavBytes(ByteArray(TEST_SAMPLE_RATE * 2), TEST_SAMPLE_RATE)
+            val wav = wavOf(ByteArray(TEST_SAMPLE_RATE * 2), TEST_SAMPLE_RATE)
             post(client, url, wav, model, token, language = null).status.value
         } finally {
             client.close()
         }
     }
+
+    /** The request payload: a mono 16-bit PCM WAV around [pcm], the one shape both server families accept. */
+    private fun wavOf(pcm: ByteArray, sampleRate: Int): ByteArray =
+        Buffer().apply {
+            writeWavHeader(sampleRate, pcm.size)
+            write(pcm)
+        }.readByteArray()
 
     private suspend fun post(
         client: HttpClient,

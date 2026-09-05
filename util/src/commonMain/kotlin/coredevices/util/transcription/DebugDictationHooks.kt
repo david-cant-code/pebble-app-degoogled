@@ -6,9 +6,9 @@ import kotlin.time.Duration.Companion.seconds
 
 /**
  * Debug-only dictation test hooks (see the `debug*` fields of
- * `STTConfig`). Each pure decision below repeats the debug-build check
- * instead of trusting the settings UI, so a stored flag can never act in
- * a release install that inherited a debug build's settings.
+ * `STTConfig`). Each hook below repeats the debug-build check instead of
+ * trusting the settings UI, so a stored flag can never act in a release
+ * install that inherited a debug build's settings.
  */
 
 /**
@@ -44,6 +44,15 @@ fun debugCaptureDumpApplies(captureDump: Boolean, debugBuild: Boolean): Boolean 
  * first emission.
  */
 fun captureDumpShouldClear(wasOn: Boolean?, on: Boolean): Boolean = !on && wasOn != false
+
+/**
+ * Archives the engine's input for one dictation ([pcm16] at [sampleRate])
+ * when the capture dump hook is on in a debug build; a no-op otherwise.
+ * The write is fenced inside the dumper and cannot fail the dictation.
+ */
+fun debugArchiveDictationAudio(captureDump: Boolean, debugBuild: Boolean, pcm16: ByteArray, sampleRate: Int) {
+    if (debugCaptureDumpApplies(captureDump, debugBuild)) DictationCaptureDump.write(pcm16, sampleRate)
+}
 
 /**
  * Archives the watch's codec frames for one dictation when the capture

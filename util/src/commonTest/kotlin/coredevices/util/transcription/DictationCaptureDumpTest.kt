@@ -1,49 +1,54 @@
 package coredevices.util.transcription
 
+import coredevices.util.writeWavHeader
+import kotlinx.io.Buffer
 import kotlinx.io.buffered
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
 import kotlinx.io.files.SystemTemporaryDirectory
+import kotlinx.io.readByteArray
 import kotlinx.io.writeString
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
- * Pins the WAV layout a replay tool will parse, the prune order that
- * keeps the newest captures, and the clear that leaves none.
+ * Pins the two capture files' contents and names, the prune order that
+ * keeps the newest captures, and the clear that leaves none. The WAV
+ * header itself is pinned by WAVHeaderTest.
  */
 class DictationCaptureDumpTest {
-
-    private fun ByteArray.leInt(at: Int): Int =
-        (this[at].toInt() and 0xFF) or
-            ((this[at + 1].toInt() and 0xFF) shl 8) or
-            ((this[at + 2].toInt() and 0xFF) shl 16) or
-            ((this[at + 3].toInt() and 0xFF) shl 24)
 
     private fun ByteArray.leShort(at: Int): Int =
         (this[at].toInt() and 0xFF) or ((this[at + 1].toInt() and 0xFF) shl 8)
 
     @Test
-    fun wavHeaderDescribesMono16BitPcm() {
+    fun writeStoresTheWavHeaderThenThePcmUnderAStampedName() {
+        val directory = Path(SystemTemporaryDirectory, "captures-${Random.nextLong()}")
         val pcm = ByteArray(1000) { it.toByte() }
-        val wav = DictationCaptureDump.wavBytes(pcm, 16_000)
-        assertEquals(44 + pcm.size, wav.size)
-        assertEquals("RIFF", wav.decodeToString(0, 4))
-        assertEquals(36 + pcm.size, wav.leInt(4))
-        assertEquals("WAVE", wav.decodeToString(8, 12))
-        assertEquals("fmt ", wav.decodeToString(12, 16))
-        assertEquals(16, wav.leInt(16))
-        assertEquals(1, wav.leShort(20), "PCM format tag")
-        assertEquals(1, wav.leShort(22), "mono")
-        assertEquals(16_000, wav.leInt(24))
-        assertEquals(32_000, wav.leInt(28), "byte rate")
-        assertEquals(2, wav.leShort(32), "block align")
-        assertEquals(16, wav.leShort(34), "bits per sample")
-        assertEquals("data", wav.decodeToString(36, 40))
-        assertEquals(pcm.size, wav.leInt(40))
-        assertContentEquals(pcm, wav.copyOfRange(44, wav.size))
+        val path = DictationCaptureDump.write(directory, pcm, 16_000)
+        val file = Path(path!!)
+        assertTrue(file.name.startsWith("dictation-") && file.name.endsWith(".wav"), file.name)
+        val expected = Buffer().apply {
+            writeWavHeader(16_000, pcm.size)
+            write(pcm)
+        }.readByteArray()
+        assertContentEquals(expected, SystemFileSystem.source(file).buffered().use { it.readByteArray() })
+    }
+
+    @Test
+    fun writeFramesStoresTheFrameLayoutUnderAStampedName() {
+        val directory = Path(SystemTemporaryDirectory, "captures-${Random.nextLong()}")
+        val frames = listOf(byteArrayOf(1, 2, 3), byteArrayOf(9))
+        val path = DictationCaptureDump.writeFrames(directory, frames)
+        val file = Path(path!!)
+        assertTrue(file.name.startsWith("dictation-") && file.name.endsWith(".spx"), file.name)
+        assertContentEquals(
+            DictationCaptureDump.framesBytes(frames),
+            SystemFileSystem.source(file).buffered().use { it.readByteArray() },
+        )
     }
 
     @Test

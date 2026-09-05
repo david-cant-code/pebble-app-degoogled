@@ -94,7 +94,9 @@ class HybridTranscription(
             }
         }
         rawFrames?.let { frames ->
-            withContext(Dispatchers.IO) { debugArchiveDictationFrames(archiveFrames, isDebugBuild(), frames) }
+            withContext(Dispatchers.IO) {
+                debugArchiveDictationFrames(coreConfigFlow.value.sttConfig.debugCaptureDump, isDebugBuild(), frames)
+            }
         }
         // Debug-only: an emulated watch's microphone is silence, so a debug
         // build can stand the bundled 16 kHz clip in for whatever arrived.
