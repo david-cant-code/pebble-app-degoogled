@@ -116,7 +116,6 @@ class DeviceSpeedTest {
         }
         assertNull(WhisperSpeedCalibration.estimateWindowSeconds("whisper-base-en", null))
         assertNull(WhisperSpeedCalibration.estimateWindowSeconds("not-a-model", reference))
-        assertNull(WhisperSpeedCalibration.estimateWindowSeconds("not-a-model", reference))
     }
 
     @Test

@@ -79,7 +79,16 @@ class SelfHostedServerTest {
     fun transportFailuresAreDescribedWithoutTheAddress() {
         val url = "https://stt.example.net:8443/inference"
         assertEquals("timed out", describeTransportFailure(java.net.SocketTimeoutException("Read timed out [url=$url]")))
-        assertEquals("timed out", describeTransportFailure(Exception("Connect timeout has expired [url=$url]", ConnectTimeoutStandIn())))
+        // The OkHttp engine raises Ktor's ConnectTimeoutException over the socket's own timeout.
+        assertEquals(
+            "timed out",
+            describeTransportFailure(
+                io.ktor.client.network.sockets.ConnectTimeoutException(
+                    "Connect timeout has expired [url=$url, connect_timeout=unknown ms]",
+                    java.net.SocketTimeoutException("failed to connect to stt.example.net/10.0.0.5:8443"),
+                ),
+            ),
+        )
         assertEquals("host name not found", describeTransportFailure(java.net.UnknownHostException("Unable to resolve host \"stt.example.net\"")))
         assertEquals("connection refused", describeTransportFailure(java.net.ConnectException("Failed to connect to stt.example.net/10.0.0.5:8443")))
         assertEquals(
@@ -97,8 +106,6 @@ class SelfHostedServerTest {
         a.initCause(b)
         assertEquals("IOException", describeTransportFailure(a))
     }
-
-    private class ConnectTimeoutStandIn : Exception("Connect timeout has expired")
 
     @Test
     fun fingerprintMatchesTheOpensslLayout() {

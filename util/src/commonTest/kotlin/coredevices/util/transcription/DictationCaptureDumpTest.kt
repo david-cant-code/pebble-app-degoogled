@@ -1,5 +1,6 @@
 package coredevices.util.transcription
 
+import coredevices.util.deleteRecursive
 import coredevices.util.writeWavHeader
 import kotlinx.io.Buffer
 import kotlinx.io.buffered
@@ -9,6 +10,7 @@ import kotlinx.io.files.SystemTemporaryDirectory
 import kotlinx.io.readByteArray
 import kotlinx.io.writeString
 import kotlin.random.Random
+import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -21,12 +23,17 @@ import kotlin.test.assertTrue
  */
 class DictationCaptureDumpTest {
 
+    /** A directory of this test's own under the temporary directory; the file tests write into it and it is removed afterwards. */
+    private val directory = Path(SystemTemporaryDirectory, "captures-${Random.nextLong()}")
+
+    @AfterTest
+    fun cleanup() = deleteRecursive(directory)
+
     private fun ByteArray.leShort(at: Int): Int =
         (this[at].toInt() and 0xFF) or ((this[at + 1].toInt() and 0xFF) shl 8)
 
     @Test
     fun writeStoresTheWavHeaderThenThePcmUnderAStampedName() {
-        val directory = Path(SystemTemporaryDirectory, "captures-${Random.nextLong()}")
         val pcm = ByteArray(1000) { it.toByte() }
         val path = DictationCaptureDump.write(directory, pcm, 16_000)
         val file = Path(path!!)
@@ -40,7 +47,6 @@ class DictationCaptureDumpTest {
 
     @Test
     fun writeFramesStoresTheFrameLayoutUnderAStampedName() {
-        val directory = Path(SystemTemporaryDirectory, "captures-${Random.nextLong()}")
         val frames = listOf(byteArrayOf(1, 2, 3), byteArrayOf(9))
         val path = DictationCaptureDump.writeFrames(directory, frames)
         val file = Path(path!!)
@@ -81,7 +87,6 @@ class DictationCaptureDumpTest {
 
     @Test
     fun clearDeletesEveryCaptureAndNothingElse() {
-        val directory = Path(SystemTemporaryDirectory, "captures-${Random.nextLong()}")
         SystemFileSystem.createDirectories(directory)
         for (name in listOf("dictation-1700000000001.wav", "dictation-1700000000002.wav", "dictation-1700000000001.spx", "notes.txt")) {
             SystemFileSystem.sink(Path(directory, name)).buffered().use { it.writeString("x") }

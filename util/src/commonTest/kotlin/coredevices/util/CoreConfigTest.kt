@@ -48,6 +48,19 @@ class CoreConfigTest {
     }
 
     @Test
+    fun sttConfigPrintsEveryFieldItDeclares() {
+        // The redacting toString names its fields by hand, so one added to
+        // the class has to be added there too; the serializer's descriptor
+        // lists what the class declares.
+        val printed = STTConfig().toString()
+        val descriptor = STTConfig.serializer().descriptor
+        for (index in 0 until descriptor.elementsCount) {
+            val name = descriptor.getElementName(index)
+            assertTrue(printed.contains("$name="), "toString leaves out $name: $printed")
+        }
+    }
+
+    @Test
     fun unsetWeatherUnitsFallsBackToDeviceDefault() {
         val decoded = json.decodeFromString<CoreConfig>("{}")
         assertEquals(null, decoded.weatherUnits)
