@@ -5,6 +5,7 @@ import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigFlow
 import coredevices.util.STTConfig
 import coredevices.util.models.CactusSTTMode
+import io.rebble.libpebblecommon.voice.DICTATION_DEADLINE
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -17,17 +18,20 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 /**
  * Pins the feed into the speed record: a successful decode lands its
- * factor under the model that ran, a blank result records nothing, and a
+ * factor under the model that ran, a blank result records nothing, a
  * model switched mid-decode is credited to the model that did the work,
- * not the one configured after it.
+ * not the one configured after it, and a decode cancelled by the next
+ * session records its elapsed time only once past the deadline.
  */
 class SpeedRecordTest {
 
-    private class Harness {
+    private class Harness(recordCancelledAfter: Duration = DICTATION_DEADLINE) {
         val engine = FakeWhisperEngine()
         val tracker = DictationSpeedTracker(MapSettings())
         val config = MutableStateFlow(CoreConfig(sttConfig = STTConfig(mode = CactusSTTMode.LocalOnly, modelName = "model-a")))
@@ -40,6 +44,7 @@ class SpeedRecordTest {
             speedTracker = tracker,
             debugBuild = { false },
             clearCaptures = {},
+            recordCancelledAfter = recordCancelledAfter,
         )
 
         suspend fun awaitUntil(what: String, condition: () -> Boolean) {
@@ -101,5 +106,42 @@ class SpeedRecordTest {
         assertEquals("hello world", result.await())
         assertNotNull(h.tracker.factorFor("model-a"), "the decode ran on model-a")
         assertNull(h.tracker.factorFor("model-b"), "model-b has not decoded anything yet")
+    }
+
+    @Test
+    fun aDecodeCancelledPastTheDeadlineRecordsItsElapsedTimeAsALowerBound() = runBlocking(Dispatchers.Default) {
+        // The session coordinator cancels a decode when the watch starts its
+        // next session; one that had already run past the deadline records
+        // what it cost so far, which is already beyond the window.
+        val h = Harness(recordCancelledAfter = 50.milliseconds)
+        h.engine.decodedSamples = 4 * 16_000
+        h.engine.gate = CountDownLatch(1)
+        h.awaitUntil("model init") { h.service.isModelReady }
+        val decode = async { h.service.transcribeLocal(realPcmBytes(), sampleRate = 16_000) }
+        h.awaitUntil("decode in flight") { h.engine.inRealTranscribe }
+        delay(150)
+        decode.cancel()
+        h.engine.gate!!.countDown()
+        runCatching { decode.await() }
+        h.awaitUntil("cancelled decode unwound") { !h.engine.inRealTranscribe }
+        val factor = assertNotNull(h.tracker.factorFor("model-a"), "the elapsed time is recorded as the sample")
+        assertTrue(factor > 0.0)
+    }
+
+    @Test
+    fun aDecodeCancelledBeforeTheDeadlineRecordsNothing() = runBlocking(Dispatchers.Default) {
+        // Superseded early, its cost says nothing about a full window.
+        val h = Harness(recordCancelledAfter = 10.seconds)
+        h.engine.decodedSamples = 4 * 16_000
+        h.engine.gate = CountDownLatch(1)
+        h.awaitUntil("model init") { h.service.isModelReady }
+        val decode = async { h.service.transcribeLocal(realPcmBytes(), sampleRate = 16_000) }
+        h.awaitUntil("decode in flight") { h.engine.inRealTranscribe }
+        delay(100)
+        decode.cancel()
+        h.engine.gate!!.countDown()
+        runCatching { decode.await() }
+        h.awaitUntil("cancelled decode unwound") { !h.engine.inRealTranscribe }
+        assertNull(h.tracker.factorFor("model-a"))
     }
 }

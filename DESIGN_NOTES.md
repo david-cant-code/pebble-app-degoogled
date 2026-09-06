@@ -359,13 +359,18 @@ The replacement is whisper.cpp (MIT), compiled from source:
   in libpebble3, not by the provider. The firmware records for at most
   15 seconds, gives the phone 15 seconds from the end of the recording,
   drops a later result, and after its error dialog starts a new session
-  on its own. So sessions run as independent jobs (the retry must not
-  cancel the decode it replaces), frames are buffered from the moment a
-  setup is accepted, and an overrun is reported as a recognizer error
-  one second before the watch's own clock runs out while the decode
-  runs on, so the speed record (below) still sees how long it really
-  took; the late transcript itself goes nowhere and the watch's retry
-  runs as a fresh session. A recording the watch has not ended
+  on its own. So each setup is its own job and a new setup supersedes
+  the session in flight: the watch has moved on, so the earlier decode
+  is cancelled and nothing more is sent for it (the engine runs one
+  decode at a time, and a decode left running would fail the new
+  session's own the moment its recording ended). Frames are buffered
+  from the moment a setup is accepted, and an overrun is reported as a
+  recognizer error one second before the watch's own clock runs out
+  while the decode runs on until the next session supersedes it, so the
+  speed record (below) still sees how long it really took; a decode
+  cancelled past the deadline records its elapsed time as a lower bound.
+  The late transcript itself goes nowhere and the watch's retry runs as
+  a fresh session. A recording the watch has not ended
   30 seconds after the setup is abandoned from the phone side (its
   clock has run out by then for any recording), so a stop packet that
   never arrives cannot hold a session open for the life of the

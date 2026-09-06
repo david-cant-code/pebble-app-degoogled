@@ -16,6 +16,7 @@ import coredevices.whisper.whisperCancel
 import coredevices.whisper.whisperFree
 import coredevices.whisper.whisperInit
 import coredevices.whisper.whisperTranscribe
+import io.rebble.libpebblecommon.voice.DICTATION_DEADLINE
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -300,6 +301,8 @@ class WhisperTranscriptionService internal constructor(
     // The build check behind the debug hooks and the capture clear, injected so host tests can drive both.
     private val debugBuild: () -> Boolean = ::isDebugBuild,
     private val clearCaptures: () -> Unit = { DictationCaptureDump.clear() },
+    // A decode cancelled after running this long had already missed the watch; its elapsed time is recorded (see runLocalTranscribe).
+    private val recordCancelledAfter: Duration = DICTATION_DEADLINE,
 ) {
     /** Production entry point: the real native engine. */
     constructor(
@@ -708,6 +711,16 @@ class WhisperTranscriptionService internal constructor(
             throw e
         } catch (e: CancellationException) {
             outcome = "cancelled"
+            // The session coordinator cancels a decode when the watch starts
+            // its next session. One that had already run past the deadline
+            // was lost anyway; its elapsed time is a lower bound on the cost
+            // and already beyond the window, so the speed record takes it.
+            val elapsed = started.elapsedNow()
+            if (elapsed >= recordCancelledAfter) {
+                stats.speechSeconds()?.let { speechSeconds ->
+                    model?.let { speedTracker?.recordDecode(it, speechSeconds, elapsed.inWholeMilliseconds) }
+                }
+            }
             throw e
         } catch (e: Exception) {
             outcome = "error:${e::class.simpleName}"

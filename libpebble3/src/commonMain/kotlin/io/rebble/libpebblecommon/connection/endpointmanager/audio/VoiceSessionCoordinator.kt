@@ -15,8 +15,10 @@ import io.rebble.libpebblecommon.voice.boundedForProtocol
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -38,15 +40,18 @@ import kotlin.uuid.Uuid
  * starts a brand-new session on its own.
  *
  * Three fork behaviours follow from that contract:
- *  - Sessions never cancel each other. The watch's automatic retry is a
- *    new setup request, and the decode of the session it replaces must
- *    be allowed to finish.
+ *  - A new setup request supersedes the session in flight. The watch has
+ *    moved on, so nothing sent for the earlier session could be shown any
+ *    more, and its decode is cancelled: the engine runs one decode at a
+ *    time, and a decode left running would fail the new session's own
+ *    with "transcription in progress" the moment its recording ended.
  *  - The deadline is owned here, measured from the end of the recording:
  *    a decode that overruns it is reported to the watch as a recognizer
  *    error [DEADLINE_MARGIN] before the watch would time out itself, and
- *    the decode runs on so the speed record still sees how long it really
- *    took. Its late result goes nowhere; the watch's retry runs as a
- *    fresh session.
+ *    the decode runs on, until the next session supersedes it, so the
+ *    speed record sees how long it really took (a decode cancelled past
+ *    the deadline records its elapsed time as a lower bound). Its late
+ *    result goes nowhere; the watch's retry runs as a fresh session.
  *  - A recording the watch has not ended [RECORDING_BOUND] after the
  *    setup is abandoned from the phone side, so a stop packet that never
  *    arrives cannot hold the session, its buffer and its provider call
@@ -79,10 +84,15 @@ internal class VoiceSessionCoordinator(
         val RECORDING_BOUND = PEBBLE_FW_RECORDING_CAP + PEBBLE_FW_TRANSCRIPTION_TIMEOUT
     }
 
-    /** Collects setup requests for the life of [scope]; one job per session. */
+    /** Collects setup requests for the life of [scope]; one job per session, each superseding the last. */
     suspend fun run() {
+        var inFlight: Job? = null
         setupRequests.collect { request ->
-            scope.launch { handle(request) }
+            inFlight?.takeIf { it.isActive }?.let { previous ->
+                logger.i { "Voice session ${request.sessionId} supersedes the session in flight" }
+                previous.cancel(CancellationException("superseded by session ${request.sessionId}"))
+            }
+            inFlight = scope.launch { handle(request) }
         }
     }
 
@@ -105,59 +115,78 @@ internal class VoiceSessionCoordinator(
         }
         val sessionId = request.sessionId.toUShort()
         onSessionStarted(request)
-
-        // Buffer the recording from before the watch is told to start; the
-        // collector runs for the whole session and closes the channel at the
-        // end of the transfer, which is the moment the watch's clock starts.
-        val frames = Channel<UByteArray>(Channel.UNLIMITED)
-        val audioEnded = CompletableDeferred<Unit>()
-        val collector = scope.launch {
-            try {
-                framesFor(sessionId).collect { frames.send(it) }
-            } finally {
-                frames.close()
-                audioEnded.complete(Unit)
-            }
-        }
-        yield()
-        sendSetupResult(request.sessionType, Result.Success, appInitiated)
-
-        val transcription = scope.async {
-            try {
-                provider.transcribe(encoderInfo, frames.receiveAsFlow(), isNotificationReply(request))
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                logger.e(e) { "Error during transcription: ${e.message}" }
-                TranscriptionResult.Error("Transcription error: ${e.message}")
-            }
-        }
-        if (withTimeoutOrNull(RECORDING_BOUND) { audioEnded.await() } == null) {
-            // Nothing is sent: the watch gave up on this session before the
-            // bound, and the provider has not started a decode yet, since it
-            // reads the whole recording before it does.
-            logger.w { "Voice session ${request.sessionId} recording not ended after $RECORDING_BOUND; abandoning it" }
-            transcription.cancelAndJoin()
-            collector.cancelAndJoin()
-            onSessionEnded(request, TranscriptionResult.Failed)
-            return
-        }
-        val result = withTimeoutOrNull(deadline) { transcription.await() }?.boundedForProtocol()
-        if (result != null) {
-            logger.i { "Voice session ${request.sessionId} completed with result: ${describe(result)}" }
-            sendDictationResult(sessionId, result, request.appUuid)
+        var ended = false
+        fun end(result: TranscriptionResult) {
+            ended = true
             onSessionEnded(request, result)
-            return
         }
 
-        // Lost: the watch is told now, one margin before its own clock runs
-        // out. The decode keeps running so the speed record sees its real
-        // duration; its result is only logged.
-        logger.w { "Voice session ${request.sessionId} missed the ${deadline} deadline; reporting failure and keeping the decode" }
-        sendDictationResult(sessionId, TranscriptionResult.Failed, request.appUuid)
-        onSessionEnded(request, TranscriptionResult.Failed)
-        val late = transcription.await()
-        logger.i { "Lost voice session ${request.sessionId} finished late with ${describe(late)}" }
+        try {
+            // The collector and the decode are children of this session's job,
+            // so a superseding session cancels both with it.
+            coroutineScope {
+                // Buffer the recording from before the watch is told to start; the
+                // collector runs for the whole session and closes the channel at the
+                // end of the transfer, which is the moment the watch's clock starts.
+                val frames = Channel<UByteArray>(Channel.UNLIMITED)
+                val audioEnded = CompletableDeferred<Unit>()
+                val collector = launch {
+                    try {
+                        framesFor(sessionId).collect { frames.send(it) }
+                    } finally {
+                        frames.close()
+                        audioEnded.complete(Unit)
+                    }
+                }
+                yield()
+                sendSetupResult(request.sessionType, Result.Success, appInitiated)
+
+                val transcription = async {
+                    try {
+                        provider.transcribe(encoderInfo, frames.receiveAsFlow(), isNotificationReply(request))
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        logger.e(e) { "Error during transcription: ${e.message}" }
+                        TranscriptionResult.Error("Transcription error: ${e.message}")
+                    }
+                }
+                if (withTimeoutOrNull(RECORDING_BOUND) { audioEnded.await() } == null) {
+                    // Nothing is sent: the watch gave up on this session before the
+                    // bound, and the provider has not started a decode yet, since it
+                    // reads the whole recording before it does.
+                    logger.w { "Voice session ${request.sessionId} recording not ended after $RECORDING_BOUND; abandoning it" }
+                    transcription.cancelAndJoin()
+                    collector.cancelAndJoin()
+                    end(TranscriptionResult.Failed)
+                    return@coroutineScope
+                }
+                val result = withTimeoutOrNull(deadline) { transcription.await() }?.boundedForProtocol()
+                if (result != null) {
+                    logger.i { "Voice session ${request.sessionId} completed with result: ${describe(result)}" }
+                    sendDictationResult(sessionId, result, request.appUuid)
+                    end(result)
+                    return@coroutineScope
+                }
+
+                // Lost: the watch is told now, one margin before its own clock runs
+                // out. The decode keeps running so the speed record sees its real
+                // duration; its result is only logged.
+                logger.w { "Voice session ${request.sessionId} missed the ${deadline} deadline; reporting failure and keeping the decode" }
+                sendDictationResult(sessionId, TranscriptionResult.Failed, request.appUuid)
+                end(TranscriptionResult.Failed)
+                val late = transcription.await()
+                logger.i { "Lost voice session ${request.sessionId} finished late with ${describe(late)}" }
+            }
+        } catch (e: CancellationException) {
+            // Superseded by the watch's next session: nothing more is sent for
+            // this one, and a session still open or decoding ends as failed.
+            if (!ended) {
+                logger.i { "Voice session ${request.sessionId} superseded before it ended" }
+                end(TranscriptionResult.Failed)
+            }
+            throw e
+        }
     }
 
     private fun describe(result: TranscriptionResult): String = when (result) {
