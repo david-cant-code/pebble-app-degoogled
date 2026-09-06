@@ -67,7 +67,6 @@ internal fun formatEngineDiagnostics(
     threads: Int,
     snapshot: EngineRuntimeSnapshot,
     audioSeconds: Double,
-    speechSeconds: Double?,
     decodeMillis: Long,
     outcome: String,
 ): String = buildString {
@@ -77,8 +76,6 @@ internal fun formatEngineDiagnostics(
     append(" cpuset=").append(snapshot.cpuset ?: "?")
     append(" importance=").append(snapshot.importance ?: "?")
     append(" audioSec=").append(formatSeconds(audioSeconds))
-    // What the engine reported decoding; "?" when the call never reached it.
-    append(" speechSec=").append(speechSeconds?.let(::formatSeconds) ?: "?")
     append(" decodeMs=").append(decodeMillis)
     append(" outcome=").append(outcome)
 }

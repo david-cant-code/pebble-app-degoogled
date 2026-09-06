@@ -88,7 +88,7 @@ actual fun whisperTranscribe(
     stats: TranscribeStats?,
 ): String {
     // The shim writes into a one-slot array; the stats object is filled
-    // from it on every exit so a failed call still reports what it decoded.
+    // from it on every exit so a failed call still reports what it was given.
     val slots = if (stats != null) intArrayOf(-1) else null
     try {
         val bytes = WhisperJNI.nativeTranscribe(
@@ -96,7 +96,7 @@ actual fun whisperTranscribe(
         ) ?: throw RuntimeException("whisper transcription failed: ${whisperGetLastError()}")
         return bytes.decodeToString()
     } finally {
-        if (stats != null && slots != null) stats.decodedSamples = slots[0]
+        if (stats != null && slots != null) stats.inputSamples = slots[0]
     }
 }
 

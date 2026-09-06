@@ -269,15 +269,15 @@ The replacement is whisper.cpp (MIT), compiled from source:
   down a tier while its estimate exceeds the watch's window, to the tiny
   floor at most.
 - The probe is a forecast; real dictations are the record. The engine
-  reports how many samples it decoded (`TranscribeStats`), the service
+  reports how many samples it was given (`TranscribeStats`), the service
   records the time to a result per
   second of engine input after each successful dictation, under the
   model that ran the decode, smoothed per model in settings
   (`DictationSpeedTracker`), and `DictationSpeedPolicy` predicts a full
   window from it. Engine input counts the encoder's fixed floor (the
   shim's 64 extra context positions, 1.28 s of audio) on top of the
-  speech, since every call pays it and a short reply would otherwise
-  read as a slow model; dictations under two seconds of speech are not
+  audio, since every call pays it and a short reply would otherwise
+  read as a slow model; dictations under two seconds of audio are not
   recorded at all. When that prediction misses the session coordinator's
   deadline and a cheaper tier exists, `SttSpeedNudgePrompt` offers the
   switch, naming the watch's error text and where the model can be

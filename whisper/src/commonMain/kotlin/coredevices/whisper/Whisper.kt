@@ -55,12 +55,12 @@ data class EnginePlacement(val cpuMask: Long = 0L, val nice: Int = 0) {
  * What one [whisperTranscribe] call reports back about itself when the
  * caller passes an instance.
  *
- * @property decodedSamples the samples the engine was given, which is the
- *   input size; -1 until the call reaches that point. Decode cost follows
- *   this count, which is what makes a per-second-of-input timing possible.
+ * @property inputSamples the samples the engine was given; -1 until the
+ *   call reaches that point. Decode cost follows this count, which is what
+ *   makes a per-second-of-input timing possible.
  */
 class TranscribeStats {
-    var decodedSamples: Int = -1
+    var inputSamples: Int = -1
 }
 
 /**

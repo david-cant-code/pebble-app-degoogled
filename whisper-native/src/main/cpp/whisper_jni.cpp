@@ -50,6 +50,11 @@ constexpr const char *kLogTag = "whisper_jni";
 // no_speech_thold default.
 constexpr float kNoSpeechThreshold = 0.6f;
 
+// Fallback for a non-positive thread count, for both the decode and the
+// speed probe; the Kotlin side always sends a positive one, so this only
+// ever serves a direct native caller.
+constexpr int kDefaultThreads = 4;
+
 // Call ids whose transcription has been asked to abort. Membership is the
 // abort signal for that call; a call clears its own id on return. The set
 // is guarded by a mutex rather than a lock-free structure because the
@@ -179,9 +184,6 @@ private:
 // than carved from the context per call (ggml_graph_compute_with_ctx
 // allocates a new one on every call, which would exhaust any fixed budget
 // inside the timing loop).
-// Fallback for a non-positive thread count; the Kotlin side always sends
-// a positive one, so this only ever serves a direct native caller.
-constexpr int kDefaultThreads = 4;
 
 constexpr int kBenchState  = 512;   // base model width
 constexpr int kBenchHeads  = 8;
@@ -426,9 +428,9 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
     // Reports the sample count the engine is given into the caller's
     // optional one-slot array, so the Kotlin side can time the decode per
     // second of engine input.
-    auto report_decoded = [&](int decoded) {
+    auto report_input = [&](int samples) {
         if (stats != nullptr && env->GetArrayLength(stats) > 0) {
-            const jint value = decoded;
+            const jint value = samples;
             env->SetIntArrayRegion(stats, 0, 1, &value);
         }
     };
@@ -450,9 +452,8 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
         return nullptr;
     }
 
-    const float *samples = pinned;
-    int n_samples = static_cast<int>(n_pinned);
-    report_decoded(n_samples);
+    const int n_samples = static_cast<int>(n_pinned);
+    report_input(n_samples);
 
     // Language codes are ASCII (ISO 639-1), so modified UTF-8 is safe on
     // this input path too. Null means in-engine language detection.
@@ -531,7 +532,7 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
         // Scoped to the engine call alone; the destructor restores the
         // thread before any JNI call below runs.
         ScopedPlacement placement(cpu_mask, nice_value);
-        rc = whisper_full(ctx, params, samples, static_cast<int>(n_samples));
+        rc = whisper_full(ctx, params, pinned, n_samples);
     }
     const bool was_cancelled = is_call_cancelled(this_call);
     // The abort key is per call, so clearing it here cannot revoke any

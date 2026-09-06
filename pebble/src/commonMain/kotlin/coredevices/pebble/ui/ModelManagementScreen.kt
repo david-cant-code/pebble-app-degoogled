@@ -58,6 +58,7 @@ import coredevices.util.models.ModelManager
 import coredevices.util.models.RecommendedModel
 import coredevices.util.models.awaitModelDownloadSettled
 import coredevices.util.transcription.SpeedScore
+import coredevices.util.transcription.WhisperSpeedCalibration
 import coredevices.util.transcription.modelRowText
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -77,6 +78,7 @@ import org.jetbrains.compose.ui.tooling.preview.Preview
 import org.koin.compose.viewmodel.koinViewModel
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
+import kotlin.math.roundToInt
 
 /**
  * Completes a just-scheduled model download: waits for it to settle (see
@@ -287,9 +289,10 @@ fun ModelDownloadPromptDialog(
             }
             is RecommendedModel.Minimal -> {
                 Spacer(modifier = Modifier.height(8.dp))
+                val window = WhisperSpeedCalibration.WINDOW_SECONDS.roundToInt()
                 Text(
-                    "This phone is too slow for the larger models to finish inside the watch's " +
-                        "15 second dictation limit, so the smallest model will be used. Its accuracy " +
+                    "This phone is too slow for the larger models to answer a full $window second " +
+                        "dictation in time, so the smallest model will be used. Its accuracy " +
                         "is noticeably lower; another model can be chosen later under Manage Models.",
                 )
             }
@@ -316,12 +319,15 @@ private fun SpeedTestRow(score: SpeedScore?, measuring: Boolean, onRetest: () ->
             )
         },
         supportingContent = {
+            // The numbers are the firmware constants the estimates and the deadline are built on.
+            val window = WhisperSpeedCalibration.WINDOW_SECONDS.roundToInt()
+            val deadline = WhisperSpeedCalibration.MARGINAL_LIMIT_SECONDS.roundToInt()
             Text(
                 when {
                     measuring -> "This takes about a second."
-                    score == null -> "Each model will show how long a 15 second dictation would take once the speed test has run."
-                    else -> "Each model shows how long a full 15 second dictation would take on this phone " +
-                        "with the app in the background. The watch gives up after 15 seconds."
+                    score == null -> "Each model will show how long a $window second dictation would take once the speed test has run."
+                    else -> "Each model shows how long a full $window second dictation would take on this phone " +
+                        "with the app in the background. A result later than $deadline seconds is too late for the watch."
                 }
             )
         },

@@ -34,13 +34,14 @@ internal class FakeModelProvider : CactusModelPathProvider {
 /**
  * An engine that answers [reply] for real audio and "" for the all-zero
  * warm-up pass, counting the real calls so a test can tell whether the
- * local model ran. It reports [decodedSamples] through the stats slot the
- * way the shim does, and a real call blocks on [gate] while one is set,
- * so a test can act while a decode is in flight.
+ * local model ran. It reports the input size through the stats slot the
+ * way the shim does (or nothing at all while [reportInput] is off), and a
+ * real call blocks on [gate] while one is set, so a test can act while a
+ * decode is in flight.
  */
 internal class FakeWhisperEngine(@Volatile var reply: String = "hello world") {
     @Volatile var realCalls = 0
-    @Volatile var decodedSamples: Int = -1
+    @Volatile var reportInput = true
     @Volatile var gate: CountDownLatch? = null
     @Volatile var inRealTranscribe = false
 
@@ -61,7 +62,7 @@ internal class FakeWhisperEngine(@Volatile var reply: String = "hello world") {
         ): String {
             if (pcm.all { it == 0f }) return ""
             realCalls++
-            if (decodedSamples >= 0) stats?.decodedSamples = decodedSamples
+            if (reportInput) stats?.inputSamples = pcm.size
             inRealTranscribe = true
             try {
                 if (decodeMillis > 0) Thread.sleep(decodeMillis)
@@ -77,5 +78,6 @@ internal class FakeWhisperEngine(@Volatile var reply: String = "hello world") {
     }
 }
 
-/** Real-looking PCM16 bytes: a quarter second of a non-zero ramp at 16 kHz. */
-internal fun realPcmBytes(): ByteArray = ByteArray(8000) { (it % 100 + 1).toByte() }
+/** Real-looking PCM16 bytes: [seconds] of a non-zero ramp at 16 kHz, a quarter second by default. */
+internal fun realPcmBytes(seconds: Double = 0.25): ByteArray =
+    ByteArray((seconds * 16_000 * 2).toInt()) { (it % 100 + 1).toByte() }

@@ -10,6 +10,7 @@ import kotlinx.coroutines.runBlocking
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.roundToInt
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -121,14 +122,16 @@ class DeviceSpeedTest {
     @Test
     fun rowTextNamesTheFitInPlainWords() {
         assertEquals("147 MB", modelRowText(147, null))
-        assertEquals("74 MB, under 1 s for a 15 s recording", modelRowText(74, 0.4))
-        assertEquals("147 MB, about 4 s for a 15 s recording", modelRowText(147, 3.6))
+        // The recording length in the copy is the firmware's cap the estimate is made for.
+        val window = WhisperSpeedCalibration.WINDOW_SECONDS.roundToInt()
+        assertEquals("74 MB, under 1 s for a $window s recording", modelRowText(74, 0.4))
+        assertEquals("147 MB, about 4 s for a $window s recording", modelRowText(147, 3.6))
         assertEquals(
-            "487 MB, about 12 s for a 15 s recording, close to the watch's limit",
+            "487 MB, about 12 s for a $window s recording, close to the watch's limit",
             modelRowText(487, 12.2),
         )
         assertEquals(
-            "487 MB, too slow for the watch on this phone (about 22 s for a 15 s recording)",
+            "487 MB, too slow for the watch on this phone (about 22 s for a $window s recording)",
             modelRowText(487, 22.4),
         )
     }

@@ -592,9 +592,9 @@ class WhisperTranscriptionService internal constructor(
         }
     }
 
-    /** Seconds of audio the engine decoded, null when the call never reported. */
-    private fun TranscribeStats.speechSeconds(): Double? =
-        decodedSamples.takeIf { it >= 0 }?.let { it / ENGINE_SAMPLE_RATE.toDouble() }
+    /** Seconds of audio the engine was given, null when the call never reported. */
+    private fun TranscribeStats.inputSeconds(): Double? =
+        inputSamples.takeIf { it >= 0 }?.let { it / ENGINE_SAMPLE_RATE.toDouble() }
 
     private fun modelExists(): Boolean =
         sttConfig.value.modelName?.let { modelProvider.isModelDownloaded(it) } ?: false
@@ -699,10 +699,10 @@ class WhisperTranscriptionService internal constructor(
             // second of engine input, on successful dictations only. The
             // debug hold counts, so the slow-decode hook exercises the nudge
             // the way a slow phone would.
-            val speechSeconds = stats.speechSeconds()
-            if (text.isNotBlank() && speechSeconds != null) {
+            val inputSeconds = stats.inputSeconds()
+            if (text.isNotBlank() && inputSeconds != null) {
                 val resultMs = started.elapsedNow().inWholeMilliseconds
-                model?.let { speedTracker?.recordDecode(it, speechSeconds, resultMs) }
+                model?.let { speedTracker?.recordDecode(it, inputSeconds, resultMs) }
             }
             return collapseRepeatedSentences(text)
         } catch (e: TimeoutCancellationException) {
@@ -717,8 +717,8 @@ class WhisperTranscriptionService internal constructor(
             // and already beyond the window, so the speed record takes it.
             val elapsed = started.elapsedNow()
             if (elapsed >= recordCancelledAfter) {
-                stats.speechSeconds()?.let { speechSeconds ->
-                    model?.let { speedTracker?.recordDecode(it, speechSeconds, elapsed.inWholeMilliseconds) }
+                stats.inputSeconds()?.let { inputSeconds ->
+                    model?.let { speedTracker?.recordDecode(it, inputSeconds, elapsed.inWholeMilliseconds) }
                 }
             }
             throw e
@@ -733,7 +733,6 @@ class WhisperTranscriptionService internal constructor(
                     threads = threads,
                     snapshot = snapshot,
                     audioSeconds = pcm.size / ENGINE_SAMPLE_RATE.toDouble(),
-                    speechSeconds = stats.speechSeconds(),
                     decodeMillis = started.elapsedNow().inWholeMilliseconds,
                     outcome = outcome,
                 )

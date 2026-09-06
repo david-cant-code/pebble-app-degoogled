@@ -63,10 +63,9 @@ class SpeedRecordTest {
     @Test
     fun aSuccessfulDecodeRecordsItsFactorUnderTheModelThatRan() = runBlocking(Dispatchers.Default) {
         val h = Harness()
-        h.engine.decodedSamples = 4 * 16_000
         h.engine.decodeMillis = 30
         h.awaitUntil("model init") { h.service.isModelReady }
-        assertEquals("hello world", h.service.transcribeLocal(realPcmBytes(), sampleRate = 16_000))
+        assertEquals("hello world", h.service.transcribeLocal(realPcmBytes(seconds = 4.0), sampleRate = 16_000))
         assertTrue(assertNotNull(h.tracker.factorFor("model-a")) > 0.0)
         assertNull(h.tracker.nudge.value, "an instant decode never predicts a missed window")
     }
@@ -74,30 +73,29 @@ class SpeedRecordTest {
     @Test
     fun aBlankResultRecordsNothing() = runBlocking(Dispatchers.Default) {
         val h = Harness()
-        h.engine.decodedSamples = 4 * 16_000
         h.engine.decodeMillis = 30
         h.engine.reply = ""
         h.awaitUntil("model init") { h.service.isModelReady }
-        h.service.transcribeLocal(realPcmBytes(), sampleRate = 16_000)
+        h.service.transcribeLocal(realPcmBytes(seconds = 4.0), sampleRate = 16_000)
         assertNull(h.tracker.factorFor("model-a"))
     }
 
     @Test
     fun aDecodeWithoutAReportedSampleCountRecordsNothing() = runBlocking(Dispatchers.Default) {
         val h = Harness()
+        h.engine.reportInput = false
         h.engine.decodeMillis = 30
         h.awaitUntil("model init") { h.service.isModelReady }
-        h.service.transcribeLocal(realPcmBytes(), sampleRate = 16_000)
+        h.service.transcribeLocal(realPcmBytes(seconds = 4.0), sampleRate = 16_000)
         assertNull(h.tracker.factorFor("model-a"))
     }
 
     @Test
     fun aSwitchDuringADecodeIsRecordedUnderTheModelThatDecoded() = runBlocking(Dispatchers.Default) {
         val h = Harness()
-        h.engine.decodedSamples = 4 * 16_000
         h.engine.gate = CountDownLatch(1)
         h.awaitUntil("model init") { h.service.isModelReady }
-        val result = async { h.service.transcribeLocal(realPcmBytes(), sampleRate = 16_000) }
+        val result = async { h.service.transcribeLocal(realPcmBytes(seconds = 4.0), sampleRate = 16_000) }
         h.awaitUntil("decode inside the engine") { h.engine.inRealTranscribe }
 
         h.switchTo("model-b")
@@ -114,10 +112,9 @@ class SpeedRecordTest {
         // next session; one that had already run past the deadline records
         // what it cost so far, which is already beyond the window.
         val h = Harness(recordCancelledAfter = 50.milliseconds)
-        h.engine.decodedSamples = 4 * 16_000
         h.engine.gate = CountDownLatch(1)
         h.awaitUntil("model init") { h.service.isModelReady }
-        val decode = async { h.service.transcribeLocal(realPcmBytes(), sampleRate = 16_000) }
+        val decode = async { h.service.transcribeLocal(realPcmBytes(seconds = 4.0), sampleRate = 16_000) }
         h.awaitUntil("decode in flight") { h.engine.inRealTranscribe }
         delay(150)
         decode.cancel()
@@ -132,10 +129,9 @@ class SpeedRecordTest {
     fun aDecodeCancelledBeforeTheDeadlineRecordsNothing() = runBlocking(Dispatchers.Default) {
         // Superseded early, its cost says nothing about a full window.
         val h = Harness(recordCancelledAfter = 10.seconds)
-        h.engine.decodedSamples = 4 * 16_000
         h.engine.gate = CountDownLatch(1)
         h.awaitUntil("model init") { h.service.isModelReady }
-        val decode = async { h.service.transcribeLocal(realPcmBytes(), sampleRate = 16_000) }
+        val decode = async { h.service.transcribeLocal(realPcmBytes(seconds = 4.0), sampleRate = 16_000) }
         h.awaitUntil("decode in flight") { h.engine.inRealTranscribe }
         delay(100)
         decode.cancel()

@@ -14,7 +14,7 @@ import kotlin.time.DurationUnit
  * A prompt to switch models because real dictations on [currentModelId]
  * decode too slowly for the watch's window; [targetModelId] is the next
  * cheaper catalog tier and [factor] the measured seconds of decode per
- * second of speech.
+ * second of engine input.
  */
 data class SpeedNudge(val currentModelId: String, val targetModelId: String, val factor: Double)
 
@@ -22,7 +22,7 @@ data class SpeedNudge(val currentModelId: String, val targetModelId: String, val
  * The decision behind the nudge, pure so it stays under host tests. The
  * measured decode factor (seconds of engine time per second of engine
  * input, smoothed across dictations) predicts what a full window of
- * speech would cost; when that prediction misses the deadline the session
+ * audio would cost; when that prediction misses the deadline the session
  * coordinator enforces, and a cheaper tier exists, the user is offered it
  * once per model. The speed probe's estimate at selection is the
  * forecast; this is the record of what actually happened, so it also
@@ -35,22 +35,22 @@ object DictationSpeedPolicy {
     /** Weight of the newest dictation in the smoothed factor. */
     const val NEWEST_WEIGHT = 0.3
 
-    /** Dictations with less speech than this say nothing reliable about speed. */
-    const val MIN_SPEECH_SECONDS = 2.0
+    /** Dictations shorter than this say nothing reliable about speed. */
+    const val MIN_INPUT_SECONDS = 2.0
 
     /**
      * Audio-equivalent seconds of encoder work every call carries beyond
-     * its speech: the shim sizes the encoder context at the audio's own
+     * its audio: the shim sizes the encoder context at the audio's own
      * positions plus 64 (`audio_ctx` in `whisper_jni.cpp`), and a position
      * covers 20 ms of audio (whisper.cpp's 10 ms mel hop, then the
      * encoder's stride-two convolution, `whisper_build_graph_encoder`).
-     * Rates are measured and extrapolated against speech plus this floor,
-     * so a short reply's fixed cost does not read as a slow model.
+     * Rates are measured and extrapolated against the audio plus this
+     * floor, so a short reply's fixed cost does not read as a slow model.
      */
     const val ENCODER_FLOOR_SECONDS = 1.28
 
-    /** The engine input a dictation of [speechSeconds] costs, floor included. */
-    fun effectiveSeconds(speechSeconds: Double): Double = speechSeconds + ENCODER_FLOOR_SECONDS
+    /** The engine input a dictation of [inputSeconds] of audio costs, floor included. */
+    fun effectiveSeconds(inputSeconds: Double): Double = inputSeconds + ENCODER_FLOOR_SECONDS
 
     fun smoothedFactor(previous: Double?, sample: Double): Double =
         previous?.let { it + NEWEST_WEIGHT * (sample - it) } ?: sample
@@ -85,12 +85,15 @@ fun speedNudgeCopy(nudge: SpeedNudge): SpeedNudgeCopy {
     val currentName = current?.displayName ?: nudge.currentModelId
     val targetName = target?.displayName ?: nudge.targetModelId
     val predicted = DictationSpeedPolicy.predictedWindowSeconds(nudge.factor).roundToInt()
+    // The numbers come from the firmware constants the deadline is built on.
+    val window = WhisperSpeedCalibration.WINDOW_SECONDS.roundToInt()
+    val deadline = DictationSpeedPolicy.DEADLINE_SECONDS.roundToInt()
     return SpeedNudgeCopy(
         title = "Dictation is too slow for the watch",
-        body = "$currentName needs about $predicted seconds for a full 15 second dictation on this " +
-            "phone. The watch gives up after 15 seconds and shows \"Error occurred. Try again.\" " +
-            "$targetName is faster, with somewhat lower accuracy. Either way, the model can be " +
-            "changed later under Settings > Speech Recognition > Manage Offline Models.",
+        body = "$currentName needs about $predicted seconds for a full $window second dictation on this " +
+            "phone. A result later than $deadline seconds is too late for the watch, which shows " +
+            "\"Error occurred. Try again.\" $targetName is faster, with somewhat lower accuracy. " +
+            "Either way, the model can be changed later under Settings > Speech Recognition > Manage Offline Models.",
         switchLabel = "Switch to $targetName",
         keepLabel = "Keep $currentName",
     )
@@ -126,14 +129,14 @@ class DictationSpeedTracker(private val settings: Settings) {
     fun isDeclined(modelId: String): Boolean = settings.getBoolean(DECLINED_PREFIX + modelId, false)
 
     /**
-     * Records that [speechSeconds] of engine input took [decodeMillis] on
+     * Records that [inputSeconds] of audio took [decodeMillis] on
      * [modelId] and re-evaluates the nudge, unless a switch is in
      * progress, in which case only the factor is updated. Inputs shorter
-     * than [DictationSpeedPolicy.MIN_SPEECH_SECONDS] are ignored.
+     * than [DictationSpeedPolicy.MIN_INPUT_SECONDS] are ignored.
      */
-    fun recordDecode(modelId: String, speechSeconds: Double, decodeMillis: Long) {
-        if (speechSeconds < DictationSpeedPolicy.MIN_SPEECH_SECONDS || decodeMillis <= 0L) return
-        val sample = decodeMillis / 1000.0 / DictationSpeedPolicy.effectiveSeconds(speechSeconds)
+    fun recordDecode(modelId: String, inputSeconds: Double, decodeMillis: Long) {
+        if (inputSeconds < DictationSpeedPolicy.MIN_INPUT_SECONDS || decodeMillis <= 0L) return
+        val sample = decodeMillis / 1000.0 / DictationSpeedPolicy.effectiveSeconds(inputSeconds)
         val factor = DictationSpeedPolicy.smoothedFactor(factorFor(modelId), sample)
         settings.putDouble(FACTOR_PREFIX + modelId, factor)
         if (switching) return

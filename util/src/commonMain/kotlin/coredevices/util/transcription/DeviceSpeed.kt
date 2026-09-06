@@ -36,7 +36,7 @@ enum class WindowFit { Fits, Marginal, Exceeds }
  * catalog model. The probe times one base-width encoder block; each
  * tier's decode is a fixed multiple of that block on a given CPU, so the
  * time the reference phone took to decode a full [WINDOW_SECONDS] window
- * of speech on each tier, divided by the reference phone's own score,
+ * of audio on each tier, divided by the reference phone's own score,
  * scales to another phone through its score. The estimate then carries
  * [BACKGROUND_MARGIN] for the app not being on screen: an off-screen
  * process lands in a smaller cpuset, and the on-screen to off-screen
@@ -117,10 +117,11 @@ fun modelRowText(sizeInMB: Int, estimatedWindowSeconds: Double?): String {
     if (estimatedWindowSeconds == null) return "$sizeInMB MB"
     val rounded = estimatedWindowSeconds.roundToInt()
     val about = if (rounded < 1) "under 1 s" else "about $rounded s"
+    val recording = "for a ${WhisperSpeedCalibration.WINDOW_SECONDS.roundToInt()} s recording"
     return when (WhisperSpeedCalibration.classify(estimatedWindowSeconds)) {
-        WindowFit.Fits -> "$sizeInMB MB, $about for a 15 s recording"
-        WindowFit.Marginal -> "$sizeInMB MB, $about for a 15 s recording, close to the watch's limit"
-        WindowFit.Exceeds -> "$sizeInMB MB, too slow for the watch on this phone ($about for a 15 s recording)"
+        WindowFit.Fits -> "$sizeInMB MB, $about $recording"
+        WindowFit.Marginal -> "$sizeInMB MB, $about $recording, close to the watch's limit"
+        WindowFit.Exceeds -> "$sizeInMB MB, too slow for the watch on this phone ($about $recording)"
     }
 }
 

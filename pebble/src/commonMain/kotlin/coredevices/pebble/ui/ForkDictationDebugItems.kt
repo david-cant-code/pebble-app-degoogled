@@ -4,6 +4,7 @@ import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigHolder
 import coredevices.util.STTConfig
 import coredevices.util.isDebugBuild
+import io.rebble.libpebblecommon.voice.PEBBLE_FW_TRANSCRIPTION_TIMEOUT
 
 /**
  * Fork: the settings toggles for the debug-only dictation test hooks (the
@@ -12,6 +13,8 @@ import coredevices.util.isDebugBuild
  * is true, and the code that honours each flag re-checks the build.
  */
 internal fun forkDictationDebugItems(coreConfig: CoreConfig, coreConfigHolder: CoreConfigHolder): List<SettingsItem> {
+    // The window named in the copy is the firmware's result timeout the hooks are built around.
+    val window = PEBBLE_FW_TRANSCRIPTION_TIMEOUT.inWholeSeconds
     fun toggle(title: String, description: String, checked: Boolean, update: STTConfig.(Boolean) -> STTConfig) =
         basicSettingsToggleItem(
             title = title,
@@ -28,7 +31,7 @@ internal fun forkDictationDebugItems(coreConfig: CoreConfig, coreConfigHolder: C
     return listOf(
         toggle(
             title = "Dictation: single engine thread",
-            description = "Run local speech recognition on one thread so a fast phone reproduces a decode that overruns the watch's 15 second window.",
+            description = "Run local speech recognition on one thread so a fast phone reproduces a decode that overruns the watch's $window second window.",
             checked = coreConfig.sttConfig.debugSingleThread,
         ) { copy(debugSingleThread = it) },
         toggle(
@@ -37,8 +40,8 @@ internal fun forkDictationDebugItems(coreConfig: CoreConfig, coreConfigHolder: C
             checked = coreConfig.sttConfig.debugSubstituteAudio,
         ) { copy(debugSubstituteAudio = it) },
         toggle(
-            title = "Dictation: hold each result for 20 seconds",
-            description = "Delay every decode past the watch's 15 second window so the deadline report can be watched on any phone.",
+            title = "Dictation: hold each result past the watch's window",
+            description = "Delay every decode past the watch's $window second window so the deadline report can be watched on any phone.",
             checked = coreConfig.sttConfig.debugSlowDecode,
         ) { copy(debugSlowDecode = it) },
         toggle(
