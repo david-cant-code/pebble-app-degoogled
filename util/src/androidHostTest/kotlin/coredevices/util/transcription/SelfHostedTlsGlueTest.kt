@@ -135,7 +135,7 @@ class SelfHostedTlsGlueTest {
 
     private fun Throwable.refusal(): UntrustedServerCertificateException =
         assertNotNull(
-            generateSequence(this) { it.cause?.takeIf { cause -> cause !== it } }
+            generateSequence(this) { it.cause }.take(MAX_CAUSE_DEPTH)
                 .firstNotNullOfOrNull { it as? UntrustedServerCertificateException },
             "no certificate refusal in the cause chain of ${this::class.simpleName}: $message",
         )

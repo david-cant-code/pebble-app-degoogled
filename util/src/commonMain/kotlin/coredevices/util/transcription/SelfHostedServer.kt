@@ -109,13 +109,20 @@ fun ServerCertificateRefusal.describe(): String =
 class ServerUnreachableException(reason: String) : IOException(reason)
 
 /**
+ * How far a cause chain is read. A cycle longer than a self-cause is legal
+ * (`java.base` `java/lang/Throwable.java`, `initCause` refuses only
+ * `this`), and an unbounded walk over one never ends.
+ */
+internal const val MAX_CAUSE_DEPTH = 16
+
+/**
  * Why a request to the server failed at the transport, in words that name
  * neither the URL nor the address: a certificate refusal by its own
  * description, otherwise a category read off the exception classes in
  * the cause chain.
  */
 fun describeTransportFailure(failure: Throwable): String {
-    val chain = generateSequence(failure) { it.cause?.takeIf { cause -> cause !== it } }.toList()
+    val chain = generateSequence(failure) { it.cause }.take(MAX_CAUSE_DEPTH).toList()
     chain.firstNotNullOfOrNull { it as? ServerCertificateRefusal }?.let { return it.describe() }
     val names = chain.map { it::class.simpleName.orEmpty() }
     return when {

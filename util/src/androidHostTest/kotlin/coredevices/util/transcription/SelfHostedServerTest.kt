@@ -91,6 +91,11 @@ class SelfHostedServerTest {
         val refused = javax.net.ssl.SSLHandshakeException("handshake").apply { initCause(Refusal("AA:BB", changed = true)) }
         assertEquals("server certificate changed, SHA-256 AA:BB", describeTransportFailure(refused))
         assertEquals("IOException", describeTransportFailure(java.io.IOException("unexpected end of stream on $url")))
+        // A cause cycle ends the walk at its bound instead of running away.
+        val a = java.io.IOException("a")
+        val b = java.io.IOException("b", a)
+        a.initCause(b)
+        assertEquals("IOException", describeTransportFailure(a))
     }
 
     private class ConnectTimeoutStandIn : Exception("Connect timeout has expired")

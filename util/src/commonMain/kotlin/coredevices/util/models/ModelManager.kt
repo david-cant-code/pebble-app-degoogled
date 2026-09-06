@@ -89,6 +89,9 @@ class ModelManager(
     companion object {
         private const val MIB = 1024L * 1024L
 
+        /** Whole MiB, rounded to nearest: the one size rule for every row the picker and the download job see. */
+        private fun mebibytes(bytes: Long): Int = ((bytes + MIB / 2) / MIB).toInt()
+
         /**
          * A catalog entry as the download job and the picker carry it. The
          * size is rounded to the nearest MiB for the download job's traffic
@@ -96,7 +99,7 @@ class ModelManager(
          */
         internal fun modelInfoFor(model: WhisperModel, estimatedWindowSeconds: Double? = null): ModelInfo = ModelInfo(
             slug = model.id,
-            sizeInMB = ((model.sizeBytes + MIB / 2) / MIB).toInt(),
+            sizeInMB = mebibytes(model.sizeBytes),
             url = WhisperModelCatalog.urlFor(model),
             estimatedWindowSeconds = estimatedWindowSeconds,
         )
@@ -124,10 +127,8 @@ class ModelManager(
             }
             val stale = provider?.getDownloadedModels()
                 ?.filter { WhisperModelCatalog.byId(it) == null }
-                ?.map { slug ->
-                    val sizeMB = (provider.getModelSizeBytes(slug) / (1024 * 1024)).toInt()
-                    ModelInfo(slug = slug, sizeInMB = sizeMB)
-                } ?: emptyList()
+                ?.map { slug -> ModelInfo(slug = slug, sizeInMB = mebibytes(provider.getModelSizeBytes(slug))) }
+                ?: emptyList()
             return catalog + stale
         }
 

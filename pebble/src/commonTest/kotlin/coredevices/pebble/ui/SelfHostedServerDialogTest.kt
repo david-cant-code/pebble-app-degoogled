@@ -44,6 +44,7 @@ class SelfHostedServerDialogTest {
         assertNull(effectiveServerToken("", clearToken = false, saved, home, "stt.exarnple.net:443"))
         assertNull(effectiveServerToken("", clearToken = false, saved, home, "stt.example.net:8443"))
         assertNull(effectiveServerToken("", clearToken = false, saved, home, null), "no server, no token")
+        assertNull(effectiveServerToken(" typed ", clearToken = false, saved, home, null), "removing the server drops a typed token too")
         assertNull(effectiveServerToken("", clearToken = true, saved, home, home))
         assertEquals("typed", effectiveServerToken(" typed ", clearToken = false, saved, home, "other.test:443"))
         assertNull(effectiveServerToken("", clearToken = false, saved = null, savedHostPort = null, hostPort = home))
@@ -60,5 +61,7 @@ class SelfHostedServerDialogTest {
         )
         assertEquals("Bearer token (optional)", tokenFieldLabel("typed", clearToken = false, hasSaved = true, home, home))
         assertEquals("Bearer token (optional)", tokenFieldLabel("", clearToken = true, hasSaved = true, home, home))
+        assertEquals("Bearer token (optional)", tokenFieldLabel("", clearToken = false, hasSaved = true, home, null), "no server keeps no token")
+        assertEquals("Bearer token (optional)", tokenFieldLabel("", clearToken = false, hasSaved = true, null, null))
     }
 }

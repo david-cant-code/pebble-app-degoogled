@@ -73,8 +73,9 @@ class ModelManagerLogicTest {
     @Test
     fun availableModelsAppendStaleNonCatalogDirectories() {
         // Previous-engine leftovers stay visible so they remain deletable;
-        // their size comes from the on-disk measurement, not a pin.
-        val staleBytes = 406L * 1024 * 1024
+        // their size comes from the on-disk measurement, rounded to the
+        // nearest MiB like a catalog row (406.67 MiB reads as 407).
+        val staleBytes = 406L * 1024 * 1024 + 700_000
         val provider = FakeProvider(
             downloaded = listOf("parakeet-tdt-0.6b-v3", "whisper-base-en"),
             sizes = mapOf("parakeet-tdt-0.6b-v3" to staleBytes),
@@ -82,7 +83,7 @@ class ModelManagerLogicTest {
         val available = ModelManager.availableSTTModels(provider)
         val stale = available.firstOrNull { it.slug == "parakeet-tdt-0.6b-v3" }
         assertTrue(stale != null, "stale non-catalog directory must stay listed for deletion")
-        assertEquals(406, stale.sizeInMB)
+        assertEquals(407, stale.sizeInMB)
         // A downloaded catalog model is not double-listed as stale.
         assertEquals(1, available.count { it.slug == "whisper-base-en" })
     }

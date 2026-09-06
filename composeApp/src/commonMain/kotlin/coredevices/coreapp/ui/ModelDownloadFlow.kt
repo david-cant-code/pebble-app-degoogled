@@ -64,9 +64,12 @@ class ModelDownloadFlow(
         private set
     private var settling: Job? = null
 
-    /** Installs [slug] if needed and hands it to [onInstalled]; ignored while a download runs. */
+    /** Installs [slug] if needed and hands it to [onInstalled]; ignored while a download runs or is being scheduled. */
     fun download(slug: String) {
-        if (downloading) return
+        // The job itself is the re-entry guard: [downloading] is raised only
+        // once the schedule has gone through, and a second tap can land while
+        // the install check is still on the IO dispatcher.
+        if (downloading || settling?.isActive == true) return
         failed = false
         settling = scope.launch {
             if (isInstalled(slug)) {
@@ -79,15 +82,20 @@ class ModelDownloadFlow(
             }
             downloading = true
             onStarted()
-            awaitModelDownloadSettled(status)
-            val installed = isInstalled(slug)
-            downloading = false
-            if (installed) {
-                onInstalled(slug)
-            } else {
-                failed = true
-                onEnded()
+            var installed = false
+            try {
+                awaitModelDownloadSettled(status)
+                installed = isInstalled(slug)
+            } finally {
+                // The scope dies with its composition, so a settle cancelled
+                // that way still ends the switch it started; [cancel] has
+                // already ended it and leaves nothing to do here.
+                if (downloading) {
+                    downloading = false
+                    if (!installed) onEnded()
+                }
             }
+            if (installed) onInstalled(slug) else failed = true
         }
     }
 

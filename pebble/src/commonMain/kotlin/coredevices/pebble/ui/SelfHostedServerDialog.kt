@@ -55,20 +55,23 @@ internal fun serverTestStatusText(status: Int): String = when (status) {
 
 /**
  * The token a request from the dialog carries, and the one kept on save:
- * the typed one, else the saved one only while [hostPort] is the host and
- * port it was saved with. A token is a credential for one server, so an
- * edited URL never carries it to another.
+ * none without a server ([hostPort] null, the URL removed), else the typed
+ * one, else the saved one only while [hostPort] is the host and port it
+ * was saved with. A token is a credential for one server, so an edited URL
+ * never carries it to another and a removed server does not leave it
+ * behind.
  */
 internal fun effectiveServerToken(typed: String, clearToken: Boolean, saved: String?, savedHostPort: String?, hostPort: String?): String? = when {
-    clearToken -> null
+    clearToken || hostPort == null -> null
     typed.isNotBlank() -> typed.trim()
-    saved != null && hostPort != null && hostPort == savedHostPort -> saved
+    saved != null && hostPort == savedHostPort -> saved
     else -> null
 }
 
 /** The token field's label: whether a saved token exists, and whether it applies to the host and port typed. */
 internal fun tokenFieldLabel(typed: String, clearToken: Boolean, hasSaved: Boolean, savedHostPort: String?, hostPort: String?): String = when {
-    typed.isNotBlank() || clearToken || !hasSaved -> "Bearer token (optional)"
+    // Without a server the save keeps no token, so nothing is "saved" to replace.
+    typed.isNotBlank() || clearToken || !hasSaved || hostPort == null -> "Bearer token (optional)"
     hostPort == savedHostPort -> "Bearer token (saved; type to replace)"
     else -> "Bearer token (the saved one stays with the previous server)"
 }

@@ -91,7 +91,6 @@ object WhisperModelCatalog {
     const val HF_REPO_COMMIT = "5359861c739e955e79d9a303bcbc70fb988958b1"
 
     private const val GIB = 1024L * 1024L * 1024L
-    private const val MIB = 1024L * 1024L
 
     /**
      * Total-device-RAM floor for recommending the small tier over base.
