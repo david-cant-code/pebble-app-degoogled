@@ -17,6 +17,7 @@ import coredevices.whisper.whisperFree
 import coredevices.whisper.whisperInit
 import coredevices.whisper.whisperTranscribe
 import io.rebble.libpebblecommon.voice.DICTATION_DEADLINE
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -303,6 +304,11 @@ class WhisperTranscriptionService internal constructor(
     private val clearCaptures: () -> Unit = { DictationCaptureDump.clear() },
     // A decode cancelled after running this long had already missed the watch; its elapsed time is recorded (see runLocalTranscribe).
     private val recordCancelledAfter: Duration = DICTATION_DEADLINE,
+    // The service scope's dispatcher and the one for blocking work (model
+    // init, engine calls, capture files); tests pass inline dispatchers to
+    // run the init path to completion inside the constructor.
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     /** Production entry point: the real native engine. */
     constructor(
@@ -349,7 +355,7 @@ class WhisperTranscriptionService internal constructor(
     @kotlin.concurrent.Volatile
     private var lastInitedModel: String? = null
 
-    private val scope = CoroutineScope(Dispatchers.Default)
+    private val scope = CoroutineScope(dispatcher)
 
     val lastModelUsed get() = lastInitedModel
     val isModelReady get() = modelHandle != 0L
@@ -365,6 +371,25 @@ class WhisperTranscriptionService internal constructor(
     // Null until the first config emission; see captureDumpShouldClear.
     private var captureDumpWasOn: Boolean? = null
 
+    @kotlin.concurrent.Volatile
+    private var lastTranscriptionAt: TimeMark? = null
+    private val modelMutex = Mutex()
+
+    // 1 second of 16 kHz silence for the warm-up pass; the engine's first
+    // inference after load pays one-time setup costs the warm-up absorbs.
+    private val silentPcm = FloatArray(ENGINE_SAMPLE_RATE)
+
+    // Monotonic call-id source. Only ever incremented from
+    // withWhisperCancelOnCancel, which every caller enters holding
+    // [modelMutex], so the increment is already serialized and the ids are
+    // unique even against an abandoned wedged call still running.
+    private var callIdCounter: Long = 0L
+
+    // Last of the initializers: the collector's first emission runs
+    // performInit on another thread, so every field that path reaches
+    // (modelMutex, silentPcm, lastTranscriptionAt, callIdCounter) must be
+    // assigned before the launch; WhisperHandleLifecycleTest pins it with
+    // inline dispatchers.
     init {
         sttConfig.onEach {
             logger.i { "STT config changed: $it" }
@@ -373,19 +398,11 @@ class WhisperTranscriptionService internal constructor(
             }
             val captureDumpOn = debugCaptureDumpApplies(it.debugCaptureDump, debugBuild())
             if (captureDumpShouldClear(captureDumpWasOn, captureDumpOn)) {
-                withContext(Dispatchers.IO) { clearCaptures() }
+                withContext(ioDispatcher) { clearCaptures() }
             }
             captureDumpWasOn = captureDumpOn
         }.launchIn(scope)
     }
-
-    @kotlin.concurrent.Volatile
-    private var lastTranscriptionAt: TimeMark? = null
-    private val modelMutex = Mutex()
-
-    // 1 second of 16 kHz silence for the warm-up pass; the engine's first
-    // inference after load pays one-time setup costs the warm-up absorbs.
-    private val silentPcm = FloatArray(ENGINE_SAMPLE_RATE)
 
     /**
      * Runs [block], a blocking native engine call, with working
@@ -410,7 +427,7 @@ class WhisperTranscriptionService internal constructor(
      */
     private suspend fun <T> withWhisperCancelOnCancel(block: (Long) -> T): T {
         val callId = nextCallId()
-        val worker = scope.async(Dispatchers.IO) { runCatching { block(callId) } }
+        val worker = scope.async(ioDispatcher) { runCatching { block(callId) } }
         return awaitEngineWork(
             worker = worker,
             cancel = {
@@ -422,11 +439,7 @@ class WhisperTranscriptionService internal constructor(
         )
     }
 
-    // Monotonic call-id source. Only ever incremented from
-    // withWhisperCancelOnCancel, which every caller enters holding
-    // [modelMutex], so the increment is already serialized and the ids are
-    // unique even against an abandoned wedged call still running.
-    private var callIdCounter: Long = 0L
+    // callIdCounter is declared with the other init-path state above the init block.
     private fun nextCallId(): Long = ++callIdCounter
 
     /**
@@ -600,7 +613,7 @@ class WhisperTranscriptionService internal constructor(
         sttConfig.value.modelName?.let { modelProvider.isModelDownloaded(it) } ?: false
 
     private fun performInit(): Job {
-        return scope.launch(Dispatchers.IO) {
+        return scope.launch(ioDispatcher) {
             try {
                 initIfNeeded()
                 warmUpIfIdle()
@@ -762,7 +775,7 @@ class WhisperTranscriptionService internal constructor(
         }
         return try {
             // Debug builds can archive the exact bytes the engine is about to see.
-            withContext(Dispatchers.IO) {
+            withContext(ioDispatcher) {
                 debugArchiveDictationAudio(sttConfig.value.debugCaptureDump, debugBuild(), audio, sampleRate)
             }
             val pcm = toEngineFloats(audio, sampleRate)
