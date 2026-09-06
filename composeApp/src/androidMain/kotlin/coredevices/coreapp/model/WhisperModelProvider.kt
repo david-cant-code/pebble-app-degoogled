@@ -72,8 +72,8 @@ class WhisperModelProvider(
          * Model directories that cannot serve the current engine: names
          * outside the catalog (every Cactus-era install lands here) and
          * catalog directories whose file is missing or wrong-sized (a
-         * quarantine leftover or torn install). Staging is the
-         * installer's workspace, never a model.
+         * torn install; a load-time quarantine deletes its directory).
+         * Staging is the installer's workspace, never a model.
          */
         internal fun incompatibleIn(modelsDir: File): List<String> =
             modelDirNamesIn(modelsDir)

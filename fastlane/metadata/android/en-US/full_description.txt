@@ -8,7 +8,7 @@ On top of the de-Googling, Gravel tightens the app's own security posture:
 - Plain-HTTP (cleartext) traffic is blocked app-wide
 - Core watch firmware updates are fetched from the public PebbleOS releases and integrity-verified before install
 - On-device voice dictation with the whisper.cpp speech engine, built from source; the speech model is an optional, integrity-pinned download you start yourself
-- Optional dictation through your own transcription server over https, with the server's certificate pinned on first use; nothing is sent unless you configure one
+- Optional dictation through your own transcription server over https: a self-signed certificate is pinned on first use once you have compared its fingerprint, and a certificate from a CA the phone trusts is accepted as elsewhere on the phone; nothing is sent unless you configure one
 - Manual latitude/longitude entry replaces the play-services place search for weather
 - App store searches leave the phone only when you tap search, never while you type, and are sent with Algolia's query analytics and personalization switched off and no user token
 

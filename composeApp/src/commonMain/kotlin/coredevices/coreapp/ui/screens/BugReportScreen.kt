@@ -182,7 +182,7 @@ fun BugReportScreen(
         // Fork: every control that needs the report backend (send, sign-in,
         // the report list, the guide link, the "will be sent" note) is gated
         // on this flag. With no backend configured the screen is the local
-        // log export reached from Settings > Export logs: the zip goes to
+        // log export reached from Settings > Get Help > Export logs: the zip goes to
         // the share sheet and nothing in the app can upload it.
         val canSendReports = bugReportProcessor.canSendReports()
         val platformShareLauncher: PlatformShareLauncher = koinInject()

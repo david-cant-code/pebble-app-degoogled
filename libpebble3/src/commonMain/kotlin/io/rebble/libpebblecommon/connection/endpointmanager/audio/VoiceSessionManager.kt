@@ -26,8 +26,8 @@ import kotlin.uuid.Uuid
  * Protocol adapter for watch dictation: decodes the frame stream and
  * encodes the setup and dictation result packets, and hands the session
  * logic itself to [VoiceSessionCoordinator] (the deadline, the bound on a
- * recording the watch never ends, and the rule that sessions never cancel
- * each other).
+ * recording the watch never ends, and the rule that a new setup supersedes
+ * the session in flight).
  */
 class VoiceSessionManager(
     private val voiceService: VoiceService,

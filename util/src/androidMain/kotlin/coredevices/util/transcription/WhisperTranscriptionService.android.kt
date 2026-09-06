@@ -16,11 +16,12 @@ actual val PLATFORM_MIN_TRANSCRIPTION_MEMORY_MB: Long = 20
 // a session; the per-core frequencies are static. Without a readable mask
 // the count falls back to the possible-CPU count under the same cap:
 // `Runtime.availableProcessors` on Android returns
-// `sysconf(_SC_NPROCESSORS_CONF)` (AOSP libcore
+// `sysconf(_SC_NPROCESSORS_CONF)` (AOSP libcore, android16-release,
 // `ojluni/src/main/java/java/lang/Runtime.java`, `availableProcessors`),
-// which bionic serves from `/sys/devices/system/cpu/possible`
-// (`libc/bionic/sysinfo.cpp`, `get_nprocs_conf`): every CPU the kernel
-// could bring up, whether online or not, and never the affinity mask.
+// which bionic serves from `/sys/devices/system/cpu/possible` (AOSP
+// bionic, android16-release, `libc/bionic/sysinfo.cpp`,
+// `get_nprocs_conf`): every CPU the kernel could bring up, whether
+// online or not, and never the affinity mask.
 actual fun transcriptionThreadCount(): Int {
     val allowed = readAllowedCpuIds()
     return if (allowed.isNullOrEmpty()) {

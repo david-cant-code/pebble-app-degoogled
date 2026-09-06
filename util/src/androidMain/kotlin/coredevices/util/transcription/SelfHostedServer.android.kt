@@ -53,8 +53,9 @@ internal interface PlatformServerTrust {
  * check, and the default host-name verifier. The hostname-aware overload
  * is the one the platform requires once the network security config
  * carries any per-domain entry; its two-argument form is refused then
- * (AOSP frameworks/base
- * `android.security.net.config.RootTrustManager.checkServerTrusted`).
+ * (AOSP frameworks/base, android16-release,
+ * `core/java/android/security/net/config/RootTrustManager.java`,
+ * `checkServerTrusted`).
  */
 internal class AndroidServerTrust(private val manager: X509TrustManager = platformTrustManager()) : PlatformServerTrust {
     private val extensions = X509TrustManagerExtensions(manager)

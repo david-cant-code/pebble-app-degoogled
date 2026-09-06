@@ -256,7 +256,7 @@ The replacement is whisper.cpp (MIT), compiled from source:
   compiling for the unmaintained iOS targets. Engine strings cross JNI
   as UTF-8 byte arrays: engine output can be byte sequences that are
   invalid modified UTF-8, which NewStringUTF aborts on under CheckJNI.
-- The ninth function is a model-free speed probe: the shim times one
+- `whisperBenchmark` is the model-free speed probe: the shim times one
   encoder block of the base model's shape, built on ggml with random
   weights, on the thread count a dictation would get. `DeviceSpeedEstimator`
   (util) runs it once per install (callers arriving during a probe wait
@@ -327,7 +327,11 @@ The replacement is whisper.cpp (MIT), compiled from source:
   above the TLS glue is pure and host-tested; the trust manager and
   verifier are tested against two self-signed fixtures, and the client
   and probe against a local TLS server whose key pair the test generates
-  with the JDK's keytool, so no key material is tracked.
+  with the JDK's keytool, so no key material is tracked. The one piece
+  no host test reaches is `AndroidServerTrust`, the adapter over the
+  platform's hostname-aware check (the SDK stub of
+  `X509TrustManagerExtensions` throws from its constructor); a change to
+  it needs a device pass against a self-hosted server.
 - `WhisperTranscriptionService` (util) keeps the Cactus-era service's
   proven shape: config-driven re-initialization, the two-mutex warm-up
   design, the memory guard, and the InferenceBoost foreground-priority
@@ -348,13 +352,13 @@ The replacement is whisper.cpp (MIT), compiled from source:
   returns the correct text in under 10 seconds on the slowest catalog
   model.
 - Nothing CI runs reaches `whisper_jni.cpp`: the host suites stop at the
-  binding's Kotlin side, so the shim's semantics (the sample count it
-  reports, cancellation, cold-start init) are guarded only by the
-  instrumented `WhisperLocalCancellationTest` and
-  `WhisperColdStartRaceTest` under `androidApp/src/androidTest`, run one
-  class at a time on a device with the model installed (each KDoc carries
-  the command). An engine bump or a shim edit gets a device run of those
-  two before it merges.
+  binding's Kotlin side, so the shim's semantics (cancellation,
+  cold-start init) are guarded only by the instrumented
+  `WhisperLocalCancellationTest` and `WhisperColdStartRaceTest` under
+  `androidApp/src/androidTest`, run one class at a time on a device with
+  the model installed (each KDoc carries the command); the sample count
+  the shim reports has no automated check. An engine bump or a shim edit
+  gets a device run of those two before it merges.
 - The watch's dictation deadline is owned by `VoiceSessionCoordinator`
   in libpebble3, not by the provider. The firmware records for at most
   15 seconds, gives the phone 15 seconds from the end of the recording,
@@ -363,8 +367,10 @@ The replacement is whisper.cpp (MIT), compiled from source:
   the session in flight: the watch has moved on, so the earlier decode
   is cancelled and nothing more is sent for it (the engine runs one
   decode at a time, and a decode left running would fail the new
-  session's own the moment its recording ended). Frames are buffered
-  from the moment a setup is accepted, and an overrun is reported as a
+  session's own the moment its recording ended; the cancel lands
+  between engine passes, so a decode deep in one can still hold the
+  engine for up to its unwind bound). Frames are buffered from the
+  moment a setup is accepted, and an overrun is reported as a
   recognizer error one second before the watch's own clock runs out
   while the decode runs on until the next session supersedes it, so the
   speed record (below) still sees how long it really took; a decode
@@ -399,16 +405,17 @@ The replacement is whisper.cpp (MIT), compiled from source:
   `TranscriptionThreads`), so a count above the usable cores stalls
   every barrier for a scheduler slice and a decode that takes a second
   takes half a minute (measured on two chips; `TranscriptionThreads`
-  holds the numbers' conclusions). The count is read at call time from the process affinity
-  mask, since a process that leaves the screen lands in a smaller cpuset
-  on every phone tried, and sized by the fastest frequency tier in that
-  mask (`tieredThreadCount`), capped at four. The engine binding carries
-  an `EnginePlacement` (affinity mask, nice value) that the shim applies
-  to the calling thread for one call; it exists for the on-device
-  placement benchmark and probe under `androidApp/src/androidTest`, and
-  the service always passes the default: pinning gained ten percent at
-  best and can drop below the thread count when the OS moves the allowed
-  set, and a raised priority changed nothing.
+  holds the numbers' conclusions). The count is read at call time from
+  the process affinity mask, since a process that leaves the screen
+  lands in a smaller cpuset on every phone tried, and sized by the
+  fastest frequency tier in that mask (`tieredThreadCount`), capped at
+  four. The engine binding carries an `EnginePlacement` (affinity mask,
+  nice value) that the shim applies to the calling thread for one call;
+  it exists for the on-device placement benchmark and probe under
+  `androidApp/src/androidTest`, and the service always passes the
+  default: pinning gained ten percent at best and can drop below the
+  thread count when the OS moves the allowed set, and a raised priority
+  changed nothing.
 - Four debug-only hooks live behind `isDebugBuild()` (util), which reads
   the application's debuggable flag and fails closed: a single-thread
   override that slows a fast phone's decode, a capture dump that writes

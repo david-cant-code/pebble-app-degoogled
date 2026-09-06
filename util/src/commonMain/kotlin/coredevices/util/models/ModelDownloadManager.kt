@@ -20,12 +20,14 @@ sealed interface ModelDownloadStatus {
 }
 
 /**
- * Suspends until a download scheduled just before this call has settled:
- * the first non-Downloading status after the replayed current one (Idle
- * on success and on Android cancel, Cancelled on iOS cancel, Failed on
- * error). Waiting on Idle alone would leave a failed download's waiter
- * alive to act on the next unrelated download's Idle. Whether the model
- * then exists is the caller's check: a cancelled download settles too.
+ * Suspends until the first non-Downloading status after the replayed
+ * current one (Idle on success and on Android cancel, Cancelled on iOS
+ * cancel, Failed on error), the settle of a download scheduled just
+ * before this call. The status names no download, so the end of another
+ * download running at the time settles this wait as well. Waiting on
+ * Idle alone would leave a failed download's waiter alive to act on the
+ * next unrelated download's Idle. Whether the model then exists is the
+ * caller's check: a cancelled download settles too.
  */
 suspend fun awaitModelDownloadSettled(status: Flow<ModelDownloadStatus>) {
     status.drop(1).firstOrNull { it !is ModelDownloadStatus.Downloading }

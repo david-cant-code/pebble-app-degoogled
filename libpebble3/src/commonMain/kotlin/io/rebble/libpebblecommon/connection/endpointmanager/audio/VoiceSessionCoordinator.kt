@@ -44,7 +44,10 @@ import kotlin.uuid.Uuid
  *    moved on, so nothing sent for the earlier session could be shown any
  *    more, and its decode is cancelled: the engine runs one decode at a
  *    time, and a decode left running would fail the new session's own
- *    with "transcription in progress" the moment its recording ended.
+ *    with "transcription in progress" the moment its recording ended. The
+ *    cancel lands only between the engine's passes, so a decode deep in
+ *    one can still hold the engine for up to its unwind bound when the
+ *    new recording ends.
  *  - The deadline is owned here, measured from the end of the recording:
  *    a decode that overruns it is reported to the watch as a recognizer
  *    error [DEADLINE_MARGIN] before the watch would time out itself, and
