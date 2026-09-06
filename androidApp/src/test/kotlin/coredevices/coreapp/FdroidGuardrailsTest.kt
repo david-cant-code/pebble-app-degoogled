@@ -45,6 +45,9 @@ import kotlin.test.assertTrue
  * tag checkout, the value the build produces
  * ([versionFileMatchesTheBuiltCommitOnATagCheckout]).
  */
+/** F-Droid's documented maximum for a changelog file; longer text is cut when published. */
+private const val FDROID_CHANGELOG_LIMIT = 500
+
 class FdroidGuardrailsTest {
 
     /**
@@ -288,6 +291,27 @@ class FdroidGuardrailsTest {
         assertTrue(
             declared == count,
             "Tag ${tags.joinToString()} builds versionCode $count but androidApp/version.properties declares $declared",
+        )
+    }
+
+    /**
+     * F-Droid publishes each `changelogs/<versionCode>.txt` as the listing's
+     * "What's New" text and cuts it at 500 characters, so every changelog
+     * file in the tree stays within that bound. Counted in code points,
+     * the documented unit, with the file's trailing newline ignored.
+     */
+    @Test
+    fun everyChangelogFitsFdroidsWhatsNewLimit() {
+        val changelogs = scannedFiles.filter {
+            it.startsWith("fastlane/metadata/android/") && "/changelogs/" in it && it.endsWith(".txt")
+        }
+        assertTrue(changelogs.isNotEmpty(), "no changelog files found under fastlane/metadata/android")
+        val lengths = changelogs.associateWith { path -> read(path).readText().trimEnd().let { it.codePointCount(0, it.length) } }
+        val over = lengths.filterValues { it > FDROID_CHANGELOG_LIMIT }
+        assertTrue(
+            over.isEmpty(),
+            "F-Droid cuts a changelog at $FDROID_CHANGELOG_LIMIT characters; over the limit: " +
+                over.entries.joinToString { "${it.key} (${it.value})" },
         )
     }
 
