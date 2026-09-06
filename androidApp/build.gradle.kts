@@ -169,6 +169,11 @@ dependencies {
     // framework-agnostic jar, which has no kotlin.test.Test annotation.
     testImplementation(libs.kotlin.test.junit)
 
+    // Fork: the debug-only SttDebugReceiver (src/debug) resolves the config
+    // holder through Koin and logs through Kermit; neither reaches the app
+    // module's own classpath otherwise.
+    debugImplementation(libs.koin.core)
+    debugImplementation(libs.kermit)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.ktor.client.okhttp)
@@ -291,8 +296,9 @@ abstract class VerifyExportedComponents : DefaultTask() {
 /**
  * Fork: inspects every APK a variant packages, so the packaging decisions taken in this file are
  * verified against the built artifact on every build rather than by hand:
- * - no entry matches [forbiddenEntries]: the Wispr Flow logo assets ignoreAssetsPattern drops
- *   and the two native libraries of the Ring satellite AAR that :haversine-stubs replaces;
+ * - no entry matches [forbiddenEntries]: the Wispr Flow logo assets ignoreAssetsPattern drops,
+ *   the two native libraries of the Ring satellite AAR that :haversine-stubs replaces, and in
+ *   release the debug variant's dictation test clip;
  * - the APK Signing Block is present or absent as the variant's signing configuration says
  *   ([expectSigned]: a release built without a keystore must come out unsigned, which is the
  *   shape F-Droid builds), and when present never carries the dependency-metadata pair
@@ -477,10 +483,12 @@ androidComponents {
             group = "verification"
             description = "Fails if the packaged APK carries excluded assets, replaced natives, or an unexpected signing block."
             forbiddenEntries.set(
-                listOf(
+                listOfNotNull(
                     """.*wispr_flow_logo_(black|white)\.png""",
                     """lib/[^/]+/libhaversinesatellitelibrary\.so""",
                     """lib/[^/]+/libppcommon\.so""",
+                    // The dictation test clip lives in src/debug/assets and must stay out of release.
+                    """assets/debug-dictation-clip\.raw""".takeIf { variant.buildType == "release" },
                 ),
             )
             expectSigned.set(variant.buildType != "release" || localReleaseBuild || signReleaseWithKeystore)

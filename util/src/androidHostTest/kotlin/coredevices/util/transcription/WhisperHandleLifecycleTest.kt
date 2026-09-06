@@ -80,6 +80,8 @@ class WhisperHandleLifecycleTest {
                 threads: Int,
                 language: String?,
                 callId: Long,
+                placement: coredevices.whisper.EnginePlacement,
+                stats: coredevices.whisper.TranscribeStats?,
             ): String {
                 if (pcm.all { it == 0f }) {
                     synchronized(lock) { warmedUpHandles.add(handle) }
@@ -150,6 +152,29 @@ class WhisperHandleLifecycleTest {
         } catch (e: Exception) {
             throw AssertionError("Timed out waiting for: $what", e)
         }
+    }
+
+    /**
+     * The config collector launches from the constructor and its first
+     * emission runs the model init on another thread, so every field that
+     * path reaches has to be assigned before the launch. Inline dispatchers
+     * run the whole path inside the constructor, where an unassigned field
+     * fails the init (swallowed by performInit) and the model never comes up.
+     */
+    @Test
+    fun modelIsReadyWhenTheConstructorReturns() {
+        val fake = FakeEngine()
+        val service = WhisperTranscriptionService(
+            coreConfigFlow = CoreConfigFlow(MutableStateFlow(configFor("model-a"))),
+            modelProvider = FakeProvider(),
+            analytics = NoopAnalytics,
+            inferenceBoost = NoOpInferenceBoost(),
+            engine = fake.engine,
+            dispatcher = Dispatchers.Unconfined,
+            ioDispatcher = Dispatchers.Unconfined,
+        )
+        assertTrue(service.isModelReady, "the init that ran inside the constructor did not bring the model up")
+        assertEquals(1, fake.initCount)
     }
 
     @Test

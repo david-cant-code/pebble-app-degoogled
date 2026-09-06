@@ -43,6 +43,7 @@ fun App() {
         Box(Modifier.fillMaxSize().dismissKeyboardOnTapOutside()) {
             AppNavHost(navHostController, startDestination)
             SttModelUpdatePrompt()
+            SttSpeedNudgePrompt()
             // Fork: one-time update notice (currently: watchapp permissions). Self-gates
             // to onboarded installs whose last-seen revision is behind the current one.
             WhatsNewDialog()

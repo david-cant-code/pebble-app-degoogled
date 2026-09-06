@@ -20,13 +20,22 @@
 
 #include <jni.h>
 #include <android/log.h>
+#include <sched.h>
+#include <sys/resource.h>
+#include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <mutex>
+#include <new>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
+#include "ggml-cpu.h"
 #include "whisper.h"
 
 namespace {
@@ -40,6 +49,11 @@ constexpr const char *kLogTag = "whisper_jni";
 // guard runs independently on top. 0.6 matches whisper's stock
 // no_speech_thold default.
 constexpr float kNoSpeechThreshold = 0.6f;
+
+// Fallback for a non-positive thread count, for both the decode and the
+// speed probe; the Kotlin side always sends a positive one, so this only
+// ever serves a direct native caller.
+constexpr int kDefaultThreads = 4;
 
 // Call ids whose transcription has been asked to abort. Membership is the
 // abort signal for that call; a call clears its own id on return. The set
@@ -94,6 +108,262 @@ void install_log_bridge() {
     });
 }
 
+// Scheduling placement of the calling thread for the duration of one
+// engine call, restored on every exit path by the destructor. ggml creates
+// its worker threads per graph with pthread_create and no attributes, so
+// they inherit whatever affinity mask and nice value the calling thread
+// holds when whisper_full runs; this is the only handle the shim has on
+// where the decode runs, since whisper exposes no threadpool or cpumask
+// control. A zero mask or a zero nice value leaves that dimension alone,
+// and a refused syscall is logged and ignored: the process cannot pin to
+// CPUs outside its cpuset or raise priority past its rlimit, and a decode
+// on the default placement is always better than no decode.
+class ScopedPlacement {
+public:
+    ScopedPlacement(int64_t mask_bits, int nice_value) {
+        if (mask_bits != 0) {
+            cpu_set_t want;
+            CPU_ZERO(&want);
+            for (int cpu = 0; cpu < 64 && cpu < CPU_SETSIZE; ++cpu) {
+                if (mask_bits & (int64_t(1) << cpu)) CPU_SET(cpu, &want);
+            }
+            if (sched_getaffinity(0, sizeof(saved_mask_), &saved_mask_) == 0 &&
+                sched_setaffinity(0, sizeof(want), &want) == 0) {
+                mask_applied_ = true;
+            } else {
+                __android_log_print(ANDROID_LOG_WARN, kLogTag,
+                                    "affinity mask 0x%llx not applied: %s",
+                                    (unsigned long long) mask_bits, strerror(errno));
+            }
+        }
+        if (nice_value != 0) {
+            errno = 0;
+            const int current = getpriority(PRIO_PROCESS, gettid());
+            if (errno == 0 && setpriority(PRIO_PROCESS, gettid(), nice_value) == 0) {
+                saved_nice_ = current;
+                nice_applied_ = true;
+            } else {
+                __android_log_print(ANDROID_LOG_WARN, kLogTag,
+                                    "nice %d not applied: %s", nice_value, strerror(errno));
+            }
+        }
+    }
+
+    ~ScopedPlacement() {
+        if (mask_applied_) sched_setaffinity(0, sizeof(saved_mask_), &saved_mask_);
+        if (nice_applied_) setpriority(PRIO_PROCESS, gettid(), saved_nice_);
+    }
+
+    ScopedPlacement(const ScopedPlacement &) = delete;
+    ScopedPlacement &operator=(const ScopedPlacement &) = delete;
+
+private:
+    cpu_set_t saved_mask_{};
+    bool mask_applied_ = false;
+    int saved_nice_ = 0;
+    bool nice_applied_ = false;
+};
+
+// Model-free speed probe: one encoder block of the base model's shape over
+// a 512-frame sequence, built straight on ggml with random weights and
+// timed on the CPU backend. It exists so the model picker can estimate,
+// before anything is downloaded, how long a full watch dictation window
+// would take each catalog model on this phone; the catalog constants that
+// turn its result into seconds are calibrated against real decodes (see
+// WhisperSpeedCalibration in util). The op mix mirrors whisper's encoder
+// layer at this engine revision: layer norm, f16 QKV projections against
+// f32 activations, flash attention over f16 keys and values, the output
+// projection, and the GELU MLP. 512 frames rather than the encoder's 1500
+// keeps the block's tensors around 60 MB with every intermediate
+// materialized (there is no graph allocator here), cheap enough to run at
+// model selection.
+//
+// ggml aborts the whole process when a context runs out of memory, so the
+// data context is sized to the byte from a dry build of the same graph in
+// a no-alloc context, and the compute work buffer is owned here rather
+// than carved from the context per call (ggml_graph_compute_with_ctx
+// allocates a new one on every call, which would exhaust any fixed budget
+// inside the timing loop).
+
+constexpr int kBenchState  = 512;   // base model width
+constexpr int kBenchHeads  = 8;
+constexpr int kBenchCtx    = 512;   // frames (a multiple of 256, as the engine pads to)
+constexpr int kBenchMlp    = 4 * kBenchState;
+constexpr int64_t kBenchBudgetUs = 1000 * 1000;   // wall-clock budget for the timed loop
+constexpr int kBenchMaxIters = 64;
+constexpr int kBenchMinIters = 3;
+
+// Deterministic small values in [-0.5, 0.5): the numbers never matter,
+// only that no denormals or infinities slow the arithmetic down.
+struct BenchRandom {
+    uint32_t state = 0x9E3779B9u;
+    float next() {
+        state = state * 1664525u + 1013904223u;
+        return float(state >> 8) / float(1u << 24) - 0.5f;
+    }
+};
+
+void bench_fill(ggml_tensor *t, BenchRandom &rng) {
+    const int64_t n = ggml_nelements(t);
+    if (t->type == GGML_TYPE_F16) {
+        auto *data = static_cast<ggml_fp16_t *>(t->data);
+        for (int64_t i = 0; i < n; ++i) data[i] = ggml_fp32_to_fp16(rng.next());
+    } else {
+        auto *data = static_cast<float *>(t->data);
+        for (int64_t i = 0; i < n; ++i) data[i] = rng.next();
+    }
+}
+
+// The block's graph plus every tensor it created (views included), so the
+// data context can be sized exactly, and the inputs that need values.
+struct BenchGraph {
+    ggml_cgraph *gf = nullptr;
+    std::vector<ggml_tensor *> tensors;
+    std::vector<ggml_tensor *> inputs;
+};
+
+BenchGraph build_bench_graph(ggml_context *ctx) {
+    BenchGraph g;
+    auto T = [&](ggml_tensor *t) { g.tensors.push_back(t); return t; };
+    auto in32 = [&](int64_t ne0, int64_t ne1) {
+        ggml_tensor *t = ne1 > 0 ? ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne0, ne1)
+                                 : ggml_new_tensor_1d(ctx, GGML_TYPE_F32, ne0);
+        g.inputs.push_back(t);
+        return T(t);
+    };
+    auto in16 = [&](int64_t ne0, int64_t ne1) {
+        ggml_tensor *t = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, ne0, ne1);
+        g.inputs.push_back(t);
+        return T(t);
+    };
+    const int S = kBenchState, C = kBenchCtx, H = kBenchHeads, D = kBenchState / kBenchHeads, M = kBenchMlp;
+
+    ggml_tensor *x = in32(S, C);
+    ggml_tensor *ln0_w = in32(S, 0), *ln0_b = in32(S, 0), *ln1_w = in32(S, 0), *ln1_b = in32(S, 0);
+    ggml_tensor *wq = in16(S, S), *wk = in16(S, S), *wv = in16(S, S), *wo = in16(S, S);
+    ggml_tensor *bq = in32(S, 0), *bv = in32(S, 0), *bo = in32(S, 0);
+    ggml_tensor *w0 = in16(S, M), *b0 = in32(M, 0), *w1 = in16(M, S), *b1 = in32(S, 0);
+
+    // Attention block, as whisper_build_graph_encoder lays it out.
+    ggml_tensor *cur = T(ggml_norm(ctx, x, 1e-5f));
+    cur = T(ggml_add(ctx, T(ggml_mul(ctx, cur, ln0_w)), ln0_b));
+    ggml_tensor *q = T(ggml_add(ctx, T(ggml_mul_mat(ctx, wq, cur)), bq));
+    ggml_tensor *k = T(ggml_mul_mat(ctx, wk, cur));
+    ggml_tensor *v = T(ggml_add(ctx, T(ggml_mul_mat(ctx, wv, cur)), bv));
+    ggml_tensor *Q = T(ggml_permute(ctx, T(ggml_reshape_3d(ctx, q, D, H, C)), 0, 2, 1, 3));
+    ggml_tensor *k16 = T(ggml_cast(ctx, k, GGML_TYPE_F16));
+    ggml_tensor *v16 = T(ggml_cast(ctx, v, GGML_TYPE_F16));
+    const size_t es = ggml_element_size(k16);
+    ggml_tensor *K = T(ggml_view_3d(ctx, k16, D, C, H, es * S, es * D, 0));
+    ggml_tensor *V = T(ggml_view_3d(ctx, v16, D, C, H, es * S, es * D, 0));
+    cur = T(ggml_flash_attn_ext(ctx, Q, K, V, nullptr, 1.0f / sqrtf(float(D)), 0.0f, 0.0f));
+    cur = T(ggml_reshape_2d(ctx, cur, S, C));
+    cur = T(ggml_add(ctx, T(ggml_mul_mat(ctx, wo, cur)), bo));
+    ggml_tensor *ff = T(ggml_add(ctx, cur, x));
+
+    // Feed-forward block.
+    cur = T(ggml_norm(ctx, ff, 1e-5f));
+    cur = T(ggml_add(ctx, T(ggml_mul(ctx, cur, ln1_w)), ln1_b));
+    cur = T(ggml_gelu(ctx, T(ggml_add(ctx, T(ggml_mul_mat(ctx, w0, cur)), b0))));
+    cur = T(ggml_add(ctx, T(ggml_mul_mat(ctx, w1, cur)), b1));
+    ggml_tensor *out = T(ggml_add(ctx, cur, ff));
+
+    g.gf = ggml_new_graph(ctx);
+    ggml_build_forward_expand(g.gf, out);
+    return g;
+}
+
+// Bytes a data context needs to hold [g]: an object plus padded data per
+// non-view tensor, an object per view, and the graph. Each term rounds up
+// separately, so this can only overstate what ggml_init will consume.
+size_t bench_context_bytes(const BenchGraph &g) {
+    size_t bytes = ggml_graph_overhead() + 4096;
+    for (const ggml_tensor *t : g.tensors) {
+        bytes += ggml_tensor_overhead();
+        if (t->view_src == nullptr) bytes += GGML_PAD(ggml_nbytes(t), GGML_MEM_ALIGN);
+    }
+    return bytes;
+}
+
+// Median nanoseconds per block evaluation at [n_threads], or -1 with the
+// reason recorded for nativeGetLastError. The median rather than the mean
+// keeps one preempted iteration from moving the score.
+int64_t run_benchmark(int n_threads) {
+    ggml_time_init();
+    ggml_cpu_init();
+
+    // Dry build: shapes only, to learn the data and work sizes.
+    size_t data_bytes = 0;
+    size_t work_bytes = 0;
+    {
+        std::vector<uint8_t> meta(ggml_tensor_overhead() * 128 + ggml_graph_overhead() + 4096);
+        ggml_init_params mparams = { /*.mem_size =*/ meta.size(), /*.mem_buffer =*/ meta.data(), /*.no_alloc =*/ true };
+        ggml_context *mctx = ggml_init(mparams);
+        if (mctx == nullptr) {
+            set_last_error("benchmark: ggml_init (dry build) failed");
+            return -1;
+        }
+        BenchGraph g = build_bench_graph(mctx);
+        data_bytes = bench_context_bytes(g);
+        work_bytes = ggml_graph_plan(g.gf, n_threads, nullptr).work_size;
+        ggml_free(mctx);
+    }
+
+    // The shim's one large, variable-size allocation (tens of MB, sized
+    // from the dry build above), and the one with a caller that has a
+    // failure contract: the estimator keeps its last score. Every other
+    // allocation here and in the engine it calls is unguarded on purpose:
+    // they are small or fixed, whisper_full allocates far more inside
+    // code this file cannot wrap, and a process refused a sub-MB block
+    // aborts either way.
+    std::vector<uint8_t> data, work;
+    try {
+        data.resize(data_bytes);
+        work.resize(work_bytes + 1);
+    } catch (const std::bad_alloc &) {
+        set_last_error("benchmark: could not allocate " + std::to_string((data_bytes + work_bytes) / 1024) + " KB");
+        return -1;
+    }
+    ggml_init_params params = { /*.mem_size =*/ data.size(), /*.mem_buffer =*/ data.data(), /*.no_alloc =*/ false };
+    ggml_context *ctx = ggml_init(params);
+    if (ctx == nullptr) {
+        set_last_error("benchmark: ggml_init failed");
+        return -1;
+    }
+    BenchGraph g = build_bench_graph(ctx);
+    BenchRandom rng;
+    for (ggml_tensor *t : g.inputs) bench_fill(t, rng);
+    ggml_cplan cplan = ggml_graph_plan(g.gf, n_threads, nullptr);
+    cplan.work_data = work.data();
+
+    // The first evaluation pays one-time setup, so it is excluded.
+    if (ggml_graph_compute(g.gf, &cplan) != GGML_STATUS_SUCCESS) {
+        set_last_error("benchmark: graph compute failed");
+        ggml_free(ctx);
+        return -1;
+    }
+    std::vector<int64_t> samples;
+    samples.reserve(kBenchMaxIters);
+    const int64_t loop_start = ggml_time_us();
+    while (int(samples.size()) < kBenchMaxIters) {
+        const int64_t t0 = ggml_time_us();
+        if (ggml_graph_compute(g.gf, &cplan) != GGML_STATUS_SUCCESS) {
+            set_last_error("benchmark: graph compute failed");
+            ggml_free(ctx);
+            return -1;
+        }
+        const int64_t t1 = ggml_time_us();
+        samples.push_back((t1 - t0) * 1000);
+        if (int(samples.size()) >= kBenchMinIters && t1 - loop_start >= kBenchBudgetUs) break;
+    }
+    __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                        "benchmark: %zu iterations on %d threads, %zu KB context (%zu KB used), %zu KB work",
+                        samples.size(), n_threads, data.size() / 1024, ggml_used_mem(ctx) / 1024, work.size() / 1024);
+    ggml_free(ctx);
+    std::sort(samples.begin(), samples.end());
+    return samples[samples.size() / 2];
+}
+
 // UTF-8 bytes out, exactly as produced; the Kotlin side decodes. Returns
 // null only on allocation failure (a pending OutOfMemoryError).
 jbyteArray utf8_bytes(JNIEnv *env, const std::string &s) {
@@ -134,24 +404,45 @@ Java_coredevices_whisper_WhisperJNI_nativeInit(JNIEnv *env, jclass, jstring mode
     return reinterpret_cast<jlong>(ctx);
 }
 
+extern "C" JNIEXPORT jlong JNICALL
+Java_coredevices_whisper_WhisperJNI_nativeBenchmark(JNIEnv *, jclass, jint n_threads,
+                                                    jlong cpu_mask, jint nice_value) {
+    install_log_bridge();
+    // Same placement as a decode, so the score reflects where dictation runs.
+    ScopedPlacement placement(cpu_mask, nice_value);
+    return run_benchmark(n_threads > 0 ? n_threads : kDefaultThreads);
+}
+
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong handle,
                                                      jfloatArray pcm, jint n_threads,
-                                                     jstring language, jlong call_id) {
+                                                     jstring language, jlong call_id,
+                                                     jlong cpu_mask, jint nice_value,
+                                                     jintArray stats) {
     auto *ctx = reinterpret_cast<whisper_context *>(handle);
     if (ctx == nullptr) {
         set_last_error("transcribe called with a null engine handle");
         return nullptr;
     }
 
+    // Reports the sample count the engine is given into the caller's
+    // optional one-slot array, so the Kotlin side can time the decode per
+    // second of engine input.
+    auto report_input = [&](int samples) {
+        if (stats != nullptr && env->GetArrayLength(stats) > 0) {
+            const jint value = samples;
+            env->SetIntArrayRegion(stats, 0, 1, &value);
+        }
+    };
+
     // This call's abort key lives on the stack for the whole whisper_full
     // call; the abort_callback reads it through user_data. Cleared on every
     // return path so a cancel request for this id cannot linger.
     const int64_t this_call = call_id;
 
-    const jsize n_samples = env->GetArrayLength(pcm);
-    jfloat *samples = env->GetFloatArrayElements(pcm, nullptr);
-    if (samples == nullptr) {
+    const jsize n_pinned = env->GetArrayLength(pcm);
+    jfloat *pinned = env->GetFloatArrayElements(pcm, nullptr);
+    if (pinned == nullptr) {
         // A failed pin leaves a pending OutOfMemoryError; clear it and
         // report through the shim's own error channel instead of passing a
         // null buffer into the engine.
@@ -160,6 +451,9 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
         clear_call_cancel(this_call);
         return nullptr;
     }
+
+    const int n_samples = static_cast<int>(n_pinned);
+    report_input(n_samples);
 
     // Language codes are ASCII (ISO 639-1), so modified UTF-8 is safe on
     // this input path too. Null means in-engine language detection.
@@ -181,7 +475,7 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
     }
 
     whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-    params.n_threads       = n_threads > 0 ? n_threads : 4;
+    params.n_threads       = n_threads > 0 ? n_threads : kDefaultThreads;
     params.language        = lang;
     params.translate       = false;
     params.no_timestamps   = true;  // dictation wants plain text
@@ -233,13 +527,19 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
     };
     params.abort_callback_user_data = const_cast<int64_t *>(&this_call);
 
-    const int rc = whisper_full(ctx, params, samples, static_cast<int>(n_samples));
+    int rc;
+    {
+        // Scoped to the engine call alone; the destructor restores the
+        // thread before any JNI call below runs.
+        ScopedPlacement placement(cpu_mask, nice_value);
+        rc = whisper_full(ctx, params, pinned, n_samples);
+    }
     const bool was_cancelled = is_call_cancelled(this_call);
     // The abort key is per call, so clearing it here cannot revoke any
     // other in-flight call's pending abort.
     clear_call_cancel(this_call);
 
-    env->ReleaseFloatArrayElements(pcm, samples, JNI_ABORT); // read-only, never copy back
+    env->ReleaseFloatArrayElements(pcm, pinned, JNI_ABORT); // read-only, never copy back
     if (lang != nullptr) {
         env->ReleaseStringUTFChars(language, lang);
     }

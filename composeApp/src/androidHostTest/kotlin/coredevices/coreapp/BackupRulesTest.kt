@@ -79,6 +79,25 @@ class BackupRulesTest {
         assertEquals(emptyList(), document.elementsNamed("include"))
     }
 
+    @Test
+    fun `voice captures stay out of every backup and transfer set`() {
+        // The debug capture hook writes the developer's own dictations under files/debug-captures;
+        // each rule set that backs up the file domain must exclude that directory.
+        val v28 = parse(resFile("xml-v28", "full_backup_content.xml"))
+        assertEquals(
+            setOf("models", "debug-captures"),
+            v28.elementsNamed("exclude").filter { it.getAttribute("domain") == "file" }.map { it.getAttribute("path") }.toSet(),
+        )
+        val v31 = parse(resFile("xml", "backup_rules.xml"))
+        for (section in listOf("cloud-backup", "device-transfer")) {
+            val excludes = v31.elementsNamed(section).single().childElements("exclude")
+            assertTrue(
+                excludes.any { it.getAttribute("domain") == "file" && it.getAttribute("path") == "debug-captures" },
+                "$section does not exclude files/debug-captures",
+            )
+        }
+    }
+
     private fun parse(file: File) = DocumentBuilderFactory.newInstance()
         .newDocumentBuilder()
         .parse(file)
@@ -87,6 +106,9 @@ class BackupRulesTest {
         val nodes = getElementsByTagName(tag)
         return (0 until nodes.length).map { nodes.item(it) as Element }
     }
+
+    private fun Element.childElements(tag: String): List<Element> =
+        (0 until childNodes.length).map { childNodes.item(it) }.filterIsInstance<Element>().filter { it.tagName == tag }
 
     /** Locates the res file from wherever Gradle happens to set the test working directory. */
     private fun resFile(qualifier: String, name: String): File {

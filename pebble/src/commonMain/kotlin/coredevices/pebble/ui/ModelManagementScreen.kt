@@ -56,14 +56,18 @@ import coredevices.util.models.ModelDownloadStatus
 import coredevices.util.models.ModelInfo
 import coredevices.util.models.ModelManager
 import coredevices.util.models.RecommendedModel
+import coredevices.util.models.awaitModelDownloadSettled
+import coredevices.util.transcription.SpeedScore
+import coredevices.util.transcription.WhisperSpeedCalibration
+import coredevices.util.transcription.modelRowText
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -74,17 +78,14 @@ import org.jetbrains.compose.ui.tooling.preview.Preview
 import org.koin.compose.viewmodel.koinViewModel
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
+import kotlin.math.roundToInt
 
 /**
- * Completes a just-scheduled model download: waits for it to settle and
- * selects the model only if it actually installed. Settling means the
- * first non-Downloading status after the replayed current one (Idle on
- * success and on Android cancel, Cancelled on iOS cancel, Failed on
- * error); waiting on Idle alone would leave a failed download's coroutine
- * alive to select its model on the next unrelated download's Idle. The
- * install check guards the cancel/failure cases: selecting an absent
- * model strands config pointing at nothing, and the engine then skips
- * init for it, so local dictation dies at the next process restart.
+ * Completes a just-scheduled model download: waits for it to settle (see
+ * [awaitModelDownloadSettled]) and selects the model only if it actually
+ * installed. The install check guards the cancel/failure cases: selecting
+ * an absent model strands config pointing at nothing, and the engine then
+ * skips init for it, so local dictation dies at the next process restart.
  * Static so the settle/select decision stays under host tests.
  */
 internal suspend fun settleDownloadThenSelect(
@@ -93,7 +94,7 @@ internal suspend fun settleDownloadThenSelect(
     refresh: () -> Unit,
     select: () -> Unit,
 ) {
-    status.drop(1).firstOrNull { it !is ModelDownloadStatus.Downloading }
+    awaitModelDownloadSettled(status)
     refresh()
     if (isInstalled()) select()
 }
@@ -135,8 +136,40 @@ class ModelManagementScreenViewModel(
         MutableStateFlow<AvailableModelsState>(AvailableModelsState.Loading)
     val availableSTTModels = _availableSTTModels.asStateFlow()
 
+    /** The phone's speed score; the estimates and the recommendation follow it. */
+    val speedScore: StateFlow<SpeedScore?> = modelManager.speedScore
+
+    private val _measuringSpeed = MutableStateFlow(false)
+    val measuringSpeed = _measuringSpeed.asStateFlow()
+
+    val recommendedModel: StateFlow<RecommendedModel> = speedScore
+        .map { modelManager.getRecommendedSTTModel() }
+        .stateIn(
+            viewModelScope,
+            started = kotlinx.coroutines.flow.SharingStarted.Lazily,
+            initialValue = modelManager.getRecommendedSTTModel(),
+        )
+
     init {
-        refreshAvailableModels()
+        viewModelScope.launch {
+            // The probe runs once per install, the first time the picker
+            // opens; the list is (re)built from every score, including the
+            // initial one, so the rows always show the current estimates.
+            if (speedScore.value == null) {
+                _measuringSpeed.value = true
+                modelManager.ensureSpeedMeasured()
+                _measuringSpeed.value = false
+            }
+            speedScore.collect { refreshAvailableModels() }
+        }
+    }
+
+    fun retestSpeed() {
+        viewModelScope.launch {
+            _measuringSpeed.value = true
+            modelManager.measureSpeed()
+            _measuringSpeed.value = false
+        }
     }
 
     fun refreshDownloadedModels() {
@@ -204,14 +237,11 @@ class ModelManagementScreenViewModel(
         }
     }
 
-    fun getRecommendedSTTModel(): RecommendedModel {
-        return modelManager.getRecommendedSTTModel()
-    }
 }
 
 @Composable
 fun ModelDownloadPromptDialog(
-    isLite: Boolean,
+    recommended: RecommendedModel,
     downloadSizeInMb: Int,
     onGetRecommended: () -> Unit,
     onDismiss: () -> Unit,
@@ -231,11 +261,13 @@ fun ModelDownloadPromptDialog(
             TextButton(
                 onClick = onGetRecommended,
             ) {
-                if (isLite) {
-                    Text("Download lite model: ${downloadSizeInMb}MB")
-                } else {
-                    Text("Download offline model: ${downloadSizeInMb}MB")
-                }
+                Text(
+                    when (recommended) {
+                        is RecommendedModel.Standard -> "Download offline model: ${downloadSizeInMb}MB"
+                        is RecommendedModel.Lite -> "Download lite model: ${downloadSizeInMb}MB"
+                        is RecommendedModel.Minimal -> "Download minimal model: ${downloadSizeInMb}MB"
+                    }
+                )
             }
             TextButton(
                 onClick = onDismiss,
@@ -250,11 +282,63 @@ fun ModelDownloadPromptDialog(
                 Data charges may apply, Wi-Fi is recommended.
             """.trimIndent(),
         )
-        if (isLite) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("Your device may struggle with larger models, a reduced accuracy model will be used.")
+        when (recommended) {
+            is RecommendedModel.Lite -> {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Your device may struggle with larger models, a reduced accuracy model will be used.")
+            }
+            is RecommendedModel.Minimal -> {
+                Spacer(modifier = Modifier.height(8.dp))
+                val window = WhisperSpeedCalibration.WINDOW_SECONDS.roundToInt()
+                Text(
+                    "This phone is too slow for the larger models to answer a full $window second " +
+                        "dictation in time, so the smallest model will be used. Its accuracy " +
+                        "is noticeably lower; another model can be chosen later under Manage Models.",
+                )
+            }
+            is RecommendedModel.Standard -> {}
         }
     }
+}
+
+/**
+ * The picker's header: whether the phone has been speed-tested, what the
+ * per-model estimates below mean, and a way to test again (after a
+ * system update, say, or with the phone cooler).
+ */
+@Composable
+private fun SpeedTestRow(score: SpeedScore?, measuring: Boolean, onRetest: () -> Unit) {
+    ListItem(
+        headlineContent = {
+            Text(
+                when {
+                    measuring -> "Measuring this phone's speed"
+                    score == null -> "Phone speed not measured"
+                    else -> "Phone speed measured"
+                }
+            )
+        },
+        supportingContent = {
+            // The numbers are the firmware constants the estimates and the deadline are built on.
+            val window = WhisperSpeedCalibration.WINDOW_SECONDS.roundToInt()
+            val deadline = WhisperSpeedCalibration.MARGINAL_LIMIT_SECONDS.roundToInt()
+            Text(
+                when {
+                    measuring -> "This takes about a second."
+                    score == null -> "Each model will show how long a $window second dictation would take once the speed test has run."
+                    else -> "Each model shows how long a full $window second dictation would take on this phone " +
+                        "with the app in the background. A result later than $deadline seconds is too late for the watch."
+                }
+            )
+        },
+        trailingContent = {
+            if (measuring) {
+                CircularProgressIndicator(modifier = Modifier.padding(8.dp).size(26.dp), strokeWidth = 2.dp)
+            } else {
+                TextButton(onClick = onRetest) { Text(if (score == null) "Test" else "Re-test") }
+            }
+        },
+    )
 }
 
 @Composable
@@ -266,6 +350,9 @@ fun ModelManagementScreen(
     availableSTTModels: State<ModelManagementScreenViewModel.AvailableModelsState>,
     currentSTTModel: State<String?>,
     recommendedSTTModelSlug: String,
+    speedScore: State<SpeedScore?>,
+    measuringSpeed: State<Boolean>,
+    onRetestSpeed: () -> Unit,
     onDownloadSTTModel: (ModelInfo) -> Unit,
     onCancelDownload: () -> Unit,
     onDeleteModel: (String) -> Unit,
@@ -293,6 +380,13 @@ fun ModelManagementScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                item(contentType = "speed") {
+                    SpeedTestRow(
+                        score = speedScore.value,
+                        measuring = measuringSpeed.value,
+                        onRetest = onRetestSpeed,
+                    )
+                }
                 when (val state = availableSTTModels.value) {
                     ModelManagementScreenViewModel.AvailableModelsState.Loading -> {
                         item(contentType = "loading") {
@@ -383,7 +477,7 @@ private fun ModelListItem(
             },
         overlineContent = { if (isRecommended) { Text("Recommended for your device") } },
         headlineContent = { Text(model.slug) },
-        supportingContent = { Text("${model.sizeInMB} MB") },
+        supportingContent = { Text(modelRowText(model.sizeInMB, model.estimatedWindowSeconds)) },
         leadingContent = {
             RadioButton(
                 selected = isSelected && downloadState == DownloadState.Downloaded,
@@ -453,7 +547,9 @@ fun ModelManagementScreen(
     val availableSTTModels = viewModel.availableSTTModels.collectAsState()
     val currentSTTModel = viewModel.currentSTTModel.collectAsState()
     val downloadStatus = viewModel.modelDownloadState.collectAsState()
-    val recommendedSTTModel = remember { viewModel.getRecommendedSTTModel() }
+    val recommendedSTTModel by viewModel.recommendedModel.collectAsState()
+    val speedScore = viewModel.speedScore.collectAsState()
+    val measuringSpeed = viewModel.measuringSpeed.collectAsState()
 
     LaunchedEffect(viewModel, topBarParams) {
         viewModel.snackbarMessages.collect { topBarParams.showSnackbar(it) }
@@ -467,6 +563,9 @@ fun ModelManagementScreen(
         availableSTTModels = availableSTTModels,
         currentSTTModel = currentSTTModel,
         recommendedSTTModelSlug = recommendedSTTModel.modelSlug,
+        speedScore = speedScore,
+        measuringSpeed = measuringSpeed,
+        onRetestSpeed = viewModel::retestSpeed,
         onDownloadSTTModel = viewModel::downloadSTTModel,
         onCancelDownload = viewModel::cancelDownload,
         onDeleteModel = viewModel::deleteModel,
@@ -494,6 +593,9 @@ fun ModelManagementScreenPreview() {
             ),
             currentSTTModel = mutableStateOf("whisper-small"),
             recommendedSTTModelSlug = "whisper-medium-pro",
+            speedScore = mutableStateOf(SpeedScore(nsPerBlock = 80_000_000L, threads = 2, measuredAtEpochMs = 0L)),
+            measuringSpeed = mutableStateOf(false),
+            onRetestSpeed = {},
             onDownloadSTTModel = {},
             onCancelDownload = {},
             onDeleteModel = {},
@@ -507,7 +609,7 @@ fun ModelManagementScreenPreview() {
 fun ModelManagementScreenPromptDialogPreview() {
     PreviewWrapper {
         ModelDownloadPromptDialog(
-            isLite = false,
+            recommended = RecommendedModel.Standard("whisper-small-en"),
             onGetRecommended = {},
             onDismiss = {},
             downloadSizeInMb = 100,
@@ -520,10 +622,23 @@ fun ModelManagementScreenPromptDialogPreview() {
 fun ModelManagementScreenPromptDialogLitePreview() {
     PreviewWrapper {
         ModelDownloadPromptDialog(
-            isLite = true,
+            recommended = RecommendedModel.Lite("whisper-base-en"),
             onGetRecommended = {},
             onDismiss = {},
             downloadSizeInMb = 100,
+        )
+    }
+}
+
+@Preview
+@Composable
+fun ModelManagementScreenPromptDialogMinimalPreview() {
+    PreviewWrapper {
+        ModelDownloadPromptDialog(
+            recommended = RecommendedModel.Minimal("whisper-tiny-en"),
+            onGetRecommended = {},
+            onDismiss = {},
+            downloadSizeInMb = 74,
         )
     }
 }

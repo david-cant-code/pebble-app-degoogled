@@ -31,9 +31,9 @@ class RealPebbleAccount(
 ) : PebbleAccount {
     private val logger = Logger.withTag("PebbleAccount")
 
-    // The account bearer token is the highest-value secret the app persists, and nothing else in
-    // the app encrypts anything at rest, so it would otherwise sit in plaintext SharedPreferences
-    // and travel in every backup and device transfer.
+    // The account bearer token is the highest-value secret the app persists; without this it
+    // would sit in plaintext SharedPreferences and travel in every backup and device transfer.
+    // The transcription server's bearer token goes through the same setting type.
     private val tokenSetting = EncryptedStringSetting(settings, secretCipher, TOKEN_KEY)
 
     // Lazy because getToken() now performs Keystore IPC (decrypting the token), and this class

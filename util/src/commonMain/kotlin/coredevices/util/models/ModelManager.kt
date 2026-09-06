@@ -2,6 +2,12 @@ package coredevices.util.models
 
 import coredevices.util.Platform
 import coredevices.util.transcription.CactusModelPathProvider
+import coredevices.util.transcription.DeviceSpeedEstimator
+import coredevices.util.transcription.SpeedScore
+import coredevices.util.transcription.WhisperSpeedCalibration
+import coredevices.util.transcription.WindowFit
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * UI-facing surface over the whisper model catalog and the provider that
@@ -12,8 +18,18 @@ class ModelManager(
     private val platform: Platform,
     private val modelDownloadManager: ModelDownloadManager,
     private val modelPathProvider: CactusModelPathProvider? = null,
+    private val speedEstimator: DeviceSpeedEstimator? = null,
 ) {
     val modelDownloadStatus = modelDownloadManager.downloadStatus
+
+    /** The phone's speed score; null until the probe has run on this install. */
+    val speedScore: StateFlow<SpeedScore?> = speedEstimator?.score ?: MutableStateFlow(null)
+
+    /** Runs the speed probe now (about a second of CPU) and caches the result. */
+    suspend fun measureSpeed(): SpeedScore? = speedEstimator?.measure()
+
+    /** The cached speed score, measuring once when there is none. */
+    suspend fun ensureSpeedMeasured(): SpeedScore? = speedEstimator?.cachedOrMeasure()
 
     fun downloadSTTModel(modelInfo: ModelInfo, allowMetered: Boolean): Boolean {
         return modelDownloadManager.downloadSTTModel(modelInfo, allowMetered)
@@ -42,10 +58,12 @@ class ModelManager(
     /**
      * The whole catalog (sizes from the pins, so the UI shows them before
      * anything is downloaded), plus any downloaded directory outside the
-     * catalog so stale models remain visible for deletion.
+     * catalog so stale models remain visible for deletion. Each catalog
+     * entry carries the phone's estimated full-window decode when a speed
+     * score exists.
      */
     suspend fun getAvailableSTTModels(): List<ModelInfo> =
-        availableSTTModels(modelPathProvider)
+        availableSTTModels(modelPathProvider, speedScore.value)
 
     fun getRecommendedSTTMode(): CactusSTTMode {
         return when {
@@ -55,25 +73,37 @@ class ModelManager(
     }
 
     /**
-     * Device-appropriate default pick: small tier as Standard on machines
-     * with enough RAM, base tier as Lite below that, English-only variants
-     * on English-language devices. Both the model and the Lite/Standard
-     * label come from a single [WhisperModelCatalog.recommended] decision
-     * over one RAM read, so the label always matches the chosen model.
+     * Device-appropriate default pick: the RAM tier from
+     * [WhisperModelCatalog.recommended], stepped down while the phone's
+     * speed score says a full dictation window would exceed the watch's
+     * limit on it (see [recommendedModel]). Without a score the RAM tier
+     * stands, so callers that can afford the probe call
+     * [ensureSpeedMeasured] first.
      */
-    fun getRecommendedSTTModel(): RecommendedModel {
-        val recommendation = WhisperModelCatalog.recommended(
-            totalRamBytes = platform.totalRamBytes(),
-            preferEnglishOnly = platform.prefersEnglishModels(),
-        )
-        return if (recommendation.standardTier) {
-            RecommendedModel.Standard(recommendation.model.id)
-        } else {
-            RecommendedModel.Lite(recommendation.model.id)
-        }
-    }
+    fun getRecommendedSTTModel(): RecommendedModel = recommendedModel(
+        totalRamBytes = platform.totalRamBytes(),
+        preferEnglishOnly = platform.prefersEnglishModels(),
+        score = speedScore.value,
+    )
 
     companion object {
+        private const val MIB = 1024L * 1024L
+
+        /** Whole MiB, rounded to nearest: the one size rule for every row the picker and the download job see. */
+        private fun mebibytes(bytes: Long): Int = ((bytes + MIB / 2) / MIB).toInt()
+
+        /**
+         * A catalog entry as the download job and the picker carry it. The
+         * size is rounded to the nearest MiB for the download job's traffic
+         * estimate.
+         */
+        internal fun modelInfoFor(model: WhisperModel, estimatedWindowSeconds: Double? = null): ModelInfo = ModelInfo(
+            slug = model.id,
+            sizeInMB = mebibytes(model.sizeBytes),
+            url = WhisperModelCatalog.urlFor(model),
+            estimatedWindowSeconds = estimatedWindowSeconds,
+        )
+
         /**
          * Catalog models actually installed and usable by the engine.
          * Static and provider-parameterized so the install filter stays
@@ -88,36 +118,68 @@ class ModelManager(
          * catalog (stale previous-engine leftovers), so those stay visible
          * for deletion. Static and provider-parameterized for host tests.
          */
-        internal fun availableSTTModels(provider: CactusModelPathProvider?): List<ModelInfo> {
+        internal fun availableSTTModels(
+            provider: CactusModelPathProvider?,
+            score: SpeedScore? = null,
+        ): List<ModelInfo> {
             val catalog = WhisperModelCatalog.MODELS.map { model ->
-                ModelInfo(
-                    slug = model.id,
-                    sizeInMB = (model.sizeBytes / (1024 * 1024)).toInt(),
-                    url = WhisperModelCatalog.urlFor(model),
-                )
+                modelInfoFor(model, WhisperSpeedCalibration.estimateWindowSeconds(model.id, score))
             }
             val stale = provider?.getDownloadedModels()
                 ?.filter { WhisperModelCatalog.byId(it) == null }
-                ?.map { slug ->
-                    val sizeMB = (provider.getModelSizeBytes(slug) / (1024 * 1024)).toInt()
-                    ModelInfo(slug = slug, sizeInMB = sizeMB)
-                } ?: emptyList()
+                ?.map { slug -> ModelInfo(slug = slug, sizeInMB = mebibytes(provider.getModelSizeBytes(slug))) }
+                ?: emptyList()
             return catalog + stale
+        }
+
+        /**
+         * The RAM tier, stepped down one tier at a time while the estimate
+         * for it on this phone exceeds the watch's window, to the tiny
+         * floor at most. The label follows the tier the walk ends on, so
+         * it always matches the model. Static so the walk stays under host
+         * tests.
+         */
+        internal fun recommendedModel(
+            totalRamBytes: Long,
+            preferEnglishOnly: Boolean,
+            score: SpeedScore?,
+        ): RecommendedModel {
+            var model = WhisperModelCatalog.recommended(totalRamBytes, preferEnglishOnly).model
+            while (WhisperSpeedCalibration.fitOf(model.id, score) == WindowFit.Exceeds) {
+                model = WhisperModelCatalog.stepDown(model) ?: break
+            }
+            return when (model.tier) {
+                WhisperTier.Small -> RecommendedModel.Standard(model.id)
+                WhisperTier.Base -> RecommendedModel.Lite(model.id)
+                WhisperTier.Tiny -> RecommendedModel.Minimal(model.id)
+            }
         }
     }
 }
 
+/**
+ * The default model for a device with the tier it landed on: Standard is
+ * the small tier, Lite the base tier, Minimal the tiny tier, which only
+ * the speed step-down ever reaches.
+ */
 sealed class RecommendedModel {
     abstract val modelSlug: String
     data class Lite(override val modelSlug: String) : RecommendedModel()
     data class Standard(override val modelSlug: String) : RecommendedModel()
+    data class Minimal(override val modelSlug: String) : RecommendedModel()
 }
 
+/**
+ * @param estimatedWindowSeconds the phone's estimated decode time for a
+ *   full 15 s dictation on this model, null without a speed score or for
+ *   non-catalog directories.
+ */
 data class ModelInfo(
     val createdAt: kotlin.time.Instant = kotlin.time.Clock.System.now(),
     val slug: String,
     val sizeInMB: Int = 0,
-    val url: String = ""
+    val url: String = "",
+    val estimatedWindowSeconds: Double? = null,
 )
 
 expect fun Platform.supportsNPU(): Boolean

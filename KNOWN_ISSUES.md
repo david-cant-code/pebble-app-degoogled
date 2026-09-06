@@ -343,7 +343,7 @@ the smaller models passed.
 
 ## Watch dictation accuracy varies sharply between sessions
 
-**Status: open; capture-chain investigation pending.**
+**Status: open; the variance is in the watch's microphone capture.**
 
 On-device testing found dictation accuracy varying between
 back-to-back sessions under identical conditions: the same sentence
@@ -371,6 +371,53 @@ unchanged since the earlier pass. Three apps is too few to generalize
 from, so the requesting watchapp joins the firmware revision as a
 variable a capture comparison should hold fixed.
 
+A capture pass with the phone-side path held fixed placed the variance
+ahead of the phone. In one afternoon, on one watch and one build, the
+share of captures the engine hears as noise before the app touches them
+swung between rounds minutes apart, from one in five to eleven in
+fifteen; the failing captures are as loud as the good ones or louder,
+but carry little energy in the speech band and no voiced pitch, the
+low-frequency signature the earlier pass found, and a standalone decode
+labels them as scraping, footsteps or crickets while the good captures
+from the same minutes transcribe correctly. Nothing on the phone can
+restore speech the capture never carried. The candidates are on the
+watch: the microphone port covered while the watch is held to the
+mouth, debris or moisture in the port, and the firmware's microphone
+or gain state.
+
+## A silent dictation can transcribe as a stray word
+
+**Status: open; engine behavior.**
+
+The engine decodes ten seconds of digital silence to " The" on the
+base English model, and a near-silent watch recording can come back as
+a single short word instead of the "Missed that" the watch shows for
+an empty result. Nothing gates on level before the engine, so a silent
+recording reaches it whole. A gate on the audio itself (an absolute
+level floor measured after the microphone's start-up transient, or the
+engine's own per-segment no-speech probability) needs captures from
+more than one watch before its threshold can be set.
+
+## A provider that fails before the recording ends is answered only after it
+
+**Status: open; reachable only through a codec frame the decoder rejects,
+which the firmware has not been observed to send.**
+
+The dictation session coordinator waits for the watch to end the
+recording before it looks at the provider's result, because the
+watch's result clock starts at that moment. A provider that returns or
+throws before it has read the recording is therefore answered only
+when the recording ends, up to the firmware's recording cap later,
+while the user keeps speaking into a session that has already failed.
+The local provider decodes each codec frame as the watch sends it and
+throws on a frame the decoder rejects, so a corrupt frame would reach
+this case; no dictation has produced one, and the only encoder the
+firmware sends is the one every provider accepts. If a rejected frame,
+a second encoder or a provider that fails before reading ever shows up,
+the coordinator needs to race the provider against the end of the
+recording and stop the watch's transfer on an early failure, with a
+coordinator test for it.
+
 ## Watch-side dictation endpointing misfires in both directions
 
 **Status: open; firmware behavior, app-side mitigation only.**
@@ -381,8 +428,88 @@ sometimes ends the session after one to two seconds while the user is
 still speaking. Both directions were observed repeatedly during
 on-device dictation testing; a fully silent session reliably streams
 the whole window. The endpointer runs in the watch firmware, so the
-app can only shape what it does with the audio it receives: the
-encoder-context trim keeps full-window sessions cheap to decode, and
-a truncated session transcribes as the fragment that was actually
-captured. Recorded here so short or slow dictation results are
-attributed correctly during testing.
+app can only shape what it does with the audio it receives: a
+full-window session costs a full-window decode, and a truncated session
+transcribes as the fragment that was actually captured. Recorded here so
+short or slow dictation results are attributed correctly during testing.
+
+## A stale model directory resets local dictation for one launch
+
+**Status: accepted; no catalog change that reaches it is planned.**
+
+The model directory is swept at every launch, and any directory the
+sweep cannot match to an installed catalog model is treated as a
+leftover of the previous speech engine: the directory is deleted, the
+selected model is cleared, and a local mode is stashed and replaced by
+cloud-only until the next launch, when the sweep finds the stash and a
+model it knows, restores the mode, and selects the first installed
+model the directory listing returns, which may not be the one selected
+before. With a self-hosted server configured, dictation for that launch
+goes to it; without one, dictation fails until the next launch. Three
+states reach it: a downgrade to 0.1.6 or earlier from an install
+holding a tiny model, whose catalog lacks the name (the tiny model has
+to be downloaded again); a later version that drops or re-pins a
+catalog entry while the selected model stays valid; and an install from
+an unreleased build holding a directory this catalog no longer names. A
+model file that fails its load-time hash check is not one of them: the
+installer deletes its directory as it quarantines the file. Installs
+holding only catalog models in their pinned shape are unaffected.
+Closing this means resetting the mode only when the selected model
+itself is gone and keeping the selected model on restore, each with a
+migration test; deferred because no such catalog change is planned.
+
+## A superseded decode can hold the engine into the next session
+
+**Status: open; bounded by the engine's unwind bound.**
+
+The dictation session coordinator cancels the session in flight when
+the watch opens the next one, so a decode that missed the deadline does
+not hold the engine against the retry. The engine checks the abort only
+between its encoder and decoder passes, and one pass of the larger
+models takes seconds on a slow phone, so a decode deep in a pass can
+still hold the engine when the retry's recording ends. The retry's own
+decode then fails at once with a recognizer error, the same "Error
+occurred. Try again." the superseded session produced, and the watch's
+next retry runs clean. The hold lasts at most the engine's unwind bound
+(10 seconds) and needs a pass longer than the next recording. A bounded
+wait on the engine would mostly turn an immediate failure into a late
+one inside the same deadline; closing this means the new session
+joining the superseded decode after its recording ends and before its
+provider call, with a service test that cancels a blocking engine call
+and starts a second decode during the unwind.
+
+## A model prompt's download can settle on another download's status
+
+**Status: open; the prompt shows a failure it can retry.**
+
+The speed nudge and the engine update prompt wait for their download by
+taking the first status after the current one that is not Downloading,
+and the status names no download. When a download of another model is
+already running, scheduling the prompt's own cancels that job, whose
+Idle then settles the prompt's wait before its own download has
+reported anything: the prompt shows "Download failed" while the
+download runs. A retry attaches to the running download without
+starting it again; dismissing the prompt instead leaves the model to
+finish downloading unselected. Closing this means settling on a
+terminal status for the waited-on model, or on Idle seen after a
+Downloading for it, with a flow test; deferred as cosmetic.
+
+## A decode of the replaced model can re-raise the speed nudge
+
+**Status: open; the prompt returns for the model just left.**
+
+The speed tracker raises the nudge for the model whose decode it has
+just recorded, and holds a pending one only between the dialog
+starting a switch and that switch settling. A decode that began on
+the previous model and ends after the switch is still recorded
+against it, so the prompt returns offering the model the user has
+already chosen. This is likeliest on the phones the nudge exists
+for: their decodes overrun the watch's window, the watch opens a
+retry about five seconds after the failure it reports, and that
+retry's decode is often still running while the dialog is being
+read. The second prompt changes no selection on its own, Keep
+declines a model that is no longer in use, and Switch re-selects the
+model already selected. Closing this means dropping a sample for a
+model that is no longer selected, or holding the latch until decodes
+that began before a switch have ended, with a tracker test that
+records for the replaced model after the switch settles.

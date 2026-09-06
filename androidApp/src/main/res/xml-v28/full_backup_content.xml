@@ -29,4 +29,7 @@
          Over quota the system stops backing the app up altogether, so leaving these in would
          cost the backup of everything else. Exclude takes precedence over include. -->
     <exclude domain="file" path="models" />
+    <!-- Debug-only dictation captures: voice data kept for the capture hook and deleted
+         when it is turned off. They stay on this phone. -->
+    <exclude domain="file" path="debug-captures" />
 </full-backup-content>

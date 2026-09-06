@@ -93,6 +93,7 @@ import coredevices.ui.SignInDialog
 import coredevices.util.CoreConfigFlow
 import coredevices.util.Platform
 import coredevices.util.emailOrNull
+import coredevices.util.FORK_ISSUE_TRACKER_URL
 import coredevices.util.isIOS
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.FirebaseUser
@@ -178,6 +179,11 @@ fun BugReportScreen(
             .collectAsState(Firebase.auth.currentUser.toUserProps())
 
         val keyboardController = LocalSoftwareKeyboardController.current
+        // Fork: every control that needs the report backend (send, sign-in,
+        // the report list, the guide link, the "will be sent" note) is gated
+        // on this flag. With no backend configured the screen is the local
+        // log export reached from Settings > Get Help > Export logs: the zip goes to
+        // the share sheet and nothing in the app can upload it.
         val canSendReports = bugReportProcessor.canSendReports()
         val platformShareLauncher: PlatformShareLauncher = koinInject()
         val snackbarHostState = remember { SnackbarHostState() }
@@ -308,7 +314,7 @@ fun BugReportScreen(
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 TopAppBar(
-                    title = { Text("Bug Report") },
+                    title = { Text(if (canSendReports) "Bug Report" else "Export logs") },
                     navigationIcon = {
                         IconButton(onClick = coreNav::goBack) {
                             Icon(
@@ -349,7 +355,32 @@ fun BugReportScreen(
                             setImageAttachments = setImageAttachments
                         )
                         Spacer(Modifier.weight(1.0f))
-                        Button(
+                        if (!canSendReports) {
+                            Button(
+                                enabled = !sending && !screenshotLoading,
+                                onClick = {
+                                    keyboardController?.hide()
+                                    sendLogs(shareLocally = true)
+                                },
+                                contentPadding = ButtonDefaults.ButtonWithIconContentPadding
+                            ) {
+                                if (sending) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Filled.Share,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(ButtonDefaults.IconSize)
+                                    )
+                                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                                    Text("Export logs")
+                                }
+                            }
+                        } else Button(
                             enabled = !sending && !showSuccess && !screenshotLoading && user != null && canSendReports,
                             onClick = {
                                 keyboardController?.hide()
@@ -429,7 +460,7 @@ fun BugReportScreen(
                         )
                     }
                 }
-                if (user == null) {
+                if (user == null && canSendReports) {
                     Text(
                         "You must sign in to submit a bug report",
                         textAlign = TextAlign.Center,
@@ -549,16 +580,29 @@ fun BugReportScreen(
                     Spacer(Modifier.height(8.dp))
                 }
 
-                PebbleElevatedButton(
-                    onClick = {
-                        scope.launch {
-                            platform.openUrl("https://pbl.zip/bugs")
-                        }
-                    },
-                    modifier = Modifier.padding(8.dp),
-                    text = "How to submit a great bug report",
-                    primaryColor = false,
-                )
+                if (canSendReports) {
+                    PebbleElevatedButton(
+                        onClick = {
+                            scope.launch {
+                                platform.openUrl("https://pbl.zip/bugs")
+                            }
+                        },
+                        modifier = Modifier.padding(8.dp),
+                        text = "How to submit a great bug report",
+                        primaryColor = false,
+                    )
+                } else {
+                    PebbleElevatedButton(
+                        onClick = {
+                            scope.launch {
+                                platform.openUrl(FORK_ISSUE_TRACKER_URL)
+                            }
+                        },
+                        modifier = Modifier.padding(8.dp),
+                        text = "Open the issue tracker",
+                        primaryColor = false,
+                    )
+                }
                 Text(
                     "Tap to see what's working and what's still in development",
                     textAlign = TextAlign.Center,
@@ -571,14 +615,26 @@ fun BugReportScreen(
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold
                 )
-                Text(
-                    "Please note that logs + device info will be sent with this report",
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(8.dp),
-                    fontSize = 12.sp
-                )
+                if (canSendReports) {
+                    Text(
+                        "Please note that logs + device info will be sent with this report",
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(8.dp),
+                        fontSize = 12.sp
+                    )
+                } else {
+                    Text(
+                        "Nothing is sent anywhere. Export creates a zip with the app log, " +
+                            "a device summary and anything you attach here, for you to add " +
+                            "to an issue yourself. The log leaves out personal content " +
+                            "unless you turn that on under Diagnostics settings.",
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        fontSize = 13.sp
+                    )
+                }
                 Spacer(Modifier.height(20.dp))
-                ElevatedCard(
+                if (canSendReports) ElevatedCard(
                     elevation = CardDefaults.cardElevation(
                         defaultElevation = 6.dp
                     ),

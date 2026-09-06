@@ -46,7 +46,16 @@ private object WhisperJNI {
     external fun nativeInit(modelPath: String): Long
 
     @JvmStatic
-    external fun nativeTranscribe(handle: Long, pcm: FloatArray, threads: Int, language: String?, callId: Long): ByteArray?
+    external fun nativeTranscribe(
+        handle: Long,
+        pcm: FloatArray,
+        threads: Int,
+        language: String?,
+        callId: Long,
+        cpuMask: Long,
+        nice: Int,
+        stats: IntArray?,
+    ): ByteArray?
 
     @JvmStatic
     external fun nativeCancel(callId: Long)
@@ -56,6 +65,9 @@ private object WhisperJNI {
 
     @JvmStatic
     external fun nativeGetLastError(): ByteArray
+
+    @JvmStatic
+    external fun nativeBenchmark(threads: Int, cpuMask: Long, nice: Int): Long
 }
 
 actual fun whisperInit(modelPath: String): Long {
@@ -66,10 +78,26 @@ actual fun whisperInit(modelPath: String): Long {
     return handle
 }
 
-actual fun whisperTranscribe(handle: Long, pcm: FloatArray, threads: Int, language: String?, callId: Long): String {
-    val bytes = WhisperJNI.nativeTranscribe(handle, pcm, threads, language, callId)
-        ?: throw RuntimeException("whisper transcription failed: ${whisperGetLastError()}")
-    return bytes.decodeToString()
+actual fun whisperTranscribe(
+    handle: Long,
+    pcm: FloatArray,
+    threads: Int,
+    language: String?,
+    callId: Long,
+    placement: EnginePlacement,
+    stats: TranscribeStats?,
+): String {
+    // The shim writes into a one-slot array; the stats object is filled
+    // from it on every exit so a failed call still reports what it was given.
+    val slots = if (stats != null) intArrayOf(-1) else null
+    try {
+        val bytes = WhisperJNI.nativeTranscribe(
+            handle, pcm, threads, language, callId, placement.cpuMask, placement.nice, slots,
+        ) ?: throw RuntimeException("whisper transcription failed: ${whisperGetLastError()}")
+        return bytes.decodeToString()
+    } finally {
+        if (stats != null && slots != null) stats.inputSamples = slots[0]
+    }
 }
 
 actual fun whisperCancel(callId: Long) {
@@ -83,3 +111,11 @@ actual fun whisperFree(handle: Long) {
 }
 
 actual fun whisperGetLastError(): String = WhisperJNI.nativeGetLastError().decodeToString()
+
+actual fun whisperBenchmark(threads: Int, placement: EnginePlacement): Long {
+    val ns = WhisperJNI.nativeBenchmark(threads, placement.cpuMask, placement.nice)
+    if (ns <= 0L) {
+        throw RuntimeException("whisper benchmark failed: ${whisperGetLastError()}")
+    }
+    return ns
+}

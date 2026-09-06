@@ -25,7 +25,13 @@ type. The fork keeps them out of release with
 whose `tools:node="remove"` entries drop the four elements from the
 merged manifest; upstream's declarations and classes stay verbatim,
 debug builds keep the receivers for driving an emulator from adb, and
-the release exported-component allowlist is unchanged. Two things in
+the release exported-component allowlist is unchanged. The fork adds one
+receiver of the same kind, declared only in the debug overlay
+`androidApp/src/debug/AndroidManifest.xml`: `SttDebugReceiver`, gated on
+the same permission, sets the four dictation debug hooks from adb and
+can post a reply-capable test notification for driving an emulated
+watch; release builds never declare it, so there is nothing to remove.
+Two things in
 that verbatim upstream text do not hold here: the manifest comment and
 the receiver KDocs call the receivers safe to keep in release builds,
 which describes upstream's build, and their `am broadcast` recipes
@@ -94,6 +100,14 @@ never-authoritative store). Consequences:
 
 `UsersDao` is additionally rebound at the Koin seam to the fork's
 `SignedOutUsersDao`.
+
+The bug report screen's upload path needed both a Core account ID token
+and the bug-reports backend (`bugUrl`, empty in this build), so it is
+dead twice over. The screen stays and gates every backend control on
+`BugApi.canUseService()`: with no backend it is the local log export
+reached from Settings > Get Help > Export logs (zip to the share sheet,
+no upload path), and upstream's screen keeps its behaviour across
+merges.
 
 ## The FCM exception
 
@@ -237,11 +251,87 @@ The replacement is whisper.cpp (MIT), compiled from source:
   time, with no runtime dispatch), so a tiny baseline-architecture
   probe, `libwhispercpu.so`, checks the hwcaps first, and no engine code
   is mapped until it passes.
-- `:whisper` holds the Kotlin bindings: a six-function expect/actual
+- `:whisper` holds the Kotlin bindings: a seven-function expect/actual
   surface whose iOS actuals are unsupported stubs, keeping commonMain
   compiling for the unmaintained iOS targets. Engine strings cross JNI
   as UTF-8 byte arrays: engine output can be byte sequences that are
   invalid modified UTF-8, which NewStringUTF aborts on under CheckJNI.
+- `whisperBenchmark` is the model-free speed probe: the shim times one
+  encoder block of the base model's shape, built on ggml with random
+  weights, on the thread count a dictation would get. `DeviceSpeedEstimator`
+  (util) runs it once per install (callers arriving during a probe wait
+  for it and take its score) and caches the score;
+  `WhisperSpeedCalibration` turns the score into "seconds for a full 15 s
+  dictation" per catalog tier from constants measured on the reference
+  phone (the calibration procedure is in its KDoc, the instrumented
+  `WhisperSpeedCalibrationBenchmark` produces the numbers). The model
+  picker shows the estimate on every row, and the default pick steps
+  down a tier while its estimate exceeds the watch's window, to the tiny
+  floor at most.
+- The probe is a forecast; real dictations are the record. The engine
+  reports how many samples it was given (`TranscribeStats`), the service
+  records the time to a result per
+  second of engine input after each successful dictation, under the
+  model that ran the decode, smoothed per model in settings
+  (`DictationSpeedTracker`), and `DictationSpeedPolicy` predicts a full
+  window from it. Engine input counts the encoder's fixed floor (the
+  shim's 64 extra context positions, 1.28 s of audio) on top of the
+  audio, since every call pays it and a short reply would otherwise
+  read as a slow model; dictations under two seconds of audio are not
+  recorded at all. When that prediction misses the session coordinator's
+  deadline and a cheaper tier exists, `SttSpeedNudgePrompt` offers the
+  switch, naming the watch's error text and where the model can be
+  changed later; keeping the current model is remembered per model, so
+  each model asks at most once, and the pending offer is held while the
+  prompt downloads its target, so a dictation finishing mid-download
+  neither replaces nor withdraws it.
+- A self-hosted transcription server is the fork's remote backend, at
+  the seam where upstream's cloud pair sits: `HybridTranscriptionService`
+  keeps upstream's three remote modes and their fallback timing, and
+  when a server URL is configured `SelfHostedTranscriptionService` takes
+  the remote slot (the cloud pair stays for merge parity and can never
+  sign in here). One request shape serves whisper.cpp's own server and
+  OpenAI-style servers: a multipart POST of the session audio as a
+  16 kHz mono WAV with `response_format=json`, the model name when set
+  and the spoken language when known, answered with JSON `text`; the
+  URL is used as entered, path included. The bearer token is a secret
+  and goes through the keystore-backed encrypted setting
+  (`SelfHostedServerStore`), and belongs to the host and port it was
+  saved with: a URL edited to another server is tested and saved
+  without it unless a new one is typed. Transport is https only, like
+  every other connection in the app; the trust rule
+  (`decideServerTrust`) is: a pin for the host and port, once one
+  exists, decides alone, and any other certificate is refused as changed
+  even when the platform trusts its chain, since a CA-issued certificate
+  for the same name is what an interceptor would present; with no pin,
+  platform trust (system and user-installed CAs, matching host name)
+  passes and anything else is refused until the user pins it. The pin
+  is the leaf certificate's SHA-256 fingerprint, confirmed in the
+  settings dialog against what the server prints, and keyed by
+  `host:port`; forgetting it in the dialog returns the host to platform
+  trust, which is how a server moves to a CA-issued certificate. A
+  pinned certificate also satisfies host-name verification, since a
+  self-signed certificate is often issued to no name. Every platform
+  check goes through Android's hostname-aware trust extension, the form
+  the platform requires once a network security config carries
+  per-domain entries. The dialog's connection test probes the
+  certificate first and only then sends a one-second silent request on
+  a client of its own, so a wrong token or path is found before saving
+  and the dictation path's client is never closed under a request. A
+  reply is read through a 64 KB bound, and every transcript, from the
+  server or the Rebble path alike, passes a word-count and word-length
+  bound in libpebble3 before it is encoded for the watch. The app log
+  never carries the server's address: the config line prints the URL as
+  set or unset, and transport failures reach the log by exception
+  class, with the cause the router sees rebuilt without it. Everything
+  above the TLS glue is pure and host-tested; the trust manager and
+  verifier are tested against two self-signed fixtures, and the client
+  and probe against a local TLS server whose key pair the test generates
+  with the JDK's keytool, so no key material is tracked. The one piece
+  no host test reaches is `AndroidServerTrust`, the adapter over the
+  platform's hostname-aware check (the SDK stub of
+  `X509TrustManagerExtensions` throws from its constructor); a change to
+  it needs a device pass against a self-hosted server.
 - `WhisperTranscriptionService` (util) keeps the Cactus-era service's
   proven shape: config-driven re-initialization, the two-mutex warm-up
   design, the memory guard, and the InferenceBoost foreground-priority
@@ -261,9 +351,88 @@ The replacement is whisper.cpp (MIT), compiled from source:
   seconds under the default parameters, the bounded configuration
   returns the correct text in under 10 seconds on the slowest catalog
   model.
+- Nothing CI runs reaches `whisper_jni.cpp`: the host suites stop at the
+  binding's Kotlin side, so the shim's semantics (cancellation,
+  cold-start init) are guarded only by the instrumented
+  `WhisperLocalCancellationTest` and `WhisperColdStartRaceTest` under
+  `androidApp/src/androidTest`, run one class at a time on a device with
+  the model installed (each KDoc carries the command); the sample count
+  the shim reports has no automated check. An engine bump or a shim edit
+  gets a device run of those two before it merges.
+- The watch's dictation deadline is owned by `VoiceSessionCoordinator`
+  in libpebble3, not by the provider. The firmware records for at most
+  15 seconds, gives the phone 15 seconds from the end of the recording,
+  drops a later result, and after its error dialog starts a new session
+  on its own. So each setup is its own job and a new setup supersedes
+  the session in flight: the watch has moved on, so the earlier decode
+  is cancelled and nothing more is sent for it (the engine runs one
+  decode at a time, and a decode left running would fail the new
+  session's own the moment its recording ended; the cancel lands
+  between engine passes, so a decode deep in one can still hold the
+  engine for up to its unwind bound). Frames are buffered from the
+  moment a setup is accepted, and an overrun is reported as a
+  recognizer error one second before the watch's own clock runs out
+  while the decode runs on until the next session supersedes it, so the
+  speed record (below) still sees how long it really took; a decode
+  cancelled past the deadline records its elapsed time as a lower bound.
+  The late transcript itself goes nowhere and the watch's retry runs as
+  a fresh session. A recording the watch has not ended
+  30 seconds after the setup is abandoned from the phone side (its
+  clock has run out by then for any recording), so a stop packet that
+  never arrives cannot hold a session open for the life of the
+  connection. The firmware's timing constants and the deadline derived
+  from them live once, beside `TranscriptionProvider` in libpebble3,
+  and the speed nudge and the model picker's fit classes are built on
+  that deadline. `HybridTranscription` keeps only a 60 second backstop,
+  mapped to a generic error; the connection-error code is never used
+  for a local decode, since the watch renders it as "No internet
+  connection".
+- Nothing gates on level before the decode: the engine receives each
+  dictation exactly as the watch sent it. A Silero detector once cut
+  the audio to its detected speech; on Speex watch audio with speech
+  near -25 dBFS it found either nothing or a fragment and cut the rest,
+  and cost half a second per dictation. A level-based edge trim was
+  tried in its place and dropped: on the Core Time 2 the microphone
+  opens with a 60 to 120 ms burst and lifts post-speech ambient to
+  -43 dBFS, so no real capture had a tail it could cut, and removing
+  half a second of non-speech before the first word changed marginal
+  decodes, once from a correct sentence to nothing. The decode cost of
+  a full 15 second window is bounded instead by the thread policy below
+  and by the model choice the picker's estimate and the nudge steer.
+- The engine thread count follows the cores the process can actually
+  run on, not the phone's CPU count: ggml's workers synchronize on
+  spinning barriers (sourced at `MAX_ENGINE_THREADS` in
+  `TranscriptionThreads`), so a count above the usable cores stalls
+  every barrier for a scheduler slice and a decode that takes a second
+  takes half a minute (measured on two chips; `TranscriptionThreads`
+  holds the numbers' conclusions). The count is read at call time from
+  the process affinity mask, since a process that leaves the screen
+  lands in a smaller cpuset on every phone tried, and sized by the
+  fastest frequency tier in that mask (`tieredThreadCount`), capped at
+  four. The engine binding carries an `EnginePlacement` (affinity mask,
+  nice value) that the shim applies to the calling thread for one call;
+  it exists for the on-device placement benchmark and probe under
+  `androidApp/src/androidTest`, and the service always passes the
+  default: pinning gained ten percent at best and can drop below the
+  thread count when the OS moves the allowed set, and a raised priority
+  changed nothing.
+- Four debug-only hooks live behind `isDebugBuild()` (util), which reads
+  the application's debuggable flag and fails closed: a single-thread
+  override that slows a fast phone's decode, a capture dump that writes
+  each dictation's engine input as WAV under the app's private files
+  (last 20 kept, excluded from backups and device transfer, deleted when
+  the hook goes off or at start in a build that cannot honour it), a
+  substitute-audio hook that stands the bundled test clip (debug assets
+  only) in for the watch's audio so an emulated watch, whose microphone
+  is silence, still yields a transcript, and a slow-decode hook that
+  holds every result for 20 seconds so the deadline report runs on any
+  phone. The settings toggles are offered only in debug builds and the
+  code re-checks the build before honouring any flag, because debug and
+  release installs share an application id.
 
 Model weights are never checked in. `WhisperModelCatalog` (util) pins
-four models (small, small.en, base, base.en) from
+six models (small, base and tiny, each as the multilingual and the
+English-only conversion) from
 the whisper.cpp author's Hugging Face conversions, each with an
 immutable-commit URL, exact byte size, and SHA-256; the catalog KDoc
 records the three-source re-pin procedure. Verification is layered,
@@ -418,7 +587,8 @@ What the tree guarantees, and how it is pinned:
   APK carries no dependency-metadata signing block; both are checked by
   the packaging-time `VerifyApkContents` task in
   `androidApp/build.gradle.kts`, which also asserts the excluded assets and
-  the replaced native libraries are absent from every APK. CI builds the
+  the replaced native libraries are absent from every APK and the debug
+  variant's dictation test clip from the release one. CI builds the
   release variant on a keystore-less checkout and compares the built
   `versionName` with `git describe` of the built commit.
 

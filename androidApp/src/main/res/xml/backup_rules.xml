@@ -3,9 +3,10 @@
     Backup rules for Android 12 (API 31) and above. See full_backup_content.xml for the
     equivalent on API 26 to 30.
 
-    Backups stay enabled deliberately. The data here is worth being able to restore, and the
-    account token, the one credential the app controls, is encrypted at rest under a key that
-    never leaves the device, so a backup copy of it is inert on any other hardware.
+    Backups stay enabled deliberately. The data here is worth being able to restore, and the two
+    credentials the app keeps, the account token and the transcription server's bearer token, are
+    encrypted at rest under a key that never leaves the device, so a backup copy of either is
+    inert on any other hardware.
 
     disableIfNoEncryptionCapabilities stops a cloud backup happening at all unless it can be
     client-side encrypted, which in practice means the user has a screen lock. Everything else
@@ -25,10 +26,16 @@
              quota. Over quota the system calls onQuotaExceeded() and stops backing the app up
              altogether, so leaving these in would cost the backup of everything else. -->
         <exclude domain="file" path="models" />
+        <!-- Debug-only dictation captures: voice data kept for the capture hook and deleted
+             when it is turned off. They stay on this phone. -->
+        <exclude domain="file" path="debug-captures" />
     </cloud-backup>
     <device-transfer>
         <!-- No quota applies here, but the weights are re-downloadable and would only slow a
              migration down. -->
         <exclude domain="file" path="models" />
+        <!-- Debug-only dictation captures: voice data kept for the capture hook and deleted
+             when it is turned off. They stay on this phone. -->
+        <exclude domain="file" path="debug-captures" />
     </device-transfer>
 </data-extraction-rules>

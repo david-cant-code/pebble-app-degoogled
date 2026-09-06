@@ -41,8 +41,9 @@ import java.util.concurrent.ConcurrentHashMap
 class WhisperModelProvider(
     private val context: Context,
     private val httpClient: HttpClient,
-    // Same RAM/locale source the ModelManager recommendation uses, so the
-    // two recommendation paths cannot diverge near the tier boundary.
+    // RAM/locale source for the legacy default below; the ModelManager's
+    // recommendation reads the same source and steps down on the speed
+    // score as well.
     private val platform: Platform,
     // Handed in by the DI wiring so the provider can resolve "the
     // configured model" without owning config plumbing; null means nothing
@@ -71,17 +72,24 @@ class WhisperModelProvider(
          * Model directories that cannot serve the current engine: names
          * outside the catalog (every Cactus-era install lands here) and
          * catalog directories whose file is missing or wrong-sized (a
-         * quarantine leftover or torn install). Staging is the
-         * installer's workspace, never a model.
+         * torn install; a load-time quarantine deletes its directory).
+         * Staging is the installer's workspace, never a model.
          */
         internal fun incompatibleIn(modelsDir: File): List<String> =
-            modelsDir.listFiles()
-                ?.filter { it.isDirectory && it.name != ModelFileInstaller.STAGING_DIR }
-                ?.map { it.name }
-                ?.filter { name ->
+            modelDirNamesIn(modelsDir)
+                .filter { name ->
                     val model = WhisperModelCatalog.byId(name)
                     model == null || !isInstalledShapeIn(modelsDir, model)
                 }
+
+        /**
+         * Directory names under modelsDir that can be models: everything
+         * except the installer's staging workspace.
+         */
+        internal fun modelDirNamesIn(modelsDir: File): List<String> =
+            modelsDir.listFiles()
+                ?.filter { it.isDirectory && it.name != ModelFileInstaller.STAGING_DIR }
+                ?.map { it.name }
                 ?: emptyList()
 
         /**
@@ -193,13 +201,10 @@ class WhisperModelProvider(
         return isInstalledShapeIn(modelsDir, model)
     }
 
-    // Raw directory view (minus staging): includes stale engine models on
-    // purpose so they stay visible to the sweep and deletable in the UI.
-    override fun getDownloadedModels(): List<String> =
-        modelsDir.listFiles()
-            ?.filter { it.isDirectory && it.name != ModelFileInstaller.STAGING_DIR }
-            ?.map { it.name }
-            ?: emptyList()
+    // Raw directory view (minus staging): includes stale
+    // engine models on purpose so they stay visible to the sweep and
+    // deletable in the UI.
+    override fun getDownloadedModels(): List<String> = modelDirNamesIn(modelsDir)
 
     override fun getIncompatibleModels(): List<String> = incompatibleIn(modelsDir)
 
@@ -224,11 +229,13 @@ class WhisperModelProvider(
     }
 
     /**
-     * Device-appropriate default when nothing is configured: the same
-     * single [WhisperModelCatalog.recommended] decision the ModelManager
-     * uses, over the same [Platform] RAM/locale source, so a bare
-     * getSTTModelPath and the recommendation prompt can never pick
-     * different models for one device.
+     * Default when nothing is configured: the RAM/locale tier from
+     * [WhisperModelCatalog.recommended] without the speed step-down the
+     * ModelManager applies, so on a slow phone it can sit one tier above
+     * the picker's recommendation. Reached only through the legacy
+     * [getSTTModelPath], whose one caller is a dialog the unplugged Ring
+     * module used; the dictation path resolves the configured model by
+     * name.
      */
     private fun recommendedDefault(): WhisperModel {
         val model = WhisperModelCatalog.recommended(

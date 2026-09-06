@@ -136,6 +136,8 @@ import coredevices.util.STTConfig
 import coredevices.util.WeatherUnit
 import coredevices.util.emailOrNull
 import coredevices.util.models.CactusSTTMode
+import coredevices.util.transcription.serverHostPort
+import coredevices.util.transcription.validateServerUrl
 import coredevices.util.models.ModelDownloadStatus
 import coredevices.util.models.ModelInfo
 import coredevices.util.models.ModelManager
@@ -343,8 +345,13 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     var debugOptionsEnabled by remember { mutableStateOf(settings.showDebugOptions()) }
     var pendingSTTModeDialog by remember { mutableStateOf<CactusSTTMode?>(null) }
     var showSpokenLanguageDialog by remember { mutableStateOf(false) }
-    val recommendedSTTModel = modelManager.getRecommendedSTTModel()
+    var showServerDialog by remember { mutableStateOf(false) }
+    // Fork: the server modes are offered only while a valid server URL is set.
+    val serverConfigured = coreConfig.sttConfig.serverUrl?.let { validateServerUrl(it) == null } == true
     val modelDownloadState by modelManager.modelDownloadStatus.collectAsState()
+    if (showServerDialog) {
+        SelfHostedServerDialog(onDismissRequest = { showServerDialog = false })
+    }
     if (showSpokenLanguageDialog) {
         SpokenLanguagePickerDialog(
             selectedCode = coreConfig.sttConfig.spokenLanguage,
@@ -360,24 +367,26 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
         )
     }
     pendingSTTModeDialog?.let { pendingSTTMode ->
-        val recommendedModel by produceState<ModelInfo?>(null) {
+        val recommendation by produceState<Pair<RecommendedModel, ModelInfo>?>(null) {
             withContext(Dispatchers.Default) {
+                // The speed probe runs once per install before the first
+                // pick, so a slow phone is offered a tier it can run.
+                modelManager.ensureSpeedMeasured()
+                val recommendedSTTModel = modelManager.getRecommendedSTTModel()
                 val models = modelManager.getAvailableSTTModels()
-                value = models.firstOrNull { it.slug == recommendedSTTModel.modelSlug }
-                    ?: run {
-                        snackbarDisplay.showSnackbar("Error occurred. Please try again later.")
-                        logger.e { "Recommended model $recommendedSTTModel not found in available models: ${models.map { it.slug }}" }
-                        pendingSTTModeDialog = null
-                        null
-                    }
+                val info = models.firstOrNull { it.slug == recommendedSTTModel.modelSlug }
+                if (info == null) {
+                    snackbarDisplay.showSnackbar("Error occurred. Please try again later.")
+                    logger.e { "Recommended model $recommendedSTTModel not found in available models: ${models.map { it.slug }}" }
+                    pendingSTTModeDialog = null
+                } else {
+                    value = recommendedSTTModel to info
+                }
             }
         }
-        val recommendedModelFinal = recommendedModel
-        if (recommendedModelFinal == null) {
-            return@let
-        }
+        val (recommendedSTTModel, recommendedModelFinal) = recommendation ?: return@let
         ModelDownloadPromptDialog(
-            isLite = recommendedSTTModel is RecommendedModel.Lite,
+            recommended = recommendedSTTModel,
             downloadSizeInMb = recommendedModelFinal.sizeInMB,
             onGetRecommended = {
                 scope.launch {
@@ -585,8 +594,13 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     actionIcon = Icons.AutoMirrored.Default.Launch,
                 ),
                 navBarNav?.let { nav -> basicSettingsActionItem(
-                    title = "New Bug Report",
-                    description = "Please report a bug if anything went wrong!",
+                    // Fork: upstream's "New Bug Report". Remote submission
+                    // is gone with the Firebase strip (it needed the
+                    // bug-reports backend and a Firebase ID token), so the
+                    // screen behind this item is the local log export, and
+                    // the item says so.
+                    title = "Export logs",
+                    description = "Save a zip of the app log to attach to an issue. Nothing is sent anywhere.",
                     topLevelType = TopLevelType.Phone,
                     section = Section.Support,
                     action = {
@@ -597,10 +611,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                             )
                         )
                     },
-                    // Fork: hidden, never removed. Remote bug reporting is
-                    // gone with the Firebase strip (submission needed the
-                    // bug-reports backend and a Firebase ID token).
-                    show = { false },
                 ) },
                 navBarNav?.let { nav -> basicSettingsActionItem(
                     title = "View My Bug Reports",
@@ -609,7 +619,8 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     action = {
                         nav.navigateTo(CommonRoutes.ViewMyBugReportsRoute)
                     },
-                    // Fork: hidden with New Bug Report above.
+                    // Fork: hidden, never removed; the list is served by the
+                    // bug-reports backend the fork does not configure.
                     show = { false },
                 ) },
                 navBarNav?.let { nav -> basicSettingsActionItem(
@@ -1495,13 +1506,13 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                             CactusSTTMode.RebbleFirst,
                             CactusSTTMode.RebbleFallback -> rebbleVoiceAvailable
                             CactusSTTMode.PlatformOnly -> platformSttAvailable
-                            // Fork: the Core cloud STT modes need a Core-account
-                            // sign-in this build removed (their selection gate
-                            // below could only offer a dialog of disabled
-                            // providers), so they are never offered.
+                            // Fork: the remote modes run against the user's
+                            // self-hosted server, so they appear once one is
+                            // configured; the Core cloud they were built for
+                            // needs a sign-in this build removed.
                             CactusSTTMode.RemoteOnly,
                             CactusSTTMode.RemoteFirst,
-                            CactusSTTMode.LocalFirst -> false
+                            CactusSTTMode.LocalFirst -> serverConfigured
                             else -> true
                         }
                     },
@@ -1522,7 +1533,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                             snackbarDisplay.showSnackbar("This device doesn't support system speech recognition")
                         } else if (it != CactusSTTMode.RemoteOnly && !isPlatform && !whisperSupported) {
                             snackbarDisplay.showSnackbar("This device doesn't support local speech recognition")
-                        } else if (it != CactusSTTMode.LocalOnly && !isPlatform && !isRebble && coreUser == null) {
+                        } else if (it != CactusSTTMode.LocalOnly && !isPlatform && !isRebble && !serverConfigured && coreUser == null) {
                             snackbarDisplay.showSnackbar("You need to be signed in to use cloud speech recognition")
                             showSignInDialog = true
                         } else if (needsLocal && !hasOfflineModels) {
@@ -1547,10 +1558,10 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     },
                     itemText = { mode ->
                         when (mode) {
-                            CactusSTTMode.RemoteOnly -> "Cloud Only"
-                            CactusSTTMode.RemoteFirst -> "Cloud (with Local Fallback)"
+                            CactusSTTMode.RemoteOnly -> "Server Only"
+                            CactusSTTMode.RemoteFirst -> "Server (with Local Fallback)"
                             CactusSTTMode.LocalOnly -> "Local Only"
-                            CactusSTTMode.LocalFirst -> "Local (with Cloud Fallback)"
+                            CactusSTTMode.LocalFirst -> "Local (with Server Fallback)"
                             CactusSTTMode.RebbleOnly -> "Rebble Only"
                             CactusSTTMode.RebbleFirst -> "Rebble (with Local Fallback)"
                             CactusSTTMode.RebbleFallback -> "Local (with Rebble Fallback)"
@@ -1576,6 +1587,8 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                         }
                     },
                 ),
+                // Fork, debug builds only: the dictation test hook toggles.
+                *forkDictationDebugItems(coreConfig, coreConfigHolder).toTypedArray(),
                 navBarNav?.let { nav -> basicSettingsActionItem(
                     title = "Manage Offline Models",
                     description = if (coreConfig.sttConfig.mode == CactusSTTMode.LocalOnly ||
@@ -1599,6 +1612,14 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                         nav.navigateTo(PebbleNavBarRoutes.OfflineModelsRoute)
                     },
                 ) },
+                basicSettingsActionItem(
+                    title = "Self-hosted Server",
+                    description = coreConfig.sttConfig.serverUrl?.let { serverHostPort(it) ?: "Invalid URL" } ?: "Not set",
+                    keywords = "server self-hosted whisper stt speech recognition remote https",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Speech,
+                    action = { showServerDialog = true },
+                ),
                 basicSettingsActionItem(
                     title = "Spoken Language",
                     description = coreConfig.sttConfig.spokenLanguage

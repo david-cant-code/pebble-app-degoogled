@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
  * users on update. The popup auto-shows once per user per bump (`WhatsNewDialog` in
  * composeApp) and can be reopened any time from Settings > About.
  */
-const val WHATS_NEW_VERSION = 4
+const val WHATS_NEW_VERSION = 5
 
 /** A single announced change: a short heading and a sentence or two of body. */
 data class WhatsNewEntry(val title: String, val body: String)
@@ -32,6 +32,16 @@ data class WhatsNewEntry(val title: String, val body: String)
  * changelog (that lives in git history and the repo docs).
  */
 val whatsNewEntries: List<WhatsNewEntry> = listOf(
+    WhatsNewEntry(
+        title = "Faster dictation, working in the background, and your own server",
+        body = "Speech recognition is optimized: the engine now uses the cores your phone " +
+            "actually gives it, and the model picker measures your phone, shows what " +
+            "each model costs, and offers a smaller one if needed for your device. " +
+            "Dictation with Gravel in the background or the screen locked, which used " +
+            "to fail on some phones, now works. And you can connect Gravel to your own " +
+            "self-hosted transcription server over https in Settings > Speech " +
+            "Recognition; nothing is sent unless you set one up.",
+    ),
     WhatsNewEntry(
         title = "Pictures on your wrist, and a store of your choosing",
         body = "Notification images and album art now go to the watch when it asks for " +

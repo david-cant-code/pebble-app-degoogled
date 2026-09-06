@@ -1,19 +1,20 @@
 package coredevices.whisper
 
 /**
- * The complete engine surface for on-device speech recognition. Six
- * functions on purpose: this is the fork's replacement for a much larger
- * proprietary binding surface, and everything the app needs from the
- * engine fits here. Anything not expressible through these functions
- * belongs in the Kotlin service layer, not in new native entry points.
+ * The complete engine surface for on-device speech recognition. Seven
+ * functions: this is the fork's replacement for a much larger proprietary
+ * binding surface, and everything the app needs from the engine fits
+ * here (six for the speech model, one model-free speed probe). Anything
+ * not expressible through these functions belongs in the Kotlin service
+ * layer, not in new native entry points.
  *
  * Threading contract: callers serialize [whisperInit], [whisperTranscribe]
- * and [whisperFree] per handle (the transcription service holds a mutex
- * across every native call). [whisperCancel] is the one function safe to
- * call concurrently; it targets a specific in-flight call by its [callId],
- * so a cancellation can never revoke a different call's pending abort (the
- * case that arises when an abandoned wedged call still runs alongside a
- * fresh one).
+ * and [whisperFree] per handle (the transcription service holds one mutex
+ * across every native call).
+ * [whisperCancel] is the one function safe to call concurrently; it
+ * targets a specific in-flight call by its [callId], so a cancellation
+ * can never revoke a different call's pending abort (the case that arises
+ * when an abandoned wedged call still runs alongside a fresh one).
  */
 
 /**
@@ -32,14 +33,56 @@ expect fun isWhisperSupported(): Boolean
 expect fun whisperInit(modelPath: String): Long
 
 /**
+ * Where one engine call runs. The engine's worker threads inherit the
+ * calling thread's scheduling, so the native side applies this to the
+ * calling thread for the duration of the call and restores it after.
+ *
+ * @property cpuMask bit i set = CPU i allowed; 0 leaves the affinity mask
+ *   untouched. Bits outside the process's cpuset are ignored by the
+ *   kernel, and a mask that leaves nothing is refused and logged.
+ * @property nice nice value for the call (negative is higher priority);
+ *   0 leaves the priority untouched. A refused change is logged and
+ *   ignored.
+ */
+data class EnginePlacement(val cpuMask: Long = 0L, val nice: Int = 0) {
+    companion object {
+        /** Default scheduling: whatever the calling thread already has. */
+        val DEFAULT = EnginePlacement()
+    }
+}
+
+/**
+ * What one [whisperTranscribe] call reports back about itself when the
+ * caller passes an instance.
+ *
+ * @property inputSamples the samples the engine was given; -1 until the
+ *   call reaches that point. Decode cost follows this count, which is what
+ *   makes a per-second-of-input timing possible.
+ */
+class TranscribeStats {
+    var inputSamples: Int = -1
+}
+
+/**
  * Transcribes 16 kHz mono float PCM and returns plain text ("" means no
  * speech found). [language] is an ISO 639-1 code; null lets the engine
  * detect the language. [callId] identifies this call for [whisperCancel];
  * it must be unique among all calls that can be in flight at once (the
- * service uses a monotonic counter). Throws with the engine's error text
- * on failure, including cancellation via [whisperCancel].
+ * service uses a monotonic counter). [placement] scopes the calling
+ * thread's affinity and priority to this call. The audio is decoded as
+ * given. [stats], when given, is filled in by the call. Throws with the
+ * engine's error text on failure, including cancellation via
+ * [whisperCancel].
  */
-expect fun whisperTranscribe(handle: Long, pcm: FloatArray, threads: Int, language: String?, callId: Long): String
+expect fun whisperTranscribe(
+    handle: Long,
+    pcm: FloatArray,
+    threads: Int,
+    language: String?,
+    callId: Long,
+    placement: EnginePlacement = EnginePlacement.DEFAULT,
+    stats: TranscribeStats? = null,
+): String
 
 /**
  * Requests cancellation of the in-flight [whisperTranscribe] call with the
@@ -51,6 +94,17 @@ expect fun whisperCancel(callId: Long)
 
 /** Releases an engine handle. Safe to call with 0. */
 expect fun whisperFree(handle: Long)
+
+/**
+ * Times one synthetic encoder block (the base model's shape over 512
+ * frames, random weights, no model file) on [threads] engine threads and
+ * returns the median nanoseconds per evaluation: a measure of how fast
+ * this phone runs the engine, which the service layer calibrates into
+ * per-model dictation estimates before any model is downloaded. Runs for
+ * about a second of CPU. [placement] scopes the calling thread as for
+ * [whisperTranscribe]. Throws with the engine's error text on failure.
+ */
+expect fun whisperBenchmark(threads: Int, placement: EnginePlacement = EnginePlacement.DEFAULT): Long
 
 /** The engine's last recorded failure reason, for error propagation. */
 expect fun whisperGetLastError(): String

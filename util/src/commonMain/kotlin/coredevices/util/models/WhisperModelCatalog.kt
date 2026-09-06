@@ -1,11 +1,25 @@
 package coredevices.util.models
 
 /**
+ * Whisper size tiers in the catalog, largest first. Each tier is one
+ * architecture, so the multilingual and English-only entries of a tier
+ * cost the same to run; [cheaper] walks toward the floor, which is how
+ * the speed-based recommendation steps down.
+ */
+enum class WhisperTier {
+    Small, Base, Tiny;
+
+    /** The next tier down, or null at the floor. */
+    fun cheaper(): WhisperTier? = entries.getOrNull(ordinal + 1)
+}
+
+/**
  * Everything the installer must know to obtain and verify one whisper
  * model file before it is allowed anywhere near the native parser.
  *
  * @param id catalog identity and the on-disk directory name; stable
  *   contract with existing installs, never rename casually.
+ * @param tier the size tier.
  * @param displayName what the model picker shows.
  * @param fileName the ggml file inside the source repository, and the on-
  *   disk file name under the model directory.
@@ -17,15 +31,20 @@ package coredevices.util.models
  * @param multilingual false for the .en models, which only transcribe
  *   English; the transcription service forces language "en" for those
  *   regardless of the spoken-language setting.
+ * @param repo the Hugging Face repository the file is served from.
+ * @param commit the immutable commit of that repository the URL resolves.
  */
 data class WhisperModel(
     val id: String,
+    val tier: WhisperTier,
     val displayName: String,
     val fileName: String,
     val sha256: String,
     val sizeBytes: Long,
     val minRamBytes: Long,
     val multilingual: Boolean,
+    val repo: String = WhisperModelCatalog.HF_REPO,
+    val commit: String = WhisperModelCatalog.HF_REPO_COMMIT,
 )
 
 /**
@@ -41,14 +60,14 @@ data class WhisperModel(
  * and the received bytes must match the pinned SHA-256 and exact size
  * before a file is installed, fail closed.
  *
- * Re-pin procedure when changing [HF_REPO_COMMIT] or an entry (each step
- * is an independent source; all three must agree before new values land):
- *  1. Pick the new commit from the repository's history and record it in
- *     [HF_REPO_COMMIT].
- *  2. Declared metadata: HEAD `https://huggingface.co/ggerganov/
- *     whisper.cpp/resolve/<commit>/<file>` and read `x-linked-size` and
- *     `x-linked-etag`; the etag is the payload's SHA-256 from HF's
- *     content-addressed storage, declared without downloading anything.
+ * Re-pin procedure when changing a commit or an entry (each step is an
+ * independent source; all three must agree before new values land):
+ *  1. Pick the new commit from the repository's history and record it
+ *     ([HF_REPO_COMMIT]).
+ *  2. Declared metadata: HEAD `https://huggingface.co/<repo>/resolve/
+ *     <commit>/<file>` and read `x-linked-size` and `x-linked-etag`; the
+ *     etag is the payload's SHA-256 from HF's content-addressed storage,
+ *     declared without downloading anything.
  *  3. Independent bytes: download that URL fresh, `sha256sum` it and
  *     byte-count it locally; this pair goes into the table, with 1 and 2
  *     as cross-checks.
@@ -65,7 +84,10 @@ object WhisperModelCatalog {
      */
     const val GENERATION = "whisper-1"
 
-    /** The immutable source revision every entry's URL resolves. */
+    /** The whisper.cpp author's model conversions, source of every speech model. */
+    const val HF_REPO = "ggerganov/whisper.cpp"
+
+    /** The immutable revision of [HF_REPO] every speech model URL resolves. */
     const val HF_REPO_COMMIT = "5359861c739e955e79d9a303bcbc70fb988958b1"
 
     private const val GIB = 1024L * 1024L * 1024L
@@ -78,14 +100,21 @@ object WhisperModelCatalog {
      */
     const val STANDARD_TIER_MIN_TOTAL_RAM: Long = 4 * GIB
 
-    // Values derived 2026-08-09 via the three-source procedure above.
-    // No large tier: at the pinned engine revision the large-v3-turbo
-    // q5_0 quant faulted in native inference on the test device, and its
-    // encoder cost cannot meet the watch dictation window on phone-class
-    // CPUs (details in KNOWN_ISSUES); revisit at the next engine re-pin.
+    // Values derived 2026-08-09 (small, base) and 2026-09-01 (tiny) via
+    // the three-source procedure above. List order is the order the model
+    // picker shows. No large tier: at the pinned engine revision the
+    // large-v3-turbo q5_0 quant faulted in native inference on the test
+    // device, and its encoder cost cannot meet the watch dictation window
+    // on phone-class CPUs (details in KNOWN_ISSUES); revisit at the next
+    // engine re-pin. The tiny tier is the floor: watch dictation has a
+    // fixed 15 second budget from the firmware, and a phone whose CPU
+    // cannot decode a full window with base inside it still gets a local
+    // option. RAM never recommends tiny; it is a user's or a speed-based
+    // step-down's pick.
     val MODELS: List<WhisperModel> = listOf(
         WhisperModel(
             id = "whisper-small",
+            tier = WhisperTier.Small,
             displayName = "Whisper Small (multilingual)",
             fileName = "ggml-small.bin",
             sha256 = "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
@@ -95,6 +124,7 @@ object WhisperModelCatalog {
         ),
         WhisperModel(
             id = "whisper-small-en",
+            tier = WhisperTier.Small,
             displayName = "Whisper Small (English only)",
             fileName = "ggml-small.en.bin",
             sha256 = "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
@@ -104,6 +134,7 @@ object WhisperModelCatalog {
         ),
         WhisperModel(
             id = "whisper-base",
+            tier = WhisperTier.Base,
             displayName = "Whisper Base (multilingual)",
             fileName = "ggml-base.bin",
             sha256 = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
@@ -113,10 +144,31 @@ object WhisperModelCatalog {
         ),
         WhisperModel(
             id = "whisper-base-en",
+            tier = WhisperTier.Base,
             displayName = "Whisper Base (English only)",
             fileName = "ggml-base.en.bin",
             sha256 = "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
             sizeBytes = 147_964_211,
+            minRamBytes = 1 * GIB,
+            multilingual = false,
+        ),
+        WhisperModel(
+            id = "whisper-tiny",
+            tier = WhisperTier.Tiny,
+            displayName = "Whisper Tiny (multilingual)",
+            fileName = "ggml-tiny.bin",
+            sha256 = "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+            sizeBytes = 77_691_713,
+            minRamBytes = 1 * GIB,
+            multilingual = true,
+        ),
+        WhisperModel(
+            id = "whisper-tiny-en",
+            tier = WhisperTier.Tiny,
+            displayName = "Whisper Tiny (English only)",
+            fileName = "ggml-tiny.en.bin",
+            sha256 = "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
+            sizeBytes = 77_704_715,
             minRamBytes = 1 * GIB,
             multilingual = false,
         ),
@@ -127,7 +179,16 @@ object WhisperModelCatalog {
     fun byId(id: String): WhisperModel? = MODELS.firstOrNull { it.id == id }
 
     fun urlFor(model: WhisperModel): String =
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/$HF_REPO_COMMIT/${model.fileName}"
+        "https://huggingface.co/${model.repo}/resolve/${model.commit}/${model.fileName}"
+
+    /**
+     * The entry one tier cheaper than [model] with the same language
+     * coverage, or null when [model] is already the floor.
+     */
+    fun stepDown(model: WhisperModel): WhisperModel? {
+        val next = model.tier.cheaper() ?: return null
+        return MODELS.firstOrNull { it.tier == next && it.multilingual == model.multilingual }
+    }
 
     /**
      * The default pick for a device together with the tier that decision

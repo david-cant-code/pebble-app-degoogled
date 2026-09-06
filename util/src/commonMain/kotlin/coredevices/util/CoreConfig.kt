@@ -128,4 +128,56 @@ data class STTConfig(
     val modelName: String? = null,
     /** ISO 639-1 language code. Null means auto-detect. */
     val spokenLanguage: String? = null,
-)
+    /**
+     * Fork, debug builds only: run the engine on one thread so a fast
+     * phone reproduces a decode that overruns the watch's dictation
+     * window. Honoured only when [coredevices.util.isDebugBuild] is true.
+     */
+    val debugSingleThread: Boolean = false,
+    /**
+     * Fork, debug builds only: write each dictation's engine input as a
+     * WAV under the app's private files so degraded captures can be
+     * replayed through the engine. Honoured only when
+     * [coredevices.util.isDebugBuild] is true.
+     */
+    val debugCaptureDump: Boolean = false,
+    /**
+     * Fork, debug builds only: replace the watch's audio with the bundled
+     * test clip, so an emulated watch (whose microphone is silence) or a
+     * silent room still produces a real transcript. Honoured only when
+     * [coredevices.util.isDebugBuild] is true.
+     */
+    val debugSubstituteAudio: Boolean = false,
+    /**
+     * Fork, debug builds only: hold each dictation's result for a fixed
+     * extra delay after the decode, so the watch's deadline report runs
+     * deterministically on any phone. Honoured only when
+     * [coredevices.util.isDebugBuild] is true.
+     */
+    val debugSlowDecode: Boolean = false,
+    /**
+     * Fork: a self-hosted transcription server, the remote backend that
+     * stands in for the removed cloud one. The full https URL of the
+     * endpoint (whisper.cpp's server listens on `/inference`, OpenAI-style
+     * servers on `/v1/audio/transcriptions`); null means no server. The
+     * bearer token is a secret and lives in the encrypted setting, never
+     * here.
+     */
+    val serverUrl: String? = null,
+    /**
+     * Model name sent with each server request. Servers that host one
+     * model ignore it; OpenAI-style servers require it. Null sends none.
+     */
+    val serverModel: String? = null,
+) {
+    /**
+     * The server URL names the user's own infrastructure, and the config
+     * is logged on every change into the app log that "Export logs"
+     * ships, so it prints as set or unset only.
+     */
+    override fun toString(): String =
+        "STTConfig(mode=$mode, modelName=$modelName, spokenLanguage=$spokenLanguage, " +
+            "debugSingleThread=$debugSingleThread, debugCaptureDump=$debugCaptureDump, " +
+            "debugSubstituteAudio=$debugSubstituteAudio, debugSlowDecode=$debugSlowDecode, " +
+            "serverUrl=${if (serverUrl != null) "[set]" else "null"}, serverModel=$serverModel)"
+}
