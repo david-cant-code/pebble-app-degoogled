@@ -1,6 +1,8 @@
 package io.rebble.libpebblecommon.io.rebble.libpebblecommon.music
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaController
@@ -8,6 +10,7 @@ import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.SystemClock
 import android.view.KeyEvent
+import androidx.core.net.toUri
 import co.touchlab.kermit.Logger
 import io.rebble.libpebblecommon.WatchConfig
 import io.rebble.libpebblecommon.WatchConfigFlow
@@ -433,6 +436,22 @@ class AndroidSystemMusicControl(
             logger.d { "Encoding album art ${bitmap.width}x${bitmap.height} -> ${width}x${height}" }
             bitmap.encodeForWatch(width, height)
         }
+
+    private fun MediaMetadata.albumArtBitmap(): Bitmap? =
+        ALBUM_ART_BITMAP_KEYS.firstNotNullOfOrNull { getBitmap(it) }
+            ?: ALBUM_ART_URI_KEYS.firstNotNullOfOrNull { decodeArtUri(getString(it)) }
+
+    private fun decodeArtUri(uri: String?): Bitmap? {
+        if (uri.isNullOrEmpty()) return null
+        return try {
+            context.contentResolver.openInputStream(uri.toUri())
+                ?.use { BitmapFactory.decodeStream(it) }
+        } catch (e: Exception) {
+            // Remote schemes we can't open, and providers that refuse us.
+            logger.d(e) { "Couldn't read album art uri" }
+            null
+        }
+    }
 }
 
 private fun MediaController.dispatchMediaKey(keyCode: Int) {
@@ -440,12 +459,20 @@ private fun MediaController.dispatchMediaKey(keyCode: Int) {
     dispatchMediaButtonEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
 }
 
-private fun MediaMetadata.albumArtBitmap() =
-    getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-        ?: getBitmap(MediaMetadata.METADATA_KEY_ART)
-        ?: getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+private val ALBUM_ART_BITMAP_KEYS = listOf(
+    MediaMetadata.METADATA_KEY_ALBUM_ART,
+    MediaMetadata.METADATA_KEY_ART,
+    MediaMetadata.METADATA_KEY_DISPLAY_ICON,
+)
+
+// Spotify (and other players) publish artwork only as a URI, never as a bitmap.
+private val ALBUM_ART_URI_KEYS = listOf(
+    MediaMetadata.METADATA_KEY_ALBUM_ART_URI,
+    MediaMetadata.METADATA_KEY_ART_URI,
+    MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI,
+)
+
+private val ALBUM_ART_KEYS = ALBUM_ART_BITMAP_KEYS + ALBUM_ART_URI_KEYS
 
 // containsKey, not getBitmap: getBitmap decodes the whole bitmap, and this runs on every metadata change.
-private fun MediaMetadata.hasAlbumArt() = containsKey(MediaMetadata.METADATA_KEY_ALBUM_ART)
-        || containsKey(MediaMetadata.METADATA_KEY_ART)
-        || containsKey(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+private fun MediaMetadata.hasAlbumArt() = ALBUM_ART_KEYS.any { containsKey(it) }
