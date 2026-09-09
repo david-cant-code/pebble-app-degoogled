@@ -159,6 +159,8 @@ dependencies {
     // Gravel: the text engine's isolated service, which the merged manifest declares.
     implementation(project(":llm"))
     implementation(libs.androidx.core.ktx)
+    // The manifest's androidx.startup provider entry, so lint can resolve it.
+    implementation(libs.androidx.work)
     // Fork: string notation on purpose, mirroring composeApp; the catalog has
     // no health-kmp alias so that upstream's plain libs.health.kmp fails at
     // configuration time instead of silently resolving the Google Fit
