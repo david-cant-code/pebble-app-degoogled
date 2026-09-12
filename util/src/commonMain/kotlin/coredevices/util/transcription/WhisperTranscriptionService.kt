@@ -258,6 +258,18 @@ internal interface WhisperEngine {
     fun free(handle: Long)
 }
 
+/**
+ * The terms of one cold model load, each filled in as it is paid so a
+ * load that fails part-way still reports the terms that ran; a term the
+ * load never reached stays null. Feeds the `dictation coldpath:` line
+ * (see DictationDiagnostics.kt).
+ */
+private class ColdPathTimings(val model: String, val snapshot: EngineRuntimeSnapshot) {
+    var modelPathMillis: Long? = null
+    var engineInitMillis: Long? = null
+    var warmUpMillis: Long? = null
+}
+
 /** The :whisper top-level binding functions, bound 1:1. */
 internal object RealWhisperEngine : WhisperEngine {
     override fun supported(): Boolean = isWhisperSupported()
@@ -550,7 +562,12 @@ class WhisperTranscriptionService internal constructor(
         }
     }
 
-    private suspend fun initIfNeeded() {
+    /**
+     * Loads the configured model unless it is already resident. A cold
+     * load reports its timings through [onColdLoad] before the first term
+     * is paid, so the caller can finish the line even if the load throws.
+     */
+    private suspend fun initIfNeeded(onColdLoad: (ColdPathTimings) -> Unit) {
         val config = sttConfig.value
         if (config.mode == CactusSTTMode.RemoteOnly) return
         if (!engine.supported()) return
@@ -583,14 +600,20 @@ class WhisperTranscriptionService internal constructor(
                 modelHandle = 0L
             }
             if (modelHandle == 0L) {
+                val cold = ColdPathTimings(modelName, engineRuntimeSnapshot())
+                onColdLoad(cold)
                 // getModelPath re-hashes the installed file once per process
                 // before first use. allowReinstall=false keeps init out of
                 // the download flow: a corrupt model is quarantined and this
                 // throws (surfacing as not-installed to the visible download
                 // UI) rather than pulling a silent multi-hundred-MB metered
                 // re-download from an engine-init path.
+                val pathStarted = TimeSource.Monotonic.markNow()
                 val modelPath = modelProvider.getModelPath(modelName, allowReinstall = false)
+                cold.modelPathMillis = pathStarted.elapsedNow().inWholeMilliseconds
+                val initStarted = TimeSource.Monotonic.markNow()
                 modelHandle = engine.init(modelPath)
+                cold.engineInitMillis = initStarted.elapsedNow().inWholeMilliseconds
                 lastInitedModel = modelName
                 // A fresh handle is cold no matter how recently the previous
                 // model transcribed: its first inference pays one-time graph
@@ -614,13 +637,39 @@ class WhisperTranscriptionService internal constructor(
 
     private fun performInit(): Job {
         return scope.launch(ioDispatcher) {
+            // Set once a cold load starts. The coldpath line is written
+            // from the finally so a load that fails part-way still reports
+            // the terms it paid; a job that found the model resident
+            // reports nothing.
+            var cold: ColdPathTimings? = null
+            var outcome = "error"
             try {
-                initIfNeeded()
+                initIfNeeded { cold = it }
+                // The wait in ensureInit covers the warm-up too, so the
+                // line has to account for it or the wait cannot be
+                // decomposed.
+                val warmUpStarted = TimeSource.Monotonic.markNow()
                 warmUpIfIdle()
+                cold?.warmUpMillis = warmUpStarted.elapsedNow().inWholeMilliseconds
+                outcome = "ok"
                 onInitialized.trySend(modelHandle != 0L || sttConfig.value.mode == CactusSTTMode.RemoteOnly)
             } catch (e: Throwable) {
+                outcome = "error:${e::class.simpleName}"
                 logger.e(e) { "Whisper STT model initialization failed: ${e.message}" }
                 onInitialized.trySend(false)
+            } finally {
+                cold?.let { timings ->
+                    logger.i {
+                        formatColdPathDiagnostics(
+                            model = timings.model,
+                            snapshot = timings.snapshot,
+                            modelPathMillis = timings.modelPathMillis,
+                            engineInitMillis = timings.engineInitMillis,
+                            warmUpMillis = timings.warmUpMillis,
+                            outcome = outcome,
+                        )
+                    }
+                }
             }
         }
     }
@@ -643,14 +692,28 @@ class WhisperTranscriptionService internal constructor(
         }
     }
 
-    /** Kick off init if needed and wait (up to [initTimeout]) for it to settle. */
-    private suspend fun ensureInit(initTimeout: Duration) {
+    /**
+     * Kick off init if needed and wait (up to [initTimeout]) for it to
+     * settle. Returns how long the wait blocked: the part of the cold path
+     * that did not overlap the recording, which the engine line reports as
+     * `initWaitMs`.
+     */
+    private suspend fun ensureInit(initTimeout: Duration): Long {
         if (initJob == null || modelHandle == 0L || lastInitedModel != sttConfig.value.modelName) {
             if (initJob?.isActive != true) {
                 initJob = performInit()
             }
         }
-        withTimeout(initTimeout) { initJob?.join() }
+        val waitStarted = TimeSource.Monotonic.markNow()
+        try {
+            withTimeout(initTimeout) { initJob?.join() }
+        } catch (e: TimeoutCancellationException) {
+            // A wait that hit its ceiling never reaches the engine line, so
+            // the ceiling is reported here.
+            logger.w { "Whisper STT model still initializing after $initTimeout; giving up on this dictation" }
+            throw e
+        }
+        return waitStarted.elapsedNow().inWholeMilliseconds
     }
 
     private suspend fun <T> withMaybeTimeout(timeout: Duration?, block: suspend () -> T): T {
@@ -661,7 +724,7 @@ class WhisperTranscriptionService internal constructor(
         }
     }
 
-    private suspend fun runLocalTranscribe(pcm: FloatArray, timeout: Duration? = null): String {
+    private suspend fun runLocalTranscribe(pcm: FloatArray, initWaitMillis: Long, timeout: Duration? = null): String {
         // Every engine call leaves one diagnostics line (see
         // DictationDiagnostics.kt): the scheduling facts are read before the
         // call because a background process can be promoted or demoted while
@@ -746,6 +809,7 @@ class WhisperTranscriptionService internal constructor(
                     threads = threads,
                     snapshot = snapshot,
                     audioSeconds = pcm.size / ENGINE_SAMPLE_RATE.toDouble(),
+                    initWaitMillis = initWaitMillis,
                     decodeMillis = started.elapsedNow().inWholeMilliseconds,
                     outcome = outcome,
                 )
@@ -769,7 +833,7 @@ class WhisperTranscriptionService internal constructor(
         timeout: Duration? = null,
         initTimeout: Duration = 10.seconds,
     ): String {
-        ensureInit(initTimeout)
+        val initWaitMillis = ensureInit(initTimeout)
         if (!transcriptionMutex.tryLock()) {
             throw TranscriptionException.TranscriptionInProgress(modelUsed = sttConfig.value.modelName)
         }
@@ -779,7 +843,7 @@ class WhisperTranscriptionService internal constructor(
                 debugArchiveDictationAudio(sttConfig.value.debugCaptureDump, debugBuild(), audio, sampleRate)
             }
             val pcm = toEngineFloats(audio, sampleRate)
-            modelMutex.withLock { runLocalTranscribe(pcm, timeout) }
+            modelMutex.withLock { runLocalTranscribe(pcm, initWaitMillis, timeout) }
         } finally {
             transcriptionMutex.unlock()
         }

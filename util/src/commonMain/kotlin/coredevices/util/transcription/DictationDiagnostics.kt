@@ -61,12 +61,18 @@ internal fun parseCpuList(list: String): List<Int>? {
  * One line per engine call, in a fixed `key=value` layout so a log zip from
  * a report can be read (or grepped) without the source at hand. Nulls print
  * as `?`. Kept pure so the layout is pinned by a host test.
+ *
+ * `initWaitMs` is how long the call blocked for the model to come up
+ * before the decode: zero once the model is resident, and otherwise the
+ * part of the cold path in [formatColdPathDiagnostics] that did not
+ * overlap the recording, which is what the dictation pays on top of it.
  */
 internal fun formatEngineDiagnostics(
     model: String?,
     threads: Int,
     snapshot: EngineRuntimeSnapshot,
     audioSeconds: Double,
+    initWaitMillis: Long,
     decodeMillis: Long,
     outcome: String,
 ): String = buildString {
@@ -76,7 +82,36 @@ internal fun formatEngineDiagnostics(
     append(" cpuset=").append(snapshot.cpuset ?: "?")
     append(" importance=").append(snapshot.importance ?: "?")
     append(" audioSec=").append(formatSeconds(audioSeconds))
+    append(" initWaitMs=").append(initWaitMillis)
     append(" decodeMs=").append(decodeMillis)
+    append(" outcome=").append(outcome)
+}
+
+/**
+ * One line per cold model load, the once-per-process work a dictation can
+ * end up waiting on: the model path resolve (the provider re-hashes the
+ * installed file before its first use), the engine init (the first call
+ * loads the native library, then the model) and the warm-up pass. The
+ * snapshot is read as the load starts, because the hash is CPU-bound and
+ * the process can sit in a different cpuset then than at the decode. A
+ * term the load never reached prints as `?`. Same fixed-layout contract
+ * as [formatEngineDiagnostics], pinned by the same host test.
+ */
+internal fun formatColdPathDiagnostics(
+    model: String?,
+    snapshot: EngineRuntimeSnapshot,
+    modelPathMillis: Long?,
+    engineInitMillis: Long?,
+    warmUpMillis: Long?,
+    outcome: String,
+): String = buildString {
+    append("dictation coldpath: model=").append(model ?: "?")
+    append(" allowedCpus=").append(snapshot.allowedCpus ?: "?")
+    append(" cpuset=").append(snapshot.cpuset ?: "?")
+    append(" importance=").append(snapshot.importance ?: "?")
+    append(" modelPathMs=").append(modelPathMillis ?: "?")
+    append(" engineInitMs=").append(engineInitMillis ?: "?")
+    append(" warmUpMs=").append(warmUpMillis ?: "?")
     append(" outcome=").append(outcome)
 }
 
