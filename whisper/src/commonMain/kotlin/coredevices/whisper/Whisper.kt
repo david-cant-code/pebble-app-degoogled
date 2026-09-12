@@ -1,10 +1,10 @@
 package coredevices.whisper
 
 /**
- * The complete engine surface for on-device speech recognition. Seven
+ * The complete engine surface for on-device speech recognition. Six
  * functions: this is the fork's replacement for a much larger proprietary
  * binding surface, and everything the app asks of the engine goes
- * through here (six for the speech model, one model-free speed probe);
+ * through here (five for the speech model, one model-free speed probe);
  * what the transcription service reads about the process the engine
  * runs in comes from the Android client behind these actuals
  * (`EngineProcess.android.kt`). Anything not expressible through these
@@ -118,9 +118,6 @@ expect fun whisperFree(handle: Long)
  * [whisperTranscribe]; failures follow the file's contract.
  */
 expect fun whisperBenchmark(threads: Int, placement: EnginePlacement = EnginePlacement.DEFAULT): Long
-
-/** The engine's last recorded failure reason, for error propagation. */
-expect fun whisperGetLastError(): String
 
 /**
  * Decodes little-endian signed 16-bit PCM (the watch pipeline's wire

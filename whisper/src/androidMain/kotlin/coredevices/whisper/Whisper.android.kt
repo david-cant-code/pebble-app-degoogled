@@ -121,7 +121,5 @@ actual fun whisperFree(handle: Long) {
     }
 }
 
-actual fun whisperGetLastError(): String = WhisperEngineClient.lastEngineError()
-
 actual fun whisperBenchmark(threads: Int, placement: EnginePlacement): Long =
     WhisperEngineClient.benchmark(threads, placement.cpuMask, placement.nice)

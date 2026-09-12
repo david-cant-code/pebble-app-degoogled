@@ -15,6 +15,7 @@ import coredevices.whisper.whisperBenchmark
 import coredevices.whisper.whisperFree
 import coredevices.whisper.whisperInit
 import coredevices.whisper.whisperTranscribe
+import coredevices.whisper.readCpuset
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.runBlocking
@@ -64,8 +65,6 @@ class WhisperSpeedCalibrationBenchmark {
 
     private fun median(values: List<Long>): Long = values.sorted()[values.size / 2]
 
-    private fun cpuset(): String = runCatching { File("/proc/self/cpuset").readText().trim() }.getOrDefault("?")
-
     @Test
     fun probeIsStableAndEachTierIsCalibrated() {
         Assume.assumeTrue("engine unsupported on this CPU", isWhisperSupported())
@@ -77,7 +76,7 @@ class WhisperSpeedCalibrationBenchmark {
             Thread.sleep(1500)
         }
         val threads = transcriptionThreadCount()
-        log("cpuset=${cpuset()} threads=$threads")
+        log("cpuset=${readCpuset() ?: "?"} threads=$threads")
 
         val warmUp = whisperBenchmark(threads)
         val scores = (1..RUNS).map { whisperBenchmark(threads) }

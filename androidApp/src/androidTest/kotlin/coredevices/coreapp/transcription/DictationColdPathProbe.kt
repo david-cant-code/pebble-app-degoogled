@@ -6,11 +6,12 @@ import android.os.SystemClock
 import androidx.test.platform.app.InstrumentationRegistry
 import coredevices.util.transcription.WhisperTranscriptionService
 import coredevices.whisper.isWhisperSupported
+import coredevices.whisper.readCpusAllowedList
+import coredevices.whisper.readCpuset
 import kotlinx.coroutines.runBlocking
 import org.junit.Assume
 import org.junit.Test
 import org.koin.mp.KoinPlatform
-import java.io.File
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -50,14 +51,6 @@ class DictationColdPathProbe {
         println("[$TAG] $line")
     }
 
-    private fun cpuset(): String = runCatching { File("/proc/self/cpuset").readText().trim() }.getOrDefault("?")
-
-    private fun allowed(): String = runCatching {
-        File("/proc/self/status").useLines { lines ->
-            lines.firstOrNull { it.startsWith("Cpus_allowed_list:") }?.substringAfter(':')?.trim()
-        }
-    }.getOrNull() ?: "?"
-
     @Test
     fun recordColdPath() {
         Assume.assumeTrue("engine unsupported on this CPU", isWhisperSupported())
@@ -76,7 +69,7 @@ class DictationColdPathProbe {
         val processAgeMs = SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime()
         log(
             "device=${Build.MODEL} sdk=${Build.VERSION.SDK_INT} model=$configured pid=${Process.myPid()} " +
-                "processAgeMs=$processAgeMs modelReady=${service.isModelReady} cpuset=${cpuset()} allowed=${allowed()}",
+                "processAgeMs=$processAgeMs modelReady=${service.isModelReady} cpuset=${readCpuset() ?: "?"} allowed=${readCpusAllowedList() ?: "?"}",
         )
         // Straight into the dictation, with a ceiling far above the app's,
         // so it waits out whatever is left of the load and reports the wait.

@@ -18,7 +18,6 @@ import android.util.Log
 import coredevices.whisper.WhisperEngineProtocol.DESCRIPTOR
 import coredevices.whisper.WhisperEngineProtocol.MAX_MESSAGE_BYTES
 import coredevices.whisper.WhisperEngineProtocol.MAX_TEXT_BYTES
-import coredevices.whisper.WhisperEngineProtocol.STATUS_ENGINE_ERROR
 import coredevices.whisper.WhisperEngineProtocol.STATUS_OK
 import coredevices.whisper.WhisperEngineProtocol.STATUS_STALE_HANDLE
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_BENCHMARK
@@ -93,9 +92,6 @@ object WhisperEngineClient {
     @Volatile
     private var lastBindMillis: Long? = null
 
-    @Volatile
-    private var lastEngineError: String = ""
-
     private val deathListeners = CopyOnWriteArrayList<(Long) -> Unit>()
 
     /** Records the application context; the first line of the app's onCreate. */
@@ -122,9 +118,6 @@ object WhisperEngineClient {
      * generation, whether that handle came from the process that died.
      */
     fun processGeneration(): Long = bindCount
-
-    /** The error text of the last engine failure this process received. */
-    fun lastEngineError(): String = lastEngineError
 
     /**
      * Registers [listener] to run once per engine process death, with the
@@ -174,7 +167,7 @@ object WhisperEngineClient {
             transact(TRANSACTION_INIT, "init", write = { data -> descriptor.writeToParcel(data, 0) }) { reply ->
                 when (val status = reply.readInt()) {
                     STATUS_OK -> reply.readLong()
-                    else -> throw engineFailure("init", status, reply.readBoundedMessage())
+                    else -> throw exceptionForStatus("init", status, reply.readBoundedMessage())
                 }
             }
         }
@@ -229,7 +222,7 @@ object WhisperEngineClient {
                 stats?.let { if (it.isNotEmpty()) it[0] = samples }
                 when (status) {
                     STATUS_OK -> reply.readBoundedBytes(MAX_TEXT_BYTES)
-                    else -> throw engineFailure("transcription", status, reply.readBoundedMessage())
+                    else -> throw exceptionForStatus("transcription", status, reply.readBoundedMessage())
                 }
             }
         } finally {
@@ -266,7 +259,7 @@ object WhisperEngineClient {
                 when (val status = reply.readInt()) {
                     STATUS_OK -> Unit
                     STATUS_STALE_HANDLE -> Log.w(TAG, "free of handle $handle: ${reply.readBoundedMessage()}")
-                    else -> throw engineFailure("free", status, reply.readBoundedMessage())
+                    else -> throw exceptionForStatus("free", status, reply.readBoundedMessage())
                 }
             }
         } catch (e: WhisperEngineUnavailableException) {
@@ -286,20 +279,14 @@ object WhisperEngineClient {
         ) { reply ->
             when (val status = reply.readInt()) {
                 STATUS_OK -> reply.readLong()
-                else -> throw engineFailure("benchmark", status, reply.readBoundedMessage())
+                else -> throw exceptionForStatus("benchmark", status, reply.readBoundedMessage())
             }
         }
-
-    /** The exception for a failure status, its engine text remembered for [lastEngineError]. */
-    private fun engineFailure(operation: String, status: Int, message: String): RuntimeException {
-        if (status == STATUS_ENGINE_ERROR) lastEngineError = message
-        return exceptionForStatus(operation, status, message)
-    }
 
     private fun expectOk(reply: Parcel, operation: String) {
         val status = reply.readInt()
         if (status != STATUS_OK) {
-            throw engineFailure(operation, status, reply.readBoundedMessage())
+            throw exceptionForStatus(operation, status, reply.readBoundedMessage())
         }
     }
 

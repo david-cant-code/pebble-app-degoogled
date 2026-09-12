@@ -8,6 +8,8 @@ import coredevices.whisper.pcm16ToFloats
 import coredevices.whisper.whisperFree
 import coredevices.whisper.whisperInit
 import coredevices.whisper.whisperTranscribe
+import coredevices.whisper.readCpusAllowedList
+import coredevices.whisper.readCpuset
 import kotlinx.coroutines.runBlocking
 import org.junit.Assume
 import org.junit.Test
@@ -53,14 +55,6 @@ class EnginePlacementBenchmark {
 
     private fun median(values: List<Long>): Long = values.sorted()[values.size / 2]
 
-    private fun cpuset(): String = runCatching { File("/proc/self/cpuset").readText().trim() }.getOrDefault("?")
-
-    private fun allowedList(): String = runCatching {
-        File("/proc/self/status").useLines { lines ->
-            lines.firstOrNull { it.startsWith("Cpus_allowed_list:") }?.substringAfter(':')?.trim()
-        }
-    }.getOrNull() ?: "?"
-
     @Test
     fun measurePlacementMatrix() {
         Assume.assumeTrue("engine unsupported on this CPU", isWhisperSupported())
@@ -71,13 +65,13 @@ class EnginePlacementBenchmark {
         // Bringing the app's own activity up makes the process top-app, so
         // the unmasked run is the visible-app baseline and the explicit
         // masks emulate the restricted cpusets a non-visible process gets.
-        log("before activity: cpuset=${cpuset()} allowed=${allowedList()}")
+        log("before activity: cpuset=${readCpuset() ?: "?"} allowed=${readCpusAllowedList() ?: "?"}")
         context.packageManager.getLaunchIntentForPackage(context.packageName)?.let { intent ->
             intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             instrumentation.startActivitySync(intent)
             Thread.sleep(1500)
         }
-        log("with activity: cpuset=${cpuset()} allowed=${allowedList()}")
+        log("with activity: cpuset=${readCpuset() ?: "?"} allowed=${readCpusAllowedList() ?: "?"}")
         val clip = instrumentation.context.assets
             .open(CLIP_ASSET).use { it.readBytes() }
         val pcm = pcm16ToFloats(clip)

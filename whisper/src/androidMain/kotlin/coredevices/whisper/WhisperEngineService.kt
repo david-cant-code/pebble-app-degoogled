@@ -308,15 +308,15 @@ private class EngineBinder(private val service: Service) : Binder() {
      */
     private fun runtime(reply: Parcel) {
         reply.writeInt(STATUS_OK)
-        reply.writeString(statusField("Cpus_allowed_list"))
-        reply.writeString(readTrimmed("/proc/self/cpuset"))
+        reply.writeString(readCpusAllowedList())
+        reply.writeString(readCpuset())
         // The platform refuses the importance query from an isolated
         // process (AOSP `android16-release`,
         // `services/core/java/com/android/server/am/ActivityManagerService.java`,
         // `getMyMemoryState`, `enforceNotIsolatedCaller`); the slot stays
         // so the report reads like the host's snapshot.
         reply.writeInt(UNKNOWN_INT)
-        reply.writeInt(readTrimmed("/proc/self/oom_score_adj")?.toIntOrNull() ?: UNKNOWN_INT)
+        reply.writeInt(readOomScoreAdj() ?: UNKNOWN_INT)
         reply.writeInt(Process.myPid())
         reply.writeInt(Process.myUid())
         reply.writeInt(openFds() ?: UNKNOWN_INT)
@@ -337,14 +337,4 @@ private class EngineBinder(private val service: Service) : Binder() {
     }
 
     private fun lastError(): String = WhisperJNI.nativeGetLastError().decodeToString()
-
-    private fun statusField(field: String): String? = runCatching {
-        File("/proc/self/status").useLines { lines ->
-            lines.firstOrNull { it.startsWith("$field:") }?.substringAfter(':')?.trim()
-        }
-    }.getOrNull()
-
-    private fun readTrimmed(path: String): String? = runCatching {
-        File(path).readText().trim().ifEmpty { null }
-    }.getOrNull()
 }

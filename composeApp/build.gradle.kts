@@ -229,6 +229,9 @@ kotlin {
             implementation(libs.coroutines)
             implementation(project(":pebble"))
             implementation(project(":util"))
+            // Fork: the Application class attaches the engine client and
+            // checks for the engine process.
+            implementation(project(":whisper"))
             // :experimental is unplugged from the fork's build (Firebase +
             // Supabase); ring runtime is stubbed at the Koin seam instead.
             // :libindex stays because PebbleBackgroundManager and :pebble
