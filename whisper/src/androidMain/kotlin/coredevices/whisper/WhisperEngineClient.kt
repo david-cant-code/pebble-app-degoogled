@@ -155,6 +155,7 @@ object WhisperEngineClient {
                 oomScoreAdj = reply.readInt().takeIf { it != UNKNOWN_INT },
                 pid = reply.readInt(),
                 uid = reply.readInt(),
+                openFds = reply.readInt().takeIf { it != UNKNOWN_INT },
             )
         }
     }
@@ -252,8 +253,10 @@ object WhisperEngineClient {
             transact(TRANSACTION_CANCEL, "cancel", bindIfNeeded = false, write = { data -> data.writeLong(callId) }) { reply ->
                 expectOk(reply, "cancel")
             }
-        } catch (e: WhisperEngineUnavailableException) {
-            Log.w(TAG, "cancel of call $callId reached no engine: ${e.message}")
+        } catch (e: RuntimeException) {
+            // No engine, a stale call, or a torn reply: the decode this
+            // cancels is ending either way, and the caller is unwinding.
+            Log.w(TAG, "cancel of call $callId did not reach the engine: ${e.message}")
         }
     }
 

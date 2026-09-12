@@ -35,6 +35,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <exception>
+#include <memory>
 #include <mutex>
 #include <new>
 #include <string>
@@ -392,8 +394,10 @@ Java_coredevices_whisper_WhisperJNI_nativeInitFd(JNIEnv *, jclass, jint fd) {
         set_last_error("init called with an invalid model fd " + std::to_string(fd));
         return 0;
     }
-    FILE *file = fdopen(fd, "rb");
-    if (file == nullptr) {
+    // The stream owns the descriptor and closes it when this function
+    // returns, on every path, including an unwind.
+    std::unique_ptr<FILE, int (*)(FILE *)> file(fdopen(fd, "rb"), fclose);
+    if (!file) {
         set_last_error("fdopen failed for model fd " + std::to_string(fd) + ": " + strerror(errno));
         close(fd); // fdopen adopts the fd only on success
         return 0;
@@ -403,9 +407,9 @@ Java_coredevices_whisper_WhisperJNI_nativeInitFd(JNIEnv *, jclass, jint fd) {
     // whisper_init_with_params_no_state) streams the model through these
     // callbacks, calls close on both of its exit paths and keeps no
     // reference to the context afterwards, so the callback close is a
-    // no-op and the one fclose below owns the descriptor.
+    // no-op and the stream above owns the descriptor.
     whisper_model_loader loader{};
-    loader.context = file;
+    loader.context = file.get();
     loader.read = [](void *ctx, void *output, size_t read_size) -> size_t {
         return fread(output, 1, read_size, static_cast<FILE *>(ctx));
     };
@@ -417,8 +421,21 @@ Java_coredevices_whisper_WhisperJNI_nativeInitFd(JNIEnv *, jclass, jint fd) {
     // would make init probe for one and log noise on every start.
     cparams.use_gpu = false;
 
-    whisper_context *ctx = whisper_init_with_params(&loader, cparams);
-    fclose(file);
+    // The state the engine builds behind init (whisper.cpp v1.9.3,
+    // src/whisper.cpp, whisper_init_state) is allocated with new and
+    // vector reserves, which throw on failure; an exception leaving this
+    // frame would end the process, so a throw is reported as a failed
+    // load instead.
+    whisper_context *ctx = nullptr;
+    try {
+        ctx = whisper_init_with_params(&loader, cparams);
+    } catch (const std::exception &e) {
+        set_last_error(std::string("whisper_init_with_params threw for model fd ") + std::to_string(fd) + ": " + e.what());
+        return 0;
+    } catch (...) {
+        set_last_error("whisper_init_with_params threw for model fd " + std::to_string(fd));
+        return 0;
+    }
     if (ctx == nullptr) {
         set_last_error("whisper_init_with_params failed for model fd " + std::to_string(fd)
                        + " (see whisper.cpp logcat lines for the engine's reason)");

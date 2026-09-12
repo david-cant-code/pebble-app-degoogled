@@ -158,12 +158,21 @@ private class EngineBinder(private val service: Service) : Binder() {
      * INIT: in = the model as a ParcelFileDescriptor; out = STATUS_OK and
      * the handle, or a failure status and its message. The descriptor
      * arrives duplicated into this process and is detached to the shim,
-     * which owns and closes it.
+     * which owns and closes it from the moment the call is entered.
      */
     private fun init(data: Parcel, reply: Parcel) {
         requireCpuFloor()
         val descriptor = ParcelFileDescriptor.CREATOR.createFromParcel(data)
-        val handle = WhisperJNI.nativeInitFd(descriptor.detachFd())
+        val fd = descriptor.detachFd()
+        val handle = try {
+            WhisperJNI.nativeInitFd(fd)
+        } catch (t: Throwable) {
+            // The fd is detached before the shim's class loads its library,
+            // so a load that fails throws with the fd still this process's
+            // to close; the shim itself never throws once entered.
+            ParcelFileDescriptor.adoptFd(fd).close()
+            throw t
+        }
         if (handle == 0L) {
             writeFailure(reply, STATUS_ENGINE_ERROR, lastError())
             return
@@ -295,7 +304,11 @@ private class EngineBinder(private val service: Service) : Binder() {
         reply.writeInt(readTrimmed("/proc/self/oom_score_adj")?.toIntOrNull() ?: UNKNOWN_INT)
         reply.writeInt(Process.myPid())
         reply.writeInt(Process.myUid())
+        reply.writeInt(openFds() ?: UNKNOWN_INT)
     }
+
+    /** This process's open descriptors, the listing's own included, or null if unreadable. */
+    private fun openFds(): Int? = runCatching { File("/proc/self/fd").list()?.size }.getOrNull()
 
     private fun writeFailure(reply: Parcel, status: Int, message: String) {
         reply.writeInt(status)

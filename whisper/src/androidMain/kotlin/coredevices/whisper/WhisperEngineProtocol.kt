@@ -78,6 +78,9 @@ internal object WhisperEngineProtocol {
  * @property pid the engine process id.
  * @property uid the engine process uid; an isolated process holds one in
  *   the platform's isolated range, distinct from the app's.
+ * @property openFds the number of descriptors open in the engine process
+ *   at the time of the report, null if unreadable there; a model
+ *   descriptor it was handed and kept shows up here.
  */
 class WhisperEngineRuntime(
     val cpusAllowedList: String?,
@@ -86,4 +89,5 @@ class WhisperEngineRuntime(
     val oomScoreAdj: Int?,
     val pid: Int,
     val uid: Int,
+    val openFds: Int?,
 )

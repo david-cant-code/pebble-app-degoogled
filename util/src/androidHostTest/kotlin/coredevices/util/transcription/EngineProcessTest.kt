@@ -18,7 +18,7 @@ class EngineProcessTest {
     fun engineProcessReportMapsToTheSnapshot() {
         val runtime = WhisperEngineRuntime(
             cpusAllowedList = "0-3,6", cpuset = "/foreground", importance = null,
-            oomScoreAdj = 1, pid = 4242, uid = 99010,
+            oomScoreAdj = 1, pid = 4242, uid = 99010, openFds = 12,
         )
         assertEquals(
             EngineRuntimeSnapshot(
@@ -33,7 +33,7 @@ class EngineProcessTest {
     fun unreadableEngineProcessFactsStayUnknown() {
         val runtime = WhisperEngineRuntime(
             cpusAllowedList = null, cpuset = null, importance = null,
-            oomScoreAdj = null, pid = 1, uid = 99000,
+            oomScoreAdj = null, pid = 1, uid = 99000, openFds = null,
         )
         val snapshot = engineProcessSnapshot(runtime)
         assertNull(snapshot.allowedCpus)
@@ -47,7 +47,7 @@ class EngineProcessTest {
     fun hostileCpuListInTheEngineReportReadsAsUnknown() {
         val runtime = WhisperEngineRuntime(
             cpusAllowedList = "0-2000000000", cpuset = "/foreground", importance = null,
-            oomScoreAdj = 1, pid = 4242, uid = 99010,
+            oomScoreAdj = 1, pid = 4242, uid = 99010, openFds = 12,
         )
         assertNull(engineProcessSnapshot(runtime).allowedCpus)
     }

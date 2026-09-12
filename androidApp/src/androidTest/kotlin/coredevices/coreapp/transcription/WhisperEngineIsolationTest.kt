@@ -28,8 +28,9 @@ import kotlin.test.assertTrue
  * On-device guard for the engine process boundary: the engine runs in an
  * isolated process, a dictation and a full firmware window of audio
  * cross it, a handle from a dead engine process is refused rather than
- * dereferenced, and the app process outlives the engine process and
- * binds a fresh one. Uses the installed base-en model and never
+ * dereferenced, the app process outlives the engine process and binds a
+ * fresh one, and the engine process keeps no descriptor from the models
+ * it is handed. Uses the installed base-en model and never
  * downloads. Run on its own, against a persistent install with the model:
  *   adb shell am instrument -w \
  *     -e class coredevices.coreapp.transcription.WhisperEngineIsolationTest \
@@ -44,6 +45,8 @@ class WhisperEngineIsolationTest {
         const val KEYWORD = "shrimp"
         const val WINDOW_SAMPLES = 15 * 16_000
         const val THREADS = 4
+        const val GOOD_LOADS = 8
+        const val FAILED_LOADS = 4
     }
 
     private fun log(line: String) {
@@ -140,6 +143,40 @@ class WhisperEngineIsolationTest {
         } finally {
             whisperFree(fresh)
         }
+    }
+
+    /**
+     * Every model descriptor handed to the engine process is closed
+     * there, whether the load succeeds or fails on a truncated file. A
+     * descriptor kept per load would add one for each of the loads
+     * below; the process's total drifts by a few descriptors between two
+     * reads on its own, so the bound is half the load count.
+     */
+    @Test
+    fun theEngineProcessKeepsNoModelDescriptor() {
+        val path = modelPath()
+        whisperFree(whisperInit(path))
+        val before = assertNotNull(assertNotNull(WhisperEngineClient.runtime(bindIfNeeded = false)).openFds)
+        repeat(GOOD_LOADS) { whisperFree(whisperInit(path)) }
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val truncated = File(context.cacheDir, "truncated-model.bin")
+        File(path).inputStream().use { input ->
+            val head = ByteArray(1 shl 20)
+            val read = input.read(head)
+            truncated.outputStream().use { it.write(head, 0, read) }
+        }
+        try {
+            repeat(FAILED_LOADS) { assertFailsWith<RuntimeException> { whisperInit(truncated.absolutePath) } }
+        } finally {
+            truncated.delete()
+        }
+        val after = assertNotNull(assertNotNull(WhisperEngineClient.runtime(bindIfNeeded = false)).openFds)
+        val loads = GOOD_LOADS + FAILED_LOADS
+        log("engine open descriptors: $before before, $after after $GOOD_LOADS loads and $FAILED_LOADS failed loads")
+        assertTrue(
+            after - before < loads / 2,
+            "the engine process went from $before to $after open descriptors over $loads model loads",
+        )
     }
 
     private fun shell(command: String): String {
