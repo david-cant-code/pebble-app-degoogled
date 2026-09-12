@@ -3,6 +3,7 @@ package coredevices.util.transcription
 import coredevices.analytics.CoreAnalytics
 import coredevices.whisper.EnginePlacement
 import coredevices.whisper.TranscribeStats
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration
@@ -18,8 +19,16 @@ internal object NoopAnalytics : CoreAnalytics {
     override fun updateRingLifetimeCollectionCount(serial: String, count: Int) {}
 }
 
-/** A provider with one installed model, until a test removes it through [installed]. */
+/**
+ * A provider with one installed model, until a test removes it through
+ * [installed]; records in [forgotten] every model whose verification
+ * memo the service asked it to drop.
+ */
 internal class FakeModelProvider(@Volatile var installed: Boolean = true) : CactusModelPathProvider {
+    val forgotten = CopyOnWriteArrayList<String>()
+    override fun forgetLoadVerification(modelId: String) {
+        forgotten += modelId
+    }
     override suspend fun getSTTModelPath(): String = "/fake/model"
     override suspend fun getLMModelPath(): String = error("no language model")
     override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = "/fake/$modelId"

@@ -24,6 +24,15 @@ interface CactusModelPathProvider {
      */
     suspend fun getModelPath(modelId: String, allowReinstall: Boolean = true): String
 
+    /**
+     * Drops the per-process load-verification memo for [modelId], so the
+     * next [getModelPath] re-hashes the installed file before returning
+     * it. The transcription service calls it before a reload that follows
+     * an engine process death, the one event a corrupt model file could
+     * have caused. A provider with no memo has nothing to drop.
+     */
+    fun forgetLoadVerification(modelId: String) {}
+
     fun isModelDownloaded(modelName: String): Boolean
     fun getDownloadedModels(): List<String>
     fun getIncompatibleModels(): List<String>

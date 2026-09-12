@@ -735,6 +735,11 @@ class WhisperTranscriptionService internal constructor(
                 // throws (surfacing as not-installed to the visible download
                 // UI) rather than pulling a silent multi-hundred-MB metered
                 // re-download from an engine-init path.
+                // A reload after an engine death re-hashes the file: the
+                // death is the one event a model corrupted on disk could
+                // have caused, and the once-per-process memo would hand
+                // the same bytes back unchecked.
+                if (lostGeneration != null) modelProvider.forgetLoadVerification(modelName)
                 val pathStarted = TimeSource.Monotonic.markNow()
                 val modelPath = modelProvider.getModelPath(modelName, allowReinstall = false)
                 cold.modelPathMillis = pathStarted.elapsedNow().inWholeMilliseconds

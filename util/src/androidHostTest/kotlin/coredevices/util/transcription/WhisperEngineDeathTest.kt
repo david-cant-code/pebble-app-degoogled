@@ -175,16 +175,20 @@ class WhisperEngineDeathTest {
     // assertion sees it, so they run wrapped and are unwrapped at the
     // assertion.
 
+    /** The reload after a death re-hashes the model file; the first load and a decode do not ask for it. */
     @Test
     fun idleDeathReloadsTheModelAtOnce() = runBlocking(Dispatchers.Default) {
         val fake = ProcessEngine()
-        val service = serviceFor(fake)
+        val provider = FakeModelProvider()
+        val service = serviceFor(fake, provider)
         awaitUntil("the first load") { service.isModelReady }
         assertEquals(1, fake.initCount)
+        assertEquals(emptyList(), provider.forgotten, "a first load keeps the verification memo")
 
         fake.die(report = true)
         awaitUntil("the reload") { fake.initCount == 2 && service.isModelReady }
         assertEquals(2L, fake.generation, "the reload did not bring up a fresh engine process")
+        assertEquals(listOf(service.configuredModel), provider.forgotten, "the reload after a death must re-hash the model")
         assertEquals("hello world", service.transcribeLocal(realPcmBytes(), sampleRate = 16_000))
         settle()
         assertEquals(2, fake.initCount, "the death was followed by more than one reload")

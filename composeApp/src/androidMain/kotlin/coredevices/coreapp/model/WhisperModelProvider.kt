@@ -188,6 +188,10 @@ class WhisperModelProvider(
         }
     }
 
+    override fun forgetLoadVerification(modelId: String) {
+        loadVerified.remove(modelId)
+    }
+
     override suspend fun getSTTModelPath(): String =
         getModelPath(configuredModelId() ?: recommendedDefault().id)
 
