@@ -8,6 +8,7 @@ import coredevices.util.STTConfig
 import coredevices.util.models.CactusSTTMode
 import coredevices.util.security.DecryptResult
 import coredevices.util.security.SecretCipher
+import coredevices.whisper.WhisperEngineUnavailableException
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.mock.MockEngine
@@ -152,6 +153,20 @@ class HybridTranscriptionServiceTest {
         h.engine.reply = ""
         assertEquals("from server", h.transcribe().text)
         assertEquals(1, h.requests.size)
+    }
+
+    /** A local decode that fails outright, not only an empty one, goes to the server, and the server is what succeeded. */
+    @Test
+    fun localWithServerFallbackUsesTheServerWhenTheLocalDecodeFails() = runBlocking(Dispatchers.Default) {
+        val h = Harness(CactusSTTMode.LocalFirst) { respond(jsonOk("from server"), HttpStatusCode.OK) }
+        h.awaitModel()
+        h.engine.failure = WhisperEngineUnavailableException("engine process died during transcribe")
+        val result = h.transcribe()
+        assertEquals("from server", result.text)
+        assertEquals(SelfHostedTranscriptionService.MODEL, result.modelUsed)
+        assertEquals(1, h.engine.realCalls)
+        assertEquals(1, h.requests.size)
+        assertEquals(CactusSTTMode.RemoteOnly, h.hybrid.lastSuccessfulMode)
     }
 
     @Test

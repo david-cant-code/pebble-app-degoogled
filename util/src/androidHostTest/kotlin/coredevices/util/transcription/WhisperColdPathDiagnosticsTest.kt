@@ -24,6 +24,8 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 import kotlin.time.Duration.Companion.milliseconds
@@ -74,16 +76,22 @@ class WhisperColdPathDiagnosticsTest {
     /**
      * An engine whose init takes at least [initMillis], then waits on
      * [initGate] while one is set, then fails when [failInit] is set. A
-     * transcribe of silent PCM (the warm-up input) returns immediately.
-     * With [bindMillis] set it models an engine process: the first init
-     * binds one (generation 1, the bind cost reported as the real client
-     * does), later inits find it bound, and its placement facts are the
-     * engine's while it is bound.
+     * transcribe of silent PCM (the warm-up input) takes at least
+     * [warmUpMillis]; one of real audio loses the engine process while
+     * [failDecode] is set. With [bindMillis] set it models an engine
+     * process: the first init binds one (generation 1, the bind cost
+     * reported as the real client does), later inits find it bound, and
+     * its placement facts are the engine's while it is bound.
      */
-    private class ScriptedEngine(private val initMillis: Long = 0, private val bindMillis: Long? = null) : WhisperEngine {
+    private class ScriptedEngine(
+        private val initMillis: Long = 0,
+        private val bindMillis: Long? = null,
+        private val warmUpMillis: Long = 0,
+    ) : WhisperEngine {
         @Volatile var initGate: CountDownLatch? = null
         @Volatile var failInit = false
         @Volatile var engineUnreachable = false
+        @Volatile var failDecode = false
         @Volatile private var generation = 0L
 
         override fun supported(): Boolean = true
@@ -110,7 +118,14 @@ class WhisperColdPathDiagnosticsTest {
             callId: Long,
             placement: EnginePlacement,
             stats: TranscribeStats?,
-        ): String = if (pcm.all { it == 0f }) "" else "hello world"
+        ): String {
+            if (pcm.all { it == 0f }) {
+                if (warmUpMillis > 0) Thread.sleep(warmUpMillis)
+                return ""
+            }
+            if (failDecode) throw WhisperEngineUnavailableException("engine process died during transcribe")
+            return "hello world"
+        }
 
         override fun cancel(callId: Long) {}
         override fun free(handle: Long) {}
@@ -166,21 +181,23 @@ class WhisperColdPathDiagnosticsTest {
 
     @Test
     fun coldLoadWritesOneLineWithEveryTerm() = runBlocking(Dispatchers.Default) {
-        val service = serviceFor(ScriptedEngine(initMillis = 30), SlowProvider(pathMillis = 20))
+        val service = serviceFor(ScriptedEngine(initMillis = 30, warmUpMillis = 25), SlowProvider(pathMillis = 20))
         awaitUntil("the coldpath line of the construction-time load") { capture.coldPathLines().isNotEmpty() }
 
         val line = capture.coldPathLines().single()
         assertEquals("model-a", field(line, "model"))
         assertTrue(field(line, "modelPathMs").toLong() >= 20, line)
         assertTrue(field(line, "engineInitMs").toLong() >= 30, line)
-        assertTrue(field(line, "warmUpMs").toLong() >= 0, line)
+        assertTrue(field(line, "warmUpMs").toLong() >= 25, line)
         assertEquals("ok", field(line, "outcome"))
 
         // A dictation on the resident model re-kicks nothing: still one
-        // cold load, and its engine line carries a wait of its own.
+        // cold load, and its engine line carries a numeric wait of its own.
         assertEquals("hello world", service.transcribeLocal(realPcmBytes(), sampleRate = 16_000))
         assertEquals(1, capture.coldPathLines().size, capture.lines.toString())
-        assertTrue(field(capture.engineLines().single(), "initWaitMs").toLong() >= 0)
+        val engineLine = capture.engineLines().single()
+        assertNotNull(field(engineLine, "initWaitMs").toLongOrNull(), engineLine)
+        Unit
     }
 
     @Test
@@ -202,8 +219,24 @@ class WhisperColdPathDiagnosticsTest {
             assertTrue(field(line, "initWaitMs").toLong() >= 150, line)
             assertEquals("ok", field(line, "outcome"))
         } finally {
+            // The released load logs its coldpath line on completion; let
+            // it land here rather than in the next test's capture.
             engine.initGate?.countDown()
+            awaitUntil("the released load to settle") { capture.coldPathLines().isNotEmpty() }
         }
+    }
+
+    /** A decode that loses the engine process names the stable token on its engine line. */
+    @Test
+    fun decodeThatLosesTheEngineIsNamedOnTheEngineLine() = runBlocking(Dispatchers.Default) {
+        val engine = ScriptedEngine()
+        val service = serviceFor(engine, SlowProvider(pathMillis = 0))
+        awaitUntil("the coldpath line") { capture.coldPathLines().isNotEmpty() }
+        engine.failDecode = true
+        assertFailsWith<TranscriptionException.TranscriptionServiceUnavailable> {
+            service.transcribeLocal(realPcmBytes(), sampleRate = 16_000)
+        }
+        assertEquals("error:engine_unavailable", field(capture.engineLines().single(), "outcome"))
     }
 
     /**

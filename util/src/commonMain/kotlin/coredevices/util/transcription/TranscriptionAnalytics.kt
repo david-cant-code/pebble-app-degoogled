@@ -30,6 +30,7 @@ fun transcriptionFailureReason(e: Throwable): String = when (e) {
     is TranscriptionException.TranscriptionRequiresDownload -> "requires_download"
     is TranscriptionException.NoSupportedLanguage -> "no_supported_language"
     is TranscriptionException.NoSpeechDetected -> "no_speech_${e.type}"
+    is TranscriptionException.TranscriptionInProgress -> "in_progress"
     is TranscriptionException.TranscriptionServiceError -> "service_error"
     is TimeoutCancellationException -> "timeout"
     else -> e::class.simpleName ?: "unknown"

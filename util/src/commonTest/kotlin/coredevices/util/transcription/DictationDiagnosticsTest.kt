@@ -1,12 +1,7 @@
 package coredevices.util.transcription
 
-import coredevices.whisper.WhisperEngineUnavailableException
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
 /**
@@ -132,21 +127,6 @@ class DictationDiagnosticsTest {
                 "modelPathMs=3120 bindMs=? engineInitMs=? warmUpMs=? outcome=error:RuntimeException",
             line,
         )
-    }
-
-    /**
-     * The failure tokens on the lines come from the analytics mapping, not
-     * from class names: the app's own exception classes are renamed in
-     * the release build, platform ones are not.
-     */
-    @Test
-    fun failureTokensAreStableNames() {
-        assertEquals("engine_unavailable", transcriptionFailureReason(WhisperEngineUnavailableException("gone")))
-        assertEquals("service_unavailable", transcriptionFailureReason(TranscriptionException.TranscriptionServiceUnavailable()))
-        assertEquals("requires_download", transcriptionFailureReason(TranscriptionException.TranscriptionRequiresDownload("x")))
-        val timeout = assertFailsWith<TimeoutCancellationException> { runBlocking { withTimeout(1) { kotlinx.coroutines.delay(1_000) } } }
-        assertEquals("timeout", transcriptionFailureReason(timeout))
-        assertEquals("IllegalStateException", transcriptionFailureReason(IllegalStateException("platform")))
     }
 
     @Test

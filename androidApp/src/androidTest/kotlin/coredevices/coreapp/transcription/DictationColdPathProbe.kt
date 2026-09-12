@@ -41,6 +41,7 @@ class DictationColdPathProbe {
     private companion object {
         const val TAG = "ColdPathProbe"
         const val CLIP_ASSET = "eval_shopping_list_shrimp.raw"
+        const val KEYWORD = "shrimp"
         const val SAMPLE_RATE = 16_000
     }
 
@@ -80,10 +81,14 @@ class DictationColdPathProbe {
         // Straight into the dictation, with a ceiling far above the app's,
         // so it waits out whatever is left of the load and reports the wait.
         runBlocking {
+            // The figures describe a dictation that decoded the clip; a
+            // blank or wrong decode fails the probe rather than being timed.
             val cold = service.transcribeLocal(clip, SAMPLE_RATE, timeout = 60.seconds, initTimeout = 5.minutes)
             log("cold dictation: '$cold'")
+            check(cold.lowercase().contains(KEYWORD)) { "cold decode lost the keyword: '$cold'" }
             val warm = service.transcribeLocal(clip, SAMPLE_RATE, timeout = 60.seconds)
             log("warm dictation: '$warm'")
+            check(warm.lowercase().contains(KEYWORD)) { "warm decode lost the keyword: '$warm'" }
         }
     }
 }
