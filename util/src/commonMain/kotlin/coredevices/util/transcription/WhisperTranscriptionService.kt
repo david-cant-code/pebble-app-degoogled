@@ -420,7 +420,10 @@ class WhisperTranscriptionService internal constructor(
 
     // True when the last load attempt failed because the engine process
     // could not be reached, so a dictation that finds no handle reports
-    // the engine unavailable rather than the model missing.
+    // the engine unavailable rather than the model missing. Read together
+    // with the model's presence: a job that has no model to load leaves
+    // the flag as it was, and once the model is gone the missing model is
+    // the cause.
     @kotlin.concurrent.Volatile
     private var engineUnavailable: Boolean = false
 
@@ -629,35 +632,46 @@ class WhisperTranscriptionService internal constructor(
 
     /**
      * The engine process died. The reload runs as an init job so it takes
-     * the same path, and the same mutex hold, as every other load: the
-     * handle is dropped and the model reloaded without releasing the
-     * mutex in between, so no dictation can find the handle gone and a
-     * reload merely pending. Whether there is anything to drop is decided
-     * under the mutex, from the generation, because this runs on whatever
-     * thread observed the death, possibly inside the failing call itself.
+     * the same path, and the same mutex holds, as every other load. It is
+     * not the job a dictation waits on: [initJob] names a load made on a
+     * dictation's behalf, and a dictation that arrives while this runs
+     * starts its own, which queues on the mutex and finds the model
+     * resident. Whether there is anything to drop is decided under the
+     * mutex, from the generation, because this runs on whatever thread
+     * observed the death, possibly inside the failing call itself.
      */
     private fun onEngineProcessDeath(generation: Long) {
         logger.w { "Whisper engine process (generation $generation) died" }
-        initJob = performInit(lostGeneration = generation)
+        performInit(lostGeneration = generation)
     }
 
     /**
      * Forgets the resident handle if the engine process that issued it is
-     * the one reported dead, and says whether to reload the model now.
-     * Called under [modelMutex]. A generation that is not the handle's
-     * means the dead process issued no current handle: it died during a
-     * load (which fails on its own and is not retried here) or it was
-     * already replaced. A handle a failing decode has already zeroed still
+     * the one reported dead, and says whether it did. Called under
+     * [modelMutex]. A generation that is not the handle's means the dead
+     * process issued no current handle: it died during a load (which
+     * fails on its own and is not retried here) or it was already
+     * replaced. A handle a failing decode has already zeroed still
      * matches, so the reload it expects follows.
      */
-    private fun dropLostHandleLocked(generation: Long): Boolean {
+    private fun forgetLostHandleLocked(generation: Long): Boolean {
         if (generation == 0L || handleGeneration != generation) return false
         modelHandle = 0L
         lastInitedModel = null
         handleGeneration = 0L
+        return true
+    }
+
+    /**
+     * Whether a reload after an engine process death may run now, and the
+     * count it uses up if so. Called under [modelMutex], once the load is
+     * otherwise going to happen, so a death with nothing to load costs no
+     * reload. Bounded by [MAX_PROACTIVE_RELOADS] until a decode succeeds.
+     */
+    private fun takeReloadBudgetLocked(): Boolean {
         if (proactiveReloads >= MAX_PROACTIVE_RELOADS) {
             logger.w {
-                "Whisper engine process died $proactiveReloads times since the last decode; " +
+                "Whisper engine process died more than $MAX_PROACTIVE_RELOADS times since the last decode; " +
                     "leaving the reload to the next dictation"
             }
             return false
@@ -675,6 +689,11 @@ class WhisperTranscriptionService internal constructor(
      * death, and it first drops the handle that process issued.
      */
     private suspend fun initIfNeeded(lostGeneration: Long?, onColdLoad: (ColdPathTimings) -> Unit) {
+        // The dead process's handle goes first, ahead of every reason not
+        // to load: whatever the configuration says, a handle from a process
+        // that is gone must not stay on record, or the service keeps
+        // answering that a model is loaded and the next warm-up runs on it.
+        if (lostGeneration != null && !modelMutex.withLock { forgetLostHandleLocked(lostGeneration) }) return
         val config = sttConfig.value
         if (config.mode == CactusSTTMode.RemoteOnly) return
         if (!engine.supported()) return
@@ -702,7 +721,7 @@ class WhisperTranscriptionService internal constructor(
         // second job re-reads the handle state below and becomes a no-op
         // instead of double-freeing or leaking a second context.
         modelMutex.withLock {
-            if (lostGeneration != null && !dropLostHandleLocked(lostGeneration)) return
+            if (lostGeneration != null && !takeReloadBudgetLocked()) return
             if (modelName != lastInitedModel && modelHandle != 0L) {
                 engine.free(modelHandle)
                 modelHandle = 0L
@@ -819,9 +838,17 @@ class WhisperTranscriptionService internal constructor(
             }
             initJob = performInit()
         } else {
+            // The warm-up can find the engine process gone; the death
+            // report reloads, and this launch has no handler to fail into.
             scope.launch {
-                warmUpIfIdle()
-                onInitialized.trySend(true)
+                try {
+                    warmUpIfIdle()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logger.w(e) { "Whisper STT warm-up failed: ${e.message}" }
+                }
+                onInitialized.trySend(modelHandle != 0L)
             }
         }
     }
@@ -882,10 +909,10 @@ class WhisperTranscriptionService internal constructor(
         try {
             if (handle == 0L) {
                 // No engine to run on, or one that could not be reached
-                // by the load this dictation waited for: unavailable,
-                // which the hybrid fallback routes to remote. Otherwise
-                // the model itself is missing.
-                if (!engine.supported() || engineUnavailable) {
+                // by the last load of a model that is still installed:
+                // unavailable, which the hybrid fallback routes to remote.
+                // Otherwise the model itself is missing.
+                if (!engine.supported() || (engineUnavailable && modelExists())) {
                     throw TranscriptionException.TranscriptionServiceUnavailable(modelUsed = sttConfig.value.modelName)
                 }
                 throw TranscriptionException.TranscriptionRequiresDownload("Model not initialized")

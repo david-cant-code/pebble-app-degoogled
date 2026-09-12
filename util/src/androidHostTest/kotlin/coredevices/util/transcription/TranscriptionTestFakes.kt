@@ -18,12 +18,12 @@ internal object NoopAnalytics : CoreAnalytics {
     override fun updateRingLifetimeCollectionCount(serial: String, count: Int) {}
 }
 
-/** A provider with one installed model. */
-internal class FakeModelProvider : CactusModelPathProvider {
+/** A provider with one installed model, until a test removes it through [installed]. */
+internal class FakeModelProvider(@Volatile var installed: Boolean = true) : CactusModelPathProvider {
     override suspend fun getSTTModelPath(): String = "/fake/model"
     override suspend fun getLMModelPath(): String = error("no language model")
     override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = "/fake/$modelId"
-    override fun isModelDownloaded(modelName: String): Boolean = true
+    override fun isModelDownloaded(modelName: String): Boolean = installed
     override fun getDownloadedModels(): List<String> = emptyList()
     override fun getIncompatibleModels(): List<String> = emptyList()
     override fun deleteModel(modelName: String) {}

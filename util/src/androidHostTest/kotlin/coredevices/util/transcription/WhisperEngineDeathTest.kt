@@ -148,9 +148,9 @@ class WhisperEngineDeathTest {
         CoreConfig(sttConfig = STTConfig(mode = CactusSTTMode.LocalOnly, modelName = "model-a")),
     )
 
-    private fun serviceFor(fake: ProcessEngine) = WhisperTranscriptionService(
+    private fun serviceFor(fake: ProcessEngine, provider: FakeModelProvider = FakeModelProvider()) = WhisperTranscriptionService(
         coreConfigFlow = CoreConfigFlow(config),
-        modelProvider = FakeModelProvider(),
+        modelProvider = provider,
         analytics = NoopAnalytics,
         inferenceBoost = NoOpInferenceBoost(),
         engine = fake.engine,
@@ -305,6 +305,49 @@ class WhisperEngineDeathTest {
         fake.dieOnWarmUp = false
         assertEquals("hello world", service.transcribeLocal(realPcmBytes(), sampleRate = 16_000))
         assertTrue(service.isModelReady)
+    }
+
+    /**
+     * A death while the configured model is no longer installed has
+     * nothing to reload, but the dead process's handle still goes: the
+     * service must not keep answering that a model is loaded.
+     */
+    @Test
+    fun deathWithTheModelGoneDropsTheHandleAndReloadsNothing() = runBlocking(Dispatchers.Default) {
+        val fake = ProcessEngine()
+        val provider = FakeModelProvider()
+        val service = serviceFor(fake, provider)
+        awaitUntil("the first load") { service.isModelReady }
+        assertTrue(service.isLocalAvailable())
+
+        provider.installed = false
+        fake.die(report = true)
+        awaitUntil("the handle dropped") { !service.isModelReady }
+        settle()
+        assertEquals(1, fake.initCount, "a reload ran with no model to load")
+        assertFalse(service.isLocalAvailable(), "local dictation offered on a dead process")
+    }
+
+    /**
+     * The engine-unavailable report belongs to the model the load could
+     * not reach the engine for; once that model is gone, the missing model
+     * is the cause a dictation reports.
+     */
+    @Test
+    fun unreachableEngineIsNotReportedOnceTheModelIsGone() = runBlocking(Dispatchers.Default) {
+        val fake = ProcessEngine().apply { dieOnInit = true }
+        val provider = FakeModelProvider()
+        val service = serviceFor(fake, provider)
+        awaitUntil("the failed first load") { fake.initCount == 1 }
+        assertFailsWith<TranscriptionException.TranscriptionServiceUnavailable> {
+            service.transcribeLocal(realPcmBytes(), sampleRate = 16_000)
+        }
+
+        provider.installed = false
+        assertFailsWith<TranscriptionException.TranscriptionRequiresDownload> {
+            service.transcribeLocal(realPcmBytes(), sampleRate = 16_000)
+        }
+        Unit
     }
 
     /** A report for a process already replaced leaves the fresh handle alone. */
