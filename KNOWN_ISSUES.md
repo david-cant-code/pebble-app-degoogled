@@ -513,3 +513,17 @@ model already selected. Closing this means dropping a sample for a
 model that is no longer selected, or holding the latch until decodes
 that began before a switch have ended, with a tracker test that
 records for the replaced model after the switch settles.
+
+## No local dictation on Android 8.0
+
+**Status: accepted.**
+
+The speech engine runs in an isolated process and receives each
+dictation's audio as a shared-memory region, a platform API that exists
+from Android 8.1. On Android 8.0 the engine reports itself unsupported:
+the model picker offers no local models and dictation takes the remote
+path, as it does on a CPU below the engine's feature floor. Closing this
+means a second audio transport for that one release, a temporary file
+passed as a descriptor, with its own device run; deferred because the
+engine's CPU floor already excludes nearly every phone that shipped with
+Android 8.0, and none of those is held at it.

@@ -257,6 +257,39 @@ The replacement is whisper.cpp (MIT), compiled from source:
   compiling for the unmaintained iOS targets. Engine strings cross JNI
   as UTF-8 byte arrays: engine output can be byte sequences that are
   invalid modified UTF-8, which NewStringUTF aborts on under CheckJNI.
+- The engine runs in an isolated process, `WhisperEngineService`,
+  declared in the app manifest with `android:isolatedProcess`: a
+  separate zero-permission uid that cannot open the app's files, reach
+  the network or hold any permission, so a memory-safety bug in the
+  model parser or the decoder, reached through a model file, is
+  contained to that process. This layer is independent of the pinned
+  catalog below: the pin covers that the bytes that arrived are the
+  bytes that were meant to arrive; it does not cover a parser bug
+  reached through a correctly pinned model, nor a file replaced on disk
+  after verification. The app-process side is `WhisperEngineClient`,
+  behind the `:whisper` actuals, so the common surface stays path-based:
+  it opens the verified model path and passes the descriptor (the engine
+  process never opens a path; from its domain the app's files do not
+  resolve), and passes each dictation's audio as a read-only
+  shared-memory region, since a Binder transaction cannot carry a full
+  window of float PCM. The transactions are a hand-written Binder
+  protocol, `WhisperEngineProtocol`, because the KMP Android library
+  plugin has no AIDL support, and everything read back from the engine
+  process is bounded before use. The engine side keeps a live-handle set
+  and a per-handle busy flag, so a handle from an earlier engine process
+  or one inside another call is refused rather than dereferenced,
+  independently of the service's mutexes, and re-checks the CPU floor
+  before loading the engine library. The one binding is held for the
+  life of the app process, which keeps the model resident as the
+  in-process engine was; a released binding would end the engine
+  process, and the next dictation would pay a cold load with nothing in
+  front of it. The transport needs API 27, so on Android 8.0 the engine
+  reports itself unsupported and dictation takes the remote path
+  (KNOWN_ISSUES). Every process of the app instantiates its Application
+  class, the engine process included, so `MainApplication.onCreate`
+  returns at once there (`runningInIsolatedProcess`); and the platform
+  derives the process's real name from the service class name, so a
+  per-process manifest attribute belongs on `<application>`.
 - `whisperBenchmark` is the model-free speed probe: the shim times one
   encoder block of the base model's shape, built on ggml with random
   weights, on the thread count a dictation would get. `DeviceSpeedEstimator`
@@ -357,9 +390,12 @@ The replacement is whisper.cpp (MIT), compiled from source:
   cold-start init) are guarded only by the instrumented
   `WhisperLocalCancellationTest` and `WhisperColdStartRaceTest` under
   `androidApp/src/androidTest`, run one class at a time on a device with
-  the model installed (each KDoc carries the command); the sample count
-  the shim reports has no automated check. An engine bump or a shim edit
-  gets a device run of those two before it merges.
+  the model installed (each KDoc carries the command); the process
+  boundary (an isolated uid, a dictation and a full window across it, a
+  refused stale handle, the app outliving a crashed engine process) by
+  `WhisperEngineIsolationTest` beside them. An engine bump, a shim edit
+  or a protocol change gets a device run of those three before it
+  merges.
 - The watch's dictation deadline is owned by `VoiceSessionCoordinator`
   in libpebble3, not by the provider. The firmware records for at most
   15 seconds, gives the phone 15 seconds from the end of the recording,

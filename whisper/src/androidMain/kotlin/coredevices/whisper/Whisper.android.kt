@@ -1,26 +1,26 @@
 package coredevices.whisper
 
-import android.os.ParcelFileDescriptor
+import android.os.Build
 import java.io.File
-import java.io.IOException
 
 /**
- * Android actuals over the two JNI libraries built by :whisper-native.
+ * Android actuals. The engine runs in an isolated process
+ * ([WhisperEngineService]); these functions are its app-process side
+ * ([WhisperEngineClient]) and keep the common surface path-based: the
+ * model path is opened here and crosses as a descriptor, the audio
+ * crosses as shared memory, and a handle names an engine context in that
+ * process. [WhisperCpuJNI], the baseline-architecture probe behind
+ * [isWhisperSupported], is the one native library this process loads;
+ * the engine library is loaded only in the engine process, by
+ * [WhisperJNI], after the same probe has passed there.
  *
- * Two holder objects on purpose: [WhisperCpuJNI] loads only the tiny
- * baseline-architecture probe library, and [WhisperJNI] loads the engine.
- * The engine library is compiled for armv8.2+dotprod+fp16 and would crash
- * at first use on older CPUs, so nothing may touch [WhisperJNI] before
- * [isWhisperSupported] has returned true; the lazy support flag plus the
- * service-layer gates enforce that ordering.
- *
- * Strings come back from native as UTF-8 byte arrays, decoded here.
+ * Strings come back from the engine as UTF-8 byte arrays, decoded here.
  * Engine output can contain byte sequences that are not valid modified
  * UTF-8, and returning them through NewStringUTF would abort the process
  * under CheckJNI, so the shim never constructs Java strings itself.
  */
 
-private object WhisperCpuJNI {
+internal object WhisperCpuJNI {
     init {
         System.loadLibrary("whispercpu")
     }
@@ -31,7 +31,7 @@ private object WhisperCpuJNI {
 
 // Missing library (repackaged APK, unexpected ABI) must read as
 // "unsupported", never as a crash: the probe is called from UI code.
-private val whisperSupported: Boolean by lazy {
+private val cpuSupported: Boolean by lazy {
     try {
         WhisperCpuJNI.nativeIsWhisperSupported()
     } catch (_: Throwable) {
@@ -39,9 +39,22 @@ private val whisperSupported: Boolean by lazy {
     }
 }
 
-actual fun isWhisperSupported(): Boolean = whisperSupported
+/**
+ * The audio transport (SharedMemory) exists from API 27, so the engine is
+ * unsupported on Android 8.0 and a phone there takes the same path as an
+ * unsupported CPU. Unattached (no application context yet) reads as
+ * unsupported too, so nothing binds before the app has set up.
+ */
+actual fun isWhisperSupported(): Boolean =
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && WhisperEngineClient.isAttached && cpuSupported
 
-private object WhisperJNI {
+/**
+ * The engine library's entry points. Touched only inside the engine
+ * process, by [WhisperEngineService]: the library is compiled for
+ * armv8.2+dotprod+fp16 and would crash at first use on older CPUs, so
+ * that service checks [WhisperCpuJNI] before its first call here.
+ */
+internal object WhisperJNI {
     init {
         System.loadLibrary("whisperjni")
     }
@@ -74,23 +87,7 @@ private object WhisperJNI {
     external fun nativeBenchmark(threads: Int, cpuMask: Long, nice: Int): Long
 }
 
-actual fun whisperInit(modelPath: String): Long {
-    // The model reaches the engine as an open descriptor, never as a
-    // path: the process that runs the engine is not assumed to resolve
-    // the host's files. Opened read-only here, where the path does
-    // resolve, and detached so the shim owns the descriptor from the
-    // call on (one close, on every path, on its side).
-    val fd = try {
-        ParcelFileDescriptor.open(File(modelPath), ParcelFileDescriptor.MODE_READ_ONLY).detachFd()
-    } catch (e: IOException) {
-        throw RuntimeException("whisper init failed: cannot open the model file: ${e.message}", e)
-    }
-    val handle = WhisperJNI.nativeInitFd(fd)
-    if (handle == 0L) {
-        throw RuntimeException("whisper init failed: ${whisperGetLastError()}")
-    }
-    return handle
-}
+actual fun whisperInit(modelPath: String): Long = WhisperEngineClient.init(File(modelPath))
 
 actual fun whisperTranscribe(
     handle: Long,
@@ -101,35 +98,28 @@ actual fun whisperTranscribe(
     placement: EnginePlacement,
     stats: TranscribeStats?,
 ): String {
-    // The shim writes into a one-slot array; the stats object is filled
-    // from it on every exit so a failed call still reports what it was given.
+    // The engine reports into a one-slot array; the stats object is
+    // filled from it on every exit so a failed call still reports what
+    // it was given.
     val slots = if (stats != null) intArrayOf(-1) else null
     try {
-        val bytes = WhisperJNI.nativeTranscribe(
+        return WhisperEngineClient.transcribe(
             handle, pcm, threads, language, callId, placement.cpuMask, placement.nice, slots,
-        ) ?: throw RuntimeException("whisper transcription failed: ${whisperGetLastError()}")
-        return bytes.decodeToString()
+        ).decodeToString()
     } finally {
         if (stats != null && slots != null) stats.inputSamples = slots[0]
     }
 }
 
-actual fun whisperCancel(callId: Long) {
-    WhisperJNI.nativeCancel(callId)
-}
+actual fun whisperCancel(callId: Long) = WhisperEngineClient.cancel(callId)
 
 actual fun whisperFree(handle: Long) {
     if (handle != 0L) {
-        WhisperJNI.nativeFree(handle)
+        WhisperEngineClient.free(handle)
     }
 }
 
-actual fun whisperGetLastError(): String = WhisperJNI.nativeGetLastError().decodeToString()
+actual fun whisperGetLastError(): String = WhisperEngineClient.lastEngineError()
 
-actual fun whisperBenchmark(threads: Int, placement: EnginePlacement): Long {
-    val ns = WhisperJNI.nativeBenchmark(threads, placement.cpuMask, placement.nice)
-    if (ns <= 0L) {
-        throw RuntimeException("whisper benchmark failed: ${whisperGetLastError()}")
-    }
-    return ns
-}
+actual fun whisperBenchmark(threads: Int, placement: EnginePlacement): Long =
+    WhisperEngineClient.benchmark(threads, placement.cpuMask, placement.nice)

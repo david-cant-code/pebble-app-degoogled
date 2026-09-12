@@ -160,6 +160,22 @@
         </activity-alias>
 
         <!--
+            Fork: the whisper.cpp speech engine runs in this isolated process, a
+            separate zero-permission uid that cannot open the app's files, reach
+            the network, or hold any permission. The app process passes it the
+            model as a file descriptor and each dictation's audio as shared
+            memory, so a memory-safety bug in the model parser or the decoder
+            is contained there. The platform derives the real process name from
+            the class name (":whisper" is only a prefix of it), so any
+            per-process attribute belongs on <application>, not here.
+        -->
+        <service
+            android:name="coredevices.whisper.WhisperEngineService"
+            android:exported="false"
+            android:isolatedProcess="true"
+            android:process=":whisper" />
+
+        <!--
             Attaches a QEMU emulator watch for automated testing. android:permission restricts the
             sender to adb/shell and system, so no installed app can reach it; that gate is what
             keeps it safe to ship in release builds for CI.
