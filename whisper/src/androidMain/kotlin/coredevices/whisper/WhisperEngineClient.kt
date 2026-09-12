@@ -173,7 +173,7 @@ object WhisperEngineClient {
             transact(TRANSACTION_INIT, "init", write = { data -> descriptor.writeToParcel(data, 0) }) { reply ->
                 when (val status = reply.readInt()) {
                     STATUS_OK -> reply.readLong()
-                    else -> throw engineFailure("init", status, reply.readBoundedBytes(MAX_MESSAGE_BYTES).decodeToString())
+                    else -> throw engineFailure("init", status, reply.readBoundedMessage())
                 }
             }
         }
@@ -229,11 +229,11 @@ object WhisperEngineClient {
                 },
             ) { reply ->
                 val status = reply.readInt()
-                val samples = reply.readInt()
+                val samples = boundedSampleEcho(reported = reply.readInt(), sent = pcm.size)
                 stats?.let { if (it.isNotEmpty()) it[0] = samples }
                 when (status) {
                     STATUS_OK -> reply.readBoundedBytes(MAX_TEXT_BYTES)
-                    else -> throw engineFailure("transcription", status, reply.readBoundedBytes(MAX_MESSAGE_BYTES).decodeToString())
+                    else -> throw engineFailure("transcription", status, reply.readBoundedMessage())
                 }
             }
         } finally {
@@ -267,8 +267,8 @@ object WhisperEngineClient {
             transact(TRANSACTION_FREE, "free", bindIfNeeded = false, write = { data -> data.writeLong(handle) }) { reply ->
                 when (val status = reply.readInt()) {
                     STATUS_OK -> Unit
-                    STATUS_STALE_HANDLE -> Log.w(TAG, "free of handle $handle: ${reply.readBoundedBytes(MAX_MESSAGE_BYTES).decodeToString()}")
-                    else -> throw engineFailure("free", status, reply.readBoundedBytes(MAX_MESSAGE_BYTES).decodeToString())
+                    STATUS_STALE_HANDLE -> Log.w(TAG, "free of handle $handle: ${reply.readBoundedMessage()}")
+                    else -> throw engineFailure("free", status, reply.readBoundedMessage())
                 }
             }
         } catch (e: WhisperEngineUnavailableException) {
@@ -288,7 +288,7 @@ object WhisperEngineClient {
         ) { reply ->
             when (val status = reply.readInt()) {
                 STATUS_OK -> reply.readLong()
-                else -> throw engineFailure("benchmark", status, reply.readBoundedBytes(MAX_MESSAGE_BYTES).decodeToString())
+                else -> throw engineFailure("benchmark", status, reply.readBoundedMessage())
             }
         }
 
@@ -312,9 +312,13 @@ object WhisperEngineClient {
     private fun expectOk(reply: Parcel, operation: String) {
         val status = reply.readInt()
         if (status != STATUS_OK) {
-            throw engineFailure(operation, status, reply.readBoundedBytes(MAX_MESSAGE_BYTES).decodeToString())
+            throw engineFailure(operation, status, reply.readBoundedMessage())
         }
     }
+
+    /** An engine message: bounded, decoded, and stripped of control characters before it can reach a log line. */
+    private fun Parcel.readBoundedMessage(): String =
+        sanitizeEngineText(readBoundedBytes(MAX_MESSAGE_BYTES).decodeToString())
 
     private fun Parcel.readBoundedBytes(max: Int): ByteArray {
         val bytes = createByteArray() ?: ByteArray(0)
@@ -329,7 +333,7 @@ object WhisperEngineClient {
         if (value.length > MAX_MESSAGE_BYTES) {
             throw WhisperEngineUnavailableException("engine reply string of ${value.length} chars exceeds the bound")
         }
-        return value
+        return sanitizeEngineText(value)
     }
 
     /**

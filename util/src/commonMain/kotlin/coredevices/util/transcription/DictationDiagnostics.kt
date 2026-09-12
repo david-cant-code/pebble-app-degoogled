@@ -49,9 +49,19 @@ expect fun engineRuntimeSnapshot(): EngineRuntimeSnapshot
 internal fun parseCpuListCount(list: String): Int? = parseCpuList(list)?.size
 
 /**
+ * The largest CPU id a cpulist may name; a list naming a higher id is
+ * malformed. The engine process reports its own list across the process
+ * boundary, and that process parses untrusted model bytes, so the list
+ * is untrusted too: this bound keeps a range such as `0-2000000000` from
+ * expanding without limit in the app process. Far above any phone.
+ */
+internal const val MAX_CPU_ID = 4095
+
+/**
  * The CPU ids named by a Linux cpulist such as `0-3,6`, in ascending
- * order, or null for anything that is not a well-formed list. This is
- * the id set an engine placement can choose from.
+ * order, or null for anything that is not a well-formed list, an id
+ * above [MAX_CPU_ID] included. This is the id set an engine placement
+ * can choose from.
  */
 internal fun parseCpuList(list: String): List<Int>? {
     val trimmed = list.trim()
@@ -62,11 +72,13 @@ internal fun parseCpuList(list: String): List<Int>? {
         if (range.isEmpty()) return null
         val dash = range.indexOf('-')
         if (dash < 0) {
-            ids += range.toIntOrNull()?.takeIf { it >= 0 } ?: return null
+            ids += range.toIntOrNull()?.takeIf { it in 0..MAX_CPU_ID } ?: return null
         } else {
             val lo = range.substring(0, dash).toIntOrNull() ?: return null
             val hi = range.substring(dash + 1).toIntOrNull() ?: return null
-            if (lo < 0 || hi < lo) return null
+            // The bound is checked before the loop so a malformed range
+            // never allocates.
+            if (lo < 0 || hi < lo || hi > MAX_CPU_ID) return null
             for (id in lo..hi) ids += id
         }
     }

@@ -159,6 +159,17 @@ class DeviceSpeedEstimator(
         /** Probes per measurement; the lowest score is kept (see the class comment). */
         const val PROBE_RUNS = 2
 
+        /**
+         * Scores accepted from a probe. The probe runs in the engine
+         * process, which parses untrusted model bytes, so its answer is
+         * untrusted; a score a hundred times faster or slower than the
+         * reference phone is nonsense from any real CPU and reads as a
+         * failed probe rather than becoming the cached score the model
+         * recommendation is built on.
+         */
+        internal val PLAUSIBLE_NS: LongRange =
+            (WhisperSpeedCalibration.REFERENCE_SCORE_NS / 100)..(WhisperSpeedCalibration.REFERENCE_SCORE_NS * 100)
+
         private const val KEY_NS = "stt_speed_ns_per_block"
         private const val KEY_THREADS = "stt_speed_threads"
         private const val KEY_AT = "stt_speed_measured_at"
@@ -202,7 +213,7 @@ class DeviceSpeedEstimator(
                 runCatching { probe(threads) }
                     .onFailure { logger.w(it) { "Speed probe failed" } }
                     .getOrNull()
-                    ?.takeIf { it > 0L }
+                    ?.takeIf { it in PLAUSIBLE_NS }
             }.minOrNull()
             if (ns == null) return@withContext null
             val score = SpeedScore(nsPerBlock = ns, threads = threads, measuredAtEpochMs = now())

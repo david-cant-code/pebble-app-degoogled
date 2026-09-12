@@ -34,10 +34,22 @@ internal object WhisperEngineProtocol {
     /** The handle is inside another call; a message follows. */
     const val STATUS_BUSY = 3
 
-    /** Longest engine output accepted, far above any dictation transcript. */
-    const val MAX_TEXT_BYTES = 64 * 1024
+    /**
+     * Longest engine output accepted. The watch caps a recording at 15
+     * seconds and the shim caps the tokens per segment, so a transcript
+     * is hundreds of bytes; this leaves an order of magnitude for a
+     * decoder that repeats itself while keeping the repetition collapse
+     * that runs over the text, which is quadratic in its word count,
+     * bounded by the process on the other side of the boundary.
+     */
+    const val MAX_TEXT_BYTES = 8 * 1024
 
-    /** Longest error or diagnostic string accepted from the engine process. */
+    /**
+     * Longest error or diagnostic string accepted from the engine
+     * process, in bytes for byte arrays and chars for strings. Text under
+     * this bound is still untrusted: [sanitizeEngineText] runs over it
+     * before it reaches an exception message or a log line.
+     */
     const val MAX_MESSAGE_BYTES = 4 * 1024
 
     /** Sentinel for an integer field the engine process could not read. */

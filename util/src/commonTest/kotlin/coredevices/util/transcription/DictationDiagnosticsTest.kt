@@ -32,6 +32,20 @@ class DictationDiagnosticsTest {
         assertEquals(listOf(2), parseCpuList("2,2"))
     }
 
+    /**
+     * The list can come from the engine process, so a range that would
+     * expand to billions of ids must read as malformed, not allocate.
+     */
+    @Test
+    fun cpuListRejectsIdsAboveTheBound() {
+        assertNull(parseCpuList("0-2000000000"))
+        assertNull(parseCpuList("0-${MAX_CPU_ID + 1}"))
+        assertNull(parseCpuList("${MAX_CPU_ID + 1}"))
+        assertNull(parseCpuList("0-3,${Int.MAX_VALUE}"))
+        assertEquals(MAX_CPU_ID + 1, parseCpuListCount("0-$MAX_CPU_ID"))
+        assertEquals(listOf(MAX_CPU_ID), parseCpuList("$MAX_CPU_ID"))
+    }
+
     @Test
     fun cpuListRejectsMalformedInput() {
         assertNull(parseCpuListCount(""))

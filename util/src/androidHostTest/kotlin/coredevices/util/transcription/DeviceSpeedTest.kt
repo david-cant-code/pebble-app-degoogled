@@ -49,7 +49,7 @@ class DeviceSpeedTest {
     @Test
     fun cachedOrMeasureMeasuresOnce() = runBlocking {
         var runs = 0
-        val estimator = estimator(probe = { runs++; 10L })
+        val estimator = estimator(probe = { runs++; 100_000_000L })
         estimator.cachedOrMeasure()
         estimator.cachedOrMeasure()
         assertEquals(DeviceSpeedEstimator.PROBE_RUNS, runs, "one measurement, no more")
@@ -65,16 +65,16 @@ class DeviceSpeedTest {
 
     @Test
     fun aProbeThatFailsLeavesTheOtherToMeasure() = runBlocking {
-        val scores = ArrayDeque<() -> Long>(listOf({ error("engine unavailable") }, { 100L }))
+        val scores = ArrayDeque<() -> Long>(listOf({ error("engine unavailable") }, { 100_000_000L }))
         val measured = estimator(probe = { scores.removeFirst()() }).measure()
-        assertEquals(100L, assertNotNull(measured).nsPerBlock)
+        assertEquals(100_000_000L, assertNotNull(measured).nsPerBlock)
     }
 
     @Test
     fun callersArrivingDuringAProbeShareItsScore() = runBlocking(Dispatchers.Default) {
         val gate = CountDownLatch(1)
         val runs = AtomicInteger()
-        val estimator = estimator(probe = { runs.incrementAndGet(); gate.await(10, TimeUnit.SECONDS); 10L })
+        val estimator = estimator(probe = { runs.incrementAndGet(); gate.await(10, TimeUnit.SECONDS); 100_000_000L })
         val first = async { estimator.cachedOrMeasure() }
         val second = async { estimator.cachedOrMeasure() }
         delay(200)
@@ -86,10 +86,23 @@ class DeviceSpeedTest {
         )
     }
 
+    /** A score no real CPU could produce is a failed probe, whichever direction it is off in. */
+    @Test
+    fun anImplausibleScoreIsAFailedProbe() = runBlocking {
+        val tooFast = DeviceSpeedEstimator.PLAUSIBLE_NS.first - 1
+        val tooSlow = DeviceSpeedEstimator.PLAUSIBLE_NS.last + 1
+        assertNull(estimator(probe = { tooFast }).measure())
+        assertNull(estimator(probe = { tooSlow }).measure())
+        var calls = 0
+        val honest = WhisperSpeedCalibration.REFERENCE_SCORE_NS
+        val measured = estimator(probe = { if (calls++ == 0) tooFast else honest }).measure()
+        assertEquals(honest, measured?.nsPerBlock, "the honest probe measures, the forged one drops out")
+    }
+
     @Test
     fun aFailedProbeKeepsThePreviousScore() = runBlocking {
         val settings = MapSettings()
-        val good = estimator(settings, probe = { 100L }).measure()
+        val good = estimator(settings, probe = { 100_000_000L }).measure()
         val failing = estimator(settings, probe = { error("engine unavailable") })
         assertEquals(good, failing.measure())
         assertEquals(good, failing.cached())
@@ -98,7 +111,7 @@ class DeviceSpeedTest {
     @Test
     fun anUnsupportedEngineNeverProbes() = runBlocking {
         var runs = 0
-        val estimator = estimator(probe = { runs++; 10L }, supported = false)
+        val estimator = estimator(probe = { runs++; 100_000_000L }, supported = false)
         assertNull(estimator.measure())
         assertEquals(0, runs)
     }
@@ -106,7 +119,7 @@ class DeviceSpeedTest {
     @Test
     fun aScoreFromAnOlderProbeIsDiscarded() = runBlocking {
         val settings = MapSettings()
-        estimator(settings, probe = { 100L }).measure()
+        estimator(settings, probe = { 100_000_000L }).measure()
         settings.putInt("stt_speed_probe_version", WhisperSpeedCalibration.PROBE_VERSION - 1)
         assertNull(estimator(settings, probe = { error("must not run") }).cached())
     }

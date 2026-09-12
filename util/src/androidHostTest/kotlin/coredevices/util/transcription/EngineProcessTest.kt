@@ -42,6 +42,16 @@ class EngineProcessTest {
         assertEquals(EngineRuntimeSnapshot.PROCESS_ENGINE, snapshot.process)
     }
 
+    /** A hostile engine report degrades to unknown facts; it never costs the app process memory. */
+    @Test
+    fun hostileCpuListInTheEngineReportReadsAsUnknown() {
+        val runtime = WhisperEngineRuntime(
+            cpusAllowedList = "0-2000000000", cpuset = "/foreground", importance = null,
+            oomScoreAdj = 1, pid = 4242, uid = 99010,
+        )
+        assertNull(engineProcessSnapshot(runtime).allowedCpus)
+    }
+
     @Test
     fun withoutABoundEngineProcessThisProcessAnswers() {
         assertNull(engineProcessSnapshot())
