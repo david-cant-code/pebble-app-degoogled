@@ -1,6 +1,5 @@
 package coredevices.whisper
 
-import android.app.ActivityManager
 import android.app.Service
 import android.content.Intent
 import android.os.Binder
@@ -31,19 +30,24 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The engine's process. This module's manifest declares the service with
- * `android:isolatedProcess`: a separate zero-permission uid with no path
- * into the app's files, no network and no other permission, so a
- * memory-safety bug in the model parser or the decoder, reached through
- * a model file, is contained to this process. Nothing here opens a path:
- * the model arrives as a file descriptor and the audio as a shared-memory
- * region, both passed by [WhisperEngineClient], and the engine is the
- * only thing that runs here.
+ * `android:isolatedProcess`, which the platform runs under a special
+ * process isolated from the rest of the system, reachable only through
+ * the Service API (AOSP `android16-release`,
+ * `core/res/res/values/attrs_manifest.xml`, `isolatedProcess`): a uid of
+ * its own in the isolated range ([isIsolatedUid]) that holds no
+ * permission, so neither the app's files nor the network resolve from
+ * it, and a memory-safety bug in the model parser or the decoder,
+ * reached through a model file, is contained to this process. Nothing
+ * here opens a path: the model arrives as a file descriptor and the
+ * audio as a shared-memory region, both passed by [WhisperEngineClient],
+ * and the engine is the only thing that runs here. Every other mention
+ * of what the isolation buys points here.
  *
- * The platform derives this process's real name from the class name
- * (`<applicationId>:whisper:coredevices.whisper.WhisperEngineService`),
- * so the manifest's `android:process` value is a prefix of it, never
- * equal to it; a per-process manifest attribute keyed to the declared
- * name misses and belongs on the application element instead.
+ * The platform names an isolated service's process after its class,
+ * `<declared process>:<class name>` (AOSP `android16-release`,
+ * `services/core/java/com/android/server/am/ActiveServices.java`,
+ * `getProcessNameForService`), so `ps` and logcat show this one as
+ * `<applicationId>:whisper:coredevices.whisper.WhisperEngineService`.
  */
 class WhisperEngineService : Service() {
     // Built with the service: onBind is its only entry point and the
@@ -55,13 +59,14 @@ class WhisperEngineService : Service() {
 
 /**
  * True inside an isolated process. Every process of the app instantiates
- * the app's Application class, the engine process included, and the app
- * start-up (DI graph, watch connection, background work) must not run
- * there: it has no file, network or permission access, and the engine is
- * all that process is for. From API 28 the platform answers directly;
- * below it the answer is the uid range the platform reserves for
- * isolated processes, which is what `isIsolated` checks; [isIsolatedUid]
- * holds that range.
+ * the app's Application class, the engine process included (AOSP
+ * `android16-release`, `core/java/android/app/ActivityThread.java`,
+ * `handleBindApplication`), and the app start-up (DI graph, watch
+ * connection, background work) must not run there: the process has none
+ * of the access it needs ([WhisperEngineService]), and the engine is all
+ * that process is for. From API 28 the platform answers directly
+ * (`Process.isIsolated`); below it the answer is the uid range that
+ * call checks, held by [isIsolatedUid].
  */
 fun runningInIsolatedProcess(): Boolean =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -72,16 +77,22 @@ fun runningInIsolatedProcess(): Boolean =
 
 /**
  * Serves [WhisperEngineProtocol] over the JNI shim. Each layer holds on
- * its own: only the app's own uid may call (the manifest's exported=false
- * is the layer in front of it); a handle is dereferenced only if this
- * process issued it, so a value from before an engine restart is refused;
- * a handle inside one call refuses a second call and a free, which is
- * what makes a use-after-free impossible if the app process ever fails
- * to serialize its calls; and the CPU feature floor is re-checked here
- * before the engine library is loaded, so a client that skipped its own
- * check gets an error rather than an illegal instruction. A failure in a
- * handler is reported in the reply, never thrown: an exception escaping
- * onTransact ends this process.
+ * its own: only the app's own uid may make a protocol transaction (the
+ * manifest's exported=false is the layer in front of it; the framework's
+ * own transaction codes go to the platform's handler untouched); a
+ * handle is dereferenced only if this process issued it, so a value from
+ * before an engine restart is refused; a handle inside one call refuses
+ * a second call and a free, which is what makes a use-after-free
+ * impossible if the app process ever fails to serialize its calls; and
+ * the CPU feature floor is re-checked here before the engine library is
+ * loaded, so a client that skipped its own check gets an error rather
+ * than an illegal instruction. A failure in a handler is reported in the
+ * reply, never thrown: the platform turns a RuntimeException out of
+ * onTransact into an exception reply the client reads as a transport
+ * failure (AOSP `android16-release`, `core/java/android/os/Binder.java`,
+ * `execTransactInternal`), and an Error out of it ends this process, so
+ * onTransact catches everything and writes the failure in the reply's
+ * own layout.
  */
 private class EngineBinder(private val service: Service) : Binder() {
 
@@ -299,7 +310,12 @@ private class EngineBinder(private val service: Service) : Binder() {
         reply.writeInt(STATUS_OK)
         reply.writeString(statusField("Cpus_allowed_list"))
         reply.writeString(readTrimmed("/proc/self/cpuset"))
-        reply.writeInt(importance() ?: UNKNOWN_INT)
+        // The platform refuses the importance query from an isolated
+        // process (AOSP `android16-release`,
+        // `services/core/java/com/android/server/am/ActivityManagerService.java`,
+        // `getMyMemoryState`, `enforceNotIsolatedCaller`); the slot stays
+        // so the report reads like the host's snapshot.
+        reply.writeInt(UNKNOWN_INT)
         reply.writeInt(readTrimmed("/proc/self/oom_score_adj")?.toIntOrNull() ?: UNKNOWN_INT)
         reply.writeInt(Process.myPid())
         reply.writeInt(Process.myUid())
@@ -330,11 +346,5 @@ private class EngineBinder(private val service: Service) : Binder() {
 
     private fun readTrimmed(path: String): String? = runCatching {
         File(path).readText().trim().ifEmpty { null }
-    }.getOrNull()
-
-    private fun importance(): Int? = runCatching {
-        val info = ActivityManager.RunningAppProcessInfo()
-        ActivityManager.getMyMemoryState(info)
-        info.importance
     }.getOrNull()
 }

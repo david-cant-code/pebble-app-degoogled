@@ -61,8 +61,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
         // Fork: the speech engine's isolated process instantiates this class
-        // too, and nothing below can run there (no files, no network, no
-        // permissions); see runningInIsolatedProcess.
+        // too, and nothing below may run there; see runningInIsolatedProcess.
         if (runningInIsolatedProcess()) return
         // Fork: the engine client needs the application context to bind the
         // engine process; attached before the DI graph exists so no engine

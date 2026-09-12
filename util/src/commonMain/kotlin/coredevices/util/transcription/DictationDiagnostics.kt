@@ -13,8 +13,8 @@ package coredevices.util.transcription
  * @property cpuset the cgroup cpuset path the process sits in (for example
  *   `/top-app`, `/foreground`, `/background`).
  * @property importance the platform's process importance value at the time
- *   of the call (Android `RunningAppProcessInfo.importance`); the engine
- *   process cannot read its own, so it is null there.
+ *   of the call (Android `RunningAppProcessInfo.importance`); always null
+ *   for the engine process (`WhisperEngineRuntime.importance`).
  * @property oomScoreAdj the kernel-facing rating the platform sets from
  *   the same state (`/proc/self/oom_score_adj`, lower is safer: 0 for the
  *   foreground app, 900 and above for cached apps), which the low-memory

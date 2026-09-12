@@ -1005,7 +1005,8 @@ class WhisperTranscriptionService internal constructor(
      * [transcriptionMutex] to protect the native model handle.
      *
      * Throws [TranscriptionException.TranscriptionRequiresDownload] if the model isn't initialized,
-     * [TranscriptionException.TranscriptionServiceUnavailable] if the engine is unsupported, and
+     * [TranscriptionException.TranscriptionServiceUnavailable] if the engine is unsupported or its
+     * process cannot be reached or died under the call, and
      * [TranscriptionException.NotEnoughMemory] under memory pressure.
      */
     suspend fun transcribeLocal(
@@ -1034,8 +1035,9 @@ class WhisperTranscriptionService internal constructor(
      * Run the local whisper model directly on a pre-collected PCM buffer, ignoring the configured
      * mode. Intended for callers (e.g. Rebble ASR fallback) that decide mode externally.
      * Returns the recognized text. Throws [TranscriptionException.TranscriptionRequiresDownload]
-     * if the local model isn't initialized; throws [TranscriptionException.NoSpeechDetected]
-     * if the result is empty.
+     * if the local model isn't initialized, [TranscriptionException.TranscriptionServiceUnavailable]
+     * if the engine is unsupported or its process cannot be reached or died under the call, and
+     * [TranscriptionException.NoSpeechDetected] if the result is empty.
      */
     suspend fun transcribeLocalForFallback(
         audio: ByteArray,

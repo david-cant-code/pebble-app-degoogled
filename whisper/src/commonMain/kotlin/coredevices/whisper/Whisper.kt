@@ -3,10 +3,20 @@ package coredevices.whisper
 /**
  * The complete engine surface for on-device speech recognition. Seven
  * functions: this is the fork's replacement for a much larger proprietary
- * binding surface, and everything the app needs from the engine fits
- * here (six for the speech model, one model-free speed probe). Anything
- * not expressible through these functions belongs in the Kotlin service
- * layer, not in new native entry points.
+ * binding surface, and everything the app asks of the engine goes
+ * through here (six for the speech model, one model-free speed probe);
+ * what the transcription service reads about the process the engine
+ * runs in comes from the Android client behind these actuals
+ * (`EngineProcess.android.kt`). Anything not expressible through these
+ * functions belongs in the Kotlin service layer, not in new native entry
+ * points.
+ *
+ * Failure contract: a call throws [WhisperEngineUnavailableException]
+ * when the engine's process cannot be reached, died under the call, or
+ * answered for a handle it did not issue; `IllegalStateException` when
+ * this process failed to serialize its calls (a handle inside another
+ * call); and a plain exception carrying the engine's error text for a
+ * failure inside the engine.
  *
  * Threading contract: callers serialize [whisperInit], [whisperTranscribe]
  * and [whisperFree] per handle (the transcription service holds one mutex
@@ -21,14 +31,17 @@ package coredevices.whisper
  * True when the engine libraries are present and the CPU meets the
  * compiled feature floor (armv8.2 dotprod + fp16). Checked by a separate
  * baseline-architecture probe library, so this is safe to call on any
- * device; no engine code is mapped until it has returned true.
+ * device; no engine code is mapped until it has returned true. On
+ * Android it is also false below the audio transport's API floor and
+ * before the engine client is attached to the application (the actual
+ * states both).
  */
 expect fun isWhisperSupported(): Boolean
 
 /**
- * Loads a ggml model file and returns an engine handle. Throws with the
- * engine's error text on failure. The caller owns the handle and must
- * release it with [whisperFree].
+ * Loads a ggml model file and returns an engine handle; failures follow
+ * the file's contract. The caller owns the handle and must release it
+ * with [whisperFree].
  */
 expect fun whisperInit(modelPath: String): Long
 
@@ -70,9 +83,9 @@ class TranscribeStats {
  * it must be unique among all calls that can be in flight at once (the
  * service uses a monotonic counter). [placement] scopes the calling
  * thread's affinity and priority to this call. The audio is decoded as
- * given. [stats], when given, is filled in by the call. Throws with the
- * engine's error text on failure, including cancellation via
- * [whisperCancel].
+ * given. [stats], when given, is filled in by the call. Failures follow
+ * the file's contract; a cancellation via [whisperCancel] is an engine
+ * failure with the engine's text.
  */
 expect fun whisperTranscribe(
     handle: Long,
@@ -102,7 +115,7 @@ expect fun whisperFree(handle: Long)
  * this phone runs the engine, which the service layer calibrates into
  * per-model dictation estimates before any model is downloaded. Runs for
  * about a second of CPU. [placement] scopes the calling thread as for
- * [whisperTranscribe]. Throws with the engine's error text on failure.
+ * [whisperTranscribe]; failures follow the file's contract.
  */
 expect fun whisperBenchmark(threads: Int, placement: EnginePlacement = EnginePlacement.DEFAULT): Long
 

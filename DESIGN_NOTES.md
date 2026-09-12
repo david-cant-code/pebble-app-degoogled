@@ -259,10 +259,9 @@ The replacement is whisper.cpp (MIT), compiled from source:
   invalid modified UTF-8, which NewStringUTF aborts on under CheckJNI.
 - The engine runs in an isolated process, `WhisperEngineService`,
   declared in the `:whisper` module manifest with `android:isolatedProcess`
-  (pinned at the source by `WhisperEngineManifestTest`): a
-  separate zero-permission uid that cannot open the app's files, reach
-  the network or hold any permission, so a memory-safety bug in the
-  model parser or the decoder, reached through a model file, is
+  (pinned at the source by `WhisperEngineManifestTest`; what the
+  isolation buys is stated on the service), so a memory-safety bug in
+  the model parser or the decoder, reached through a model file, is
   contained to that process. This layer is independent of the pinned
   catalog below: the pin covers that the bytes that arrived are the
   bytes that were meant to arrive; it does not cover a parser bug
@@ -298,22 +297,22 @@ The replacement is whisper.cpp (MIT), compiled from source:
   handle. The engine thread count and the placement facts on the
   diagnostics lines (`proc=engine`) come from the engine process once it
   is bound, since `/proc/self` in the app process describes the wrong
-  process. The transport needs API 27, so on Android 8.0 the engine
-  reports itself unsupported and dictation takes the remote path
-  (KNOWN_ISSUES). Every process of the app instantiates its Application
-  class, the engine process included, so `MainApplication.onCreate`
-  returns at once there (`runningInIsolatedProcess`); and the platform
-  derives the process's real name from the service class name, so a
-  per-process manifest attribute belongs on `<application>`.
+  process. The transport's API floor (`isWhisperSupported` in
+  `Whisper.android.kt`) puts Android 8.0 on the remote path
+  (KNOWN_ISSUES), and `MainApplication.onCreate` returns at once in the
+  engine process (`runningInIsolatedProcess` states why).
 - `whisperBenchmark` is the model-free speed probe: the shim times one
   encoder block of the base model's shape, built on ggml with random
   weights, on the thread count a dictation would get. `DeviceSpeedEstimator`
-  (util) runs it once per install (callers arriving during a probe wait
-  for it and take its score) and caches the score;
-  `WhisperSpeedCalibration` turns the score into "seconds for a full 15 s
-  dictation" per catalog tier from constants measured on the reference
-  phone (the calibration procedure is in its KDoc, the instrumented
-  `WhisperSpeedCalibrationBenchmark` produces the numbers). The model
+  (util) measures once per install and caches the score; a measurement
+  is the lower of two probes, since the first probe in a freshly spawned
+  engine process runs slow, and callers arriving during a measurement
+  wait for it and take its score. `WhisperSpeedCalibration` turns the
+  score into "seconds for a full 15 s dictation" per catalog tier from
+  constants measured on the reference phone (the calibration procedure
+  is in its KDoc; the instrumented `WhisperSpeedCalibrationBenchmark`
+  produces the numbers, discarding its first probe for the same
+  reason). The model
   picker shows the estimate on every row, and the default pick steps
   down a tier while its estimate exceeds the watch's window, to the tiny
   floor at most.
@@ -458,8 +457,10 @@ The replacement is whisper.cpp (MIT), compiled from source:
   every barrier for a scheduler slice and a decode that takes a second
   takes half a minute (measured on two chips; `TranscriptionThreads`
   holds the numbers' conclusions). The count is read at call time from
-  the process affinity mask, since a process that leaves the screen
-  lands in a smaller cpuset on every phone tried, and sized by the
+  the affinity mask of the process the decode runs in (the engine
+  process once one is bound, this process before that; see the
+  isolated-process bullet above), since a process that leaves the
+  screen lands in a smaller cpuset on every phone tried, and sized by the
   fastest frequency tier in that mask (`tieredThreadCount`), capped at
   four. The engine binding carries an `EnginePlacement` (affinity mask,
   nice value) that the shim applies to the calling thread for one call;

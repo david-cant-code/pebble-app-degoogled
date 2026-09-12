@@ -72,8 +72,9 @@ internal object WhisperEngineProtocol {
  * @property cpusAllowedList the engine process's `Cpus_allowed_list`
  *   from `/proc/self/status`, unparsed, null if unreadable there.
  * @property cpuset its cgroup cpuset path, null if unreadable there.
- * @property importance its process importance as the platform reports it
- *   to the process itself, null if that report failed.
+ * @property importance always null: the platform refuses the importance
+ *   query from an isolated process ([WhisperEngineService] states the
+ *   source); the field keeps the report's layout that of the host's.
  * @property oomScoreAdj its `/proc/self/oom_score_adj`, null if unreadable.
  * @property pid the engine process id.
  * @property uid the engine process uid; an isolated process holds one in

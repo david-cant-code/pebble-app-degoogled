@@ -40,10 +40,12 @@ private val cpuSupported: Boolean by lazy {
 }
 
 /**
- * The audio transport (SharedMemory) exists from API 27, so the engine is
+ * The audio transport, `android.os.SharedMemory`, exists from API 27
+ * (the platform reference's API level for the class), so the engine is
  * unsupported on Android 8.0 and a phone there takes the same path as an
- * unsupported CPU. Unattached (no application context yet) reads as
- * unsupported too, so nothing binds before the app has set up.
+ * unsupported CPU; every other mention of the floor points here.
+ * Unattached (no application context yet) reads as unsupported too, so
+ * nothing binds before the app has set up.
  */
 actual fun isWhisperSupported(): Boolean =
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && WhisperEngineClient.isAttached && cpuSupported

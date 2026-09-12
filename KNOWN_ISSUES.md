@@ -519,8 +519,9 @@ records for the replaced model after the switch settles.
 **Status: accepted.**
 
 The speech engine runs in an isolated process and receives each
-dictation's audio as a shared-memory region, a platform API that exists
-from Android 8.1. On Android 8.0 the engine reports itself unsupported:
+dictation's audio as a shared-memory region, an API whose floor is
+Android 8.1 (`isWhisperSupported` in the whisper module states it). On
+Android 8.0 the engine reports itself unsupported:
 the model picker offers no local models and dictation takes the remote
 path, as it does on a CPU below the engine's feature floor. Closing this
 means a second audio transport for that one release, a temporary file
