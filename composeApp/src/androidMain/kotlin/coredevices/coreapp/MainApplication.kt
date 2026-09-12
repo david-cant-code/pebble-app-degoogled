@@ -171,13 +171,19 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         }
     }
 
+    // Fork: the platform delivers these to every process of the app, the
+    // speech engine's isolated process included, where onCreate returned
+    // before the DI graph was built; an injected member resolved there
+    // throws, and that process has no file to write anyway.
     override fun onLowMemory() {
         super.onLowMemory()
+        if (runningInIsolatedProcess()) return
         fileLogWriter.logBlockingAndFlush(Severity.Info, "onLowMemory", "MainApplication", null)
     }
 
     override fun onTerminate() {
         super.onTerminate()
+        if (runningInIsolatedProcess()) return
         fileLogWriter.logBlockingAndFlush(Severity.Info, "onTerminate", "MainApplication", null)
     }
 
