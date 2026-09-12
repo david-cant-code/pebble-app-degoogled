@@ -9,6 +9,7 @@ import coredevices.util.STTConfig
 import coredevices.util.models.CactusSTTMode
 import coredevices.whisper.EnginePlacement
 import coredevices.whisper.TranscribeStats
+import coredevices.whisper.WhisperEngineUnavailableException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
@@ -82,6 +83,7 @@ class WhisperColdPathDiagnosticsTest {
     private class ScriptedEngine(private val initMillis: Long = 0, private val bindMillis: Long? = null) : WhisperEngine {
         @Volatile var initGate: CountDownLatch? = null
         @Volatile var failInit = false
+        @Volatile var engineUnreachable = false
         @Volatile private var generation = 0L
 
         override fun supported(): Boolean = true
@@ -91,6 +93,7 @@ class WhisperColdPathDiagnosticsTest {
             // Bounded so a deadlocked test fails instead of hanging the run.
             initGate?.await(20, TimeUnit.SECONDS)
             if (failInit) throw RuntimeException("whisper init failed: scripted")
+            if (engineUnreachable) throw WhisperEngineUnavailableException("the engine process did not connect")
             if (bindMillis != null && generation == 0L) generation = 1L
             return 1L
         }
@@ -258,6 +261,14 @@ class WhisperColdPathDiagnosticsTest {
         assertEquals("?", field(line, "engineInitMs"), line)
         assertEquals("?", field(line, "warmUpMs"), line)
         assertEquals("error:RuntimeException", field(line, "outcome"), line)
+    }
+
+    /** A load that could not reach the engine process reports the stable token, not a class name. */
+    @Test
+    fun unreachableEngineIsNamedOnTheColdPathLine() = runBlocking(Dispatchers.Default) {
+        serviceFor(ScriptedEngine().apply { engineUnreachable = true }, SlowProvider(pathMillis = 0))
+        awaitUntil("the coldpath line of the failed load") { capture.coldPathLines().isNotEmpty() }
+        assertEquals("error:engine_unavailable", field(capture.coldPathLines().single(), "outcome"))
     }
 
     @Test

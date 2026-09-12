@@ -775,7 +775,7 @@ class WhisperTranscriptionService internal constructor(
                 outcome = "ok"
                 onInitialized.trySend(modelHandle != 0L || sttConfig.value.mode == CactusSTTMode.RemoteOnly)
             } catch (e: Throwable) {
-                outcome = "error:${e::class.simpleName}"
+                outcome = "error:${transcriptionFailureReason(e)}"
                 // An engine process that could not be reached is what the
                 // next dictation reports. Set only here, and cleared only
                 // by the next attempt to reach the engine (initIfNeeded),
@@ -940,7 +940,7 @@ class WhisperTranscriptionService internal constructor(
             }
             throw e
         } catch (e: WhisperEngineUnavailableException) {
-            outcome = "error:${e::class.simpleName}"
+            outcome = "error:${transcriptionFailureReason(e)}"
             // The engine process behind this handle is gone, and with it
             // the handle: forgotten here, under the mutex, so the next
             // dictation loads afresh even if the death report has not
@@ -953,7 +953,7 @@ class WhisperTranscriptionService internal constructor(
             analytics.logTranscriptionFailure("whisper", transcriptionFailureReason(unavailable), e.message)
             throw unavailable
         } catch (e: Exception) {
-            outcome = "error:${e::class.simpleName}"
+            outcome = "error:${transcriptionFailureReason(e)}"
             analytics.logTranscriptionFailure("whisper", transcriptionFailureReason(e), e.message)
             throw e
         } finally {
