@@ -41,6 +41,22 @@ class DictationDiagnosticsTest {
         assertEquals(listOf(MAX_CPU_ID), parseCpuList("$MAX_CPU_ID"))
     }
 
+    /**
+     * Many ranges inside the id bound name as many ids as one range past
+     * it would, so the parser caps what a list names in total and does
+     * the same work for any list: over 4 KB of full ranges is refused at
+     * the second one.
+     */
+    @Test
+    fun cpuListRejectsMoreIdsThanTheBoundAllows() {
+        val fullRange = "0-$MAX_CPU_ID"
+        assertNull(parseCpuList(List(585) { fullRange }.joinToString(",")))
+        assertNull(parseCpuList("$fullRange,0"), "one id past the total, as a repeat")
+        assertNull(parseCpuList("0-2048,2048-$MAX_CPU_ID"), "an overlap counts twice")
+        assertEquals(MAX_CPU_ID + 1, parseCpuListCount("0-2047,2048-$MAX_CPU_ID"))
+        assertEquals(MAX_CPU_ID + 1, parseCpuListCount(fullRange))
+    }
+
     @Test
     fun cpuListRejectsMalformedInput() {
         assertNull(parseCpuListCount(""))

@@ -26,7 +26,6 @@ import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_FREE
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_INIT
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_RUNTIME
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_TRANSCRIBE
-import coredevices.whisper.WhisperEngineProtocol.UNKNOWN_INT
 import java.io.File
 import java.io.IOException
 import java.nio.ByteOrder
@@ -169,14 +168,19 @@ object WhisperEngineClient {
         if (!bindIfNeeded && !isConnected) return null
         return transact(TRANSACTION_RUNTIME, "runtime", bindIfNeeded, write = {}) { reply ->
             expectOk(reply, "runtime")
-            WhisperEngineRuntime(
-                cpusAllowedList = reply.readBoundedString(),
-                cpuset = reply.readBoundedString(),
-                importance = reply.readInt().takeIf { it != UNKNOWN_INT },
-                oomScoreAdj = reply.readInt().takeIf { it != UNKNOWN_INT },
+            val cpusAllowedList = reply.readBoundedString()
+            val cpuset = reply.readBoundedString()
+            // The importance slot is read past and discarded: it keeps
+            // the layout, and no value in it is the engine's own
+            // (boundedEngineRuntime).
+            reply.readInt()
+            boundedEngineRuntime(
+                cpusAllowedList = cpusAllowedList,
+                cpuset = cpuset,
+                oomScoreAdj = reply.readInt(),
                 pid = reply.readInt(),
                 uid = reply.readInt(),
-                openFds = reply.readInt().takeIf { it != UNKNOWN_INT },
+                openFds = reply.readInt(),
             )
         }
     }

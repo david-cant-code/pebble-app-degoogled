@@ -67,21 +67,25 @@ internal object WhisperEngineProtocol {
 /**
  * What the engine process reports about itself, read inside it: the
  * placement facts the app process cannot observe from outside, because
- * `/proc/self` there describes the wrong process.
+ * `/proc/self` there describes the wrong process. A field is null when
+ * the engine process could not read it, and also when what it sent has
+ * a shape the app knows the field cannot have ([boundedEngineRuntime]).
  *
  * @property cpusAllowedList the engine process's `Cpus_allowed_list`
- *   from `/proc/self/status`, unparsed, null if unreadable there.
- * @property cpuset its cgroup cpuset path, null if unreadable there.
+ *   from `/proc/self/status`, unparsed.
+ * @property cpuset its cgroup cpuset path, one token.
  * @property importance always null: the platform refuses the importance
  *   query from an isolated process ([WhisperEngineService] states the
- *   source); the field keeps the report's layout that of the host's.
- * @property oomScoreAdj its `/proc/self/oom_score_adj`, null if unreadable.
+ *   source), and the client discards the slot; the field keeps the
+ *   report's layout that of the host's.
+ * @property oomScoreAdj its `/proc/self/oom_score_adj`, within the
+ *   kernel's range for it.
  * @property pid the engine process id.
  * @property uid the engine process uid; an isolated process holds one in
  *   the platform's isolated range, distinct from the app's.
  * @property openFds the number of descriptors open in the engine process
- *   at the time of the report, null if unreadable there; a model
- *   descriptor it was handed and kept shows up here.
+ *   at the time of the report; a model descriptor it was handed and kept
+ *   shows up here.
  */
 class WhisperEngineRuntime(
     val cpusAllowedList: String?,

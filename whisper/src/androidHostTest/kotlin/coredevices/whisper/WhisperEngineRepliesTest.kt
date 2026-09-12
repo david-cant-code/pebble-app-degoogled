@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
@@ -117,6 +118,84 @@ class WhisperEngineRepliesTest {
         assertTrue(longest <= 5.minutes, "a hung engine is held for $longest")
         assertTrue(transactionDeadline(WhisperEngineProtocol.TRANSACTION_INIT) >= 1.minutes, "a model load reads up to a gigabyte")
         assertEquals(shortest, transactionDeadline(WhisperEngineProtocol.TRANSACTION_RUNTIME + 1), "an unknown code gets the shortest bound")
+    }
+
+    /**
+     * The runtime report describes the engine process's placement and
+     * nothing else: a field the app can predict the shape of reads as
+     * unknown when the engine's value has another shape, and the
+     * importance slot is never the engine's to fill.
+     */
+    @Test
+    fun theRuntimeReportKeepsOnlyFieldsOfThePredictedShape() {
+        val honest = boundedEngineRuntime(cpusAllowedList = "0-3,6", cpuset = "/top-app", oomScoreAdj = 0, pid = 4242, uid = 99010, openFds = 12)
+        assertEquals("0-3,6", honest.cpusAllowedList)
+        assertEquals("/top-app", honest.cpuset)
+        assertNull(honest.importance)
+        assertEquals(0, honest.oomScoreAdj)
+        assertEquals(4242, honest.pid)
+        assertEquals(99010, honest.uid)
+        assertEquals(12, honest.openFds)
+        val unknown = boundedEngineRuntime(
+            cpusAllowedList = null, cpuset = null, oomScoreAdj = WhisperEngineProtocol.UNKNOWN_INT,
+            pid = 1, uid = 99000, openFds = WhisperEngineProtocol.UNKNOWN_INT,
+        )
+        assertNull(unknown.cpusAllowedList)
+        assertNull(unknown.cpuset)
+        assertNull(unknown.oomScoreAdj)
+        assertNull(unknown.openFds)
+        assertNull(boundedEngineRuntime(cpusAllowedList = null, cpuset = null, oomScoreAdj = 0, pid = 1, uid = 99000, openFds = -1).openFds)
+    }
+
+    /**
+     * The cpuset is printed as one `key=value` field of the fixed-layout
+     * diagnostics lines, so only one path token is a cpuset: a value that
+     * could start another field, or that no cgroup path is made of, reads
+     * as unknown.
+     */
+    @Test
+    fun aCpusetThatIsNotOnePathTokenReadsAsUnknown() {
+        fun cpuset(value: String) = boundedEngineRuntime(cpusAllowedList = null, cpuset = value, oomScoreAdj = 0, pid = 1, uid = 99000, openFds = 1).cpuset
+        assertEquals("/", cpuset("/"), "the root cpuset")
+        assertEquals("/top-app", cpuset("/top-app"))
+        assertEquals("/application/background", cpuset("/application/background"))
+        assertEquals("/system-background", cpuset("/system-background"))
+        assertEquals("/foreground_window", cpuset("/foreground_window"))
+        assertEquals("/vendor.group2", cpuset("/vendor.group2"))
+        val longest = "/" + "a".repeat(MAX_CPUSET_PATH_CHARS - 1)
+        assertEquals(longest, cpuset(longest))
+        assertNull(cpuset(longest + "a"), "one past the length bound")
+        assertNull(cpuset("/top-app oomAdj=0 outcome=ok"), "a space starts a forged field")
+        assertNull(cpuset("/top-app=ok"), "an equals sign forges a value")
+        assertNull(cpuset("/top-app?dictation engine: forged=1"), "a sanitised line break is still not a path")
+        assertNull(cpuset("/top-app‮"), "a format character is not a control character, and not a path either")
+        assertNull(cpuset("/tóp-app"), "a letter outside ASCII")
+        assertNull(cpuset("top-app"), "no leading slash")
+        assertNull(cpuset(""))
+    }
+
+    @Test
+    fun aCpuListWithAnythingButDigitsCommasAndDashesReadsAsUnknown() {
+        fun list(value: String) = boundedEngineRuntime(cpusAllowedList = value, cpuset = null, oomScoreAdj = 0, pid = 1, uid = 99000, openFds = 1).cpusAllowedList
+        assertEquals("0-3,6", list("0-3,6"))
+        assertEquals("0-4095", list("0-4095"))
+        assertEquals("7", list("7"))
+        assertNull(list("0-3 oomAdj=0"), "a space")
+        assertNull(list("0-3,6?"), "a sanitised control character")
+        assertNull(list("0-3;6"))
+        assertNull(list(""))
+    }
+
+    @Test
+    fun anOomScoreAdjOutsideTheKernelRangeReadsAsUnknown() {
+        fun adj(value: Int) = boundedEngineRuntime(cpusAllowedList = null, cpuset = null, oomScoreAdj = value, pid = 1, uid = 99000, openFds = 1).oomScoreAdj
+        assertEquals(-1000, adj(-1000))
+        assertEquals(0, adj(0))
+        assertEquals(1000, adj(1000))
+        assertNull(adj(-1001))
+        assertNull(adj(1001))
+        assertNull(adj(Int.MAX_VALUE))
+        assertNull(adj(WhisperEngineProtocol.UNKNOWN_INT))
     }
 
     @Test

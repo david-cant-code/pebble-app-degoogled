@@ -6,6 +6,7 @@ import coredevices.whisper.WhisperEngineProtocol.STATUS_STALE_HANDLE
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_BENCHMARK
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_INIT
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_TRANSCRIBE
+import coredevices.whisper.WhisperEngineProtocol.UNKNOWN_INT
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
@@ -85,6 +86,62 @@ internal fun audioRegionBytes(samples: Int): Int {
  */
 internal fun boundedSampleEcho(reported: Int, sent: Int): Int =
     if (reported == -1 || reported == sent) reported else -1
+
+/**
+ * The values `oom_score_adj` can hold (AOSP bionic `android16-release`,
+ * `libc/kernel/uapi/linux/oom.h`, `OOM_SCORE_ADJ_MIN` and
+ * `OOM_SCORE_ADJ_MAX`); [UNKNOWN_INT] lies outside it.
+ */
+internal val OOM_SCORE_ADJ_RANGE = -1000..1000
+
+/** Longest cgroup path token accepted as a cpuset; past any path the platform's profiles join. */
+internal const val MAX_CPUSET_PATH_CHARS = 64
+
+/**
+ * The engine's runtime report as this process takes it, built from the
+ * values read off the reply: a field whose shape the app can predict is
+ * checked against it and reads as unknown otherwise, so the report can
+ * describe the engine process's placement and forge nothing else. The
+ * cpulist is digits, commas and dashes (the parser that counts it checks
+ * the rest); the cpuset is one path token, which matters because the
+ * diagnostics lines print it as one `key=value` field of a fixed layout,
+ * where a space or an `=` in it would forge a field; `oom_score_adj`
+ * lies in [OOM_SCORE_ADJ_RANGE]; and a descriptor count is not negative.
+ * The importance slot of the reply is not an input here: the platform
+ * refuses that query to an isolated process ([WhisperEngineService]
+ * states the source), so no value in it is the engine's own.
+ */
+internal fun boundedEngineRuntime(
+    cpusAllowedList: String?,
+    cpuset: String?,
+    oomScoreAdj: Int,
+    pid: Int,
+    uid: Int,
+    openFds: Int,
+): WhisperEngineRuntime = WhisperEngineRuntime(
+    cpusAllowedList = cpusAllowedList?.takeIf(::isCpuList),
+    cpuset = cpuset?.takeIf(::isCpusetPath),
+    importance = null,
+    oomScoreAdj = oomScoreAdj.takeIf { it in OOM_SCORE_ADJ_RANGE },
+    pid = pid,
+    uid = uid,
+    openFds = openFds.takeIf { it >= 0 },
+)
+
+private fun isCpuList(text: String): Boolean =
+    text.isNotEmpty() && text.all { it in '0'..'9' || it == ',' || it == '-' }
+
+// The names the platform's task profiles join under the cpuset
+// controller are letters, digits, `_` and `-`, nested with `/` (AOSP
+// `android16-release`,
+// `system/core/libprocessgroup/profiles/task_profiles.json`, the
+// `JoinCgroup` actions on the `cpuset` controller); `/proc/self/cpuset`
+// prints the path from the root, so it starts with `/`. A dot is allowed
+// for a vendor's name. ASCII only: a letter from another script is not
+// a control character, but it is not a path here either.
+private fun isCpusetPath(text: String): Boolean =
+    text.length in 1..MAX_CPUSET_PATH_CHARS && text[0] == '/' &&
+        text.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it == '/' || it == '_' || it == '-' || it == '.' }
 
 /**
  * Engine-supplied text with every ISO control character replaced by a

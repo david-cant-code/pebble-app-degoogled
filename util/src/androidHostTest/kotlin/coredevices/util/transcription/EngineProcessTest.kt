@@ -42,14 +42,19 @@ class EngineProcessTest {
         assertEquals(EngineRuntimeSnapshot.PROCESS_ENGINE, snapshot.process)
     }
 
-    /** A hostile engine report degrades to unknown facts; it never costs the app process memory. */
+    /**
+     * A hostile engine report degrades to unknown facts, whether it names
+     * one range past the id bound or 4 KB of ranges inside it, and the
+     * parse costs the app process the same either way.
+     */
     @Test
     fun hostileCpuListInTheEngineReportReadsAsUnknown() {
-        val runtime = WhisperEngineRuntime(
-            cpusAllowedList = "0-2000000000", cpuset = "/foreground", importance = null,
+        fun report(cpusAllowedList: String) = WhisperEngineRuntime(
+            cpusAllowedList = cpusAllowedList, cpuset = "/foreground", importance = null,
             oomScoreAdj = 1, pid = 4242, uid = 99010, openFds = 12,
         )
-        assertNull(engineProcessSnapshot(runtime).allowedCpus)
+        assertNull(engineProcessSnapshot(report("0-2000000000")).allowedCpus)
+        assertNull(engineProcessSnapshot(report(List(585) { "0-$MAX_CPU_ID" }.joinToString(","))).allowedCpus)
     }
 
     @Test
