@@ -258,7 +258,8 @@ The replacement is whisper.cpp (MIT), compiled from source:
   as UTF-8 byte arrays: engine output can be byte sequences that are
   invalid modified UTF-8, which NewStringUTF aborts on under CheckJNI.
 - The engine runs in an isolated process, `WhisperEngineService`,
-  declared in the app manifest with `android:isolatedProcess`: a
+  declared in the `:whisper` module manifest with `android:isolatedProcess`
+  (pinned at the source by `WhisperEngineManifestTest`): a
   separate zero-permission uid that cannot open the app's files, reach
   the network or hold any permission, so a memory-safety bug in the
   model parser or the decoder, reached through a model file, is

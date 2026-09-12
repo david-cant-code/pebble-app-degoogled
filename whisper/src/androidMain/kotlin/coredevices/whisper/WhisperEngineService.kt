@@ -12,7 +12,6 @@ import android.os.Process
 import android.os.SharedMemory
 import android.util.Log
 import coredevices.whisper.WhisperEngineProtocol.DESCRIPTOR
-import coredevices.whisper.WhisperEngineProtocol.MAX_MESSAGE_BYTES
 import coredevices.whisper.WhisperEngineProtocol.STATUS_BUSY
 import coredevices.whisper.WhisperEngineProtocol.STATUS_ENGINE_ERROR
 import coredevices.whisper.WhisperEngineProtocol.STATUS_OK
@@ -31,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * The engine's process. The app manifest declares this service with
+ * The engine's process. This module's manifest declares the service with
  * `android:isolatedProcess`: a separate zero-permission uid with no path
  * into the app's files, no network and no other permission, so a
  * memory-safety bug in the model parser or the decoder, reached through
@@ -61,14 +60,14 @@ class WhisperEngineService : Service() {
  * there: it has no file, network or permission access, and the engine is
  * all that process is for. From API 28 the platform answers directly;
  * below it the answer is the uid range the platform reserves for
- * isolated processes (AOSP `android.os.Process`, `FIRST_ISOLATED_UID` to
- * `LAST_ISOLATED_UID`, per user), which is what `isIsolated` checks.
+ * isolated processes, which is what `isIsolated` checks; [isIsolatedUid]
+ * holds that range.
  */
 fun runningInIsolatedProcess(): Boolean =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
         Process.isIsolated()
     } else {
-        Process.myUid() % 100_000 in 99_000..99_999
+        isIsolatedUid(Process.myUid())
     }
 
 /**
@@ -214,7 +213,7 @@ private class EngineBinder(private val service: Service) : Binder() {
                 return
             }
             try {
-                if (samples < 0 || samples.toLong() * Float.SIZE_BYTES > region.size) {
+                if (!audioFitsRegion(samples, region.size)) {
                     writeTranscribeFailure(
                         reply, STATUS_ENGINE_ERROR,
                         "audio of $samples samples does not fit its ${region.size} byte region",
@@ -233,7 +232,7 @@ private class EngineBinder(private val service: Service) : Binder() {
                 if (text == null) {
                     reply.writeInt(STATUS_ENGINE_ERROR)
                     reply.writeInt(stats[0])
-                    reply.writeByteArray(lastError().toByteArray())
+                    reply.writeByteArray(boundedMessageBytes(lastError()))
                 } else {
                     reply.writeInt(STATUS_OK)
                     reply.writeInt(stats[0])
@@ -312,13 +311,13 @@ private class EngineBinder(private val service: Service) : Binder() {
 
     private fun writeFailure(reply: Parcel, status: Int, message: String) {
         reply.writeInt(status)
-        reply.writeByteArray(message.toByteArray().let { if (it.size > MAX_MESSAGE_BYTES) it.copyOf(MAX_MESSAGE_BYTES) else it })
+        reply.writeByteArray(boundedMessageBytes(message))
     }
 
     private fun writeTranscribeFailure(reply: Parcel, status: Int, message: String) {
         reply.writeInt(status)
         reply.writeInt(-1)
-        reply.writeByteArray(message.toByteArray().let { if (it.size > MAX_MESSAGE_BYTES) it.copyOf(MAX_MESSAGE_BYTES) else it })
+        reply.writeByteArray(boundedMessageBytes(message))
     }
 
     private fun lastError(): String = WhisperJNI.nativeGetLastError().decodeToString()

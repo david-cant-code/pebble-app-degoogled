@@ -2,7 +2,10 @@ package coredevices.whisper
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 /**
  * Pins the checks the engine client applies to values read from an
@@ -47,6 +50,49 @@ class WhisperEngineRepliesTest {
             listOf(WhisperEngineProtocol.TRANSACTION_TRANSCRIBE),
             codes.filter(WhisperEngineProtocol::replyCarriesSampleCount),
         )
+    }
+
+    /**
+     * The service's reload policy keys on the exception type: only an
+     * unavailable engine drops the handle and reloads, a busy handle is a
+     * bug in this process, an engine error stays an engine error.
+     */
+    @Test
+    fun eachFailureStatusMapsToTheExceptionItsCallersActOn() {
+        val stale = exceptionForStatus("transcription", WhisperEngineProtocol.STATUS_STALE_HANDLE, "handle 7 was not issued by this engine process")
+        assertIs<WhisperEngineUnavailableException>(stale)
+        assertEquals("whisper transcription failed: handle 7 was not issued by this engine process", stale.message)
+        val busy = exceptionForStatus("free", WhisperEngineProtocol.STATUS_BUSY, "handle 7 is inside another call")
+        assertIs<IllegalStateException>(busy)
+        assertTrue(busy !is WhisperEngineUnavailableException)
+        val engine = exceptionForStatus("init", WhisperEngineProtocol.STATUS_ENGINE_ERROR, "fdopen failed")
+        assertEquals(RuntimeException::class, engine::class, "an engine error is the plain exception")
+        assertEquals("whisper init failed: fdopen failed", engine.message)
+        assertIs<WhisperEngineUnavailableException>(exceptionForStatus("benchmark", 99, "x"), "an unknown status is not a reply to act on")
+        assertIs<WhisperEngineUnavailableException>(exceptionForStatus("benchmark", WhisperEngineProtocol.STATUS_OK, "x"), "a success status is never a failure to map")
+    }
+
+    @Test
+    fun aReplyPastItsBoundIsRefusedAsAnUnavailableEngine() {
+        checkReplyBound("bytes", 0, WhisperEngineProtocol.MAX_TEXT_BYTES)
+        checkReplyBound("bytes", WhisperEngineProtocol.MAX_TEXT_BYTES, WhisperEngineProtocol.MAX_TEXT_BYTES)
+        val refused = assertFailsWith<WhisperEngineUnavailableException> {
+            checkReplyBound("bytes", WhisperEngineProtocol.MAX_TEXT_BYTES + 1, WhisperEngineProtocol.MAX_TEXT_BYTES)
+        }
+        assertEquals("engine reply bytes of 8193 exceeds the 8192 bound", refused.message)
+        assertFailsWith<WhisperEngineUnavailableException> {
+            checkReplyBound("chars", Int.MAX_VALUE, WhisperEngineProtocol.MAX_MESSAGE_BYTES)
+        }
+    }
+
+    @Test
+    fun theAudioRegionIsSizedForTheSamplesAndNeverEmpty() {
+        assertEquals(4, audioRegionBytes(0), "an empty clip still needs a region")
+        assertEquals(4, audioRegionBytes(1))
+        assertEquals(960_000, audioRegionBytes(240_000))
+        assertEquals(Int.MAX_VALUE - 3, audioRegionBytes((Int.MAX_VALUE - 3) / 4))
+        assertFailsWith<IllegalArgumentException> { audioRegionBytes(Int.MAX_VALUE / 4 + 1) }
+        assertFailsWith<IllegalArgumentException> { audioRegionBytes(-1) }
     }
 
     @Test

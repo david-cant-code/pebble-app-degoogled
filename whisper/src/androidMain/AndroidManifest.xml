@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!--
+            The whisper.cpp speech engine runs in this isolated process, a
+            separate zero-permission uid that cannot open the app's files, reach
+            the network, or hold any permission. The app process passes it the
+            model as a file descriptor and each dictation's audio as shared
+            memory, so a memory-safety bug in the model parser or the decoder
+            is contained there. WhisperEngineManifestTest pins the two
+            attributes that make the containment. The platform derives the
+            real process name from the class name (":whisper" is only a prefix
+            of it), so any per-process attribute belongs on <application>,
+            not here.
+        -->
+        <service
+            android:name="coredevices.whisper.WhisperEngineService"
+            android:exported="false"
+            android:isolatedProcess="true"
+            android:process=":whisper" />
+    </application>
+</manifest>

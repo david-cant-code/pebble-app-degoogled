@@ -9,6 +9,7 @@ import coredevices.whisper.EnginePlacement
 import coredevices.whisper.TranscribeStats
 import coredevices.whisper.WhisperEngineClient
 import coredevices.whisper.WhisperEngineUnavailableException
+import coredevices.whisper.isIsolatedUid
 import coredevices.whisper.isWhisperSupported
 import coredevices.whisper.pcm16ToFloats
 import coredevices.whisper.whisperFree
@@ -18,6 +19,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assume
 import org.junit.Test
 import java.io.File
+import java.util.concurrent.Executors
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
@@ -29,9 +31,13 @@ import kotlin.test.assertTrue
  * isolated process, a dictation and a full firmware window of audio
  * cross it, a handle from a dead engine process is refused rather than
  * dereferenced, the app process outlives the engine process and binds a
- * fresh one, and the engine process keeps no descriptor from the models
- * it is handed. Uses the installed base-en model and never
- * downloads. Run on its own, against a persistent install with the model:
+ * fresh one, a handle inside one call refuses a second, and the engine
+ * process keeps no descriptor from the models it is handed. The uid gate
+ * in front of every transaction has no negative case here: the
+ * instrumentation shares the app's uid, and a foreign uid cannot reach
+ * a service that is not exported. Uses the installed base-en model and
+ * never downloads. Run on its own, against a persistent install with
+ * the model:
  *   adb shell am instrument -w \
  *     -e class coredevices.coreapp.transcription.WhisperEngineIsolationTest \
  *     com.anopticlabs.gravel.test/androidx.test.runner.AndroidJUnitRunner
@@ -54,9 +60,20 @@ class WhisperEngineIsolationTest {
         println("[$TAG] $line")
     }
 
+    /**
+     * Skips on a device the engine does not support. The attach comes
+     * first and is an assertion: an unattached client reads as
+     * unsupported, so a lost attach would otherwise skip every case here
+     * rather than fail one.
+     */
+    private fun assumeEngine() {
+        assertTrue(WhisperEngineClient.isAttached, "the engine client was not attached in the application's onCreate")
+        Assume.assumeTrue("engine unsupported on this device", isWhisperSupported())
+    }
+
     /** The installed model's path, or the test is skipped. */
     private fun modelPath(): String {
-        Assume.assumeTrue("engine unsupported on this device", isWhisperSupported())
+        assumeEngine()
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val provider = ReadOnlyModelPathProvider(File(context.filesDir, "models"), MODEL)
         Assume.assumeTrue("$MODEL not installed; tests never download", provider.isModelDownloaded(MODEL))
@@ -69,7 +86,7 @@ class WhisperEngineIsolationTest {
 
     @Test
     fun engineRunsInAnIsolatedProcess() {
-        Assume.assumeTrue("engine unsupported on this device", isWhisperSupported())
+        assumeEngine()
         val runtime = assertNotNull(WhisperEngineClient.runtime(bindIfNeeded = true))
         log(
             "engine pid=${runtime.pid} uid=${runtime.uid} cpuset=${runtime.cpuset} " +
@@ -78,8 +95,7 @@ class WhisperEngineIsolationTest {
         )
         assertNotEquals(Process.myPid(), runtime.pid, "the engine answered from the app process")
         assertNotEquals(Process.myUid(), runtime.uid, "the engine runs under the app's own uid")
-        // The platform reserves this per-user range for isolated processes.
-        assertTrue(runtime.uid % 100_000 in 99_000..99_999, "engine uid ${runtime.uid} is not an isolated uid")
+        assertTrue(isIsolatedUid(runtime.uid), "engine uid ${runtime.uid} is not an isolated uid")
     }
 
     @Test
@@ -128,20 +144,54 @@ class WhisperEngineIsolationTest {
         if (WhisperEngineClient.isConnected) log("engine pid ${before.pid} after the crash request: ${shell("ps -p ${before.pid}")}")
         assertTrue(!WhisperEngineClient.isConnected, "the binding to the crashed engine process was not released")
 
-        // The old handle names a context in a dead process; a fresh engine
-        // process must refuse it rather than dereference it.
-        assertFailsWith<WhisperEngineUnavailableException> {
+        // The old handle names a context in a dead process; the fresh
+        // engine process the call binds must refuse it by its check, not
+        // die on it: a dereference would also read as an unavailable
+        // engine, so the message and the generation count tell them apart.
+        val generation = WhisperEngineClient.processGeneration()
+        val refused = assertFailsWith<WhisperEngineUnavailableException> {
             whisperTranscribe(handle, clip(), THREADS, "en", 3L)
         }
+        assertTrue(
+            refused.message.orEmpty().contains("was not issued by this engine process"),
+            "the stale handle was not refused by the engine's check: ${refused.message}",
+        )
         val fresh = whisperInit(path)
         try {
             val after = assertNotNull(WhisperEngineClient.runtime(bindIfNeeded = false))
             log("engine restarted as pid ${after.pid}, bindMs=${WhisperEngineClient.lastBindMillis()}")
             assertNotEquals(before.pid, after.pid, "the engine did not come back in a new process")
+            assertEquals(generation + 1, WhisperEngineClient.processGeneration(), "the refusal and the reload took more than one engine process")
             val text = whisperTranscribe(fresh, clip(), THREADS, "en", 4L)
             assertTrue(text.lowercase().contains(KEYWORD), "post-restart transcription '$text' lost '$KEYWORD'")
         } finally {
             whisperFree(fresh)
+        }
+    }
+
+    /**
+     * The engine process refuses a second call on a handle inside one,
+     * through the actuals so the app-side serialization is bypassed: the
+     * first call decodes a full window, the second arrives while it runs.
+     */
+    @Test
+    fun aHandleInsideACallRefusesASecondCall() {
+        val handle = whisperInit(modelPath())
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val speech = clip()
+            val window = FloatArray(WINDOW_SAMPLES) { speech[it % speech.size] }
+            val first = executor.submit<String> { whisperTranscribe(handle, window, THREADS, "en", 6L) }
+            Thread.sleep(500)
+            assertTrue(!first.isDone, "the full window finished before the second call could arrive")
+            val refused = assertFailsWith<IllegalStateException> {
+                whisperTranscribe(handle, speech, THREADS, "en", 7L)
+            }
+            assertTrue(refused.message.orEmpty().contains("is inside another call"), "unexpected refusal: ${refused.message}")
+            assertTrue(first.get().isNotBlank(), "the refused second call disturbed the first")
+        } finally {
+            executor.shutdownNow()
+            whisperFree(handle)
         }
     }
 

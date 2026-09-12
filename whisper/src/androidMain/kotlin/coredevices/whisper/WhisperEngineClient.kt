@@ -18,7 +18,6 @@ import android.util.Log
 import coredevices.whisper.WhisperEngineProtocol.DESCRIPTOR
 import coredevices.whisper.WhisperEngineProtocol.MAX_MESSAGE_BYTES
 import coredevices.whisper.WhisperEngineProtocol.MAX_TEXT_BYTES
-import coredevices.whisper.WhisperEngineProtocol.STATUS_BUSY
 import coredevices.whisper.WhisperEngineProtocol.STATUS_ENGINE_ERROR
 import coredevices.whisper.WhisperEngineProtocol.STATUS_OK
 import coredevices.whisper.WhisperEngineProtocol.STATUS_STALE_HANDLE
@@ -198,12 +197,7 @@ object WhisperEngineClient {
         stats: IntArray?,
     ): ByteArray {
         check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) { "the audio transport needs API 27" }
-        val byteCount = pcm.size.toLong() * Float.SIZE_BYTES
-        require(byteCount <= Int.MAX_VALUE) { "audio of ${pcm.size} samples exceeds the region limit" }
-        // A region must have a size; an empty clip still crosses (the
-        // engine reports it as it would in process) through the
-        // smallest one.
-        val region = SharedMemory.create("whisper-pcm", byteCount.toInt().coerceAtLeast(Float.SIZE_BYTES))
+        val region = SharedMemory.create("whisper-pcm", audioRegionBytes(pcm.size))
         try {
             val mapped = region.mapReadWrite()
             try {
@@ -296,21 +290,10 @@ object WhisperEngineClient {
             }
         }
 
-    /**
-     * Maps a failure status to the exception its callers act on: a stale
-     * handle means the engine process the handle came from is gone; a
-     * busy handle is a serialization failure in this process; an engine
-     * error keeps the engine's text and is remembered for
-     * [lastEngineError].
-     */
-    private fun engineFailure(operation: String, status: Int, message: String): RuntimeException = when (status) {
-        STATUS_STALE_HANDLE -> WhisperEngineUnavailableException("whisper $operation failed: $message")
-        STATUS_BUSY -> IllegalStateException("whisper $operation failed: $message")
-        STATUS_ENGINE_ERROR -> {
-            lastEngineError = message
-            RuntimeException("whisper $operation failed: $message")
-        }
-        else -> WhisperEngineUnavailableException("whisper $operation failed: unknown status $status")
+    /** The exception for a failure status, its engine text remembered for [lastEngineError]. */
+    private fun engineFailure(operation: String, status: Int, message: String): RuntimeException {
+        if (status == STATUS_ENGINE_ERROR) lastEngineError = message
+        return exceptionForStatus(operation, status, message)
     }
 
     private fun expectOk(reply: Parcel, operation: String) {
@@ -326,17 +309,13 @@ object WhisperEngineClient {
 
     private fun Parcel.readBoundedBytes(max: Int): ByteArray {
         val bytes = createByteArray() ?: ByteArray(0)
-        if (bytes.size > max) {
-            throw WhisperEngineUnavailableException("engine reply of ${bytes.size} bytes exceeds the $max byte bound")
-        }
+        checkReplyBound("bytes", bytes.size, max)
         return bytes
     }
 
     private fun Parcel.readBoundedString(): String? {
         val value = readString() ?: return null
-        if (value.length > MAX_MESSAGE_BYTES) {
-            throw WhisperEngineUnavailableException("engine reply string of ${value.length} chars exceeds the bound")
-        }
+        checkReplyBound("chars", value.length, MAX_MESSAGE_BYTES)
         return sanitizeEngineText(value)
     }
 
