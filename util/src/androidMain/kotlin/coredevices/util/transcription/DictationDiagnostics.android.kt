@@ -8,12 +8,15 @@ import java.io.File
  * needed: `/proc/self` is always readable by the owning process, and
  * `getMyMemoryState` is static. Every read is fenced so a SELinux surprise
  * or a format change on some OEM kernel degrades to a null field instead
- * of failing the dictation it is meant to explain.
+ * of failing the dictation it is meant to explain. This describes the app
+ * process; the engine process's own facts come from
+ * [engineProcessSnapshot].
  */
 actual fun engineRuntimeSnapshot(): EngineRuntimeSnapshot = EngineRuntimeSnapshot(
     allowedCpus = readAllowedCpuCount(),
     cpuset = readCpuset(),
     importance = readImportance(),
+    process = EngineRuntimeSnapshot.PROCESS_HOST,
 )
 
 private fun readAllowedCpuCount(): Int? = readAllowedCpuIds()?.size

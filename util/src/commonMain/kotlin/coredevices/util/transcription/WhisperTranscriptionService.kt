@@ -9,6 +9,7 @@ import coredevices.util.models.CactusSTTMode
 import coredevices.util.models.WhisperModelCatalog
 import coredevices.whisper.EnginePlacement
 import coredevices.whisper.TranscribeStats
+import coredevices.whisper.WhisperEngineUnavailableException
 import coredevices.whisper.isWhisperSupported
 import coredevices.whisper.pcm16ToShorts
 import coredevices.whisper.shortsToFloats
@@ -240,7 +241,10 @@ internal suspend fun <T> awaitEngineWork(
  * init/free/transcribe handle lifecycle stays under host tests with a
  * scripted fake (the real functions are hard-wired to the native library
  * and cannot run on a host JVM). Production wiring is [RealWhisperEngine];
- * only the service's own tests pass anything else.
+ * only the service's own tests pass anything else. The defaulted members
+ * describe the process the engine runs in, and their defaults are the
+ * answers of an engine with no process of its own, which is what a fake
+ * that does not model one is.
  */
 internal interface WhisperEngine {
     fun supported(): Boolean
@@ -256,6 +260,18 @@ internal interface WhisperEngine {
     ): String
     fun cancel(callId: Long)
     fun free(handle: Long)
+
+    /** The generation of the engine process behind the handles; see [engineProcessGeneration]. */
+    fun processGeneration(): Long = 0L
+
+    /** Milliseconds the most recent engine process bind took; see [engineProcessBindMillis]. */
+    fun lastBindMillis(): Long? = null
+
+    /** The engine process's own placement facts while one is bound; see [engineProcessSnapshot]. */
+    fun runtimeSnapshot(): EngineRuntimeSnapshot? = null
+
+    /** Registers a listener for engine process deaths; see [addEngineProcessDeathListener]. */
+    fun addDeathListener(listener: (generation: Long) -> Unit) {}
 }
 
 /**
@@ -266,11 +282,12 @@ internal interface WhisperEngine {
  */
 private class ColdPathTimings(val model: String, val snapshot: EngineRuntimeSnapshot) {
     var modelPathMillis: Long? = null
+    var bindMillis: Long? = null
     var engineInitMillis: Long? = null
     var warmUpMillis: Long? = null
 }
 
-/** The :whisper top-level binding functions, bound 1:1. */
+/** The :whisper top-level binding functions, bound 1:1, plus the engine process facts. */
 internal object RealWhisperEngine : WhisperEngine {
     override fun supported(): Boolean = isWhisperSupported()
     override fun init(modelPath: String): Long = whisperInit(modelPath)
@@ -285,6 +302,10 @@ internal object RealWhisperEngine : WhisperEngine {
     ): String = whisperTranscribe(handle, pcm, threads, language, callId, placement, stats)
     override fun cancel(callId: Long) = whisperCancel(callId)
     override fun free(handle: Long) = whisperFree(handle)
+    override fun processGeneration(): Long = engineProcessGeneration()
+    override fun lastBindMillis(): Long? = engineProcessBindMillis()
+    override fun runtimeSnapshot(): EngineRuntimeSnapshot? = engineProcessSnapshot()
+    override fun addDeathListener(listener: (generation: Long) -> Unit) = addEngineProcessDeathListener(listener)
 }
 
 /**
@@ -302,6 +323,19 @@ internal object RealWhisperEngine : WhisperEngine {
  * any other rate is resampled first. Cancellation is cooperative through
  * the engine's abort callback, requested per call id so an abandoned
  * wedged call keeps its own abort while a fresh call runs unaffected.
+ *
+ * On Android the engine runs in its own process, which can die under a
+ * decode, while idle, or during a load. A lost process costs at most the
+ * dictation that was inside it, never a cold load in front of the next
+ * one: a death reported for the process behind the resident handle
+ * forgets that handle and reloads the model at once, at most
+ * [MAX_PROACTIVE_RELOADS] times in a row without a successful decode in
+ * between, so an engine that keeps dying (a model that crashes the
+ * decoder, a system that keeps killing the process) is not reloaded in a
+ * loop. A death during a load is that load's failure and is not retried
+ * on its own; every dictation still makes its own attempt through
+ * [ensureInit]. A dictation that finds the engine gone reports it
+ * unavailable, which the hybrid service's fallback routes to remote.
  */
 class WhisperTranscriptionService internal constructor(
     private val coreConfigFlow: CoreConfigFlow,
@@ -348,6 +382,16 @@ class WhisperTranscriptionService internal constructor(
          * call against it.
          */
         private val ENGINE_UNWIND_BOUND = 10.seconds
+
+        /**
+         * How many times in a row the model is reloaded on the service's
+         * own initiative after the engine process dies, before the next
+         * reload is left to the next dictation. Three covers a fluke and
+         * a retry of it; an engine dying more often than that is being
+         * killed for a reason a reload does not address, and each reload
+         * costs a full model load.
+         */
+        internal const val MAX_PROACTIVE_RELOADS = 3
     }
 
     private val transcriptionMutex = Mutex()
@@ -366,6 +410,25 @@ class WhisperTranscriptionService internal constructor(
 
     @kotlin.concurrent.Volatile
     private var lastInitedModel: String? = null
+
+    // The generation of the engine process that issued modelHandle, kept
+    // after that handle is lost so the death report for its process can
+    // still be matched; 0 until a process is on record. Written under
+    // modelMutex like the handle.
+    @kotlin.concurrent.Volatile
+    private var handleGeneration: Long = 0L
+
+    // True when the last load attempt failed because the engine process
+    // could not be reached, so a dictation that finds no handle reports
+    // the engine unavailable rather than the model missing.
+    @kotlin.concurrent.Volatile
+    private var engineUnavailable: Boolean = false
+
+    // Reloads made on the service's own initiative since the last
+    // successful decode; bounded by MAX_PROACTIVE_RELOADS. Written under
+    // modelMutex.
+    @kotlin.concurrent.Volatile
+    private var proactiveReloads: Int = 0
 
     private val scope = CoroutineScope(dispatcher)
 
@@ -401,8 +464,10 @@ class WhisperTranscriptionService internal constructor(
     // performInit on another thread, so every field that path reaches
     // (modelMutex, silentPcm, lastTranscriptionAt, callIdCounter) must be
     // assigned before the launch; WhisperHandleLifecycleTest pins it with
-    // inline dispatchers.
+    // inline dispatchers. The death listener is registered first so a
+    // death during the construction-time load is observed too.
     init {
+        engine.addDeathListener(::onEngineProcessDeath)
         sttConfig.onEach {
             logger.i { "STT config changed: $it" }
             if (it.modelName != lastInitedModel) {
@@ -563,11 +628,53 @@ class WhisperTranscriptionService internal constructor(
     }
 
     /**
+     * The engine process died. The reload runs as an init job so it takes
+     * the same path, and the same mutex hold, as every other load: the
+     * handle is dropped and the model reloaded without releasing the
+     * mutex in between, so no dictation can find the handle gone and a
+     * reload merely pending. Whether there is anything to drop is decided
+     * under the mutex, from the generation, because this runs on whatever
+     * thread observed the death, possibly inside the failing call itself.
+     */
+    private fun onEngineProcessDeath(generation: Long) {
+        logger.w { "Whisper engine process (generation $generation) died" }
+        initJob = performInit(lostGeneration = generation)
+    }
+
+    /**
+     * Forgets the resident handle if the engine process that issued it is
+     * the one reported dead, and says whether to reload the model now.
+     * Called under [modelMutex]. A generation that is not the handle's
+     * means the dead process issued no current handle: it died during a
+     * load (which fails on its own and is not retried here) or it was
+     * already replaced. A handle a failing decode has already zeroed still
+     * matches, so the reload it expects follows.
+     */
+    private fun dropLostHandleLocked(generation: Long): Boolean {
+        if (generation == 0L || handleGeneration != generation) return false
+        modelHandle = 0L
+        lastInitedModel = null
+        handleGeneration = 0L
+        if (proactiveReloads >= MAX_PROACTIVE_RELOADS) {
+            logger.w {
+                "Whisper engine process died $proactiveReloads times since the last decode; " +
+                    "leaving the reload to the next dictation"
+            }
+            return false
+        }
+        proactiveReloads++
+        logger.i { "Reloading the whisper model after the engine process died (reload $proactiveReloads)" }
+        return true
+    }
+
+    /**
      * Loads the configured model unless it is already resident. A cold
      * load reports its timings through [onColdLoad] before the first term
      * is paid, so the caller can finish the line even if the load throws.
+     * With [lostGeneration] set this is the reload after an engine process
+     * death, and it first drops the handle that process issued.
      */
-    private suspend fun initIfNeeded(onColdLoad: (ColdPathTimings) -> Unit) {
+    private suspend fun initIfNeeded(lostGeneration: Long?, onColdLoad: (ColdPathTimings) -> Unit) {
         val config = sttConfig.value
         if (config.mode == CactusSTTMode.RemoteOnly) return
         if (!engine.supported()) return
@@ -595,12 +702,13 @@ class WhisperTranscriptionService internal constructor(
         // second job re-reads the handle state below and becomes a no-op
         // instead of double-freeing or leaking a second context.
         modelMutex.withLock {
+            if (lostGeneration != null && !dropLostHandleLocked(lostGeneration)) return
             if (modelName != lastInitedModel && modelHandle != 0L) {
                 engine.free(modelHandle)
                 modelHandle = 0L
             }
             if (modelHandle == 0L) {
-                val cold = ColdPathTimings(modelName, engineRuntimeSnapshot())
+                val cold = ColdPathTimings(modelName, placementSnapshot())
                 onColdLoad(cold)
                 // getModelPath re-hashes the installed file once per process
                 // before first use. allowReinstall=false keeps init out of
@@ -611,9 +719,17 @@ class WhisperTranscriptionService internal constructor(
                 val pathStarted = TimeSource.Monotonic.markNow()
                 val modelPath = modelProvider.getModelPath(modelName, allowReinstall = false)
                 cold.modelPathMillis = pathStarted.elapsedNow().inWholeMilliseconds
+                val generationBefore = engine.processGeneration()
                 val initStarted = TimeSource.Monotonic.markNow()
+                // A fresh attempt to reach the engine; only its own
+                // failure can set the flag again (see performInit).
+                engineUnavailable = false
                 modelHandle = engine.init(modelPath)
                 cold.engineInitMillis = initStarted.elapsedNow().inWholeMilliseconds
+                handleGeneration = engine.processGeneration()
+                // The bind is inside engineInitMs only when this load
+                // brought the engine process up.
+                cold.bindMillis = if (handleGeneration != generationBefore) engine.lastBindMillis() else 0L
                 lastInitedModel = modelName
                 // A fresh handle is cold no matter how recently the previous
                 // model transcribed: its first inference pays one-time graph
@@ -635,7 +751,12 @@ class WhisperTranscriptionService internal constructor(
     private fun modelExists(): Boolean =
         sttConfig.value.modelName?.let { modelProvider.isModelDownloaded(it) } ?: false
 
-    private fun performInit(): Job {
+    /**
+     * The init job: load if needed, then warm up. With [lostGeneration]
+     * it is the reload after an engine process death (see
+     * [onEngineProcessDeath]).
+     */
+    private fun performInit(lostGeneration: Long? = null): Job {
         return scope.launch(ioDispatcher) {
             // Set once a cold load starts. The coldpath line is written
             // from the finally so a load that fails part-way still reports
@@ -644,7 +765,7 @@ class WhisperTranscriptionService internal constructor(
             var cold: ColdPathTimings? = null
             var outcome = "error"
             try {
-                initIfNeeded { cold = it }
+                initIfNeeded(lostGeneration) { cold = it }
                 // The wait in ensureInit covers the warm-up too, so the
                 // line has to account for it or the wait cannot be
                 // decomposed.
@@ -655,6 +776,11 @@ class WhisperTranscriptionService internal constructor(
                 onInitialized.trySend(modelHandle != 0L || sttConfig.value.mode == CactusSTTMode.RemoteOnly)
             } catch (e: Throwable) {
                 outcome = "error:${e::class.simpleName}"
+                // An engine process that could not be reached is what the
+                // next dictation reports. Set only here, and cleared only
+                // by the next attempt to reach the engine (initIfNeeded),
+                // so a job with nothing to load leaves the report alone.
+                if (e is WhisperEngineUnavailableException) engineUnavailable = true
                 logger.e(e) { "Whisper STT model initialization failed: ${e.message}" }
                 onInitialized.trySend(false)
             } finally {
@@ -664,6 +790,7 @@ class WhisperTranscriptionService internal constructor(
                             model = timings.model,
                             snapshot = timings.snapshot,
                             modelPathMillis = timings.modelPathMillis,
+                            bindMillis = timings.bindMillis,
                             engineInitMillis = timings.engineInitMillis,
                             warmUpMillis = timings.warmUpMillis,
                             outcome = outcome,
@@ -673,6 +800,13 @@ class WhisperTranscriptionService internal constructor(
             }
         }
     }
+
+    /**
+     * The placement facts a diagnostics line reports: the engine
+     * process's while one is bound, since that is where the decode runs,
+     * and this process's before the first bind, when there is no other.
+     */
+    private fun placementSnapshot(): EngineRuntimeSnapshot = engine.runtimeSnapshot() ?: engineRuntimeSnapshot()
 
     /** True if the local model is loaded, or downloaded and ready to load, on a supported device. */
     fun isLocalAvailable(): Boolean = engine.supported() && (modelHandle != 0L || modelExists())
@@ -732,7 +866,7 @@ class WhisperTranscriptionService internal constructor(
         // exit path, including cancellation by the caller's deadline, reports
         // how long the engine was actually given.
         val threads = dictationThreadCount(sttConfig.value)
-        val snapshot = engineRuntimeSnapshot()
+        val snapshot = placementSnapshot()
         val started = TimeSource.Monotonic.markNow()
         var outcome = "error"
         // What the engine was actually given, for the speed record and the
@@ -747,7 +881,11 @@ class WhisperTranscriptionService internal constructor(
         val model = lastInitedModel
         try {
             if (handle == 0L) {
-                if (!engine.supported()) {
+                // No engine to run on, or one that could not be reached
+                // by the load this dictation waited for: unavailable,
+                // which the hybrid fallback routes to remote. Otherwise
+                // the model itself is missing.
+                if (!engine.supported() || engineUnavailable) {
                     throw TranscriptionException.TranscriptionServiceUnavailable(modelUsed = sttConfig.value.modelName)
                 }
                 throw TranscriptionException.TranscriptionRequiresDownload("Model not initialized")
@@ -770,6 +908,9 @@ class WhisperTranscriptionService internal constructor(
                 inferenceBoost.release()
             }
             outcome = if (text.isBlank()) "no_speech" else "ok"
+            // A decode that came back proves the engine process is
+            // serving; reloads after later deaths start counting afresh.
+            proactiveReloads = 0
             analytics.logTranscriptionSuccess("whisper")
             // The speed record behind the model nudge: time to a result per
             // second of engine input, on successful dictations only. The
@@ -798,6 +939,19 @@ class WhisperTranscriptionService internal constructor(
                 }
             }
             throw e
+        } catch (e: WhisperEngineUnavailableException) {
+            outcome = "error:${e::class.simpleName}"
+            // The engine process behind this handle is gone, and with it
+            // the handle: forgotten here, under the mutex, so the next
+            // dictation loads afresh even if the death report has not
+            // arrived yet. The reload itself is the death report's job
+            // (onEngineProcessDeath), which matches the generation this
+            // leaves in place.
+            modelHandle = 0L
+            lastInitedModel = null
+            val unavailable = TranscriptionException.TranscriptionServiceUnavailable(modelUsed = model)
+            analytics.logTranscriptionFailure("whisper", transcriptionFailureReason(unavailable), e.message)
+            throw unavailable
         } catch (e: Exception) {
             outcome = "error:${e::class.simpleName}"
             analytics.logTranscriptionFailure("whisper", transcriptionFailureReason(e), e.message)

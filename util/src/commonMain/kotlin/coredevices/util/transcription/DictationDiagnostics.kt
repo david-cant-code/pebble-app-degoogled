@@ -1,11 +1,11 @@
 package coredevices.util.transcription
 
 /**
- * Scheduling facts about this process at the moment an engine call starts.
+ * Scheduling facts about one process at the moment an engine call starts.
  * Watch dictation has a hard 15 second budget from the firmware, and a
  * decode that fits in the foreground can miss it once the app is no longer
  * the top app, so every dictation records what the OS was giving it. Each
- * field is null when the platform could not answer, never a guess.
+ * fact is null when the platform could not answer, never a guess.
  *
  * @property allowedCpus number of CPUs in the process affinity mask; a
  *   restricted cpuset shrinks this below the number of CPUs the phone
@@ -14,14 +14,23 @@ package coredevices.util.transcription
  *   `/top-app`, `/foreground`, `/background`).
  * @property importance the platform's process importance value at the time
  *   of the call (Android `RunningAppProcessInfo.importance`).
+ * @property process which process the facts describe: [PROCESS_ENGINE]
+ *   for the engine process the decode runs in, [PROCESS_HOST] for the app
+ *   process, which stands in while no engine process is bound.
  */
 data class EngineRuntimeSnapshot(
     val allowedCpus: Int?,
     val cpuset: String?,
     val importance: Int?,
-)
+    val process: String,
+) {
+    companion object {
+        const val PROCESS_ENGINE = "engine"
+        const val PROCESS_HOST = "host"
+    }
+}
 
-/** Reads the current [EngineRuntimeSnapshot]; must never throw. */
+/** Reads the [EngineRuntimeSnapshot] of this process; must never throw. */
 expect fun engineRuntimeSnapshot(): EngineRuntimeSnapshot
 
 /**
@@ -62,10 +71,12 @@ internal fun parseCpuList(list: String): List<Int>? {
  * a report can be read (or grepped) without the source at hand. Nulls print
  * as `?`. Kept pure so the layout is pinned by a host test.
  *
- * `initWaitMs` is how long the call blocked for the model to come up
- * before the decode: zero once the model is resident, and otherwise the
- * part of the cold path in [formatColdPathDiagnostics] that did not
- * overlap the recording, which is what the dictation pays on top of it.
+ * `proc` names the process the three placement facts describe (see
+ * [EngineRuntimeSnapshot.process]). `initWaitMs` is how long the call
+ * blocked for the model to come up before the decode: zero once the
+ * model is resident, and otherwise the part of the cold path in
+ * [formatColdPathDiagnostics] that did not overlap the recording, which
+ * is what the dictation pays on top of it.
  */
 internal fun formatEngineDiagnostics(
     model: String?,
@@ -78,9 +89,7 @@ internal fun formatEngineDiagnostics(
 ): String = buildString {
     append("dictation engine: model=").append(model ?: "?")
     append(" threads=").append(threads)
-    append(" allowedCpus=").append(snapshot.allowedCpus ?: "?")
-    append(" cpuset=").append(snapshot.cpuset ?: "?")
-    append(" importance=").append(snapshot.importance ?: "?")
+    appendPlacement(snapshot)
     append(" audioSec=").append(formatSeconds(audioSeconds))
     append(" initWaitMs=").append(initWaitMillis)
     append(" decodeMs=").append(decodeMillis)
@@ -91,28 +100,40 @@ internal fun formatEngineDiagnostics(
  * One line per cold model load, the once-per-process work a dictation can
  * end up waiting on: the model path resolve (the provider re-hashes the
  * installed file before its first use), the engine init (the first call
- * loads the native library, then the model) and the warm-up pass. The
- * snapshot is read as the load starts, because the hash is CPU-bound and
- * the process can sit in a different cpuset then than at the decode. A
- * term the load never reached prints as `?`. Same fixed-layout contract
- * as [formatEngineDiagnostics], pinned by the same host test.
+ * binds the engine process, then loads the model there) and the warm-up
+ * pass. `bindMs` is the part of `engineInitMs` spent bringing the engine
+ * process up, zero when the load found it already bound, so `engineInitMs`
+ * less `bindMs` is the model load itself. The snapshot is read as the
+ * load starts, because the hash is CPU-bound and the process can sit in
+ * a different cpuset then than at the decode. A term the load never
+ * reached prints as `?`. Same fixed-layout contract as
+ * [formatEngineDiagnostics], pinned by the same host test.
  */
 internal fun formatColdPathDiagnostics(
     model: String?,
     snapshot: EngineRuntimeSnapshot,
     modelPathMillis: Long?,
+    bindMillis: Long?,
     engineInitMillis: Long?,
     warmUpMillis: Long?,
     outcome: String,
 ): String = buildString {
     append("dictation coldpath: model=").append(model ?: "?")
-    append(" allowedCpus=").append(snapshot.allowedCpus ?: "?")
-    append(" cpuset=").append(snapshot.cpuset ?: "?")
-    append(" importance=").append(snapshot.importance ?: "?")
+    appendPlacement(snapshot)
     append(" modelPathMs=").append(modelPathMillis ?: "?")
+    append(" bindMs=").append(bindMillis ?: "?")
     append(" engineInitMs=").append(engineInitMillis ?: "?")
     append(" warmUpMs=").append(warmUpMillis ?: "?")
     append(" outcome=").append(outcome)
+}
+
+// The placement facts share one layout on both lines, `proc` first because
+// it says which process the three after it describe.
+private fun StringBuilder.appendPlacement(snapshot: EngineRuntimeSnapshot) {
+    append(" proc=").append(snapshot.process)
+    append(" allowedCpus=").append(snapshot.allowedCpus ?: "?")
+    append(" cpuset=").append(snapshot.cpuset ?: "?")
+    append(" importance=").append(snapshot.importance ?: "?")
 }
 
 /**

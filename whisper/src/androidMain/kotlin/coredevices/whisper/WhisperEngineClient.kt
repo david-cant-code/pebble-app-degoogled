@@ -71,7 +71,10 @@ object WhisperEngineClient {
      */
     private const val BIND_TIMEOUT_MILLIS = 5_000L
 
-    private class Connection(val serviceConnection: ServiceConnection, val binder: IBinder)
+    // One connection is one engine process; its generation is the bind
+    // count at the time it was bound, so a handle can be matched to the
+    // process that issued it after that process is gone.
+    private class Connection(val serviceConnection: ServiceConnection, val binder: IBinder, val generation: Long)
 
     @Volatile
     private var appContext: Context? = null
@@ -83,13 +86,17 @@ object WhisperEngineClient {
     private val stateLock = Any()
     private var connection: Connection? = null
 
+    // Incremented under bindLock once per successful bind; read anywhere.
+    @Volatile
+    private var bindCount: Long = 0L
+
     @Volatile
     private var lastBindMillis: Long? = null
 
     @Volatile
     private var lastEngineError: String = ""
 
-    private val deathListeners = CopyOnWriteArrayList<() -> Unit>()
+    private val deathListeners = CopyOnWriteArrayList<(Long) -> Unit>()
 
     /** Records the application context; the first line of the app's onCreate. */
     fun attach(context: Context) {
@@ -108,15 +115,26 @@ object WhisperEngineClient {
      */
     fun lastBindMillis(): Long? = lastBindMillis
 
+    /**
+     * The generation of the most recently bound engine process, alive or
+     * not: one higher per bind, 0 before the first. A caller that records
+     * it beside a handle can tell, when a death is reported for a
+     * generation, whether that handle came from the process that died.
+     */
+    fun processGeneration(): Long = bindCount
+
     /** The error text of the last engine failure this process received. */
     fun lastEngineError(): String = lastEngineError
 
     /**
-     * Registers [listener] to run, on a binder thread, once per engine
-     * process death. By the time it runs the binding is released and
-     * every handle is gone; the next engine call binds a fresh process.
+     * Registers [listener] to run once per engine process death, with the
+     * generation of the process that died, on the thread that observed
+     * the death: a binder thread, or the caller whose transaction found
+     * the process gone. By the time it runs the binding is released and
+     * every handle from that process is gone; the next engine call binds
+     * a fresh process.
      */
-    fun addDeathListener(listener: () -> Unit) {
+    fun addDeathListener(listener: (generation: Long) -> Unit) {
         deathListeners += listener
     }
 
@@ -417,8 +435,11 @@ object WhisperEngineClient {
             throw WhisperEngineUnavailableException("the engine process died as it connected", e)
         }
         lastBindMillis = SystemClock.elapsedRealtime() - started
-        Log.i(TAG, "engine process bound in $lastBindMillis ms")
-        return Connection(serviceConnection, binder)
+        // The bind cost is published before the generation moves, so a
+        // reader that sees the new generation sees the cost of its bind.
+        val generation = ++bindCount
+        Log.i(TAG, "engine process bound in $lastBindMillis ms (generation $generation)")
+        return Connection(serviceConnection, binder, generation)
     }
 
     /**
@@ -434,11 +455,11 @@ object WhisperEngineClient {
             connection = null
             current
         }
-        Log.w(TAG, "engine process died; binding released")
+        Log.w(TAG, "engine process died (generation ${dropped.generation}); binding released")
         appContext?.let { unbindQuietly(it, dropped.serviceConnection) }
         for (listener in deathListeners) {
             try {
-                listener()
+                listener(dropped.generation)
             } catch (t: Throwable) {
                 Log.e(TAG, "engine death listener failed", t)
             }

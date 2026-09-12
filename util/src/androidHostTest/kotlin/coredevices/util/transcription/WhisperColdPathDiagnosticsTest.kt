@@ -74,10 +74,15 @@ class WhisperColdPathDiagnosticsTest {
      * An engine whose init takes at least [initMillis], then waits on
      * [initGate] while one is set, then fails when [failInit] is set. A
      * transcribe of silent PCM (the warm-up input) returns immediately.
+     * With [bindMillis] set it models an engine process: the first init
+     * binds one (generation 1, the bind cost reported as the real client
+     * does), later inits find it bound, and its placement facts are the
+     * engine's while it is bound.
      */
-    private class ScriptedEngine(private val initMillis: Long = 0) : WhisperEngine {
+    private class ScriptedEngine(private val initMillis: Long = 0, private val bindMillis: Long? = null) : WhisperEngine {
         @Volatile var initGate: CountDownLatch? = null
         @Volatile var failInit = false
+        @Volatile private var generation = 0L
 
         override fun supported(): Boolean = true
 
@@ -86,8 +91,13 @@ class WhisperColdPathDiagnosticsTest {
             // Bounded so a deadlocked test fails instead of hanging the run.
             initGate?.await(20, TimeUnit.SECONDS)
             if (failInit) throw RuntimeException("whisper init failed: scripted")
+            if (bindMillis != null && generation == 0L) generation = 1L
             return 1L
         }
+
+        override fun processGeneration(): Long = generation
+        override fun lastBindMillis(): Long? = bindMillis.takeIf { generation > 0L }
+        override fun runtimeSnapshot(): EngineRuntimeSnapshot? = ENGINE_FACTS.takeIf { generation > 0L }
 
         override fun transcribe(
             handle: Long,
@@ -103,8 +113,20 @@ class WhisperColdPathDiagnosticsTest {
         override fun free(handle: Long) {}
     }
 
+    private companion object {
+        /** What a bound engine process reports about itself in the scripted engine. */
+        val ENGINE_FACTS = EngineRuntimeSnapshot(
+            allowedCpus = 6, cpuset = "/engine-cpuset", importance = null,
+            process = EngineRuntimeSnapshot.PROCESS_ENGINE,
+        )
+    }
+
     private val capture = CapturingLogWriter()
     private lateinit var writersBefore: List<LogWriter>
+
+    private var config = MutableStateFlow(
+        CoreConfig(sttConfig = STTConfig(mode = CactusSTTMode.LocalOnly, modelName = "model-a")),
+    )
 
     @BeforeTest
     fun captureServiceLog() {
@@ -119,9 +141,7 @@ class WhisperColdPathDiagnosticsTest {
 
     private fun serviceFor(engine: WhisperEngine, provider: CactusModelPathProvider) =
         WhisperTranscriptionService(
-            coreConfigFlow = CoreConfigFlow(
-                MutableStateFlow(CoreConfig(sttConfig = STTConfig(mode = CactusSTTMode.LocalOnly, modelName = "model-a"))),
-            ),
+            coreConfigFlow = CoreConfigFlow(config),
             modelProvider = provider,
             analytics = NoopAnalytics,
             inferenceBoost = NoOpInferenceBoost(),
@@ -183,6 +203,50 @@ class WhisperColdPathDiagnosticsTest {
         }
     }
 
+    /**
+     * The first load brings the engine process up, so its line carries
+     * the bind cost inside the init term; a later load against the
+     * process already bound (a model switch) pays no bind. Both lines
+     * name the process their placement facts describe: this one before
+     * the first bind, when there is no other, and the engine's once it is
+     * bound, as does the engine line of a decode.
+     */
+    @Test
+    fun linesSplitOutTheBindAndNameTheProcess() = runBlocking(Dispatchers.Default) {
+        val service = serviceFor(ScriptedEngine(initMillis = 30, bindMillis = 40), SlowProvider(pathMillis = 0))
+        awaitUntil("the coldpath line of the first load") { capture.coldPathLines().isNotEmpty() }
+        val first = capture.coldPathLines().single()
+        assertEquals("40", field(first, "bindMs"), first)
+        assertTrue(field(first, "engineInitMs").toLong() >= 30, first)
+        assertEquals("host", field(first, "proc"), first)
+
+        assertEquals("hello world", service.transcribeLocal(realPcmBytes(), sampleRate = 16_000))
+        val engineLine = capture.engineLines().single()
+        assertEquals("engine", field(engineLine, "proc"), engineLine)
+        assertEquals("6", field(engineLine, "allowedCpus"), engineLine)
+        assertEquals("/engine-cpuset", field(engineLine, "cpuset"), engineLine)
+
+        config.value = CoreConfig(sttConfig = STTConfig(mode = CactusSTTMode.LocalOnly, modelName = "model-b"))
+        awaitUntil("the coldpath line of the switch") { capture.coldPathLines().size == 2 }
+        val switch = capture.coldPathLines()[1]
+        assertEquals("model-b", field(switch, "model"), switch)
+        assertEquals("0", field(switch, "bindMs"), switch)
+        assertEquals("engine", field(switch, "proc"), switch)
+    }
+
+    /** An engine with no process of its own (the default seam answers) reports no bind and this process. */
+    @Test
+    fun engineWithoutAProcessReportsNoBind() = runBlocking(Dispatchers.Default) {
+        val service = serviceFor(ScriptedEngine(), SlowProvider(pathMillis = 0))
+        awaitUntil("the coldpath line") { capture.coldPathLines().isNotEmpty() }
+        val line = capture.coldPathLines().single()
+        assertEquals("0", field(line, "bindMs"), line)
+        assertEquals("host", field(line, "proc"), line)
+        assertEquals("hello world", service.transcribeLocal(realPcmBytes(), sampleRate = 16_000))
+        assertEquals(1, capture.engineLines().size, capture.lines.toString())
+        assertEquals("host", field(capture.engineLines().single(), "proc"))
+    }
+
     @Test
     fun loadThatFailsStillReportsThePaidTerms() = runBlocking(Dispatchers.Default) {
         val engine = ScriptedEngine().apply { failInit = true }
@@ -213,7 +277,11 @@ class WhisperColdPathDiagnosticsTest {
             )
             assertTrue(capture.engineLines().isEmpty(), "no engine ran, so no engine line")
         } finally {
+            // Release the load and let it finish before returning: it
+            // logs its coldpath line on completion, and a line logged
+            // after this test ends lands in the next test's capture.
             engine.initGate?.countDown()
+            awaitUntil("the released load to settle") { capture.coldPathLines().isNotEmpty() }
         }
     }
 }

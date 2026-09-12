@@ -283,7 +283,21 @@ The replacement is whisper.cpp (MIT), compiled from source:
   life of the app process, which keeps the model resident as the
   in-process engine was; a released binding would end the engine
   process, and the next dictation would pay a cold load with nothing in
-  front of it. The transport needs API 27, so on Android 8.0 the engine
+  front of it. The same holds when the engine process dies (a crash in
+  the engine, or the platform reclaiming it): `WhisperTranscriptionService`
+  forgets the handle that process issued and reloads the model at once,
+  at most three times in a row without a successful decode in between,
+  so a process that keeps dying is not reloaded in a loop; a death
+  during a load is that load's failure and is not retried on its own,
+  and every dictation still makes its own load attempt. A dictation
+  inside the process when it dies is lost and reported as the engine
+  unavailable, which the hybrid fallback routes to remote. Handles are
+  matched to the process that issued them by a per-bind generation from
+  the client, so a late report of an earlier death never drops a fresh
+  handle. The engine thread count and the placement facts on the
+  diagnostics lines (`proc=engine`) come from the engine process once it
+  is bound, since `/proc/self` in the app process describes the wrong
+  process. The transport needs API 27, so on Android 8.0 the engine
   reports itself unsupported and dictation takes the remote path
   (KNOWN_ISSUES). Every process of the app instantiates its Application
   class, the engine process included, so `MainApplication.onCreate`
