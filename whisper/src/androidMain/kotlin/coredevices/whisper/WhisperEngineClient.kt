@@ -55,9 +55,10 @@ import java.util.concurrent.TimeUnit
  * read back from the engine process is bounded before use.
  *
  * Must be attached to the application context before any engine call;
- * unattached, the engine reads as unsupported. Binding blocks the calling
- * thread until the process is up, so no engine call may run on the main
- * thread.
+ * unattached, the engine reads as unsupported. Every transaction blocks the
+ * calling thread until the engine process answers, and a bind until the
+ * process is up, so no engine call may run on the main thread; each
+ * transaction checks.
  */
 object WhisperEngineClient {
     private const val TAG = "WhisperEngineClient"
@@ -352,6 +353,9 @@ object WhisperEngineClient {
         write: (Parcel) -> Unit,
         read: (Parcel) -> T,
     ): T {
+        // Every transaction blocks until the engine process answers, and a
+        // bind until the process is up, so none may run on the main thread.
+        check(Looper.myLooper() != Looper.getMainLooper()) { "engine calls must not run on the main thread" }
         val live = connected(bindIfNeeded)
             ?: throw WhisperEngineUnavailableException("no engine process is bound for $operation")
         val data = Parcel.obtain()
@@ -394,7 +398,6 @@ object WhisperEngineClient {
     private fun bind(): Connection {
         val context = appContext
             ?: throw WhisperEngineUnavailableException("engine client not attached to the application")
-        check(Looper.myLooper() != Looper.getMainLooper()) { "engine calls must not run on the main thread" }
         val latch = CountDownLatch(1)
         var bound: IBinder? = null
         val serviceConnection = object : ServiceConnection {

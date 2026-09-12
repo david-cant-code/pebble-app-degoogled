@@ -202,11 +202,13 @@ class DeviceSpeedEstimator(
 
     private suspend fun measureLocked(): SpeedScore? {
         if (!supported()) return _score.value
-        val threads = threadCount()
-        // The probe and the settings writes both belong off the main
-        // thread: the writes hit disk, which the debug build's strict mode
-        // rejects on the UI thread.
+        // The thread count, the probe and the settings writes all belong
+        // off the main thread: the count is read from the engine process
+        // once one is bound, the probe runs there, and the writes hit
+        // disk, which the debug build's strict mode rejects on the UI
+        // thread.
         val measured = withContext(Dispatchers.IO) {
+            val threads = threadCount()
             // A probe that fails or answers nonsense drops out of the
             // measurement; the measurement fails only when none is left.
             val ns = (1..PROBE_RUNS).mapNotNull {

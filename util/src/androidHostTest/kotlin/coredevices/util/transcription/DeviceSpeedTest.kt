@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
@@ -106,6 +107,24 @@ class DeviceSpeedTest {
         val failing = estimator(settings, probe = { error("engine unavailable") })
         assertEquals(good, failing.measure())
         assertEquals(good, failing.cached())
+    }
+
+    @Test
+    fun theThreadCountIsReadOffTheCallingThread() = runBlocking {
+        // The count comes from the engine process once one is bound, so
+        // it must run where the probe runs, never on the caller's thread.
+        val caller = Thread.currentThread()
+        var counted: Thread? = null
+        val estimator = DeviceSpeedEstimator(
+            settings = MapSettings(),
+            threadCount = { counted = Thread.currentThread(); 2 },
+            probe = { 100_000_000L },
+            supported = { true },
+            now = { 1_000L },
+        )
+        assertNotNull(estimator.measure())
+        assertNotNull(counted)
+        assertNotEquals(caller, counted)
     }
 
     @Test
