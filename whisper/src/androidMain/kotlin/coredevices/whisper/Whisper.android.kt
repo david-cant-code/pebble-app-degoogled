@@ -1,5 +1,9 @@
 package coredevices.whisper
 
+import android.os.ParcelFileDescriptor
+import java.io.File
+import java.io.IOException
+
 /**
  * Android actuals over the two JNI libraries built by :whisper-native.
  *
@@ -43,7 +47,7 @@ private object WhisperJNI {
     }
 
     @JvmStatic
-    external fun nativeInit(modelPath: String): Long
+    external fun nativeInitFd(fd: Int): Long
 
     @JvmStatic
     external fun nativeTranscribe(
@@ -71,7 +75,17 @@ private object WhisperJNI {
 }
 
 actual fun whisperInit(modelPath: String): Long {
-    val handle = WhisperJNI.nativeInit(modelPath)
+    // The model reaches the engine as an open descriptor, never as a
+    // path: the process that runs the engine is not assumed to resolve
+    // the host's files. Opened read-only here, where the path does
+    // resolve, and detached so the shim owns the descriptor from the
+    // call on (one close, on every path, on its side).
+    val fd = try {
+        ParcelFileDescriptor.open(File(modelPath), ParcelFileDescriptor.MODE_READ_ONLY).detachFd()
+    } catch (e: IOException) {
+        throw RuntimeException("whisper init failed: cannot open the model file: ${e.message}", e)
+    }
+    val handle = WhisperJNI.nativeInitFd(fd)
     if (handle == 0L) {
         throw RuntimeException("whisper init failed: ${whisperGetLastError()}")
     }
