@@ -47,12 +47,27 @@ class DeviceSpeedTest {
     }
 
     @Test
-    fun cachedOrMeasureRunsTheProbeOnce() = runBlocking {
+    fun cachedOrMeasureMeasuresOnce() = runBlocking {
         var runs = 0
         val estimator = estimator(probe = { runs++; 10L })
         estimator.cachedOrMeasure()
         estimator.cachedOrMeasure()
-        assertEquals(1, runs)
+        assertEquals(DeviceSpeedEstimator.PROBE_RUNS, runs, "one measurement, no more")
+    }
+
+    /** The first probe in a fresh engine process is the slow one; the measurement keeps the better. */
+    @Test
+    fun measureKeepsTheBetterOfItsProbes() = runBlocking {
+        val scores = ArrayDeque(listOf(130_000_000L, 100_000_000L))
+        val measured = estimator(probe = { scores.removeFirst() }).measure()
+        assertEquals(100_000_000L, assertNotNull(measured).nsPerBlock)
+    }
+
+    @Test
+    fun aProbeThatFailsLeavesTheOtherToMeasure() = runBlocking {
+        val scores = ArrayDeque<() -> Long>(listOf({ error("engine unavailable") }, { 100L }))
+        val measured = estimator(probe = { scores.removeFirst()() }).measure()
+        assertEquals(100L, assertNotNull(measured).nsPerBlock)
     }
 
     @Test
@@ -65,7 +80,10 @@ class DeviceSpeedTest {
         delay(200)
         gate.countDown()
         assertEquals(first.await(), second.await())
-        assertEquals(1, runs.get(), "the second caller must wait for the running probe, not start its own")
+        assertEquals(
+            DeviceSpeedEstimator.PROBE_RUNS, runs.get(),
+            "the second caller must wait for the running measurement, not start its own",
+        )
     }
 
     @Test

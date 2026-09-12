@@ -43,7 +43,7 @@ class DictationDiagnosticsTest {
             model = "whisper-base-en",
             threads = 4,
             snapshot = EngineRuntimeSnapshot(
-                allowedCpus = 8, cpuset = "/foreground", importance = 125,
+                allowedCpus = 8, cpuset = "/foreground", importance = null, oomScoreAdj = 1,
                 process = EngineRuntimeSnapshot.PROCESS_ENGINE,
             ),
             audioSeconds = 3.456,
@@ -53,7 +53,7 @@ class DictationDiagnosticsTest {
         )
         assertEquals(
             "dictation engine: model=whisper-base-en threads=4 proc=engine allowedCpus=8 " +
-                "cpuset=/foreground importance=125 audioSec=3.46 initWaitMs=0 decodeMs=1234 outcome=ok",
+                "cpuset=/foreground importance=? oomAdj=1 audioSec=3.46 initWaitMs=0 decodeMs=1234 outcome=ok",
             line,
         )
     }
@@ -63,14 +63,14 @@ class DictationDiagnosticsTest {
         val line = formatEngineDiagnostics(
             model = null,
             threads = 1,
-            snapshot = EngineRuntimeSnapshot(null, null, null, process = EngineRuntimeSnapshot.PROCESS_HOST),
+            snapshot = EngineRuntimeSnapshot(null, null, null, null, process = EngineRuntimeSnapshot.PROCESS_HOST),
             audioSeconds = 15.0,
             initWaitMillis = 4210,
             decodeMillis = 0,
             outcome = "error:IllegalStateException",
         )
         assertEquals(
-            "dictation engine: model=? threads=1 proc=host allowedCpus=? cpuset=? importance=? " +
+            "dictation engine: model=? threads=1 proc=host allowedCpus=? cpuset=? importance=? oomAdj=? " +
                 "audioSec=15.00 initWaitMs=4210 decodeMs=0 outcome=error:IllegalStateException",
             line,
         )
@@ -81,7 +81,7 @@ class DictationDiagnosticsTest {
         val line = formatColdPathDiagnostics(
             model = "whisper-small-en",
             snapshot = EngineRuntimeSnapshot(
-                allowedCpus = 4, cpuset = "/background", importance = 400,
+                allowedCpus = 4, cpuset = "/background", importance = 400, oomScoreAdj = 700,
                 process = EngineRuntimeSnapshot.PROCESS_HOST,
             ),
             modelPathMillis = 3120,
@@ -92,7 +92,7 @@ class DictationDiagnosticsTest {
         )
         assertEquals(
             "dictation coldpath: model=whisper-small-en proc=host allowedCpus=4 cpuset=/background importance=400 " +
-                "modelPathMs=3120 bindMs=498 engineInitMs=2290 warmUpMs=640 outcome=ok",
+                "oomAdj=700 modelPathMs=3120 bindMs=498 engineInitMs=2290 warmUpMs=640 outcome=ok",
             line,
         )
     }
@@ -101,7 +101,7 @@ class DictationDiagnosticsTest {
     fun coldPathTermsNeverReachedPrintAsQuestionMarks() {
         val line = formatColdPathDiagnostics(
             model = "whisper-small-en",
-            snapshot = EngineRuntimeSnapshot(null, null, null, process = EngineRuntimeSnapshot.PROCESS_HOST),
+            snapshot = EngineRuntimeSnapshot(null, null, null, null, process = EngineRuntimeSnapshot.PROCESS_HOST),
             modelPathMillis = 3120,
             bindMillis = null,
             engineInitMillis = null,
@@ -109,7 +109,7 @@ class DictationDiagnosticsTest {
             outcome = "error:RuntimeException",
         )
         assertEquals(
-            "dictation coldpath: model=whisper-small-en proc=host allowedCpus=? cpuset=? importance=? " +
+            "dictation coldpath: model=whisper-small-en proc=host allowedCpus=? cpuset=? importance=? oomAdj=? " +
                 "modelPathMs=3120 bindMs=? engineInitMs=? warmUpMs=? outcome=error:RuntimeException",
             line,
         )

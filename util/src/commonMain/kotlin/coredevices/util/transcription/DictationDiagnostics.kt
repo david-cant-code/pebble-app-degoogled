@@ -13,7 +13,13 @@ package coredevices.util.transcription
  * @property cpuset the cgroup cpuset path the process sits in (for example
  *   `/top-app`, `/foreground`, `/background`).
  * @property importance the platform's process importance value at the time
- *   of the call (Android `RunningAppProcessInfo.importance`).
+ *   of the call (Android `RunningAppProcessInfo.importance`); the engine
+ *   process cannot read its own, so it is null there.
+ * @property oomScoreAdj the kernel-facing rating the platform sets from
+ *   the same state (`/proc/self/oom_score_adj`, lower is safer: 0 for the
+ *   foreground app, 900 and above for cached apps), which the low-memory
+ *   killer reads; readable from the engine process, so it is the rating
+ *   that answers for a decode there.
  * @property process which process the facts describe: [PROCESS_ENGINE]
  *   for the engine process the decode runs in, [PROCESS_HOST] for the app
  *   process, which stands in while no engine process is bound.
@@ -22,6 +28,7 @@ data class EngineRuntimeSnapshot(
     val allowedCpus: Int?,
     val cpuset: String?,
     val importance: Int?,
+    val oomScoreAdj: Int?,
     val process: String,
 ) {
     companion object {
@@ -71,7 +78,7 @@ internal fun parseCpuList(list: String): List<Int>? {
  * a report can be read (or grepped) without the source at hand. Nulls print
  * as `?`. Kept pure so the layout is pinned by a host test.
  *
- * `proc` names the process the three placement facts describe (see
+ * `proc` names the process the four placement facts describe (see
  * [EngineRuntimeSnapshot.process]). `initWaitMs` is how long the call
  * blocked for the model to come up before the decode: zero once the
  * model is resident, and otherwise the part of the cold path in
@@ -128,12 +135,13 @@ internal fun formatColdPathDiagnostics(
 }
 
 // The placement facts share one layout on both lines, `proc` first because
-// it says which process the three after it describe.
+// it says which process the four after it describe.
 private fun StringBuilder.appendPlacement(snapshot: EngineRuntimeSnapshot) {
     append(" proc=").append(snapshot.process)
     append(" allowedCpus=").append(snapshot.allowedCpus ?: "?")
     append(" cpuset=").append(snapshot.cpuset ?: "?")
     append(" importance=").append(snapshot.importance ?: "?")
+    append(" oomAdj=").append(snapshot.oomScoreAdj ?: "?")
 }
 
 /**

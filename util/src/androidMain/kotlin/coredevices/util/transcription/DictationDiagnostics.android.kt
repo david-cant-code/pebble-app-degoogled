@@ -16,6 +16,7 @@ actual fun engineRuntimeSnapshot(): EngineRuntimeSnapshot = EngineRuntimeSnapsho
     allowedCpus = readAllowedCpuCount(),
     cpuset = readCpuset(),
     importance = readImportance(),
+    oomScoreAdj = readOomScoreAdj(),
     process = EngineRuntimeSnapshot.PROCESS_HOST,
 )
 
@@ -56,4 +57,8 @@ private fun readImportance(): Int? = runCatching {
     val info = ActivityManager.RunningAppProcessInfo()
     ActivityManager.getMyMemoryState(info)
     info.importance
+}.getOrNull()
+
+private fun readOomScoreAdj(): Int? = runCatching {
+    File("/proc/self/oom_score_adj").readText().trim().toInt()
 }.getOrNull()

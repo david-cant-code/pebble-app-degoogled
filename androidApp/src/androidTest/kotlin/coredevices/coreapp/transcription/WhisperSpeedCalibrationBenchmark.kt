@@ -29,7 +29,9 @@ import kotlin.time.TimeSource
 /**
  * Calibration run for [WhisperSpeedCalibration] plus the one assertion the
  * probe must hold: on the same phone, repeated probe scores stay within a
- * quarter of each other. With the app's activity on screen (the state the
+ * quarter of each other, after a first probe that is discarded because
+ * the freshly spawned engine process runs it slow (the estimator keeps
+ * the better of two for the same reason). With the app's activity on screen (the state the
  * reference numbers are defined in) it prints the probe score and, for
  * every installed tier, the median decode of a full 15 second window of
  * speech, which are the constants the calibration
@@ -78,8 +80,10 @@ class WhisperSpeedCalibrationBenchmark {
         val threads = transcriptionThreadCount()
         log("cpuset=${cpuset()} threads=$threads")
 
+        val warmUp = whisperBenchmark(threads)
         val scores = (1..RUNS).map { whisperBenchmark(threads) }
         val score = median(scores)
+        log("probe first run in the fresh engine process nsPerBlock=$warmUp (discarded)")
         val spread = (scores.max() - scores.min()).toDouble() / scores.min()
         log("probe nsPerBlock=$scores median=$score spread=${"%.2f".format(spread)}")
         assertTrue(spread <= 0.25, "probe scores spread ${"%.2f".format(spread)} exceeds 0.25")

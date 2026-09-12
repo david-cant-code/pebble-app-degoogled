@@ -43,5 +43,6 @@ internal fun engineProcessSnapshot(runtime: WhisperEngineRuntime): EngineRuntime
     allowedCpus = runtime.cpusAllowedList?.let(::parseCpuListCount),
     cpuset = runtime.cpuset,
     importance = runtime.importance,
+    oomScoreAdj = runtime.oomScoreAdj,
     process = EngineRuntimeSnapshot.PROCESS_ENGINE,
 )

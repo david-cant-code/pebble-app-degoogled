@@ -116,7 +116,7 @@ class WhisperColdPathDiagnosticsTest {
     private companion object {
         /** What a bound engine process reports about itself in the scripted engine. */
         val ENGINE_FACTS = EngineRuntimeSnapshot(
-            allowedCpus = 6, cpuset = "/engine-cpuset", importance = null,
+            allowedCpus = 6, cpuset = "/engine-cpuset", importance = null, oomScoreAdj = 1,
             process = EngineRuntimeSnapshot.PROCESS_ENGINE,
         )
     }

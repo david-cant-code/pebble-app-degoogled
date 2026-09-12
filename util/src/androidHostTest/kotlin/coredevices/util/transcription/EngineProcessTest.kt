@@ -22,7 +22,7 @@ class EngineProcessTest {
         )
         assertEquals(
             EngineRuntimeSnapshot(
-                allowedCpus = 5, cpuset = "/foreground", importance = null,
+                allowedCpus = 5, cpuset = "/foreground", importance = null, oomScoreAdj = 1,
                 process = EngineRuntimeSnapshot.PROCESS_ENGINE,
             ),
             engineProcessSnapshot(runtime),
@@ -38,6 +38,7 @@ class EngineProcessTest {
         val snapshot = engineProcessSnapshot(runtime)
         assertNull(snapshot.allowedCpus)
         assertNull(snapshot.cpuset)
+        assertNull(snapshot.oomScoreAdj)
         assertEquals(EngineRuntimeSnapshot.PROCESS_ENGINE, snapshot.process)
     }
 
