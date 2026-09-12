@@ -37,3 +37,11 @@ internal expect fun engineProcessSnapshot(): EngineRuntimeSnapshot?
  * process of its own.
  */
 internal expect fun addEngineProcessDeathListener(listener: (generation: Long) -> Unit)
+
+/**
+ * Ends the bound engine process now, for [reason], as a missed
+ * transaction deadline does: every handle from it is gone, the death
+ * listeners run, and the next load binds a fresh process. No-op where
+ * the engine has no process of its own, or none is bound.
+ */
+internal expect fun endEngineProcess(reason: String)

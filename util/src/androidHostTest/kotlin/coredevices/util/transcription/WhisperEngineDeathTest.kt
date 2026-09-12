@@ -21,6 +21,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -60,6 +62,9 @@ class WhisperEngineDeathTest {
 
         /** The process dies inside the first inference after every load (the warm-up). */
         @Volatile var dieOnWarmUp = false
+
+        /** The reason the service gave for ending the process, once it has. */
+        @Volatile var endedFor: String? = null
 
         val engine = object : WhisperEngine {
             override fun supported(): Boolean = true
@@ -122,6 +127,11 @@ class WhisperEngineDeathTest {
             override fun addDeathListener(listener: (generation: Long) -> Unit) {
                 listeners += listener
             }
+
+            override fun endProcess(reason: String) {
+                endedFor = reason
+                die(report = true)
+            }
         }
 
         /**
@@ -148,12 +158,17 @@ class WhisperEngineDeathTest {
         CoreConfig(sttConfig = STTConfig(mode = CactusSTTMode.LocalOnly, modelName = "model-a")),
     )
 
-    private fun serviceFor(fake: ProcessEngine, provider: FakeModelProvider = FakeModelProvider()) = WhisperTranscriptionService(
+    private fun serviceFor(
+        fake: ProcessEngine,
+        provider: FakeModelProvider = FakeModelProvider(),
+        unwindBound: Duration = 10.seconds,
+    ) = WhisperTranscriptionService(
         coreConfigFlow = CoreConfigFlow(config),
         modelProvider = provider,
         analytics = NoopAnalytics,
         inferenceBoost = NoOpInferenceBoost(),
         engine = fake.engine,
+        engineUnwindBound = unwindBound,
     )
 
     // Generous bound: every wait returns as soon as its condition holds, so
@@ -210,6 +225,35 @@ class WhisperEngineDeathTest {
         fake.gate = null
         assertEquals("hello world", service.transcribeLocal(realPcmBytes(), sampleRate = 16_000))
         assertEquals(2, fake.realCalls)
+    }
+
+    /**
+     * A decode that ignores its abort past the unwind bound is abandoned
+     * together with its process: the service ends the engine process at
+     * once and the death report reloads the model into a fresh one, so
+     * the stuck call's own deadline has no process left to end under
+     * later work.
+     */
+    @Test
+    fun aWedgedDecodeEndsTheEngineProcessAndReloads() = runBlocking(Dispatchers.Default) {
+        val fake = ProcessEngine().apply { gate = CountDownLatch(1) }
+        val service = serviceFor(fake, unwindBound = 200.milliseconds)
+        awaitUntil("the first load") { service.isModelReady }
+
+        val dictation = async { runCatching { service.transcribeLocal(realPcmBytes(), sampleRate = 16_000) } }
+        awaitUntil("the decode inside the engine") { fake.inRealTranscribe }
+        dictation.cancel()
+        awaitUntil("the wedged process ended") { fake.endedFor != null }
+        assertTrue(fake.endedFor.orEmpty().contains("ignored its abort"), "unexpected reason: ${fake.endedFor}")
+        awaitUntil("the reload") { fake.initCount == 2 && service.isModelReady }
+        assertEquals(2L, fake.generation, "the reload did not bring up a fresh engine process")
+
+        // The stuck call is released only now, into a process that is gone.
+        fake.gate?.countDown()
+        fake.gate = null
+        assertEquals("hello world", service.transcribeLocal(realPcmBytes(), sampleRate = 16_000))
+        settle()
+        assertEquals(2, fake.initCount, "the wedge was followed by more than one reload")
     }
 
     /**

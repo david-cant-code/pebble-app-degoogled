@@ -272,6 +272,9 @@ internal interface WhisperEngine {
 
     /** Registers a listener for engine process deaths; see [addEngineProcessDeathListener]. */
     fun addDeathListener(listener: (generation: Long) -> Unit) {}
+
+    /** Ends the engine process behind the handles, reported to the death listeners; see [endEngineProcess]. */
+    fun endProcess(reason: String) {}
 }
 
 /**
@@ -306,6 +309,7 @@ internal object RealWhisperEngine : WhisperEngine {
     override fun lastBindMillis(): Long? = engineProcessBindMillis()
     override fun runtimeSnapshot(): EngineRuntimeSnapshot? = engineProcessSnapshot()
     override fun addDeathListener(listener: (generation: Long) -> Unit) = addEngineProcessDeathListener(listener)
+    override fun endProcess(reason: String) = endEngineProcess(reason)
 }
 
 /**
@@ -350,6 +354,8 @@ class WhisperTranscriptionService internal constructor(
     private val clearCaptures: () -> Unit = { DictationCaptureDump.clear() },
     // A decode cancelled after running this long had already missed the watch; its elapsed time is recorded (see runLocalTranscribe).
     private val recordCancelledAfter: Duration = DICTATION_DEADLINE,
+    // How long a cancelled decode may take to unwind before it is abandoned (see ENGINE_UNWIND_BOUND); tests shorten it.
+    private val engineUnwindBound: Duration = ENGINE_UNWIND_BOUND,
     // The service scope's dispatcher and the one for blocking work (model
     // init, engine calls, capture files); tests pass inline dispatchers to
     // run the init path to completion inside the constructor.
@@ -378,8 +384,8 @@ class WhisperTranscriptionService internal constructor(
          * pass is seconds-scale for the bigger catalog models on
          * phone-class CPUs, so the bound must comfortably exceed a single
          * pass. Blowing it means the engine is wedged, and the native
-         * context gets abandoned rather than risking a concurrent next
-         * call against it.
+         * context gets abandoned, with the process it is in, rather than
+         * risking a concurrent next call against it.
          */
         private val ENGINE_UNWIND_BOUND = 10.seconds
 
@@ -514,7 +520,7 @@ class WhisperTranscriptionService internal constructor(
                 logger.d { "Requesting whisper engine abort for call $callId (caller cancelled)" }
                 engine.cancel(callId)
             },
-            unwindBound = ENGINE_UNWIND_BOUND,
+            unwindBound = engineUnwindBound,
             onWedged = ::abandonWedgedContext,
         )
     }
@@ -524,20 +530,26 @@ class WhisperTranscriptionService internal constructor(
 
     /**
      * Containment for an engine that ignored its abort past
-     * [ENGINE_UNWIND_BOUND]: a thread may still be inside the native
-     * context, so freeing it would be a use-after-free. The context is
-     * leaked deliberately and the handle zeroed (still under [modelMutex])
-     * so the next transcription re-initializes a fresh context instead of
-     * racing the stuck call inside the old one. The wedged call keeps its
-     * own per-id abort armed, so the fresh call does not disturb it.
+     * [engineUnwindBound]: a thread may still be inside the native
+     * context, so freeing it would be a use-after-free. The handle is
+     * zeroed (still under [modelMutex]) and the engine process ended,
+     * which takes the stuck call and its context with it: the death
+     * report reloads the model into a fresh process the way any death
+     * does, and the transaction deadline the stuck call still holds
+     * expires on a process that is already gone. Where the engine has
+     * no process of its own the context is leaked deliberately instead,
+     * and the next transcription re-initializes a fresh one beside it;
+     * the wedged call keeps its own per-id abort armed either way, so a
+     * fresh call does not disturb it.
      */
     private fun abandonWedgedContext() {
         logger.e {
-            "Whisper engine ignored cancellation for $ENGINE_UNWIND_BOUND; " +
-                "abandoning the native context and forcing re-init"
+            "Whisper engine ignored cancellation for $engineUnwindBound; " +
+                "abandoning the native context and ending the engine process"
         }
         modelHandle = 0L
         lastInitedModel = null
+        engine.endProcess("a decode ignored its abort for $engineUnwindBound")
     }
 
     /**

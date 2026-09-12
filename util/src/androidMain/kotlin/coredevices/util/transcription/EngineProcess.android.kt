@@ -16,6 +16,8 @@ internal actual fun engineProcessSnapshot(): EngineRuntimeSnapshot? =
 internal actual fun addEngineProcessDeathListener(listener: (generation: Long) -> Unit) =
     WhisperEngineClient.addDeathListener(listener)
 
+internal actual fun endEngineProcess(reason: String) = WhisperEngineClient.endProcess(reason)
+
 /**
  * The CPU ids the engine process may run on right now, or null when no
  * engine process is bound or its mask is unreadable there. The decode

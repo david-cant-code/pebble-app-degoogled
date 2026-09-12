@@ -34,6 +34,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <memory>
@@ -423,18 +424,26 @@ Java_coredevices_whisper_WhisperJNI_nativeInitFd(JNIEnv *, jclass, jint fd) {
 
     // The state the engine builds behind init (whisper.cpp v1.9.3,
     // src/whisper.cpp, whisper_init_state) is allocated with new and
-    // vector reserves, which throw on failure; an exception leaving this
-    // frame would end the process, so a throw is reported as a failed
-    // load instead.
+    // vector reserves, which throw on failure, after the model's weights
+    // are loaded; whisper_init_with_params has no handler, so a throw
+    // leaves the context and the partial state allocated with nothing
+    // that can free them (whisper_free reaches the state through a
+    // pointer the throw lost). This process is the engine's own and the
+    // app recovers from its death, so a throw ends it here, with its
+    // reason in the log, rather than leave a model's worth of memory
+    // behind in a process that keeps serving loads.
     whisper_context *ctx = nullptr;
     try {
         ctx = whisper_init_with_params(&loader, cparams);
     } catch (const std::exception &e) {
-        set_last_error(std::string("whisper_init_with_params threw for model fd ") + std::to_string(fd) + ": " + e.what());
-        return 0;
+        __android_log_print(ANDROID_LOG_ERROR, kLogTag,
+                            "whisper_init_with_params threw for model fd %d: %s; ending the engine process",
+                            fd, e.what());
+        abort();
     } catch (...) {
-        set_last_error("whisper_init_with_params threw for model fd " + std::to_string(fd));
-        return 0;
+        __android_log_print(ANDROID_LOG_ERROR, kLogTag,
+                            "whisper_init_with_params threw for model fd %d; ending the engine process", fd);
+        abort();
     }
     if (ctx == nullptr) {
         set_last_error("whisper_init_with_params failed for model fd " + std::to_string(fd)

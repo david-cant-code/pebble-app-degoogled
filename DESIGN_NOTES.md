@@ -281,7 +281,11 @@ The replacement is whisper.cpp (MIT), compiled from source:
   then ends the isolated process (`WhisperEngineClient` states the
   source) and the blocked call returns as a dead-object failure, so an
   engine process that answers nothing, wedged or hostile, is handled as
-  one that died. The engine side keeps a live-handle set
+  one that died; a decode that ignores its abort past the service's
+  unwind bound ends its process the same way, and so does a reply whose
+  header is not the plain no-exception marker, which the client reads
+  itself rather than through the framework's exception reader. The
+  engine side keeps a live-handle set
   and a per-handle busy flag, so a handle from an earlier engine process
   or one inside another call is refused rather than dereferenced,
   independently of the service's mutexes, and re-checks the CPU floor

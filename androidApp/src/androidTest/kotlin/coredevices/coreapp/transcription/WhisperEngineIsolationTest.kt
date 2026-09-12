@@ -2,6 +2,7 @@ package coredevices.coreapp.transcription
 
 import android.os.ParcelFileDescriptor
 import android.os.Process
+import android.os.StrictMode
 import android.os.SystemClock
 import androidx.test.platform.app.InstrumentationRegistry
 import coredevices.coreapp.testsupport.ReadOnlyModelPathProvider
@@ -19,6 +20,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assume
 import org.junit.Test
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -33,13 +35,14 @@ import kotlin.time.Duration.Companion.milliseconds
  * cross it, a handle from a dead engine process is refused rather than
  * dereferenced, the app process outlives the engine process and binds a
  * fresh one, a handle inside one call refuses a second, a call the
- * engine does not answer in time ends its process, and the engine
- * process keeps no descriptor from the models it is handed. The uid gate
- * in front of every transaction has no negative case here: the
- * instrumentation shares the app's uid, and a foreign uid cannot reach
- * a service that is not exported. Uses the installed base-en model and
- * never downloads. Run on its own, against a persistent install with
- * the model:
+ * engine does not answer in time ends its process, the app can end it
+ * on its own account, its reply header stays plain under a StrictMode
+ * policy, and the engine process keeps no descriptor from the models it
+ * is handed. The uid gate in front of every transaction has no negative
+ * case here: the instrumentation shares the app's uid, and a foreign
+ * uid cannot reach a service that is not exported. Uses the installed
+ * base-en model and never downloads. Run on its own, against a
+ * persistent install with the model:
  *   adb shell am instrument -w \
  *     -e class coredevices.coreapp.transcription.WhisperEngineIsolationTest \
  *     com.anopticlabs.gravel.test/androidx.test.runner.AndroidJUnitRunner
@@ -231,6 +234,67 @@ class WhisperEngineIsolationTest {
             assertTrue(text.lowercase().contains(KEYWORD), "post-expiry transcription '$text' lost '$KEYWORD'")
         } finally {
             whisperFree(fresh)
+        }
+    }
+
+    /**
+     * The app can end the engine process on its own account, as the
+     * transcription service does for a decode that ignores its abort:
+     * the death listeners hear which process went, a handle from it is
+     * refused by the fresh process the next call binds, and that
+     * process is a new one.
+     */
+    @Test
+    fun theAppCanEndTheEngineProcess() {
+        val path = modelPath()
+        val handle = whisperInit(path)
+        val before = assertNotNull(WhisperEngineClient.runtime(bindIfNeeded = false))
+        val generation = WhisperEngineClient.processGeneration()
+        val deaths = CopyOnWriteArrayList<Long>()
+        WhisperEngineClient.addDeathListener { deaths += it }
+        WhisperEngineClient.endProcess("isolation test")
+        assertTrue(!WhisperEngineClient.isConnected, "the binding to the ended engine process was not released")
+        assertEquals(listOf(generation), deaths, "the death listeners did not hear the ended process")
+        val refused = assertFailsWith<WhisperEngineUnavailableException> {
+            whisperTranscribe(handle, clip(), THREADS, "en", 10L)
+        }
+        assertTrue(
+            refused.message.orEmpty().contains("was not issued by this engine process"),
+            "the handle from the ended process was not refused by the fresh one: ${refused.message}",
+        )
+        val fresh = whisperInit(path)
+        try {
+            val after = assertNotNull(WhisperEngineClient.runtime(bindIfNeeded = false))
+            log("engine ended on request as pid ${before.pid}, back as pid ${after.pid}")
+            assertNotEquals(before.pid, after.pid, "the engine process was not ended")
+            assertEquals(generation + 1, WhisperEngineClient.processGeneration(), "the end and the reload took more than one engine process")
+            val text = whisperTranscribe(fresh, clip(), THREADS, "en", 11L)
+            assertTrue(text.lowercase().contains(KEYWORD), "post-end transcription '$text' lost '$KEYWORD'")
+        } finally {
+            whisperFree(fresh)
+        }
+    }
+
+    /**
+     * The engine's reply header is read as the plain no-exception marker
+     * even when the calling thread has a StrictMode policy the engine's
+     * procfs reads would violate: the client sends the call without one,
+     * so the engine gathers nothing to write ahead of its reply and the
+     * process is not ended for a header the platform wrote.
+     */
+    @Test
+    fun aTransactionUnderAStrictModePolicyReadsAPlainHeader() {
+        assumeEngine()
+        val original = StrictMode.getThreadPolicy()
+        val detecting = StrictMode.ThreadPolicy.Builder().detectDiskReads().detectDiskWrites().penaltyLog().build()
+        StrictMode.setThreadPolicy(detecting)
+        try {
+            val report = assertNotNull(WhisperEngineClient.runtime(bindIfNeeded = true))
+            assertTrue(WhisperEngineClient.isConnected, "the engine process was ended under a StrictMode policy")
+            assertNotNull(report.cpusAllowedList, "the engine's procfs read did not reach the report")
+            assertEquals(detecting.toString(), StrictMode.getThreadPolicy().toString(), "the thread's policy was not restored after the call")
+        } finally {
+            StrictMode.setThreadPolicy(original)
         }
     }
 

@@ -471,7 +471,9 @@ still hold the engine when the retry's recording ends. The retry's own
 decode then fails at once with a recognizer error, the same "Error
 occurred. Try again." the superseded session produced, and the watch's
 next retry runs clean. The hold lasts at most the engine's unwind bound
-(10 seconds) and needs a pass longer than the next recording. A bounded
+(10 seconds) and needs a pass longer than the next recording; a decode
+still inside the engine when the bound expires is abandoned with its
+process, so the dictation after it pays a cold load. A bounded
 wait on the engine would mostly turn an immediate failure into a late
 one inside the same deadline; closing this means the new session
 joining the superseded decode after its recording ends and before its

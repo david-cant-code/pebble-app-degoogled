@@ -12,6 +12,7 @@ import android.os.Parcel
 import android.os.ParcelFileDescriptor
 import android.os.RemoteException
 import android.os.SharedMemory
+import android.os.StrictMode
 import android.os.SystemClock
 import android.system.OsConstants
 import android.util.Log
@@ -344,9 +345,11 @@ object WhisperEngineClient {
      * when [bindIfNeeded] is set and otherwise failing without one, so a
      * call that only makes sense against a live engine never spawns a
      * process. [write] fills the request after the interface token;
-     * [read] consumes the reply after its exception marker. A dead or
-     * unreachable process surfaces as [WhisperEngineUnavailableException]
-     * and drops the binding, so the next binding call gets a fresh process.
+     * [read] consumes the reply after its header. A dead or unreachable
+     * process surfaces as [WhisperEngineUnavailableException] and drops
+     * the binding, so the next binding call gets a fresh process, and so
+     * does a reply whose header is not the no-exception marker
+     * ([replyHeaderViolation]).
      */
     private inline fun <T> transact(
         code: Int,
@@ -365,6 +368,23 @@ object WhisperEngineClient {
         }
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
+        // The reply header is read here as one int, never through the
+        // framework's reader, which would turn an exception reply into
+        // one of its own exception types carrying the engine's text past
+        // every bound and the sanitiser. A legitimate reply's header is
+        // the plain no-exception marker only while nothing makes the
+        // platform write a fat one ahead of the payload: it does so for
+        // StrictMode violations the engine's binder thread gathered under
+        // this thread's policy, which travels with the interface token
+        // (AOSP `android16-release`, frameworks/native
+        // `libs/binder/Parcel.cpp`, `writeInterfaceToken` and
+        // `enforceInterface`; frameworks/base `core/java/android/os/Parcel.java`,
+        // `writeNoException` and `readExceptionCode`), so this thread
+        // carries no policy for the call; and for app ops noted under a
+        // transaction flag this call never sets (`core/java/android/os/Binder.java`,
+        // `execTransactInternal`).
+        val policy = StrictMode.getThreadPolicy()
+        StrictMode.setThreadPolicy(StrictMode.ThreadPolicy.LAX)
         val expiry = watchdog.schedule(
             { onDeadline(live, operation, deadline) },
             deadline.inWholeMilliseconds, TimeUnit.MILLISECONDS,
@@ -381,10 +401,14 @@ object WhisperEngineClient {
                 throw WhisperEngineUnavailableException("engine transaction for $operation failed: ${e.message}", e)
             }
             check(handled) { "engine did not recognize the $operation transaction" }
-            reply.readException()
+            replyHeaderViolation(operation, reply.readInt())?.let { message ->
+                expire(live, message)
+                throw WhisperEngineUnavailableException(message)
+            }
             return read(reply)
         } finally {
             expiry.cancel(false)
+            StrictMode.setThreadPolicy(policy)
             data.recycle()
             reply.recycle()
         }
@@ -392,12 +416,29 @@ object WhisperEngineClient {
 
     /**
      * A transaction's deadline has passed with no answer: the engine
-     * process is treated as dead. Dropping the binding is what ends it
-     * (see the class comment), and the call blocked in it fails with the
-     * message left here once the process is gone.
+     * process is treated as dead.
      */
-    private fun onDeadline(live: Connection, operation: String, deadline: Duration) {
-        val message = "engine did not answer $operation within $deadline; its process is ended"
+    private fun onDeadline(live: Connection, operation: String, deadline: Duration) =
+        expire(live, "engine did not answer $operation within $deadline; its process is ended")
+
+    /**
+     * Ends the bound engine process now, for [reason], as a missed
+     * deadline does: the process is treated as dead, every handle from
+     * it is gone, the death listeners run, and the next binding call
+     * gets a fresh process. Nothing to do when none is bound.
+     */
+    fun endProcess(reason: String) {
+        val live = synchronized(stateLock) { connection } ?: return
+        expire(live, "engine process ended: $reason")
+    }
+
+    /**
+     * Treats the engine process behind [live] as dead, for [message].
+     * Dropping the binding is what ends it (see the class comment), and
+     * a call blocked in it fails with the message once the process is
+     * gone.
+     */
+    private fun expire(live: Connection, message: String) {
         live.expired = message
         Log.w(TAG, message)
         onDied(live.serviceConnection)

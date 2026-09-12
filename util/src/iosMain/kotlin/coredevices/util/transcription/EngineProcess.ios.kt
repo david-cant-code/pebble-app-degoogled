@@ -9,3 +9,5 @@ internal actual fun engineProcessBindMillis(): Long? = null
 internal actual fun engineProcessSnapshot(): EngineRuntimeSnapshot? = null
 
 internal actual fun addEngineProcessDeathListener(listener: (generation: Long) -> Unit) {}
+
+internal actual fun endEngineProcess(reason: String) {}

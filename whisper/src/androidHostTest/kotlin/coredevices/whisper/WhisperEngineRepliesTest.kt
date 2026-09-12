@@ -198,6 +198,23 @@ class WhisperEngineRepliesTest {
         assertNull(adj(WhisperEngineProtocol.UNKNOWN_INT))
     }
 
+    /**
+     * Only the no-exception marker is a header this process reads past;
+     * an exception reply or a fat header is refused with a message that
+     * names the value and nothing else from the reply.
+     */
+    @Test
+    fun onlyTheNoExceptionHeaderIsReadPast() {
+        assertNull(replyHeaderViolation("init", REPLY_HEADER_NO_EXCEPTION))
+        assertEquals(0, REPLY_HEADER_NO_EXCEPTION)
+        for (header in listOf(-1, -2, -3, -4, -5, -6, -7, -8, -9, -127, -128, 1, Int.MIN_VALUE, Int.MAX_VALUE)) {
+            assertEquals(
+                "engine reply to transcribe carried header $header instead of the no-exception marker; its process is ended",
+                replyHeaderViolation("transcribe", header),
+            )
+        }
+    }
+
     @Test
     fun cleanTextPassesThroughUntouched() {
         val text = "whisper_init_with_params failed for model fd 42 (see whisper.cpp logcat lines)"

@@ -88,6 +88,29 @@ internal fun boundedSampleEcho(reported: Int, sent: Int): Int =
     if (reported == -1 || reported == sent) reported else -1
 
 /**
+ * The reply header of a transaction the engine answered: the value the
+ * platform's no-exception marker writes ([WhisperEngineClient] states
+ * the source and what else the platform can put there).
+ */
+internal const val REPLY_HEADER_NO_EXCEPTION = 0
+
+/**
+ * Why a reply header is one this process refuses, or null for the
+ * no-exception marker. Any other value means the callee threw or the
+ * platform wrote a fat header, and either would carry text the
+ * framework's reader turns into an exception message that no bound or
+ * sanitiser here has seen; so the reply is not read further, its
+ * process is ended, and the message names the value and nothing from
+ * the reply.
+ */
+internal fun replyHeaderViolation(operation: String, header: Int): String? =
+    if (header == REPLY_HEADER_NO_EXCEPTION) {
+        null
+    } else {
+        "engine reply to $operation carried header $header instead of the no-exception marker; its process is ended"
+    }
+
+/**
  * The values `oom_score_adj` can hold (AOSP bionic `android16-release`,
  * `libc/kernel/uapi/linux/oom.h`, `OOM_SCORE_ADJ_MIN` and
  * `OOM_SCORE_ADJ_MAX`); [UNKNOWN_INT] lies outside it.
