@@ -275,7 +275,13 @@ The replacement is whisper.cpp (MIT), compiled from source:
   window of float PCM. The transactions are a hand-written Binder
   protocol, `WhisperEngineProtocol`, because the KMP Android library
   plugin has no AIDL support, and everything read back from the engine
-  process is bounded before use. The engine side keeps a live-handle set
+  process is bounded before use. Every transaction carries a deadline
+  (`transactionDeadline`, set well above the slowest legitimate call of
+  its kind), on whose expiry the client drops the binding: the platform
+  then ends the isolated process (`WhisperEngineClient` states the
+  source) and the blocked call returns as a dead-object failure, so an
+  engine process that answers nothing, wedged or hostile, is handled as
+  one that died. The engine side keeps a live-handle set
   and a per-handle busy flag, so a handle from an earlier engine process
   or one inside another call is refused rather than dereferenced,
   independently of the service's mutexes, and re-checks the CPU floor

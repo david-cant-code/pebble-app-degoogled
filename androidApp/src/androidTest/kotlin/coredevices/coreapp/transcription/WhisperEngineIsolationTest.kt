@@ -25,13 +25,15 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * On-device guard for the engine process boundary: the engine runs in an
  * isolated process, a dictation and a full firmware window of audio
  * cross it, a handle from a dead engine process is refused rather than
  * dereferenced, the app process outlives the engine process and binds a
- * fresh one, a handle inside one call refuses a second, and the engine
+ * fresh one, a handle inside one call refuses a second, a call the
+ * engine does not answer in time ends its process, and the engine
  * process keeps no descriptor from the models it is handed. The uid gate
  * in front of every transaction has no negative case here: the
  * instrumentation shares the app's uid, and a foreign uid cannot reach
@@ -192,6 +194,43 @@ class WhisperEngineIsolationTest {
         } finally {
             executor.shutdownNow()
             whisperFree(handle)
+        }
+    }
+
+    /**
+     * A transaction the engine never answers ends the engine process and
+     * fails the call as an unavailable engine; the next call binds a
+     * fresh process. A healthy engine's full-window decode stands in for
+     * the silent one: the deadline is capped below its three seconds.
+     */
+    @Test
+    fun aCallTheEngineDoesNotAnswerInTimeEndsItsProcess() {
+        val path = modelPath()
+        val handle = whisperInit(path)
+        val before = assertNotNull(WhisperEngineClient.runtime(bindIfNeeded = false))
+        val generation = WhisperEngineClient.processGeneration()
+        WhisperEngineClient.transactionDeadlineCapForTests = 500.milliseconds
+        try {
+            val speech = clip()
+            val window = FloatArray(WINDOW_SAMPLES) { speech[it % speech.size] }
+            val failed = assertFailsWith<WhisperEngineUnavailableException> {
+                whisperTranscribe(handle, window, THREADS, "en", 8L)
+            }
+            assertTrue(failed.message.orEmpty().contains("did not answer"), "unexpected failure: ${failed.message}")
+            assertTrue(!WhisperEngineClient.isConnected, "the binding to the silent engine process was not released")
+        } finally {
+            WhisperEngineClient.transactionDeadlineCapForTests = null
+        }
+        val fresh = whisperInit(path)
+        try {
+            val after = assertNotNull(WhisperEngineClient.runtime(bindIfNeeded = false))
+            log("engine ended for a missed deadline as pid ${before.pid}, back as pid ${after.pid}")
+            assertNotEquals(before.pid, after.pid, "the silent engine process was not ended")
+            assertEquals(generation + 1, WhisperEngineClient.processGeneration(), "the expiry and the reload took more than one engine process")
+            val text = whisperTranscribe(fresh, clip(), THREADS, "en", 9L)
+            assertTrue(text.lowercase().contains(KEYWORD), "post-expiry transcription '$text' lost '$KEYWORD'")
+        } finally {
+            whisperFree(fresh)
         }
     }
 

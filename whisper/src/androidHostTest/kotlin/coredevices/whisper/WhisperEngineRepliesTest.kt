@@ -6,6 +6,8 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Pins the checks the engine client applies to values read from an
@@ -93,6 +95,28 @@ class WhisperEngineRepliesTest {
         assertEquals(Int.MAX_VALUE - 3, audioRegionBytes((Int.MAX_VALUE - 3) / 4))
         assertFailsWith<IllegalArgumentException> { audioRegionBytes(Int.MAX_VALUE / 4 + 1) }
         assertFailsWith<IllegalArgumentException> { audioRegionBytes(-1) }
+    }
+
+    /**
+     * Every transaction has a bound, none is shorter than a stalled but
+     * healthy phone needs, the decode's is the longest since it is the
+     * slowest legitimate call, and a code the table does not know gets
+     * the shortest.
+     */
+    @Test
+    fun everyTransactionHasADeadlineAndTheDecodeHasTheLongest() {
+        val codes = listOf(
+            WhisperEngineProtocol.TRANSACTION_INIT, WhisperEngineProtocol.TRANSACTION_TRANSCRIBE,
+            WhisperEngineProtocol.TRANSACTION_CANCEL, WhisperEngineProtocol.TRANSACTION_FREE,
+            WhisperEngineProtocol.TRANSACTION_BENCHMARK, WhisperEngineProtocol.TRANSACTION_RUNTIME,
+        )
+        val shortest = codes.minOf(::transactionDeadline)
+        assertTrue(shortest >= 15.seconds, "the shortest bound is $shortest")
+        val longest = codes.maxOf(::transactionDeadline)
+        assertEquals(transactionDeadline(WhisperEngineProtocol.TRANSACTION_TRANSCRIBE), longest)
+        assertTrue(longest <= 5.minutes, "a hung engine is held for $longest")
+        assertTrue(transactionDeadline(WhisperEngineProtocol.TRANSACTION_INIT) >= 1.minutes, "a model load reads up to a gigabyte")
+        assertEquals(shortest, transactionDeadline(WhisperEngineProtocol.TRANSACTION_RUNTIME + 1), "an unknown code gets the shortest bound")
     }
 
     @Test

@@ -33,7 +33,9 @@ import java.nio.ByteOrder
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration
 
 /**
  * The app-process side of the engine boundary: binds
@@ -57,6 +59,15 @@ import java.util.concurrent.TimeUnit
  * calling thread until the engine process answers, and a bind until the
  * process is up, so no engine call may run on the main thread; each
  * transaction checks.
+ *
+ * Every transaction carries a deadline ([transactionDeadline]). On
+ * expiry the binding is dropped, which is what ends the engine process:
+ * the platform kills an isolated process as soon as no service runs in
+ * it and never reuses one (AOSP `android16-release`,
+ * `services/core/java/com/android/server/am/OomAdjuster.java`,
+ * `updateAndTrimProcessLSP`, "isolated not needed"), and the blocked
+ * call then returns as a dead-object failure. An engine process that
+ * answers nothing is so handled like one that died, reload included.
  */
 object WhisperEngineClient {
     private const val TAG = "WhisperEngineClient"
@@ -72,8 +83,26 @@ object WhisperEngineClient {
 
     // One connection is one engine process; its generation is the bind
     // count at the time it was bound, so a handle can be matched to the
-    // process that issued it after that process is gone.
-    private class Connection(val serviceConnection: ServiceConnection, val binder: IBinder, val generation: Long)
+    // process that issued it after that process is gone. A deadline that
+    // expired on it leaves the message the blocked call fails with.
+    private class Connection(val serviceConnection: ServiceConnection, val binder: IBinder, val generation: Long) {
+        @Volatile
+        var expired: String? = null
+    }
+
+    // Runs the transaction deadlines: one daemon thread, since expiring
+    // one is an unbind and a log line.
+    private val watchdog = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "whisper-engine-watchdog").apply { isDaemon = true }
+    }
+
+    /**
+     * Test seam: while set, caps every transaction deadline at this
+     * value, so a device test can watch a healthy engine's decode expire.
+     * It can only shorten a deadline, never lengthen or remove one.
+     */
+    @Volatile
+    var transactionDeadlineCapForTests: Duration? = null
 
     @Volatile
     private var appContext: Context? = null
@@ -327,8 +356,15 @@ object WhisperEngineClient {
         check(Looper.myLooper() != Looper.getMainLooper()) { "engine calls must not run on the main thread" }
         val live = connected(bindIfNeeded)
             ?: throw WhisperEngineUnavailableException("no engine process is bound for $operation")
+        val deadline = transactionDeadline(code).let { bound ->
+            transactionDeadlineCapForTests?.let { cap -> minOf(bound, cap) } ?: bound
+        }
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
+        val expiry = watchdog.schedule(
+            { onDeadline(live, operation, deadline) },
+            deadline.inWholeMilliseconds, TimeUnit.MILLISECONDS,
+        )
         try {
             data.writeInterfaceToken(DESCRIPTOR)
             write(data)
@@ -336,7 +372,7 @@ object WhisperEngineClient {
                 live.binder.transact(code, data, reply, 0)
             } catch (e: DeadObjectException) {
                 onDied(live.serviceConnection)
-                throw WhisperEngineUnavailableException("engine process died during $operation", e)
+                throw WhisperEngineUnavailableException(live.expired ?: "engine process died during $operation", e)
             } catch (e: RemoteException) {
                 throw WhisperEngineUnavailableException("engine transaction for $operation failed: ${e.message}", e)
             }
@@ -344,9 +380,23 @@ object WhisperEngineClient {
             reply.readException()
             return read(reply)
         } finally {
+            expiry.cancel(false)
             data.recycle()
             reply.recycle()
         }
+    }
+
+    /**
+     * A transaction's deadline has passed with no answer: the engine
+     * process is treated as dead. Dropping the binding is what ends it
+     * (see the class comment), and the call blocked in it fails with the
+     * message left here once the process is gone.
+     */
+    private fun onDeadline(live: Connection, operation: String, deadline: Duration) {
+        val message = "engine did not answer $operation within $deadline; its process is ended"
+        live.expired = message
+        Log.w(TAG, message)
+        onDied(live.serviceConnection)
     }
 
     /**

@@ -3,6 +3,12 @@ package coredevices.whisper
 import coredevices.whisper.WhisperEngineProtocol.STATUS_BUSY
 import coredevices.whisper.WhisperEngineProtocol.STATUS_ENGINE_ERROR
 import coredevices.whisper.WhisperEngineProtocol.STATUS_STALE_HANDLE
+import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_BENCHMARK
+import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_INIT
+import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_TRANSCRIBE
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * The pure decisions [WhisperEngineClient] makes over what it sends and
@@ -37,6 +43,24 @@ internal fun checkReplyBound(kind: String, size: Int, max: Int) {
     if (size > max) {
         throw WhisperEngineUnavailableException("engine reply $kind of $size exceeds the $max bound")
     }
+}
+
+/**
+ * How long the client waits for the engine process to answer a
+ * transaction before it ends that process. An engine that answers never,
+ * because it is wedged or hostile, is the case each bound exists for, so
+ * a bound only has to sit well above the slowest legitimate call of its
+ * kind: a model load reads up to a gigabyte from flash, a decode of the
+ * longest watch recording on the slowest catalog model takes tens of
+ * seconds on a slow phone, the probe runs for about a second of CPU, and
+ * the rest are procfs reads or a flag. A code this table does not know
+ * gets the shortest.
+ */
+internal fun transactionDeadline(code: Int): Duration = when (code) {
+    TRANSACTION_INIT -> 2.minutes
+    TRANSACTION_TRANSCRIBE -> 3.minutes
+    TRANSACTION_BENCHMARK -> 1.minutes
+    else -> 15.seconds
 }
 
 /**
