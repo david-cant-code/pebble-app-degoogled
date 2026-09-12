@@ -30,6 +30,25 @@ class WhisperEngineRepliesTest {
         assertEquals("tab?here", sanitizeEngineText("tab\there"))
     }
 
+    /**
+     * The client reads a transcribe reply as status, sample count, payload
+     * on every status, and every other reply as status, payload; the
+     * service's catch-all writes by this table, so it must single out
+     * exactly the transcribe code.
+     */
+    @Test
+    fun onlyTheTranscribeReplyCarriesASampleCount() {
+        val codes = listOf(
+            WhisperEngineProtocol.TRANSACTION_INIT, WhisperEngineProtocol.TRANSACTION_TRANSCRIBE,
+            WhisperEngineProtocol.TRANSACTION_CANCEL, WhisperEngineProtocol.TRANSACTION_FREE,
+            WhisperEngineProtocol.TRANSACTION_BENCHMARK, WhisperEngineProtocol.TRANSACTION_RUNTIME,
+        )
+        assertEquals(
+            listOf(WhisperEngineProtocol.TRANSACTION_TRANSCRIBE),
+            codes.filter(WhisperEngineProtocol::replyCarriesSampleCount),
+        )
+    }
+
     @Test
     fun cleanTextPassesThroughUntouched() {
         val text = "whisper_init_with_params failed for model fd 42 (see whisper.cpp logcat lines)"

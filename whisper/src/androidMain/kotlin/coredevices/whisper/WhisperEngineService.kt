@@ -24,6 +24,7 @@ import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_INIT
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_RUNTIME
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_TRANSCRIBE
 import coredevices.whisper.WhisperEngineProtocol.UNKNOWN_INT
+import coredevices.whisper.WhisperEngineProtocol.replyCarriesSampleCount
 import java.io.File
 import java.nio.ByteOrder
 import java.util.concurrent.ConcurrentHashMap
@@ -118,12 +119,18 @@ private class EngineBinder(private val service: Service) : Binder() {
             }
         } catch (t: Throwable) {
             // The handler may have written part of a reply; start over
-            // with the failure, so the app process never reads a torn one.
+            // with the failure, in the layout the client reads for this
+            // code, so the app process never reads a torn one.
             Log.e(TAG, "engine transaction $code failed", t)
             out.setDataSize(0)
             out.setDataPosition(0)
             out.writeNoException()
-            writeFailure(out, STATUS_ENGINE_ERROR, "${t::class.java.simpleName}: ${t.message}")
+            val message = "${t::class.java.simpleName}: ${t.message}"
+            if (replyCarriesSampleCount(code)) {
+                writeTranscribeFailure(out, STATUS_ENGINE_ERROR, message)
+            } else {
+                writeFailure(out, STATUS_ENGINE_ERROR, message)
+            }
         }
         return true
     }

@@ -54,6 +54,14 @@ internal object WhisperEngineProtocol {
 
     /** Sentinel for an integer field the engine process could not read. */
     const val UNKNOWN_INT = Int.MIN_VALUE
+
+    /**
+     * Whether the reply to [code] carries the sample count between the
+     * status and the payload. Only TRANSCRIBE does, on every status, so
+     * a failure written for it outside its handler must carry the slot
+     * too; the client reads the layout by code, not by status.
+     */
+    fun replyCarriesSampleCount(code: Int): Boolean = code == TRANSACTION_TRANSCRIBE
 }
 
 /**
