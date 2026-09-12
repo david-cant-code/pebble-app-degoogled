@@ -28,9 +28,10 @@ debug builds keep the receivers for driving an emulator from adb, and
 the release exported-component allowlist is unchanged. The fork adds one
 receiver of the same kind, declared only in the debug overlay
 `androidApp/src/debug/AndroidManifest.xml`: `SttDebugReceiver`, gated on
-the same permission, sets the four dictation debug hooks from adb and
-can post a reply-capable test notification for driving an emulated
-watch; release builds never declare it, so there is nothing to remove.
+the same permission, sets the four dictation debug hooks and the local
+model from adb and can post a reply-capable test notification for
+driving an emulated watch; release builds never declare it, so there is
+nothing to remove.
 Two things in
 that verbatim upstream text do not hold here: the manifest comment and
 the receiver KDocs call the receivers safe to keep in release builds,
