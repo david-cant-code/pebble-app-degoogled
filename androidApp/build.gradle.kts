@@ -294,6 +294,71 @@ abstract class VerifyExportedComponents : DefaultTask() {
 }
 
 /**
+ * Fork: services that must ship isolated and unexported in the merged manifest of every variant.
+ * The whisper engine parses untrusted model bytes in a process of its own, and
+ * `android:isolatedProcess` on its service is what makes that process isolated. The attribute is
+ * declared in the `:whisper` module manifest, which WhisperEngineManifestTest pins, but a merge
+ * rule in this module (`tools:remove`, `tools:replace`) can take it out of the manifest the APK
+ * ships without touching that file, and the merged manifest is what installs. Wired like
+ * VerifyApkContents, as a listener on the artifact, so it runs whenever a variant's merged
+ * manifest is produced.
+ */
+val isolatedServices = setOf("coredevices.whisper.WhisperEngineService")
+
+abstract class VerifyIsolatedServices : DefaultTask() {
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val mergedManifest: RegularFileProperty
+
+    @get:Input
+    abstract val isolated: SetProperty<String>
+
+    @TaskAction
+    fun verify() {
+        val android = "http://schemas.android.com/apk/res/android"
+        val document = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+            .apply { isNamespaceAware = true }
+            .newDocumentBuilder()
+            .parse(mergedManifest.get().asFile)
+        val services = document.getElementsByTagName("service")
+        val declared = (0 until services.length)
+            .map { services.item(it) as org.w3c.dom.Element }
+            .groupBy { it.getAttributeNS(android, "name") }
+
+        val problems = mutableListOf<String>()
+        for (name in isolated.get().sorted()) {
+            val declarations = declared[name].orEmpty()
+            if (declarations.size != 1) {
+                problems += "$name: expected one <service> declaration, found ${declarations.size}"
+                continue
+            }
+            val service = declarations.single()
+            if (service.getAttributeNS(android, "isolatedProcess") != "true") {
+                problems += "$name: android:isolatedProcess is not \"true\""
+            }
+            if (service.getAttributeNS(android, "exported") != "false") {
+                problems += "$name: android:exported is not \"false\""
+            }
+        }
+        if (problems.isEmpty()) {
+            logger.lifecycle("Isolated services verified: ${isolated.get().size}, isolated and unexported.")
+            return
+        }
+        throw GradleException(
+            buildString {
+                appendLine("Engine containment changed in the merged manifest ${mergedManifest.get().asFile}:")
+                problems.forEach { appendLine("  $it") }
+                appendLine()
+                appendLine("The engine parses untrusted model bytes; isolatedProcess=\"true\" and exported=\"false\" on")
+                appendLine("its service are its containment. A merge rule in this module can drop either without")
+                appendLine("changing the whisper module's manifest, so fix the manifest rather than this list.")
+            },
+        )
+    }
+}
+
+/**
  * Fork: inspects every APK a variant packages, so the packaging decisions taken in this file are
  * verified against the built artifact on every build rather than by hand:
  * - no entry matches [forbiddenEntries]: the Wispr Flow logo assets ignoreAssetsPattern drops,
@@ -496,6 +561,21 @@ androidComponents {
         variant.artifacts.use(verifyApk)
             .wiredWith(VerifyApkContents::apkDirectory)
             .toListenTo(com.android.build.api.artifact.SingleArtifact.APK)
+    }
+
+    // Fork: every variant fails unless the services in isolatedServices ship isolated and
+    // unexported in its merged manifest; see VerifyIsolatedServices.
+    onVariants { variant ->
+        val verifyIsolated = tasks.register<VerifyIsolatedServices>(
+            "verify${variant.name.replaceFirstChar { it.uppercase() }}IsolatedServices",
+        ) {
+            group = "verification"
+            description = "Fails if the merged manifest ships an isolated service without isolatedProcess, or exported."
+            isolated.set(isolatedServices)
+        }
+        variant.artifacts.use(verifyIsolated)
+            .wiredWith(VerifyIsolatedServices::mergedManifest)
+            .toListenTo(com.android.build.api.artifact.SingleArtifact.MERGED_MANIFEST)
     }
 
     // Fork: release builds fail unless every exported component is allowlisted

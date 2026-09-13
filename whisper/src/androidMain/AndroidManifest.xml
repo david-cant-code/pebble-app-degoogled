@@ -5,7 +5,8 @@
             The whisper.cpp speech engine runs in this isolated process; what
             the isolation buys, and the process's real name, are stated on
             WhisperEngineService. WhisperEngineManifestTest pins the two
-            attributes that make the containment.
+            attributes that make the containment here, and the app build
+            checks them again in the merged manifest of every variant.
         -->
         <service
             android:name="coredevices.whisper.WhisperEngineService"

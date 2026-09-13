@@ -259,8 +259,10 @@ The replacement is whisper.cpp (MIT), compiled from source:
   invalid modified UTF-8, which NewStringUTF aborts on under CheckJNI.
 - The engine runs in an isolated process, `WhisperEngineService`,
   declared in the `:whisper` module manifest with `android:isolatedProcess`
-  (pinned at the source by `WhisperEngineManifestTest`; what the
-  isolation buys is stated on the service), so a memory-safety bug in
+  (pinned at the source by `WhisperEngineManifestTest` and in every
+  variant's merged manifest by the app build's `VerifyIsolatedServices`
+  task; what the isolation buys is stated on the service), so a
+  memory-safety bug in
   the model parser or the decoder, reached through a model file, is
   contained to that process. This layer is independent of the pinned
   catalog below: the pin covers that the bytes that arrived are the

@@ -11,8 +11,11 @@ import kotlin.test.fail
  * Pins the engine service's containment at the source: the module
  * manifest declares [WhisperEngineService] with isolatedProcess="true"
  * and exported="false". Dropping either attribute changes nothing that
- * compiles or that the host suites run, so this is the deterministic
- * guard; the on-device isolation test observes the real uid.
+ * compiles or that the host suites run, so this is the source layer of
+ * the guard; the app build's VerifyIsolatedServices task checks the
+ * merged manifest of every variant, since a merge rule there can drop
+ * either without touching this file, and the on-device isolation test
+ * observes the real uid.
  */
 class WhisperEngineManifestTest {
 
