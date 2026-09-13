@@ -373,23 +373,31 @@ object WhisperEngineClient {
         // one of its own exception types carrying the engine's text past
         // every bound and the sanitiser. A legitimate reply's header is
         // the plain no-exception marker only while nothing makes the
-        // platform write a fat one ahead of the payload: it does so for
-        // StrictMode violations the engine's binder thread gathered under
-        // this thread's policy, which travels with the interface token
-        // (AOSP `android16-release`, frameworks/native
+        // platform write a fat one ahead of the payload, and two things
+        // can. StrictMode violations the engine's binder thread gathered
+        // under this thread's policy, which travels with the interface
+        // token (AOSP `android16-release`, frameworks/native
         // `libs/binder/Parcel.cpp`, `writeInterfaceToken` and
         // `enforceInterface`; frameworks/base `core/java/android/os/Parcel.java`,
-        // `writeNoException` and `readExceptionCode`), so this thread
-        // carries no policy for the call; and for app ops noted under a
-        // transaction flag this call never sets (`core/java/android/os/Binder.java`,
-        // `execTransactInternal`).
+        // `writeNoException` and `readExceptionCode`): the engine writes
+        // its header before its handler runs, so those reach a header
+        // only on its catch path, and this thread carries no policy for
+        // the call so there are none to gather. App ops the engine noted
+        // for this uid before writing its header: the proxy sets the
+        // collecting flag on this call's behalf whenever the process is
+        // listening for noted ops, which it is by default
+        // (`core/java/android/os/BinderProxy.java`, `transact`;
+        // `core/java/android/app/AppOpsManager.java`,
+        // `isListeningForOpNoted` and `prefixParcelWithAppOpsIfNeeded`),
+        // so the invariant is on the engine side: it notes no app op
+        // before it writes its header (WhisperEngineService.onTransact).
         val policy = StrictMode.getThreadPolicy()
-        StrictMode.setThreadPolicy(StrictMode.ThreadPolicy.LAX)
         val expiry = watchdog.schedule(
             { onDeadline(live, operation, deadline) },
             deadline.inWholeMilliseconds, TimeUnit.MILLISECONDS,
         )
         try {
+            StrictMode.setThreadPolicy(StrictMode.ThreadPolicy.LAX)
             data.writeInterfaceToken(DESCRIPTOR)
             write(data)
             val handled = try {
@@ -401,11 +409,9 @@ object WhisperEngineClient {
                 throw WhisperEngineUnavailableException("engine transaction for $operation failed: ${e.message}", e)
             }
             check(handled) { "engine did not recognize the $operation transaction" }
-            replyHeaderViolation(operation, reply.readInt())?.let { message ->
-                expire(live, message)
-                throw WhisperEngineUnavailableException(message)
+            return readPastReplyHeader(operation, reply.readInt(), expire = { message -> expire(live, message) }) {
+                read(reply)
             }
-            return read(reply)
         } finally {
             expiry.cancel(false)
             StrictMode.setThreadPolicy(policy)

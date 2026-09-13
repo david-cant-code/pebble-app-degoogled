@@ -3,6 +3,7 @@ package coredevices.whisper
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertSame
@@ -213,6 +214,28 @@ class WhisperEngineRepliesTest {
                 replyHeaderViolation("transcribe", header),
             )
         }
+    }
+
+    /**
+     * The wiring around the header decision: a bad header ends the
+     * process and fails the call with the same message before the
+     * payload is touched; the marker reads the payload and ends nothing.
+     */
+    @Test
+    fun aBadHeaderEndsTheProcessAndFailsTheCallBeforeThePayloadIsRead() {
+        var ended: String? = null
+        var payloadRead = false
+        val refused = assertFailsWith<WhisperEngineUnavailableException> {
+            readPastReplyHeader("transcribe", -1, expire = { ended = it }) { payloadRead = true }
+        }
+        assertEquals("engine reply to transcribe carried header -1 instead of the no-exception marker; its process is ended", refused.message)
+        assertEquals(refused.message, ended, "the process was not ended for the reason the call fails with")
+        assertFalse(payloadRead, "the payload of a refused reply was read")
+
+        ended = null
+        val text = readPastReplyHeader("transcribe", REPLY_HEADER_NO_EXCEPTION, expire = { ended = it }) { "payload" }
+        assertEquals("payload", text)
+        assertNull(ended, "a plain header ended the process")
     }
 
     @Test

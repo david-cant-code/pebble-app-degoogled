@@ -111,6 +111,21 @@ internal fun replyHeaderViolation(operation: String, header: Int): String? =
     }
 
 /**
+ * What the client does with a reply once its [header] is read: the
+ * no-exception marker lets [read] consume the payload; any other value
+ * runs [expire] with the message [replyHeaderViolation] gives it, which
+ * ends the engine process, and then fails the call as an unavailable
+ * engine with that same message, without reading further.
+ */
+internal inline fun <T> readPastReplyHeader(operation: String, header: Int, expire: (String) -> Unit, read: () -> T): T {
+    replyHeaderViolation(operation, header)?.let { message ->
+        expire(message)
+        throw WhisperEngineUnavailableException(message)
+    }
+    return read()
+}
+
+/**
  * The values `oom_score_adj` can hold (AOSP bionic `android16-release`,
  * `libc/kernel/uapi/linux/oom.h`, `OOM_SCORE_ADJ_MIN` and
  * `OOM_SCORE_ADJ_MAX`); [UNKNOWN_INT] lies outside it.

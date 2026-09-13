@@ -115,7 +115,12 @@ private class EngineBinder(private val service: Service) : Binder() {
         data.enforceInterface(DESCRIPTOR)
         requireAppCaller()
         // Every transaction is two-way; a one-way delivery has no reply to
-        // fill and nothing to do.
+        // fill and nothing to do. The header goes first, before any
+        // handler work, and the catch below writes it again after; the
+        // platform writes the plain marker the client reads as one int
+        // only while no app op has been noted for the caller on this
+        // thread (WhisperEngineClient.transact states the sources), so
+        // no handler may note one.
         val out = reply ?: return true
         out.writeNoException()
         try {

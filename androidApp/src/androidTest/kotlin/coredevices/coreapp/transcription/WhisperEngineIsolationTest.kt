@@ -36,8 +36,8 @@ import kotlin.time.Duration.Companion.milliseconds
  * dereferenced, the app process outlives the engine process and binds a
  * fresh one, a handle inside one call refuses a second, a call the
  * engine does not answer in time ends its process, the app can end it
- * on its own account, its reply header stays plain under a StrictMode
- * policy, and the engine process keeps no descriptor from the models it
+ * on its own account, a calling thread's StrictMode policy is restored
+ * after a call, and the engine process keeps no descriptor from the models it
  * is handed. The uid gate in front of every transaction has no negative
  * case here: the instrumentation shares the app's uid, and a foreign
  * uid cannot reach a service that is not exported. Uses the installed
@@ -276,14 +276,15 @@ class WhisperEngineIsolationTest {
     }
 
     /**
-     * The engine's reply header is read as the plain no-exception marker
-     * even when the calling thread has a StrictMode policy the engine's
-     * procfs reads would violate: the client sends the call without one,
-     * so the engine gathers nothing to write ahead of its reply and the
-     * process is not ended for a header the platform wrote.
+     * The client sends a transaction without the calling thread's
+     * StrictMode policy and restores it afterwards. What this case can
+     * show is the restore and that the call under such a policy reads
+     * its reply: the engine writes its header before its handler runs,
+     * so a violation the handler gathers can reach a header only on the
+     * engine's catch path, which no call here takes.
      */
     @Test
-    fun aTransactionUnderAStrictModePolicyReadsAPlainHeader() {
+    fun theCallingThreadsStrictModePolicyIsRestoredAfterATransaction() {
         assumeEngine()
         val original = StrictMode.getThreadPolicy()
         val detecting = StrictMode.ThreadPolicy.Builder().detectDiskReads().detectDiskWrites().penaltyLog().build()
