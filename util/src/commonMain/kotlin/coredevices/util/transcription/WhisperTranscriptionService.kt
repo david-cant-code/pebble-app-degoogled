@@ -615,7 +615,11 @@ class WhisperTranscriptionService internal constructor(
             logger.w { "Low free memory ($freeMemory MB), skipping warmup" }
             return
         }
-        lastTranscriptionAt = TimeSource.Monotonic.markNow()
+        // The recency mark is set only once the warm-up is going to run:
+        // a warm-up that yields here to whoever holds the mutex must not
+        // count as one, or the job holding the mutex (a load that queued
+        // behind the reload after an engine death) skips its own and the
+        // fresh context meets its first real dictation cold.
         if (!modelMutex.tryLock()) {
             logger.d { "Skipping warmup, transcription in progress" }
             return
@@ -623,6 +627,7 @@ class WhisperTranscriptionService internal constructor(
         try {
             val handle = modelHandle
             if (handle == 0L) return
+            lastTranscriptionAt = TimeSource.Monotonic.markNow()
             try {
                 withTimeout(2.seconds) {
                     withWhisperCancelOnCancel { callId ->
@@ -643,8 +648,14 @@ class WhisperTranscriptionService internal constructor(
     }
 
     /**
-     * The engine process died. The reload runs as an init job so it takes
-     * the same path, and the same mutex holds, as every other load. It is
+     * The engine process died. The verification memo of the model it
+     * held, and of the configured one, goes first, on this thread and
+     * ahead of any load: a death is the one event a model corrupted on
+     * disk could have caused, and the next load must re-hash the file
+     * whichever job makes it, the reload below, a dictation's own attempt
+     * after a death during a load, or a load that takes the mutex before
+     * the reload does. The reload runs as an init job so it takes the
+     * same path, and the same mutex holds, as every other load. It is
      * not the job a dictation waits on: [initJob] names a load made on a
      * dictation's behalf, and a dictation that arrives while this runs
      * starts its own, which queues on the mutex and finds the model
@@ -654,6 +665,7 @@ class WhisperTranscriptionService internal constructor(
      */
     private fun onEngineProcessDeath(generation: Long) {
         logger.w { "Whisper engine process (generation $generation) died" }
+        setOf(lastInitedModel, sttConfig.value.modelName).filterNotNull().forEach(modelProvider::forgetLoadVerification)
         performInit(lostGeneration = generation)
     }
 
@@ -733,25 +745,24 @@ class WhisperTranscriptionService internal constructor(
         // second job re-reads the handle state below and becomes a no-op
         // instead of double-freeing or leaking a second context.
         modelMutex.withLock {
-            if (lostGeneration != null && !takeReloadBudgetLocked()) return
             if (modelName != lastInitedModel && modelHandle != 0L) {
                 engine.free(modelHandle)
                 modelHandle = 0L
             }
             if (modelHandle == 0L) {
+                // A load that took the mutex ahead of the reload leaves it
+                // nothing to do, and so no budget to spend.
+                if (lostGeneration != null && !takeReloadBudgetLocked()) return
                 val cold = ColdPathTimings(modelName, placementSnapshot())
                 onColdLoad(cold)
                 // getModelPath re-hashes the installed file once per process
-                // before first use. allowReinstall=false keeps init out of
-                // the download flow: a corrupt model is quarantined and this
-                // throws (surfacing as not-installed to the visible download
-                // UI) rather than pulling a silent multi-hundred-MB metered
-                // re-download from an engine-init path.
-                // A reload after an engine death re-hashes the file: the
-                // death is the one event a model corrupted on disk could
-                // have caused, and the once-per-process memo would hand
-                // the same bytes back unchecked.
-                if (lostGeneration != null) modelProvider.forgetLoadVerification(modelName)
+                // before first use, and again after an engine process death
+                // (onEngineProcessDeath drops the memo). allowReinstall=false
+                // keeps init out of the download flow: a corrupt model is
+                // quarantined and this throws (surfacing as not-installed to
+                // the visible download UI) rather than pulling a silent
+                // multi-hundred-MB metered re-download from an engine-init
+                // path.
                 val pathStarted = TimeSource.Monotonic.markNow()
                 val modelPath = modelProvider.getModelPath(modelName, allowReinstall = false)
                 cold.modelPathMillis = pathStarted.elapsedNow().inWholeMilliseconds

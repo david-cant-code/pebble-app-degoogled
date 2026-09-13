@@ -54,8 +54,23 @@ class WhisperEngineDeathTest {
         @Volatile var realCalls = 0
         @Volatile var inRealTranscribe = false
 
+        /** Warm-up passes served: the all-zero input. */
+        @Volatile var warmUps = 0
+
         /** A real decode blocks on this while one is set, so a test can act mid-decode. */
         @Volatile var gate: CountDownLatch? = null
+
+        /** A load blocks on this while one is set, once counted, so a test can act mid-load. */
+        @Volatile var initGate: CountDownLatch? = null
+
+        /**
+         * The support check blocks on this while one is set; the reload
+         * after a death makes that check between its two mutex holds, so
+         * a test can park it there. [parkedInSupported] counts the callers
+         * that have.
+         */
+        @Volatile var supportedGate: CountDownLatch? = null
+        @Volatile var parkedInSupported = 0
 
         /** The process dies inside every load. */
         @Volatile var dieOnInit = false
@@ -67,7 +82,13 @@ class WhisperEngineDeathTest {
         @Volatile var endedFor: String? = null
 
         val engine = object : WhisperEngine {
-            override fun supported(): Boolean = true
+            override fun supported(): Boolean {
+                supportedGate?.let {
+                    parkedInSupported++
+                    it.await(20, TimeUnit.SECONDS)
+                }
+                return true
+            }
 
             override fun init(modelPath: String): Long {
                 synchronized(lock) {
@@ -77,6 +98,7 @@ class WhisperEngineDeathTest {
                         generation++
                     }
                 }
+                initGate?.await(20, TimeUnit.SECONDS)
                 if (dieOnInit) {
                     die(report = true)
                     throw WhisperEngineUnavailableException("engine process died during init")
@@ -98,7 +120,9 @@ class WhisperEngineDeathTest {
                 stats: TranscribeStats?,
             ): String {
                 val warmUp = pcm.all { it == 0f }
-                if (!warmUp) {
+                if (warmUp) {
+                    warmUps++
+                } else {
                     realCalls++
                     inRealTranscribe = true
                 }
@@ -280,14 +304,17 @@ class WhisperEngineDeathTest {
         awaitUntil("the reload") { fake.initCount == 2 && service.isModelReady }
     }
 
+    /** A death during the load drops the verification memo too, so the next attempt re-hashes the file it died on. */
     @Test
     fun deathDuringTheLoadIsNotRetriedOnItsOwn() = runBlocking(Dispatchers.Default) {
         val fake = ProcessEngine().apply { dieOnInit = true }
-        val service = serviceFor(fake)
+        val provider = FakeModelProvider()
+        val service = serviceFor(fake, provider)
         awaitUntil("the failed first load") { fake.initCount == 1 }
         settle()
         assertEquals(1, fake.initCount, "a load the engine died in was retried without a dictation")
         assertFalse(service.isModelReady)
+        assertEquals(listOf(service.configuredModel), provider.forgotten, "a death during the load must drop the verification memo")
 
         // A dictation makes its own attempt, once, and reports the engine
         // unavailable rather than the model missing.
@@ -296,10 +323,70 @@ class WhisperEngineDeathTest {
         }
         settle()
         assertEquals(2, fake.initCount)
+        assertEquals(2, provider.forgotten.size, "the dictation's own load died without dropping the memo")
 
         fake.dieOnInit = false
         assertEquals("hello world", service.transcribeLocal(realPcmBytes(), sampleRate = 16_000))
         assertEquals(3, fake.initCount)
+    }
+
+    /**
+     * A dictation that arrives while the reload after a death is inside
+     * the engine starts its own init job, which queues on the mutex and
+     * finds the model resident; the reloaded context still gets its
+     * warm-up before the dictation decodes on it.
+     */
+    @Test
+    fun aDictationArrivingMidReloadStillGetsTheWarmUp() = runBlocking(Dispatchers.Default) {
+        val fake = ProcessEngine()
+        val service = serviceFor(fake)
+        awaitUntil("the first load and its warm-up") { service.isModelReady && fake.warmUps == 1 }
+
+        fake.initGate = CountDownLatch(1)
+        fake.die(report = true)
+        awaitUntil("the reload inside the engine") { fake.initCount == 2 }
+        val dictation = async { runCatching { service.transcribeLocal(realPcmBytes(), sampleRate = 16_000) } }
+        // The dictation's own init job queues on the mutex behind the reload.
+        settle()
+        fake.initGate?.countDown()
+        fake.initGate = null
+        assertEquals("hello world", dictation.await().getOrThrow())
+        assertEquals(2, fake.warmUps, "the reloaded context met its first dictation without a warm-up")
+        assertEquals(2, fake.initCount)
+    }
+
+    /**
+     * A load that takes the mutex between the two holds of the reload
+     * after a death (a dictation's own, here) re-hashes the file, since
+     * the death itself dropped the memo, and leaves the reload nothing to
+     * do and no reload budget to spend.
+     */
+    @Test
+    fun aLoadThatBeatsTheReloadReHashesAndSpendsNoBudget() = runBlocking(Dispatchers.Default) {
+        val fake = ProcessEngine()
+        val provider = FakeModelProvider()
+        val service = serviceFor(fake, provider)
+        awaitUntil("the first load") { service.isModelReady }
+
+        val gap = CountDownLatch(1)
+        fake.supportedGate = gap
+        fake.die(report = true)
+        assertEquals(listOf(service.configuredModel), provider.forgotten, "the death itself must drop the verification memo")
+        awaitUntil("the reload parked between its mutex holds") { fake.parkedInSupported == 1 }
+        fake.supportedGate = null
+
+        assertEquals("hello world", service.transcribeLocal(realPcmBytes(), sampleRate = 16_000))
+        assertEquals(2, fake.initCount, "the dictation did not load on its own account")
+        gap.countDown()
+        settle()
+        assertEquals(2, fake.initCount, "the reload loaded over the dictation's handle")
+        assertEquals(2, fake.warmUps, "the dictation's load was not warmed up exactly once")
+
+        // The reload spent nothing: every reload of the budget is still there.
+        repeat(WhisperTranscriptionService.MAX_PROACTIVE_RELOADS) { death ->
+            fake.die(report = true)
+            awaitUntil("reload ${death + 1} after the gap") { fake.initCount == death + 3 && service.isModelReady }
+        }
     }
 
     @Test
