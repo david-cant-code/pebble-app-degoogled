@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
@@ -47,40 +48,89 @@ class DeviceSpeedTest {
     }
 
     @Test
-    fun cachedOrMeasureRunsTheProbeOnce() = runBlocking {
+    fun cachedOrMeasureMeasuresOnce() = runBlocking {
         var runs = 0
-        val estimator = estimator(probe = { runs++; 10L })
+        val estimator = estimator(probe = { runs++; 100_000_000L })
         estimator.cachedOrMeasure()
         estimator.cachedOrMeasure()
-        assertEquals(1, runs)
+        assertEquals(DeviceSpeedEstimator.PROBE_RUNS, runs, "one measurement, no more")
+    }
+
+    /** The first probe in a fresh engine process is the slow one; the measurement keeps the better. */
+    @Test
+    fun measureKeepsTheBetterOfItsProbes() = runBlocking {
+        val scores = ArrayDeque(listOf(130_000_000L, 100_000_000L))
+        val measured = estimator(probe = { scores.removeFirst() }).measure()
+        assertEquals(100_000_000L, assertNotNull(measured).nsPerBlock)
+    }
+
+    @Test
+    fun aProbeThatFailsLeavesTheOtherToMeasure() = runBlocking {
+        val scores = ArrayDeque<() -> Long>(listOf({ error("engine unavailable") }, { 100_000_000L }))
+        val measured = estimator(probe = { scores.removeFirst()() }).measure()
+        assertEquals(100_000_000L, assertNotNull(measured).nsPerBlock)
     }
 
     @Test
     fun callersArrivingDuringAProbeShareItsScore() = runBlocking(Dispatchers.Default) {
         val gate = CountDownLatch(1)
         val runs = AtomicInteger()
-        val estimator = estimator(probe = { runs.incrementAndGet(); gate.await(10, TimeUnit.SECONDS); 10L })
+        val estimator = estimator(probe = { runs.incrementAndGet(); gate.await(10, TimeUnit.SECONDS); 100_000_000L })
         val first = async { estimator.cachedOrMeasure() }
         val second = async { estimator.cachedOrMeasure() }
         delay(200)
         gate.countDown()
         assertEquals(first.await(), second.await())
-        assertEquals(1, runs.get(), "the second caller must wait for the running probe, not start its own")
+        assertEquals(
+            DeviceSpeedEstimator.PROBE_RUNS, runs.get(),
+            "the second caller must wait for the running measurement, not start its own",
+        )
+    }
+
+    /** A score no real CPU could produce is a failed probe, whichever direction it is off in. */
+    @Test
+    fun anImplausibleScoreIsAFailedProbe() = runBlocking {
+        val tooFast = DeviceSpeedEstimator.PLAUSIBLE_NS.first - 1
+        val tooSlow = DeviceSpeedEstimator.PLAUSIBLE_NS.last + 1
+        assertNull(estimator(probe = { tooFast }).measure())
+        assertNull(estimator(probe = { tooSlow }).measure())
+        var calls = 0
+        val honest = WhisperSpeedCalibration.REFERENCE_SCORE_NS
+        val measured = estimator(probe = { if (calls++ == 0) tooFast else honest }).measure()
+        assertEquals(honest, measured?.nsPerBlock, "the honest probe measures, the forged one drops out")
     }
 
     @Test
     fun aFailedProbeKeepsThePreviousScore() = runBlocking {
         val settings = MapSettings()
-        val good = estimator(settings, probe = { 100L }).measure()
+        val good = estimator(settings, probe = { 100_000_000L }).measure()
         val failing = estimator(settings, probe = { error("engine unavailable") })
         assertEquals(good, failing.measure())
         assertEquals(good, failing.cached())
     }
 
     @Test
+    fun theThreadCountIsReadOffTheCallingThread() = runBlocking {
+        // The count comes from the engine process once one is bound, so
+        // it must run where the probe runs, never on the caller's thread.
+        val caller = Thread.currentThread()
+        var counted: Thread? = null
+        val estimator = DeviceSpeedEstimator(
+            settings = MapSettings(),
+            threadCount = { counted = Thread.currentThread(); 2 },
+            probe = { 100_000_000L },
+            supported = { true },
+            now = { 1_000L },
+        )
+        assertNotNull(estimator.measure())
+        assertNotNull(counted)
+        assertNotEquals(caller, counted)
+    }
+
+    @Test
     fun anUnsupportedEngineNeverProbes() = runBlocking {
         var runs = 0
-        val estimator = estimator(probe = { runs++; 10L }, supported = false)
+        val estimator = estimator(probe = { runs++; 100_000_000L }, supported = false)
         assertNull(estimator.measure())
         assertEquals(0, runs)
     }
@@ -88,7 +138,7 @@ class DeviceSpeedTest {
     @Test
     fun aScoreFromAnOlderProbeIsDiscarded() = runBlocking {
         val settings = MapSettings()
-        estimator(settings, probe = { 100L }).measure()
+        estimator(settings, probe = { 100_000_000L }).measure()
         settings.putInt("stt_speed_probe_version", WhisperSpeedCalibration.PROBE_VERSION - 1)
         assertNull(estimator(settings, probe = { error("must not run") }).cached())
     }

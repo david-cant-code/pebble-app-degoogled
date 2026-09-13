@@ -1,0 +1,554 @@
+package coredevices.whisper
+
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.Build
+import android.os.DeadObjectException
+import android.os.IBinder
+import android.os.Looper
+import android.os.Parcel
+import android.os.ParcelFileDescriptor
+import android.os.RemoteException
+import android.os.SharedMemory
+import android.os.StrictMode
+import android.os.SystemClock
+import android.system.OsConstants
+import android.util.Log
+import coredevices.whisper.WhisperEngineProtocol.DESCRIPTOR
+import coredevices.whisper.WhisperEngineProtocol.MAX_MESSAGE_BYTES
+import coredevices.whisper.WhisperEngineProtocol.MAX_TEXT_BYTES
+import coredevices.whisper.WhisperEngineProtocol.STATUS_OK
+import coredevices.whisper.WhisperEngineProtocol.STATUS_STALE_HANDLE
+import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_BENCHMARK
+import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_CANCEL
+import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_FREE
+import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_INIT
+import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_RUNTIME
+import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_TRANSCRIBE
+import java.io.File
+import java.io.IOException
+import java.nio.ByteOrder
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.time.Duration
+
+/**
+ * The app-process side of the engine boundary: binds
+ * [WhisperEngineService], holds the one binding for the life of this
+ * process, and turns the path-based common surface into transactions.
+ * The binding is never released while the process lives: the engine
+ * keeps the loaded model resident exactly as an in-process engine would,
+ * and a released binding would end the engine process and turn the next
+ * dictation into a cold load with nothing in front of it.
+ *
+ * Failure classes, kept apart because callers act on them differently:
+ * a transport failure (the process would not start or connect, died
+ * under a call, or answered a stale handle) is a
+ * [WhisperEngineUnavailableException], after which every handle is gone;
+ * an engine failure with the process alive is a RuntimeException carrying
+ * the engine's error text, as the in-process binding threw. Everything
+ * read back from the engine process is bounded before use.
+ *
+ * Must be attached to the application context before any engine call;
+ * unattached, the engine reads as unsupported. Every transaction blocks the
+ * calling thread until the engine process answers, and a bind until the
+ * process is up, so no engine call may run on the main thread; each
+ * transaction checks.
+ *
+ * Every transaction carries a deadline ([transactionDeadline]). On
+ * expiry the binding is dropped, which is what ends the engine process:
+ * the platform kills an isolated process as soon as no service runs in
+ * it and never reuses one (AOSP `android16-release`,
+ * `services/core/java/com/android/server/am/OomAdjuster.java`,
+ * `updateAndTrimProcessLSP`, "isolated not needed"), and the blocked
+ * call then returns as a dead-object failure. An engine process that
+ * answers nothing is so handled like one that died, reload included.
+ */
+object WhisperEngineClient {
+    private const val TAG = "WhisperEngineClient"
+
+    /**
+     * How long a bind may take before the engine is reported
+     * unavailable. Process spawn measures around a second on the slowest
+     * phone tried; this leaves room for a loaded system and stays inside
+     * the transcription service's own init ceiling, so a wait that hits
+     * it is attributed here and not to the model load.
+     */
+    private const val BIND_TIMEOUT_MILLIS = 5_000L
+
+    // One connection is one engine process; its generation is the bind
+    // count at the time it was bound, so a handle can be matched to the
+    // process that issued it after that process is gone. A deadline that
+    // expired on it leaves the message the blocked call fails with.
+    private class Connection(val serviceConnection: ServiceConnection, val binder: IBinder, val generation: Long) {
+        @Volatile
+        var expired: String? = null
+    }
+
+    // Runs the transaction deadlines: one daemon thread, since expiring
+    // one is an unbind and a log line.
+    private val watchdog = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "whisper-engine-watchdog").apply { isDaemon = true }
+    }
+
+    /**
+     * Test seam: while set, caps every transaction deadline at this
+     * value, so a device test can watch a healthy engine's decode expire.
+     * It can only shorten a deadline, never lengthen or remove one.
+     */
+    @Volatile
+    var transactionDeadlineCapForTests: Duration? = null
+
+    @Volatile
+    private var appContext: Context? = null
+
+    // bindLock is held across a whole bind, including the wait for the
+    // process; stateLock only around reads and writes of the connection,
+    // so a death delivered on a binder thread never waits on a bind.
+    private val bindLock = Any()
+    private val stateLock = Any()
+    private var connection: Connection? = null
+
+    // Incremented under bindLock once per successful bind; read anywhere.
+    @Volatile
+    private var bindCount: Long = 0L
+
+    @Volatile
+    private var lastBindMillis: Long? = null
+
+    private val deathListeners = CopyOnWriteArrayList<(Long) -> Unit>()
+
+    /** Records the application context; the first line of the app's onCreate. */
+    fun attach(context: Context) {
+        appContext = context.applicationContext
+    }
+
+    val isAttached: Boolean get() = appContext != null
+
+    /** True while a live binding to the engine process is held. */
+    val isConnected: Boolean get() = synchronized(stateLock) { connection != null }
+
+    /**
+     * Milliseconds the most recent bind took, process spawn included;
+     * null before any bind. The transcription service reads it to split
+     * its cold-path line.
+     */
+    fun lastBindMillis(): Long? = lastBindMillis
+
+    /**
+     * The generation of the most recently bound engine process, alive or
+     * not: one higher per bind, 0 before the first. A caller that records
+     * it beside a handle can tell, when a death is reported for a
+     * generation, whether that handle came from the process that died.
+     */
+    fun processGeneration(): Long = bindCount
+
+    /**
+     * Registers [listener] to run once per engine process death, with the
+     * generation of the process that died, on the thread that observed
+     * the death: a binder thread, or the caller whose transaction found
+     * the process gone. By the time it runs the binding is released and
+     * every handle from that process is gone; the next engine call binds
+     * a fresh process.
+     */
+    fun addDeathListener(listener: (generation: Long) -> Unit) {
+        deathListeners += listener
+    }
+
+    /**
+     * What the engine process reports about itself, or null when no
+     * engine is bound and [bindIfNeeded] is false. With it true the call
+     * binds, which spawns the engine process if it is not running.
+     */
+    fun runtime(bindIfNeeded: Boolean): WhisperEngineRuntime? {
+        if (!bindIfNeeded && !isConnected) return null
+        return transact(TRANSACTION_RUNTIME, "runtime", bindIfNeeded, write = {}) { reply ->
+            expectOk(reply, "runtime")
+            val cpusAllowedList = reply.readBoundedString()
+            val cpuset = reply.readBoundedString()
+            // The importance slot is read past and discarded: it keeps
+            // the layout, and no value in it is the engine's own
+            // (boundedEngineRuntime).
+            reply.readInt()
+            boundedEngineRuntime(
+                cpusAllowedList = cpusAllowedList,
+                cpuset = cpuset,
+                oomScoreAdj = reply.readInt(),
+                pid = reply.readInt(),
+                uid = reply.readInt(),
+                openFds = reply.readInt(),
+            )
+        }
+    }
+
+    /**
+     * Opens [modelFile] read-only here, where the path resolves, and
+     * hands the descriptor to the engine process; this process's copy is
+     * closed once the call returns. Returns the engine's handle.
+     */
+    internal fun init(modelFile: File): Long {
+        val descriptor = try {
+            ParcelFileDescriptor.open(modelFile, ParcelFileDescriptor.MODE_READ_ONLY)
+        } catch (e: IOException) {
+            throw RuntimeException("whisper init failed: cannot open the model file: ${e.message}", e)
+        }
+        return descriptor.use {
+            transact(TRANSACTION_INIT, "init", write = { data -> descriptor.writeToParcel(data, 0) }) { reply ->
+                when (val status = reply.readInt()) {
+                    STATUS_OK -> reply.readLong()
+                    else -> throw exceptionForStatus("init", status, reply.readBoundedMessage())
+                }
+            }
+        }
+    }
+
+    /**
+     * Sends the audio as a shared-memory region of native-order floats,
+     * made read-only before it crosses, and returns the engine's UTF-8
+     * text. [stats], when given, receives the sample count the engine
+     * reported in its first slot on every exit, as the shim fills it.
+     */
+    internal fun transcribe(
+        handle: Long,
+        pcm: FloatArray,
+        threads: Int,
+        language: String?,
+        callId: Long,
+        cpuMask: Long,
+        nice: Int,
+        stats: IntArray?,
+    ): ByteArray {
+        check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) { "the audio transport needs API 27" }
+        val region = SharedMemory.create("whisper-pcm", audioRegionBytes(pcm.size))
+        try {
+            val mapped = region.mapReadWrite()
+            try {
+                mapped.order(ByteOrder.nativeOrder()).asFloatBuffer().put(pcm)
+            } finally {
+                SharedMemory.unmap(mapped)
+            }
+            // This process never reads the region again, so it can be
+            // sealed read-only for the engine process; a refused seal only
+            // loses that hardening and is logged.
+            if (!region.setProtect(OsConstants.PROT_READ)) {
+                Log.w(TAG, "could not make the audio region read-only before sending it")
+            }
+            return transact(
+                TRANSACTION_TRANSCRIBE, "transcribe",
+                write = { data ->
+                    data.writeLong(handle)
+                    region.writeToParcel(data, 0)
+                    data.writeInt(pcm.size)
+                    data.writeInt(threads)
+                    data.writeString(language)
+                    data.writeLong(callId)
+                    data.writeLong(cpuMask)
+                    data.writeInt(nice)
+                },
+            ) { reply ->
+                val status = reply.readInt()
+                val samples = boundedSampleEcho(reported = reply.readInt(), sent = pcm.size)
+                stats?.let { if (it.isNotEmpty()) it[0] = samples }
+                when (status) {
+                    STATUS_OK -> reply.readBoundedBytes(MAX_TEXT_BYTES)
+                    else -> throw exceptionForStatus("transcription", status, reply.readBoundedMessage())
+                }
+            }
+        } finally {
+            region.close()
+        }
+    }
+
+    /**
+     * Requests the abort of one call. Never binds and never throws: an
+     * engine that is gone has nothing left to cancel, and this runs from
+     * cancellation paths that must stay safe.
+     */
+    internal fun cancel(callId: Long) {
+        try {
+            transact(TRANSACTION_CANCEL, "cancel", bindIfNeeded = false, write = { data -> data.writeLong(callId) }) { reply ->
+                expectOk(reply, "cancel")
+            }
+        } catch (e: RuntimeException) {
+            // No engine, a stale call, or a torn reply: the decode this
+            // cancels is ending either way, and the caller is unwinding.
+            Log.w(TAG, "cancel of call $callId did not reach the engine: ${e.message}")
+        }
+    }
+
+    /**
+     * Releases a handle. A handle the engine process does not know, or
+     * no engine process at all, means the context is already gone, so
+     * neither is an error; a handle inside another call is a
+     * serialization failure in this process and is thrown.
+     */
+    internal fun free(handle: Long) {
+        try {
+            transact(TRANSACTION_FREE, "free", bindIfNeeded = false, write = { data -> data.writeLong(handle) }) { reply ->
+                when (val status = reply.readInt()) {
+                    STATUS_OK -> Unit
+                    STATUS_STALE_HANDLE -> Log.w(TAG, "free of handle $handle: ${reply.readBoundedMessage()}")
+                    else -> throw exceptionForStatus("free", status, reply.readBoundedMessage())
+                }
+            }
+        } catch (e: WhisperEngineUnavailableException) {
+            Log.w(TAG, "free of handle $handle reached no engine: ${e.message}")
+        }
+    }
+
+    /** Runs the model-free speed probe in the engine process and returns its nanoseconds per block. */
+    internal fun benchmark(threads: Int, cpuMask: Long, nice: Int): Long =
+        transact(
+            TRANSACTION_BENCHMARK, "benchmark",
+            write = { data ->
+                data.writeInt(threads)
+                data.writeLong(cpuMask)
+                data.writeInt(nice)
+            },
+        ) { reply ->
+            when (val status = reply.readInt()) {
+                STATUS_OK -> reply.readLong()
+                else -> throw exceptionForStatus("benchmark", status, reply.readBoundedMessage())
+            }
+        }
+
+    private fun expectOk(reply: Parcel, operation: String) {
+        val status = reply.readInt()
+        if (status != STATUS_OK) {
+            throw exceptionForStatus(operation, status, reply.readBoundedMessage())
+        }
+    }
+
+    /** An engine message: bounded, decoded, and stripped of control characters before it can reach a log line. */
+    private fun Parcel.readBoundedMessage(): String =
+        sanitizeEngineText(readBoundedBytes(MAX_MESSAGE_BYTES).decodeToString())
+
+    private fun Parcel.readBoundedBytes(max: Int): ByteArray {
+        val bytes = createByteArray() ?: ByteArray(0)
+        checkReplyBound("bytes", bytes.size, max)
+        return bytes
+    }
+
+    private fun Parcel.readBoundedString(): String? {
+        val value = readString() ?: return null
+        checkReplyBound("chars", value.length, MAX_MESSAGE_BYTES)
+        return sanitizeEngineText(value)
+    }
+
+    /**
+     * One two-way transaction against the bound engine, binding first
+     * when [bindIfNeeded] is set and otherwise failing without one, so a
+     * call that only makes sense against a live engine never spawns a
+     * process. [write] fills the request after the interface token;
+     * [read] consumes the reply after its header. A dead or unreachable
+     * process surfaces as [WhisperEngineUnavailableException] and drops
+     * the binding, so the next binding call gets a fresh process, and so
+     * does a reply whose header is not the no-exception marker
+     * ([replyHeaderViolation]).
+     */
+    private inline fun <T> transact(
+        code: Int,
+        operation: String,
+        bindIfNeeded: Boolean = true,
+        write: (Parcel) -> Unit,
+        read: (Parcel) -> T,
+    ): T {
+        // Every transaction blocks until the engine process answers, and a
+        // bind until the process is up, so none may run on the main thread.
+        check(Looper.myLooper() != Looper.getMainLooper()) { "engine calls must not run on the main thread" }
+        val live = connected(bindIfNeeded)
+            ?: throw WhisperEngineUnavailableException("no engine process is bound for $operation")
+        val deadline = transactionDeadline(code).let { bound ->
+            transactionDeadlineCapForTests?.let { cap -> minOf(bound, cap) } ?: bound
+        }
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        // The reply header is read here as one int, never through the
+        // framework's reader, which would turn an exception reply into
+        // one of its own exception types carrying the engine's text past
+        // every bound and the sanitiser. A legitimate reply's header is
+        // the plain no-exception marker only while nothing makes the
+        // platform write a fat one ahead of the payload, and two things
+        // can. StrictMode violations the engine's binder thread gathered
+        // under this thread's policy, which travels with the interface
+        // token (AOSP `android16-release`, frameworks/native
+        // `libs/binder/Parcel.cpp`, `writeInterfaceToken` and
+        // `enforceInterface`; frameworks/base `core/java/android/os/Parcel.java`,
+        // `writeNoException` and `readExceptionCode`): the engine writes
+        // its header before its handler runs, so those reach a header
+        // only on its catch path, and this thread carries no policy for
+        // the call so there are none to gather. App ops the engine noted
+        // for this uid before writing its header: the proxy sets the
+        // collecting flag on this call's behalf whenever the process is
+        // listening for noted ops, which it is by default
+        // (`core/java/android/os/BinderProxy.java`, `transact`;
+        // `core/java/android/app/AppOpsManager.java`,
+        // `isListeningForOpNoted` and `prefixParcelWithAppOpsIfNeeded`),
+        // so the invariant is on the engine side: it notes no app op
+        // before it writes its header (WhisperEngineService.onTransact).
+        val policy = StrictMode.getThreadPolicy()
+        val expiry = watchdog.schedule(
+            { onDeadline(live, operation, deadline) },
+            deadline.inWholeMilliseconds, TimeUnit.MILLISECONDS,
+        )
+        try {
+            StrictMode.setThreadPolicy(StrictMode.ThreadPolicy.LAX)
+            data.writeInterfaceToken(DESCRIPTOR)
+            write(data)
+            val handled = try {
+                live.binder.transact(code, data, reply, 0)
+            } catch (e: DeadObjectException) {
+                onDied(live.serviceConnection)
+                throw WhisperEngineUnavailableException(live.expired ?: "engine process died during $operation", e)
+            } catch (e: RemoteException) {
+                throw WhisperEngineUnavailableException("engine transaction for $operation failed: ${e.message}", e)
+            }
+            check(handled) { "engine did not recognize the $operation transaction" }
+            return readPastReplyHeader(operation, reply.readInt(), expire = { message -> expire(live, message) }) {
+                read(reply)
+            }
+        } finally {
+            expiry.cancel(false)
+            StrictMode.setThreadPolicy(policy)
+            data.recycle()
+            reply.recycle()
+        }
+    }
+
+    /**
+     * A transaction's deadline has passed with no answer: the engine
+     * process is treated as dead.
+     */
+    private fun onDeadline(live: Connection, operation: String, deadline: Duration) =
+        expire(live, "engine did not answer $operation within $deadline; its process is ended")
+
+    /**
+     * Ends the bound engine process now, for [reason], as a missed
+     * deadline does: the process is treated as dead, every handle from
+     * it is gone, the death listeners run, and the next binding call
+     * gets a fresh process. Nothing to do when none is bound.
+     */
+    fun endProcess(reason: String) {
+        val live = synchronized(stateLock) { connection } ?: return
+        expire(live, "engine process ended: $reason")
+    }
+
+    /**
+     * Treats the engine process behind [live] as dead, for [message].
+     * Dropping the binding is what ends it (see the class comment), and
+     * a call blocked in it fails with the message once the process is
+     * gone.
+     */
+    private fun expire(live: Connection, message: String) {
+        live.expired = message
+        Log.w(TAG, message)
+        onDied(live.serviceConnection)
+    }
+
+    /**
+     * The live connection; with [bindIfNeeded] it binds (and so spawns
+     * the engine process) when there is none, otherwise it answers null.
+     */
+    private fun connected(bindIfNeeded: Boolean): Connection? {
+        synchronized(stateLock) { connection?.let { return it } }
+        if (!bindIfNeeded) return null
+        synchronized(bindLock) {
+            synchronized(stateLock) { connection?.let { return it } }
+            val fresh = bind()
+            synchronized(stateLock) { connection = fresh }
+            return fresh
+        }
+    }
+
+    private fun bind(): Connection {
+        val context = appContext
+            ?: throw WhisperEngineUnavailableException("engine client not attached to the application")
+        val latch = CountDownLatch(1)
+        var bound: IBinder? = null
+        val serviceConnection = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName, service: IBinder?) {
+                bound = service
+                latch.countDown()
+            }
+
+            override fun onServiceDisconnected(name: ComponentName) = onDied(this)
+            override fun onBindingDied(name: ComponentName) = onDied(this)
+            override fun onNullBinding(name: ComponentName) = latch.countDown()
+        }
+        val intent = Intent(context, WhisperEngineService::class.java)
+        // BIND_IMPORTANT carries this process's foreground level to the
+        // engine process, so a decode boosted here is not demoted there.
+        val flags = Context.BIND_AUTO_CREATE or Context.BIND_IMPORTANT
+        val started = SystemClock.elapsedRealtime()
+        // From API 29 the connection callbacks run on the delivering
+        // binder thread, so a busy main thread cannot delay the bind;
+        // below it they run on the main looper.
+        val accepted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            context.bindService(intent, flags, Executor { it.run() }, serviceConnection)
+        } else {
+            context.bindService(intent, serviceConnection, flags)
+        }
+        if (!accepted) {
+            unbindQuietly(context, serviceConnection)
+            throw WhisperEngineUnavailableException("the engine service could not be bound (is it declared in the manifest?)")
+        }
+        if (!latch.await(BIND_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+            unbindQuietly(context, serviceConnection)
+            throw WhisperEngineUnavailableException("the engine process did not connect within $BIND_TIMEOUT_MILLIS ms")
+        }
+        val binder = bound ?: run {
+            unbindQuietly(context, serviceConnection)
+            throw WhisperEngineUnavailableException("the engine service returned no binder")
+        }
+        try {
+            binder.linkToDeath({ onDied(serviceConnection) }, 0)
+        } catch (e: RemoteException) {
+            unbindQuietly(context, serviceConnection)
+            throw WhisperEngineUnavailableException("the engine process died as it connected", e)
+        }
+        lastBindMillis = SystemClock.elapsedRealtime() - started
+        // The bind cost is published before the generation moves, so a
+        // reader that sees the new generation sees the cost of its bind.
+        val generation = ++bindCount
+        Log.i(TAG, "engine process bound in $lastBindMillis ms (generation $generation)")
+        return Connection(serviceConnection, binder, generation)
+    }
+
+    /**
+     * Drops the binding of a dead engine process and tells the listeners,
+     * once: the death recipient, the disconnect callback and a failed
+     * transaction can all report the same death, and only the first one
+     * whose connection is still current acts.
+     */
+    private fun onDied(serviceConnection: ServiceConnection) {
+        val dropped = synchronized(stateLock) {
+            val current = connection
+            if (current?.serviceConnection !== serviceConnection) return
+            connection = null
+            current
+        }
+        Log.w(TAG, "engine process died (generation ${dropped.generation}); binding released")
+        appContext?.let { unbindQuietly(it, dropped.serviceConnection) }
+        for (listener in deathListeners) {
+            try {
+                listener(dropped.generation)
+            } catch (t: Throwable) {
+                Log.e(TAG, "engine death listener failed", t)
+            }
+        }
+    }
+
+    // unbindService throws when the connection was never registered or
+    // is already gone; either way the outcome wanted is "not bound".
+    private fun unbindQuietly(context: Context, serviceConnection: ServiceConnection) {
+        try {
+            context.unbindService(serviceConnection)
+        } catch (_: IllegalArgumentException) {
+        }
+    }
+}

@@ -15,15 +15,17 @@ import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 
 /**
- * Fork, debug builds only: sets the dictation debug hooks from adb, so an
- * emulator session can be driven without walking the settings UI. Lives
- * in the debug source set, so release builds carry neither the class nor
- * the manifest entry. Each extra is optional; omitted ones are unchanged.
+ * Fork, debug builds only: sets the dictation debug hooks and the local
+ * model from adb, so an emulator or instrumented session can be driven
+ * without walking the settings UI. Lives in the debug source set, so
+ * release builds carry neither the class nor the manifest entry. Each
+ * extra is optional; omitted ones are unchanged.
  *
  *     adb shell am broadcast -a coredevices.coreapp.SET_STT_DEBUG \
  *       -n com.anopticlabs.gravel/coredevices.coreapp.debug.SttDebugReceiver \
  *       --ez substituteAudio true --ez slowDecode true \
- *       --ez singleThread false --ez captureDump false
+ *       --ez singleThread false --ez captureDump false \
+ *       --es model whisper-base-en
  *
  * With `--ez postTestNotification true` it also posts a notification with
  * a reply action from the app itself, titled "Test Notification", which
@@ -83,14 +85,19 @@ class SttDebugReceiver : BroadcastReceiver(), KoinComponent {
         fun flag(name: String, old: Boolean): Boolean =
             if (extras?.containsKey(name) == true) intent.getBooleanExtra(name, old) else old
         val updated = stt.copy(
+            // The same field the model picker writes; an id that is not
+            // installed leaves local dictation unavailable, as it would
+            // from the picker.
+            modelName = intent.getStringExtra("model") ?: stt.modelName,
             debugSubstituteAudio = flag("substituteAudio", stt.debugSubstituteAudio),
             debugSlowDecode = flag("slowDecode", stt.debugSlowDecode),
             debugSingleThread = flag("singleThread", stt.debugSingleThread),
             debugCaptureDump = flag("captureDump", stt.debugCaptureDump),
         )
         coreConfigHolder.update(current.copy(sttConfig = updated))
-        val summary = "substituteAudio=${updated.debugSubstituteAudio} slowDecode=${updated.debugSlowDecode} " +
-            "singleThread=${updated.debugSingleThread} captureDump=${updated.debugCaptureDump}"
+        val summary = "model=${updated.modelName} substituteAudio=${updated.debugSubstituteAudio} " +
+            "slowDecode=${updated.debugSlowDecode} singleThread=${updated.debugSingleThread} " +
+            "captureDump=${updated.debugCaptureDump}"
         logger.i { "STT debug hooks: $summary" }
         resultCode = 0
         resultData = summary

@@ -28,9 +28,10 @@ debug builds keep the receivers for driving an emulator from adb, and
 the release exported-component allowlist is unchanged. The fork adds one
 receiver of the same kind, declared only in the debug overlay
 `androidApp/src/debug/AndroidManifest.xml`: `SttDebugReceiver`, gated on
-the same permission, sets the four dictation debug hooks from adb and
-can post a reply-capable test notification for driving an emulated
-watch; release builds never declare it, so there is nothing to remove.
+the same permission, sets the four dictation debug hooks and the local
+model from adb and can post a reply-capable test notification for
+driving an emulated watch; release builds never declare it, so there is
+nothing to remove.
 Two things in
 that verbatim upstream text do not hold here: the manifest comment and
 the receiver KDocs call the receivers safe to keep in release builds,
@@ -256,15 +257,74 @@ The replacement is whisper.cpp (MIT), compiled from source:
   compiling for the unmaintained iOS targets. Engine strings cross JNI
   as UTF-8 byte arrays: engine output can be byte sequences that are
   invalid modified UTF-8, which NewStringUTF aborts on under CheckJNI.
+- The engine runs in an isolated process, `WhisperEngineService`,
+  declared in the `:whisper` module manifest with `android:isolatedProcess`
+  (pinned at the source by `WhisperEngineManifestTest` and in every
+  variant's merged manifest by the app build's `VerifyIsolatedServices`
+  task; what the isolation buys is stated on the service), so a
+  memory-safety bug in
+  the model parser or the decoder, reached through a model file, is
+  contained to that process. This layer is independent of the pinned
+  catalog below: the pin covers that the bytes that arrived are the
+  bytes that were meant to arrive; it does not cover a parser bug
+  reached through a correctly pinned model, nor a file replaced on disk
+  after verification. The app-process side is `WhisperEngineClient`,
+  behind the `:whisper` actuals, so the common surface stays path-based:
+  it opens the verified model path and passes the descriptor (the engine
+  process never opens a path; from its domain the app's files do not
+  resolve), and passes each dictation's audio as a read-only
+  shared-memory region, since a Binder transaction cannot carry a full
+  window of float PCM. The transactions are a hand-written Binder
+  protocol, `WhisperEngineProtocol`, because the KMP Android library
+  plugin has no AIDL support, and everything read back from the engine
+  process is bounded before use. Every transaction carries a deadline
+  (`transactionDeadline`, set well above the slowest legitimate call of
+  its kind), on whose expiry the client drops the binding: the platform
+  then ends the isolated process (`WhisperEngineClient` states the
+  source) and the blocked call returns as a dead-object failure, so an
+  engine process that answers nothing, wedged or hostile, is handled as
+  one that died; a decode that ignores its abort past the service's
+  unwind bound ends its process the same way, and so does a reply whose
+  header is not the plain no-exception marker, which the client reads
+  itself rather than through the framework's exception reader. The
+  engine side keeps a live-handle set
+  and a per-handle busy flag, so a handle from an earlier engine process
+  or one inside another call is refused rather than dereferenced,
+  independently of the service's mutexes, and re-checks the CPU floor
+  before loading the engine library. The one binding is held for the
+  life of the app process, which keeps the model resident as the
+  in-process engine was; a released binding would end the engine
+  process, and the next dictation would pay a cold load with nothing in
+  front of it. The same holds when the engine process dies (a crash in
+  the engine, or the platform reclaiming it): `WhisperTranscriptionService`
+  forgets the handle that process issued and reloads the model at once,
+  at most three times in a row without a successful decode in between,
+  so a process that keeps dying is not reloaded in a loop; a death
+  during a load is that load's failure and is not retried on its own,
+  and every dictation still makes its own load attempt. A dictation
+  inside the process when it dies is lost and reported as the engine
+  unavailable, which the hybrid fallback routes to remote. Handles are
+  matched to the process that issued them by a per-bind generation from
+  the client, so a late report of an earlier death never drops a fresh
+  handle. The engine thread count and the placement facts on the
+  diagnostics lines (`proc=engine`) come from the engine process once it
+  is bound, since `/proc/self` in the app process describes the wrong
+  process. The transport's API floor (`isWhisperSupported` in
+  `Whisper.android.kt`) puts Android 8.0 on the remote path
+  (KNOWN_ISSUES), and `MainApplication.onCreate` returns at once in the
+  engine process (`runningInIsolatedProcess` states why).
 - `whisperBenchmark` is the model-free speed probe: the shim times one
   encoder block of the base model's shape, built on ggml with random
   weights, on the thread count a dictation would get. `DeviceSpeedEstimator`
-  (util) runs it once per install (callers arriving during a probe wait
-  for it and take its score) and caches the score;
-  `WhisperSpeedCalibration` turns the score into "seconds for a full 15 s
-  dictation" per catalog tier from constants measured on the reference
-  phone (the calibration procedure is in its KDoc, the instrumented
-  `WhisperSpeedCalibrationBenchmark` produces the numbers). The model
+  (util) measures once per install and caches the score; a measurement
+  is the lower of two probes, since the first probe in a freshly spawned
+  engine process runs slow, and callers arriving during a measurement
+  wait for it and take its score. `WhisperSpeedCalibration` turns the
+  score into "seconds for a full 15 s dictation" per catalog tier from
+  constants measured on the reference phone (the calibration procedure
+  is in its KDoc; the instrumented `WhisperSpeedCalibrationBenchmark`
+  produces the numbers, discarding its first probe for the same
+  reason). The model
   picker shows the estimate on every row, and the default pick steps
   down a tier while its estimate exceeds the watch's window, to the tiny
   floor at most.
@@ -356,9 +416,12 @@ The replacement is whisper.cpp (MIT), compiled from source:
   cold-start init) are guarded only by the instrumented
   `WhisperLocalCancellationTest` and `WhisperColdStartRaceTest` under
   `androidApp/src/androidTest`, run one class at a time on a device with
-  the model installed (each KDoc carries the command); the sample count
-  the shim reports has no automated check. An engine bump or a shim edit
-  gets a device run of those two before it merges.
+  the model installed (each KDoc carries the command); the process
+  boundary (an isolated uid, a dictation and a full window across it, a
+  refused stale handle, the app outliving a crashed engine process) by
+  `WhisperEngineIsolationTest` beside them. An engine bump, a shim edit
+  or a protocol change gets a device run of those three before it
+  merges.
 - The watch's dictation deadline is owned by `VoiceSessionCoordinator`
   in libpebble3, not by the provider. The firmware records for at most
   15 seconds, gives the phone 15 seconds from the end of the recording,
@@ -406,8 +469,10 @@ The replacement is whisper.cpp (MIT), compiled from source:
   every barrier for a scheduler slice and a decode that takes a second
   takes half a minute (measured on two chips; `TranscriptionThreads`
   holds the numbers' conclusions). The count is read at call time from
-  the process affinity mask, since a process that leaves the screen
-  lands in a smaller cpuset on every phone tried, and sized by the
+  the affinity mask of the process the decode runs in (the engine
+  process once one is bound, this process before that; see the
+  isolated-process bullet above), since a process that leaves the
+  screen lands in a smaller cpuset on every phone tried, and sized by the
   fastest frequency tier in that mask (`tieredThreadCount`), capped at
   four. The engine binding carries an `EnginePlacement` (affinity mask,
   nice value) that the shim applies to the calling thread for one call;

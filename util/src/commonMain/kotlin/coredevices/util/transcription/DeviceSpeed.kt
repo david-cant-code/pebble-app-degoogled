@@ -128,14 +128,18 @@ fun modelRowText(sizeInMB: Int, estimatedWindowSeconds: Double?): String {
 /**
  * Runs the speed probe and remembers its score across launches. One
  * measurement per install (and per [WhisperSpeedCalibration.PROBE_VERSION]),
- * repeated only on demand from the model screen, since a second of
- * engine-grade CPU is not free on the phones the estimate matters for.
- * Probes never overlap each other: callers that arrive while one runs
- * wait for it and take its score, since two probes' spinning worker
- * pools would each time the other and cache the slower figure. The probe
- * shares no lock with the transcription service; a dictation running at
- * the same time makes both slower, which only ever pushes an estimate
- * toward "too slow".
+ * repeated only on demand from the model screen, since engine-grade CPU
+ * is not free on the phones the estimate matters for. A measurement is
+ * the better of [PROBE_RUNS] probes: the first probe in a freshly spawned
+ * engine process runs slow (about fifteen percent measured, with the app
+ * on top), and a fresh install's first measurement is exactly the call
+ * that spawns it, while nothing makes a probe spuriously fast, so the
+ * lower figure is the undisturbed one. Probes never overlap each other:
+ * callers that arrive while a measurement runs wait for it and take its
+ * score, since two probes' spinning worker pools would each time the
+ * other and cache the slower figure. The probe shares no lock with the
+ * transcription service; a dictation running at the same time makes
+ * both slower, which only ever pushes an estimate toward "too slow".
  *
  * [threadCount] must be the count a dictation gets at the moment of the
  * call ([dictationThreadCount]), so the score reflects the same threading
@@ -149,12 +153,27 @@ class DeviceSpeedEstimator(
     private val supported: () -> Boolean = { isWhisperSupported() },
     private val now: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
-    private companion object {
-        val logger = Logger.withTag("DeviceSpeedEstimator")
-        const val KEY_NS = "stt_speed_ns_per_block"
-        const val KEY_THREADS = "stt_speed_threads"
-        const val KEY_AT = "stt_speed_measured_at"
-        const val KEY_VERSION = "stt_speed_probe_version"
+    companion object {
+        private val logger = Logger.withTag("DeviceSpeedEstimator")
+
+        /** Probes per measurement; the lowest score is kept (see the class comment). */
+        const val PROBE_RUNS = 2
+
+        /**
+         * Scores accepted from a probe. The probe runs in the engine
+         * process, which parses untrusted model bytes, so its answer is
+         * untrusted; a score a hundred times faster or slower than the
+         * reference phone is nonsense from any real CPU and reads as a
+         * failed probe rather than becoming the cached score the model
+         * recommendation is built on.
+         */
+        internal val PLAUSIBLE_NS: LongRange =
+            (WhisperSpeedCalibration.REFERENCE_SCORE_NS / 100)..(WhisperSpeedCalibration.REFERENCE_SCORE_NS * 100)
+
+        private const val KEY_NS = "stt_speed_ns_per_block"
+        private const val KEY_THREADS = "stt_speed_threads"
+        private const val KEY_AT = "stt_speed_measured_at"
+        private const val KEY_VERSION = "stt_speed_probe_version"
     }
 
     private val _score = MutableStateFlow(load())
@@ -183,15 +202,22 @@ class DeviceSpeedEstimator(
 
     private suspend fun measureLocked(): SpeedScore? {
         if (!supported()) return _score.value
-        val threads = threadCount()
-        // The probe and the settings writes both belong off the main
-        // thread: the writes hit disk, which the debug build's strict mode
-        // rejects on the UI thread.
+        // The thread count, the probe and the settings writes all belong
+        // off the main thread: the count is read from the engine process
+        // once one is bound, the probe runs there, and the writes hit
+        // disk, which the debug build's strict mode rejects on the UI
+        // thread.
         val measured = withContext(Dispatchers.IO) {
-            val ns = runCatching { probe(threads) }
-                .onFailure { logger.w(it) { "Speed probe failed" } }
-                .getOrNull()
-            if (ns == null || ns <= 0L) return@withContext null
+            val threads = threadCount()
+            // A probe that fails or answers nonsense drops out of the
+            // measurement; the measurement fails only when none is left.
+            val ns = (1..PROBE_RUNS).mapNotNull {
+                runCatching { probe(threads) }
+                    .onFailure { logger.w(it) { "Speed probe failed" } }
+                    .getOrNull()
+                    ?.takeIf { it in PLAUSIBLE_NS }
+            }.minOrNull()
+            if (ns == null) return@withContext null
             val score = SpeedScore(nsPerBlock = ns, threads = threads, measuredAtEpochMs = now())
             settings.putLong(KEY_NS, score.nsPerBlock)
             settings.putInt(KEY_THREADS, score.threads)

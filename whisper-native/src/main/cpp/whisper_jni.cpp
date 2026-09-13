@@ -11,6 +11,11 @@
 //  - nativeTranscribe returns null on failure and records a reason for
 //    nativeGetLastError; an empty array is a valid result meaning "no
 //    speech found".
+//  - nativeInitFd takes the model as an open file descriptor that the
+//    Kotlin side has detached from its owner; the shim owns it from that
+//    call on and closes it exactly once, on every path. The engine never
+//    opens a path: the process running it is not assumed to be able to
+//    resolve the host's files (an isolated process cannot).
 //  - Cancellation is per call, keyed by a caller-supplied call id, polled
 //    by whisper's abort_callback. A cancel request targets exactly one
 //    call, so it can never revoke a different call's pending abort. The
@@ -28,7 +33,11 @@
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <exception>
+#include <memory>
 #include <mutex>
 #include <new>
 #include <string>
@@ -379,28 +388,67 @@ jbyteArray utf8_bytes(JNIEnv *env, const std::string &s) {
 } // namespace
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_coredevices_whisper_WhisperJNI_nativeInit(JNIEnv *env, jclass, jstring model_path) {
+Java_coredevices_whisper_WhisperJNI_nativeInitFd(JNIEnv *, jclass, jint fd) {
     install_log_bridge();
 
-    // GetStringUTFChars yields modified UTF-8, which matches real UTF-8
-    // only for ASCII; model paths are filesDir plus catalog ids, ASCII by
-    // construction, so this is safe here (and only here).
-    const char *path = env->GetStringUTFChars(model_path, nullptr);
-    if (path == nullptr) {
-        return 0; // pending OutOfMemoryError
+    if (fd < 0) {
+        set_last_error("init called with an invalid model fd " + std::to_string(fd));
+        return 0;
     }
+    // The stream owns the descriptor and closes it when this function
+    // returns, on every path, including an unwind.
+    std::unique_ptr<FILE, int (*)(FILE *)> file(fdopen(fd, "rb"), fclose);
+    if (!file) {
+        set_last_error("fdopen failed for model fd " + std::to_string(fd) + ": " + strerror(errno));
+        close(fd); // fdopen adopts the fd only on success
+        return 0;
+    }
+
+    // The loader-based init (whisper.cpp v1.9.3, src/whisper.cpp,
+    // whisper_init_with_params_no_state) streams the model through these
+    // callbacks, calls close on both of its exit paths and keeps no
+    // reference to the context afterwards, so the callback close is a
+    // no-op and the stream above owns the descriptor.
+    whisper_model_loader loader{};
+    loader.context = file.get();
+    loader.read = [](void *ctx, void *output, size_t read_size) -> size_t {
+        return fread(output, 1, read_size, static_cast<FILE *>(ctx));
+    };
+    loader.eof = [](void *ctx) -> bool { return feof(static_cast<FILE *>(ctx)) != 0; };
+    loader.close = [](void *) {};
 
     whisper_context_params cparams = whisper_context_default_params();
     // CPU only: no GPU backend is compiled in, and leaving the flag set
     // would make init probe for one and log noise on every start.
     cparams.use_gpu = false;
 
-    whisper_context *ctx = whisper_init_from_file_with_params(path, cparams);
+    // The state the engine builds behind init (whisper.cpp v1.9.3,
+    // src/whisper.cpp, whisper_init_state) is allocated with new and
+    // vector reserves, which throw on failure, after the model's weights
+    // are loaded; whisper_init_with_params has no handler, so a throw
+    // leaves the context and the partial state allocated with nothing
+    // that can free them (whisper_free reaches the state through a
+    // pointer the throw lost). This process is the engine's own and the
+    // app recovers from its death, so a throw ends it here, with its
+    // reason in the log, rather than leave a model's worth of memory
+    // behind in a process that keeps serving loads.
+    whisper_context *ctx = nullptr;
+    try {
+        ctx = whisper_init_with_params(&loader, cparams);
+    } catch (const std::exception &e) {
+        __android_log_print(ANDROID_LOG_ERROR, kLogTag,
+                            "whisper_init_with_params threw for model fd %d: %s; ending the engine process",
+                            fd, e.what());
+        abort();
+    } catch (...) {
+        __android_log_print(ANDROID_LOG_ERROR, kLogTag,
+                            "whisper_init_with_params threw for model fd %d; ending the engine process", fd);
+        abort();
+    }
     if (ctx == nullptr) {
-        set_last_error(std::string("whisper_init_from_file_with_params failed for ") + path
+        set_last_error("whisper_init_with_params failed for model fd " + std::to_string(fd)
                        + " (see whisper.cpp logcat lines for the engine's reason)");
     }
-    env->ReleaseStringUTFChars(model_path, path);
     return reinterpret_cast<jlong>(ctx);
 }
 

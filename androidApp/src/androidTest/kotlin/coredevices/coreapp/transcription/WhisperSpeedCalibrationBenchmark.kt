@@ -15,6 +15,7 @@ import coredevices.whisper.whisperBenchmark
 import coredevices.whisper.whisperFree
 import coredevices.whisper.whisperInit
 import coredevices.whisper.whisperTranscribe
+import coredevices.whisper.readCpuset
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.runBlocking
@@ -29,15 +30,16 @@ import kotlin.time.TimeSource
 /**
  * Calibration run for [WhisperSpeedCalibration] plus the one assertion the
  * probe must hold: on the same phone, repeated probe scores stay within a
- * quarter of each other. With the app's activity on screen (the state the
- * reference numbers are defined in) it prints the probe score and, for
- * every installed tier, the median decode of a full 15 second window of
- * speech, which are the constants the calibration
- * object records. It also prints what the current constants predict, so
- * a second phone cross-checks them. Pass `-e download true` to install a
- * missing tier through the production provider first. The spread
- * assertion is advisory: a warm or busy phone can exceed it. Run on its
- * own:
+ * quarter of each other. A first probe is discarded, since the freshly
+ * spawned engine process runs it slow; the estimator keeps the better of
+ * two for the same reason. With the app's activity on screen (the state
+ * the reference numbers are defined in) it prints the probe score and,
+ * for every installed tier, the median decode of a full 15 second window
+ * of speech, which are the constants the calibration object records. It
+ * also prints what the current constants predict, so a second phone
+ * cross-checks them. Pass `-e download true` to install a missing tier
+ * through the production provider first. The spread assertion is
+ * advisory: a warm or busy phone can exceed it. Run on its own:
  *   adb shell am instrument -w \
  *     -e class coredevices.coreapp.transcription.WhisperSpeedCalibrationBenchmark \
  *     com.anopticlabs.gravel.test/androidx.test.runner.AndroidJUnitRunner
@@ -63,8 +65,6 @@ class WhisperSpeedCalibrationBenchmark {
 
     private fun median(values: List<Long>): Long = values.sorted()[values.size / 2]
 
-    private fun cpuset(): String = runCatching { File("/proc/self/cpuset").readText().trim() }.getOrDefault("?")
-
     @Test
     fun probeIsStableAndEachTierIsCalibrated() {
         Assume.assumeTrue("engine unsupported on this CPU", isWhisperSupported())
@@ -76,10 +76,12 @@ class WhisperSpeedCalibrationBenchmark {
             Thread.sleep(1500)
         }
         val threads = transcriptionThreadCount()
-        log("cpuset=${cpuset()} threads=$threads")
+        log("cpuset=${readCpuset() ?: "?"} threads=$threads")
 
+        val warmUp = whisperBenchmark(threads)
         val scores = (1..RUNS).map { whisperBenchmark(threads) }
         val score = median(scores)
+        log("probe first run in the fresh engine process nsPerBlock=$warmUp (discarded)")
         val spread = (scores.max() - scores.min()).toDouble() / scores.min()
         log("probe nsPerBlock=$scores median=$score spread=${"%.2f".format(spread)}")
         assertTrue(spread <= 0.25, "probe scores spread ${"%.2f".format(spread)} exceeds 0.25")

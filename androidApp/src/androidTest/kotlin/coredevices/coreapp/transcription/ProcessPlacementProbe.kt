@@ -4,9 +4,10 @@ import android.app.ActivityManager
 import android.content.Intent
 import androidx.test.platform.app.InstrumentationRegistry
 import coredevices.util.transcription.InferenceBoost
+import coredevices.whisper.readCpusAllowedList
+import coredevices.whisper.readCpuset
 import org.junit.Test
 import org.koin.mp.KoinPlatform
-import java.io.File
 
 /**
  * Measurement, not a pass/fail test: records which cpuset and CPU mask
@@ -33,20 +34,12 @@ class ProcessPlacementProbe {
         println("[$TAG] $line")
     }
 
-    private fun cpuset(): String = runCatching { File("/proc/self/cpuset").readText().trim() }.getOrDefault("?")
-
-    private fun allowed(): String = runCatching {
-        File("/proc/self/status").useLines { lines ->
-            lines.firstOrNull { it.startsWith("Cpus_allowed_list:") }?.substringAfter(':')?.trim()
-        }
-    }.getOrNull() ?: "?"
-
     private fun importance(): Int = runCatching {
         ActivityManager.RunningAppProcessInfo().also { ActivityManager.getMyMemoryState(it) }.importance
     }.getOrDefault(-1)
 
     private fun snapshot(state: String) {
-        log("state=$state cpuset=${cpuset()} allowed=${allowed()} importance=${importance()}")
+        log("state=$state cpuset=${readCpuset() ?: "?"} allowed=${readCpusAllowedList() ?: "?"} importance=${importance()}")
     }
 
     @Test

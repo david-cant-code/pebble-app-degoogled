@@ -68,7 +68,8 @@ internal fun effectiveThreadCount(singleThreadOverride: Boolean, debugBuild: Boo
 
 /**
  * The count a dictation would run with right now, read fresh from the
- * process's allowed CPUs: the one entry point for the transcription
+ * allowed CPUs of the process the decode runs in
+ * ([transcriptionThreadCount]): the one entry point for the transcription
  * service (decode and warm-up alike) and the speed probe, so the probe
  * measures the same threading the decode gets. The instrumented
  * calibration benchmark reads [transcriptionThreadCount] directly, since

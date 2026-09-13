@@ -471,7 +471,9 @@ still hold the engine when the retry's recording ends. The retry's own
 decode then fails at once with a recognizer error, the same "Error
 occurred. Try again." the superseded session produced, and the watch's
 next retry runs clean. The hold lasts at most the engine's unwind bound
-(10 seconds) and needs a pass longer than the next recording. A bounded
+(10 seconds) and needs a pass longer than the next recording; a decode
+still inside the engine when the bound expires is abandoned with its
+process, so the dictation after it pays a cold load. A bounded
 wait on the engine would mostly turn an immediate failure into a late
 one inside the same deadline; closing this means the new session
 joining the superseded decode after its recording ends and before its
@@ -513,3 +515,85 @@ model already selected. Closing this means dropping a sample for a
 model that is no longer selected, or holding the latch until decodes
 that began before a switch have ended, with a tracker test that
 records for the replaced model after the switch settles.
+
+## No local dictation on Android 8.0
+
+**Status: accepted.**
+
+The speech engine runs in an isolated process and receives each
+dictation's audio as a shared-memory region, an API whose floor is
+Android 8.1 (`isWhisperSupported` in the whisper module states it). On
+Android 8.0 the engine reports itself unsupported:
+the model picker offers no local models and dictation takes the remote
+path, as it does on a CPU below the engine's feature floor. Closing this
+means a second audio transport for that one release, a temporary file
+passed as a descriptor, with its own device run; deferred because the
+engine's CPU floor already excludes nearly every phone that shipped with
+Android 8.0, and none of those is held at it.
+
+## The model is hashed, then opened by path
+
+**Status: accepted; the isolated process is the layer behind it.**
+
+Load-time verification hashes the installed model file once per process
+and memoizes the result; the engine client then opens the path again to
+hand the engine process a descriptor. Between the hash and the open,
+and between one load and the next, the file could be replaced by
+something that already writes inside the app's private files directory,
+which is the app's own uid or root; the pin does not cover that, as the
+design notes state. The engine process that parses the bytes holds no
+permission and no path of its own, so a swapped file reaches a parser
+in a process that can do nothing else with it. Every engine process
+death drops the memo of the model that process held or was parsing and
+of the configured one, so the next load of either re-hashes the file
+whichever job makes it, since a death is the one event a corrupt file
+could have caused; a load that takes the mutex before the death report
+is acted on reads a memo set by a re-hash seconds earlier, so only a
+swap inside that window escapes. Hashing through the
+descriptor that is sent would tie the hash to the file the engine
+reads, not to its bytes: a rewrite in place after the hash still
+reaches the parser. Closing the window means hashing the bytes as they
+are sent, a copy of the whole model through memory; deferred because
+the writer it defends against already has the app's own access.
+
+## Small engine calls on the dictation path carry the 15 second bound
+
+**Status: open; bounded, and the wider limit is the decode's own.**
+
+Every engine transaction has a deadline after which the client ends the
+engine process, sized well above the slowest legitimate call of its
+kind; the runtime report, the cancel and the free are procfs reads or a
+flag, and get the table's shortest bound, 15 seconds. Two runtime reads
+sit on the dictation path ahead of the decode, outside the dictation's
+own timeout, and the cancel a timed-out decode sends sits ahead of the
+unwind bound. An engine process that is alive and answers nothing
+therefore holds a LocalFirst dictation for about 15 seconds before the
+remote fallback starts, past the watch's window, and a session that
+opens meanwhile finds the transcription in progress; the dictation
+after that recovers with a cold load into a fresh process. No benign
+cause of that state is known: a hung decode does not stall the other
+transactions, which the engine serves on other binder threads. Bounds
+sized to the calls' position, a second or two, would rescue that case,
+but a bound that short risks ending a healthy engine on a starved
+background cpuset and needs measuring on slow phones first; and it
+would not move the wider limit, which is that an engine answering the
+small calls and stalling the decode pushes the fallback past the window
+through the decode's 8 second local timeout plus the 10 second unwind
+bound, whatever these bounds say. Deferred until that measurement.
+
+## The transcript is logged verbatim with sensitive content shown in logs
+
+**Status: open; off by default, and the log site is where the fix belongs.**
+
+With "Show sensitive content in phone logs" on in the watch settings,
+the transcription service logs every transcript verbatim, whichever
+provider produced it. The log writer appends an entry's text without
+escaping, so a transcript with a line break in it starts a line of its
+own in the log a user attaches to a report, and can be made to look
+like a diagnostics line. The engine process is untrusted by design, and
+its other strings have control characters replaced before they reach a
+line; the transcript is the user's text on its way to the watch, so it
+is not altered at the boundary. Closing this means escaping control
+characters at the log site, for every entry; deferred to a pass over
+what the log writer accepts, since the setting is off by default and a
+transcript's content is the engine's to choose either way.

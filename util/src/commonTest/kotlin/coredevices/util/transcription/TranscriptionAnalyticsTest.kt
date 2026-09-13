@@ -1,8 +1,14 @@
 package coredevices.util.transcription
 
 import coredevices.analytics.CoreAnalytics
+import coredevices.whisper.WhisperEngineUnavailableException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.time.Duration
 import kotlin.time.Instant
 
@@ -44,8 +50,17 @@ class TranscriptionAnalyticsTest {
         )
     }
 
+    /**
+     * The whole table of the mapping, one assertion per arm: the tokens
+     * name the app's own exception classes on the analytics event and on
+     * the diagnostics lines, where a class name would be a minified one.
+     */
     @Test
     fun failureReasonMapsExceptionTypes() {
+        assertEquals(
+            "engine_unavailable",
+            transcriptionFailureReason(WhisperEngineUnavailableException("gone")),
+        )
         assertEquals(
             "not_enough_memory",
             transcriptionFailureReason(TranscriptionException.NotEnoughMemory()),
@@ -71,9 +86,15 @@ class TranscriptionAnalyticsTest {
             transcriptionFailureReason(TranscriptionException.NoSpeechDetected("empty_result")),
         )
         assertEquals(
+            "in_progress",
+            transcriptionFailureReason(TranscriptionException.TranscriptionInProgress("x")),
+        )
+        assertEquals(
             "service_error",
             transcriptionFailureReason(TranscriptionException.TranscriptionServiceError("x")),
         )
+        val timeout = assertFailsWith<TimeoutCancellationException> { runBlocking { withTimeout(1) { delay(1_000) } } }
+        assertEquals("timeout", transcriptionFailureReason(timeout))
         assertEquals("IllegalStateException", transcriptionFailureReason(IllegalStateException()))
     }
 }

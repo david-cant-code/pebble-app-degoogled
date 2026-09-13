@@ -9,6 +9,7 @@ import coredevices.util.transcription.STTLanguage
 import coredevices.util.transcription.TranscriptionException
 import coredevices.util.isDebugBuild
 import coredevices.util.transcription.TranscriptionSessionStatus
+import coredevices.util.transcription.transcriptionFailureReason
 import coredevices.util.transcription.debugArchiveDictationFrames
 import coredevices.util.transcription.debugCaptureDumpApplies
 import coredevices.util.transcription.debugSubstituteClip
@@ -167,7 +168,7 @@ class HybridTranscription(
             outcome = "disabled"
             TranscriptionResult.Disabled
         } catch (e: TranscriptionException) {
-            outcome = "error:${e::class.simpleName}"
+            outcome = "error:${transcriptionFailureReason(e)}"
             TranscriptionResult.Error("Transcription failed: ${e.message}")
         } finally {
             decodedBuffer.close()

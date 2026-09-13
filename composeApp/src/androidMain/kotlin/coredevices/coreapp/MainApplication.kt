@@ -38,6 +38,8 @@ import coredevices.pebble.PebbleAppDelegate
 import coredevices.pebble.watchModule
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigHolder
+import coredevices.whisper.WhisperEngineClient
+import coredevices.whisper.runningInIsolatedProcess
 import io.rebble.libpebblecommon.connection.AppContext
 import org.koin.android.ext.android.inject
 import org.koin.android.ext.koin.androidContext
@@ -58,6 +60,13 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        // Fork: the speech engine's isolated process instantiates this class
+        // too, and nothing below may run there; see runningInIsolatedProcess.
+        if (runningInIsolatedProcess()) return
+        // Fork: the engine client needs the application context to bind the
+        // engine process; attached before the DI graph exists so no engine
+        // call can precede it.
+        WhisperEngineClient.attach(this)
         startKoin {
             modules(
                 module {
@@ -161,13 +170,19 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         }
     }
 
+    // Fork: the platform delivers these to every process of the app, the
+    // speech engine's isolated process included, where onCreate returned
+    // before the DI graph was built; an injected member resolved there
+    // throws, and that process has no file to write anyway.
     override fun onLowMemory() {
         super.onLowMemory()
+        if (runningInIsolatedProcess()) return
         fileLogWriter.logBlockingAndFlush(Severity.Info, "onLowMemory", "MainApplication", null)
     }
 
     override fun onTerminate() {
         super.onTerminate()
+        if (runningInIsolatedProcess()) return
         fileLogWriter.logBlockingAndFlush(Severity.Info, "onTerminate", "MainApplication", null)
     }
 

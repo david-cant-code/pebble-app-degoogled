@@ -3,6 +3,7 @@ package coredevices.util.transcription
 import coredevices.analytics.CoreAnalytics
 import coredevices.whisper.EnginePlacement
 import coredevices.whisper.TranscribeStats
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration
@@ -18,12 +19,20 @@ internal object NoopAnalytics : CoreAnalytics {
     override fun updateRingLifetimeCollectionCount(serial: String, count: Int) {}
 }
 
-/** A provider with one installed model. */
-internal class FakeModelProvider : CactusModelPathProvider {
+/**
+ * A provider with one installed model, until a test removes it through
+ * [installed]; records in [forgotten] every model whose verification
+ * memo the service asked it to drop.
+ */
+internal class FakeModelProvider(@Volatile var installed: Boolean = true) : CactusModelPathProvider {
+    val forgotten = CopyOnWriteArrayList<String>()
+    override fun forgetLoadVerification(modelId: String) {
+        forgotten += modelId
+    }
     override suspend fun getSTTModelPath(): String = "/fake/model"
     override suspend fun getLMModelPath(): String = error("no language model")
     override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = "/fake/$modelId"
-    override fun isModelDownloaded(modelName: String): Boolean = true
+    override fun isModelDownloaded(modelName: String): Boolean = installed
     override fun getDownloadedModels(): List<String> = emptyList()
     override fun getIncompatibleModels(): List<String> = emptyList()
     override fun deleteModel(modelName: String) {}
@@ -37,10 +46,12 @@ internal class FakeModelProvider : CactusModelPathProvider {
  * local model ran. It reports the input size through the stats slot the
  * way the shim does (or nothing at all while [reportInput] is off), and a
  * real call blocks on [gate] while one is set, so a test can act while a
- * decode is in flight.
+ * decode is in flight, and throws [failure] instead of answering while
+ * one is set.
  */
 internal class FakeWhisperEngine(@Volatile var reply: String = "hello world") {
     @Volatile var realCalls = 0
+    @Volatile var failure: Throwable? = null
     @Volatile var reportInput = true
     @Volatile var gate: CountDownLatch? = null
     @Volatile var inRealTranscribe = false
@@ -62,6 +73,7 @@ internal class FakeWhisperEngine(@Volatile var reply: String = "hello world") {
         ): String {
             if (pcm.all { it == 0f }) return ""
             realCalls++
+            failure?.let { throw it }
             if (reportInput) stats?.inputSamples = pcm.size
             inRealTranscribe = true
             try {

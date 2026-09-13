@@ -27,6 +27,36 @@ class DictationDiagnosticsTest {
         assertEquals(listOf(2), parseCpuList("2,2"))
     }
 
+    /**
+     * The list can come from the engine process, so a range that would
+     * expand to billions of ids must read as malformed, not allocate.
+     */
+    @Test
+    fun cpuListRejectsIdsAboveTheBound() {
+        assertNull(parseCpuList("0-2000000000"))
+        assertNull(parseCpuList("0-${MAX_CPU_ID + 1}"))
+        assertNull(parseCpuList("${MAX_CPU_ID + 1}"))
+        assertNull(parseCpuList("0-3,${Int.MAX_VALUE}"))
+        assertEquals(MAX_CPU_ID + 1, parseCpuListCount("0-$MAX_CPU_ID"))
+        assertEquals(listOf(MAX_CPU_ID), parseCpuList("$MAX_CPU_ID"))
+    }
+
+    /**
+     * Many ranges inside the id bound name as many ids as one range past
+     * it would, so the parser caps what a list names in total and does
+     * the same work for any list: over 4 KB of full ranges is refused at
+     * the second one.
+     */
+    @Test
+    fun cpuListRejectsMoreIdsThanTheBoundAllows() {
+        val fullRange = "0-$MAX_CPU_ID"
+        assertNull(parseCpuList(List(585) { fullRange }.joinToString(",")))
+        assertNull(parseCpuList("$fullRange,0"), "one id past the total, as a repeat")
+        assertNull(parseCpuList("0-2048,2048-$MAX_CPU_ID"), "an overlap counts twice")
+        assertEquals(MAX_CPU_ID + 1, parseCpuListCount("0-2047,2048-$MAX_CPU_ID"))
+        assertEquals(MAX_CPU_ID + 1, parseCpuListCount(fullRange))
+    }
+
     @Test
     fun cpuListRejectsMalformedInput() {
         assertNull(parseCpuListCount(""))
@@ -42,14 +72,18 @@ class DictationDiagnosticsTest {
         val line = formatEngineDiagnostics(
             model = "whisper-base-en",
             threads = 4,
-            snapshot = EngineRuntimeSnapshot(allowedCpus = 8, cpuset = "/foreground", importance = 125),
+            snapshot = EngineRuntimeSnapshot(
+                allowedCpus = 8, cpuset = "/foreground", importance = null, oomScoreAdj = 1,
+                process = EngineRuntimeSnapshot.PROCESS_ENGINE,
+            ),
             audioSeconds = 3.456,
+            initWaitMillis = 0,
             decodeMillis = 1234,
             outcome = "ok",
         )
         assertEquals(
-            "dictation engine: model=whisper-base-en threads=4 allowedCpus=8 " +
-                "cpuset=/foreground importance=125 audioSec=3.46 decodeMs=1234 outcome=ok",
+            "dictation engine: model=whisper-base-en threads=4 proc=engine allowedCpus=8 " +
+                "cpuset=/foreground importance=? oomAdj=1 audioSec=3.46 initWaitMs=0 decodeMs=1234 outcome=ok",
             line,
         )
     }
@@ -59,14 +93,54 @@ class DictationDiagnosticsTest {
         val line = formatEngineDiagnostics(
             model = null,
             threads = 1,
-            snapshot = EngineRuntimeSnapshot(null, null, null),
+            snapshot = EngineRuntimeSnapshot(null, null, null, null, process = EngineRuntimeSnapshot.PROCESS_HOST),
             audioSeconds = 15.0,
+            initWaitMillis = 4210,
             decodeMillis = 0,
             outcome = "error:IllegalStateException",
         )
         assertEquals(
-            "dictation engine: model=? threads=1 allowedCpus=? cpuset=? importance=? " +
-                "audioSec=15.00 decodeMs=0 outcome=error:IllegalStateException",
+            "dictation engine: model=? threads=1 proc=host allowedCpus=? cpuset=? importance=? oomAdj=? " +
+                "audioSec=15.00 initWaitMs=4210 decodeMs=0 outcome=error:IllegalStateException",
+            line,
+        )
+    }
+
+    @Test
+    fun coldPathLineHasAFixedLayout() {
+        val line = formatColdPathDiagnostics(
+            model = "whisper-small-en",
+            snapshot = EngineRuntimeSnapshot(
+                allowedCpus = 4, cpuset = "/background", importance = 400, oomScoreAdj = 700,
+                process = EngineRuntimeSnapshot.PROCESS_HOST,
+            ),
+            modelPathMillis = 3120,
+            bindMillis = 498,
+            engineInitMillis = 2290,
+            warmUpMillis = 640,
+            outcome = "ok",
+        )
+        assertEquals(
+            "dictation coldpath: model=whisper-small-en proc=host allowedCpus=4 cpuset=/background importance=400 " +
+                "oomAdj=700 modelPathMs=3120 bindMs=498 engineInitMs=2290 warmUpMs=640 outcome=ok",
+            line,
+        )
+    }
+
+    @Test
+    fun coldPathTermsNeverReachedPrintAsQuestionMarks() {
+        val line = formatColdPathDiagnostics(
+            model = "whisper-small-en",
+            snapshot = EngineRuntimeSnapshot(null, null, null, null, process = EngineRuntimeSnapshot.PROCESS_HOST),
+            modelPathMillis = 3120,
+            bindMillis = null,
+            engineInitMillis = null,
+            warmUpMillis = null,
+            outcome = "error:RuntimeException",
+        )
+        assertEquals(
+            "dictation coldpath: model=whisper-small-en proc=host allowedCpus=? cpuset=? importance=? oomAdj=? " +
+                "modelPathMs=3120 bindMs=? engineInitMs=? warmUpMs=? outcome=error:RuntimeException",
             line,
         )
     }
