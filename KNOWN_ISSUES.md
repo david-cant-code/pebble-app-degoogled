@@ -553,3 +553,45 @@ reads, not to its bytes: a rewrite in place after the hash still
 reaches the parser. Closing the window means hashing the bytes as they
 are sent, a copy of the whole model through memory; deferred because
 the writer it defends against already has the app's own access.
+
+## Small engine calls on the dictation path carry the 15 second bound
+
+**Status: open; bounded, and the wider limit is the decode's own.**
+
+Every engine transaction has a deadline after which the client ends the
+engine process, sized well above the slowest legitimate call of its
+kind; the runtime report, the cancel and the free are procfs reads or a
+flag, and get the table's shortest bound, 15 seconds. Two runtime reads
+sit on the dictation path ahead of the decode, outside the dictation's
+own timeout, and the cancel a timed-out decode sends sits ahead of the
+unwind bound. An engine process that is alive and answers nothing
+therefore holds a LocalFirst dictation for about 15 seconds before the
+remote fallback starts, past the watch's window, and a session that
+opens meanwhile finds the transcription in progress; the dictation
+after that recovers with a cold load into a fresh process. No benign
+cause of that state is known: a hung decode does not stall the other
+transactions, which the engine serves on other binder threads. Bounds
+sized to the calls' position, a second or two, would rescue that case,
+but a bound that short risks ending a healthy engine on a starved
+background cpuset and needs measuring on slow phones first; and it
+would not move the wider limit, which is that an engine answering the
+small calls and stalling the decode pushes the fallback past the window
+through the decode's 8 second local timeout plus the 10 second unwind
+bound, whatever these bounds say. Deferred until that measurement.
+
+## The transcript is logged verbatim with sensitive content shown in logs
+
+**Status: open; off by default, and the log site is where the fix belongs.**
+
+With "Show sensitive content in phone logs" on in the watch settings,
+the transcription service logs every transcript verbatim, whichever
+provider produced it. The log writer appends an entry's text without
+escaping, so a transcript with a line break in it starts a line of its
+own in the log a user attaches to a report, and can be made to look
+like a diagnostics line. The engine process is untrusted by design, and
+its other strings have control characters replaced before they reach a
+line; the transcript is the user's text on its way to the watch, so it
+is not altered at the boundary. Closing this means escaping control
+characters at the log site, for every entry; deferred to a pass over
+what the log writer accepts, since the setting is off by default and a
+transcript's content is the engine's to choose either way.
