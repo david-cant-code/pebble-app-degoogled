@@ -389,6 +389,54 @@ class WhisperEngineDeathTest {
         }
     }
 
+    private fun switchConfiguredModelTo(modelName: String) {
+        config.value = config.value.copy(sttConfig = STTConfig(mode = CactusSTTMode.LocalOnly, modelName = modelName))
+    }
+
+    /**
+     * A death drops the memo of the model the dead process held, even
+     * when the configuration has moved on to another model during the
+     * fatal call: here a decode that ignores its abort while a switch
+     * lands, so the process is ended holding one model with another
+     * configured.
+     */
+    @Test
+    fun aWedgedDecodeDropsTheMemoOfTheModelItHeld() = runBlocking(Dispatchers.Default) {
+        val fake = ProcessEngine().apply { gate = CountDownLatch(1) }
+        val provider = FakeModelProvider()
+        val service = serviceFor(fake, provider, unwindBound = 200.milliseconds)
+        awaitUntil("the first load") { service.isModelReady }
+
+        val dictation = async { runCatching { service.transcribeLocal(realPcmBytes(), sampleRate = 16_000) } }
+        awaitUntil("the decode inside the engine") { fake.inRealTranscribe }
+        switchConfiguredModelTo("model-b")
+        settle()
+        dictation.cancel()
+        awaitUntil("the wedged process ended") { fake.endedFor != null }
+        assertEquals(setOf("model-a", "model-b"), provider.forgotten.toSet(), "the memo of the model the dead process held was kept")
+        fake.gate?.countDown()
+        fake.gate = null
+        Unit
+    }
+
+    /** A death while a model is being parsed drops that model's memo, whatever the configuration names by then. */
+    @Test
+    fun deathDuringTheLoadDropsTheMemoOfTheModelBeingParsed() = runBlocking(Dispatchers.Default) {
+        val fake = ProcessEngine().apply { initGate = CountDownLatch(1) }
+        val provider = FakeModelProvider()
+        serviceFor(fake, provider)
+        awaitUntil("the first load inside the engine") { fake.initCount == 1 }
+        switchConfiguredModelTo("model-b")
+        fake.dieOnInit = true
+        fake.initGate?.countDown()
+        awaitUntil("the load death") { provider.forgotten.isNotEmpty() }
+        settle()
+        assertTrue("model-a" in provider.forgotten, "the memo of the model being parsed was kept: ${provider.forgotten}")
+        assertTrue("model-b" in provider.forgotten, "the configured model's memo was kept: ${provider.forgotten}")
+        fake.dieOnInit = false
+        Unit
+    }
+
     @Test
     fun reloadsAreCappedUntilADecodeSucceeds() = runBlocking(Dispatchers.Default) {
         val fake = ProcessEngine()

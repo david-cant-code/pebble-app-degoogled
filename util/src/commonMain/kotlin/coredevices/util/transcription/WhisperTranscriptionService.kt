@@ -424,6 +424,14 @@ class WhisperTranscriptionService internal constructor(
     @kotlin.concurrent.Volatile
     private var handleGeneration: Long = 0L
 
+    // The model the engine process was last handed to load, set under
+    // modelMutex before the load and kept until the next; unlike
+    // lastInitedModel it is not cleared by a failed decode, a wedge or a
+    // load that dies, so a death report can always name the model the
+    // dead process held or was parsing.
+    @kotlin.concurrent.Volatile
+    private var handleModel: String? = null
+
     // True when the last load attempt failed because the engine process
     // could not be reached, so a dictation that finds no handle reports
     // the engine unavailable rather than the model missing. Read together
@@ -649,12 +657,15 @@ class WhisperTranscriptionService internal constructor(
 
     /**
      * The engine process died. The verification memo of the model it
-     * held, and of the configured one, goes first, on this thread and
-     * ahead of any load: a death is the one event a model corrupted on
-     * disk could have caused, and the next load must re-hash the file
-     * whichever job makes it, the reload below, a dictation's own attempt
-     * after a death during a load, or a load that takes the mutex before
-     * the reload does. The reload runs as an init job so it takes the
+     * held or was parsing ([handleModel]), and of the configured one,
+     * goes first, on this thread and ahead of any load: a death is the
+     * one event a model corrupted on disk could have caused, and the
+     * next load must re-hash the file whichever job makes it, the reload
+     * below, a dictation's own attempt after a death during a load, or a
+     * load that takes the mutex before the reload does. A load that
+     * takes the mutex before this thread runs the drop reads a memo set
+     * seconds earlier by a re-hash, so only a swap inside that window
+     * escapes. The reload runs as an init job so it takes the
      * same path, and the same mutex holds, as every other load. It is
      * not the job a dictation waits on: [initJob] names a load made on a
      * dictation's behalf, and a dictation that arrives while this runs
@@ -665,7 +676,7 @@ class WhisperTranscriptionService internal constructor(
      */
     private fun onEngineProcessDeath(generation: Long) {
         logger.w { "Whisper engine process (generation $generation) died" }
-        setOf(lastInitedModel, sttConfig.value.modelName).filterNotNull().forEach(modelProvider::forgetLoadVerification)
+        setOf(handleModel, sttConfig.value.modelName).filterNotNull().forEach(modelProvider::forgetLoadVerification)
         performInit(lostGeneration = generation)
     }
 
@@ -771,6 +782,7 @@ class WhisperTranscriptionService internal constructor(
                 // A fresh attempt to reach the engine; only its own
                 // failure can set the flag again (see performInit).
                 engineUnavailable = false
+                handleModel = modelName
                 modelHandle = engine.init(modelPath)
                 cold.engineInitMillis = initStarted.elapsedNow().inWholeMilliseconds
                 handleGeneration = engine.processGeneration()

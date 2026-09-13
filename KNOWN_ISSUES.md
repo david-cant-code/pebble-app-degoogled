@@ -544,10 +544,12 @@ which is the app's own uid or root; the pin does not cover that, as the
 design notes state. The engine process that parses the bytes holds no
 permission and no path of its own, so a swapped file reaches a parser
 in a process that can do nothing else with it. Every engine process
-death drops the memo of the model that process held and of the
-configured one, so the next load of either re-hashes the file whichever
-job makes it, since a death is the one event a corrupt file could have
-caused. Hashing through the
+death drops the memo of the model that process held or was parsing and
+of the configured one, so the next load of either re-hashes the file
+whichever job makes it, since a death is the one event a corrupt file
+could have caused; a load that takes the mutex before the death report
+is acted on reads a memo set by a re-hash seconds earlier, so only a
+swap inside that window escapes. Hashing through the
 descriptor that is sent would tie the hash to the file the engine
 reads, not to its bytes: a rewrite in place after the hash still
 reaches the parser. Closing the window means hashing the bytes as they
