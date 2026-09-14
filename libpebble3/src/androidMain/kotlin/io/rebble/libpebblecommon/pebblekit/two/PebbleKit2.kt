@@ -2,6 +2,7 @@ package io.rebble.libpebblecommon.pebblekit.two
 
 import co.touchlab.kermit.Logger
 import io.rebble.libpebblecommon.ErrorTracker
+import io.rebble.libpebblecommon.WatchConfigFlow
 import io.rebble.libpebblecommon.connection.CompanionApp
 import io.rebble.libpebblecommon.connection.UserFacingError
 import io.rebble.libpebblecommon.di.ConnectionCoroutineScope
@@ -51,12 +52,22 @@ class PebbleKit2(
     private val targetPackages = appInfo.companionApp?.android?.apps.orEmpty().mapNotNull { it.pkg }
     private val connector = DefaultPebbleListenerConnector(getKoin().get(), targetPackages)
     private val errorTracker: ErrorTracker = getKoin().get<ErrorTracker>()
+    private val watchConfig: WatchConfigFlow = getKoin().get()
 
     val uuid: Uuid by lazy { Uuid.Companion.parse(appInfo.uuid) }
     private var runningScope: CoroutineScope? = null
     private var incomingConsumer: Job? = null
 
+    // Fork: stop() binds out to the companion only if start() did, which the toggle can refuse.
+    private var connectorOpened = false
+
     override suspend fun start(incomingAppMessages: Flow<AppMessageData>) {
+        // Fork: a session that exists while PebbleKit 2 is off does not bind out.
+        if (!watchConfig.value.pebbleKit2Enabled) {
+            logger.w { "PebbleKit 2 is off; session for $uuid connects to nothing" }
+            return
+        }
+        connectorOpened = true
         val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
             logger.e(throwable) { "Unhandled exception in PebbleKit2 $uuid: ${throwable.message}" }
         }
@@ -100,6 +111,8 @@ class PebbleKit2(
 
         // Cancel the scope immediately to release the AppMessage channel
         scope?.cancel()
+
+        if (!connectorOpened) return
 
         // Give the companion app a couple of seconds to clean up before closing the connection
         libpebbleScope.launch {

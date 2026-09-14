@@ -233,6 +233,60 @@ change to existing users (`WhatsNewDialog`).
 only: current stable, Apache-2.0, on Google's Maven (F-Droid
 deliverable), no known advisories, non-deprecated API surface.
 
+## PebbleKit exposure toggles
+
+Two `WatchConfig` booleans, `classicPebbleKitEnabled` (default off) and
+`pebbleKit2Enabled` (default on), decide whether each PebbleKit surface
+gets a session.
+
+**Why classic is off by default.** Every non-system watchapp that declares
+no PebbleKit 2 companion package gets a classic PebbleKit session when the
+watch runs it, JS-only watchfaces included, because upstream's
+`appMessageToMultipleCompanions` default creates the platform session next
+to PKJS. A classic session broadcasts what the watch sends to any installed
+app and accepts a `SEND` from any app (KNOWN_ISSUES, "Classic PebbleKit
+broadcasts cannot be restricted to authorized callers"), a path the per-app
+Internet and Location grants never touched. Classic therefore ships off,
+for upgrading installs too, the same way the network default shipped.
+PebbleKit 2 travels over a bound service and a ContentProvider, where the
+caller is authoritative and checked against the companions installed
+watchapps declare, so its toggle reduces surface for a user with no
+PebbleKit 2 companion and stays on.
+
+**Routing and no fallback.** `PebbleKitSurface.kt` (common code) holds the
+routing rule: a declared companion package means PebbleKit 2, anything else
+classic, and both the Android session factory and the session gate read it.
+A disabled surface yields no platform session; a PebbleKit 2 watchapp is not
+given a classic session, which would turn a caller-gated surface into an
+ungated broadcast. `appMessageToMultipleCompanions` is left as upstream has
+it.
+
+**Layers per surface.**
+
+1. *Session creation.* `CompanionAppLifecycleManager.createCompanionApps`
+   consults `WatchConfig.allowsPlatformCompanionSession`, and each session
+   class checks its toggle again at `start()`; the classic session also
+   checks it at every broadcast, for the moment between a toggle-off and the
+   restart. A toggle flipped while an app runs restarts its session through
+   the coordinator, pinned to the session generation like the permission
+   restart (`launchPlatformSessionGateWatcher`). The watcher compares the
+   live decision with the one the session was built from, so a flip while
+   the session starts still counts; a flip off and back on across a
+   session's own `start()` does not (KNOWN_ISSUES).
+
+**Accepted costs.** Flipping a toggle restarts the running watchapp's whole
+session, PKJS included, when that watchapp uses the flipped surface, so a JS
+watchface reloads once on a classic flip.
+
+**Verification shape.** Host tests pin the routing, defaults and no
+fallback (`PebbleKitSurfaceTest`) and the restart trigger and the
+watcher's restart request (`PlatformSessionGateChangesTest`). A source
+sentinel in `:androidApp` (`CompanionSessionGateSentinelTest`) checks that
+the upstream-owned manager, which no unit test can construct, still calls
+the gate and launches the watcher. On the device,
+`ClassicPebbleKitSessionTest` and `PebbleKit2SessionTest` drive real
+sessions across the toggles.
+
 ## The whisper speech engine
 
 Upstream's on-device dictation ran on the proprietary Cactus engine: a

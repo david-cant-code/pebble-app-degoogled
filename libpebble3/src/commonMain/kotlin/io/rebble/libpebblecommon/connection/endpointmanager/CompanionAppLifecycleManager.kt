@@ -17,6 +17,9 @@ import io.rebble.libpebblecommon.locker.Locker
 import io.rebble.libpebblecommon.locker.LockerPBWCache
 import io.rebble.libpebblecommon.locker.WatchappPermissionResolver
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.PbwAppInfo
+import io.rebble.libpebblecommon.WatchConfig
+import io.rebble.libpebblecommon.pebblekit.allowsPlatformCompanionSession
+import io.rebble.libpebblecommon.pebblekit.launchPlatformSessionGateWatcher
 import io.rebble.libpebblecommon.services.WatchInfo
 import io.rebble.libpebblecommon.services.app.AppRunStateService
 import io.rebble.libpebblecommon.services.appmessage.AppMessageData
@@ -59,7 +62,7 @@ class CompanionAppLifecycleManager(
     private var activeAppScope: CoroutineScope = CoroutineScope(Job().also { it.cancel() })
 
     // Fork: the locker entry whose companion apps are currently running, kept so a
-    // permission-triggered restart can verify the request still targets the live
+    // watcher-triggered restart can verify the request still targets the live
     // session before acting on it.
     private var currentEntry: LockerEntry? = null
 
@@ -119,8 +122,11 @@ class CompanionAppLifecycleManager(
                 runningApps.value.forEach { it.stop() }
             }
 
-            val newApps = createCompanionApps(pbw, lockerEntry)
+            // Fork: one config snapshot builds the session and seeds the toggle watcher's baseline.
+            val watchConfig = libPebbleConfigFlow.value.watchConfig
+            val newApps = createCompanionApps(pbw, lockerEntry, watchConfig)
             runningApps.value = newApps
+            val pkjsRunning = newApps.any { it is PKJSApp }
 
             val appIncomingChannels = newApps.map { Channel<AppMessageData>(Channel.BUFFERED) }
 
@@ -136,6 +142,21 @@ class CompanionAppLifecycleManager(
                 }
             }
 
+            // Read here, for both watchers below (see CompanionSessionCoordinator.currentGeneration).
+            val sessionGeneration = sessionCoordinator.currentGeneration
+
+            // Fork: a PebbleKit toggle flipped while this app runs restarts its session. On
+            // activeAppScope, so the watcher ends with the session it restarts.
+            activeAppScope.launchPlatformSessionGateWatcher(
+                config = libPebbleConfigFlow.flow,
+                appInfo = pbw.info,
+                pkjsRunning = pkjsRunning,
+                builtWith = watchConfig.allowsPlatformCompanionSession(pbw.info, pkjsRunning),
+                app = lockerEntry.id,
+                sessionGeneration = sessionGeneration,
+                requestRestart = sessionCoordinator::requestRestart,
+            )
+
             // Fork: restart the session when the app's Network grant flips from deny
             // to allow. A PKJS session that loaded while denied had its JS network
             // entry points guarded from page load, and an app that only fetches at
@@ -147,12 +168,7 @@ class CompanionAppLifecycleManager(
             // the enforcement layers apply it live. The watcher dies with
             // activeAppScope, and a fresh session's watcher starts with a clean
             // transition history, so a restart cannot retrigger itself.
-            if (newApps.any { it is PKJSApp }) {
-                // Read here, where the coordinator has already counted this
-                // session's start, so the request stays pinned to THIS session; a
-                // read at emission time could adopt a successor session's
-                // generation and defeat the coordinator's staleness check.
-                val sessionGeneration = sessionCoordinator.currentGeneration
+            if (pkjsRunning) {
                 activeAppScope.launch {
                     watchappPermissions
                         .watchappPermissionGranted(lockerEntry.id, LockerAppPermissionType.Network)
@@ -174,7 +190,8 @@ class CompanionAppLifecycleManager(
 
     private fun createCompanionApps(
         pbw: PbwApp,
-        lockerEntry: LockerEntry
+        lockerEntry: LockerEntry,
+        watchConfig: WatchConfig,
     ): List<CompanionApp> {
         return buildList {
             val pkjsApp = if (pbw.hasPKJS) {
@@ -188,7 +205,8 @@ class CompanionAppLifecycleManager(
                 )
             } else null
             pkjsApp?.let { add(it) }
-            if (libPebbleConfigFlow.value.watchConfig.appMessageToMultipleCompanions || pkjsApp == null) {
+            // Fork: the PebbleKit toggles gate the platform session.
+            if (watchConfig.allowsPlatformCompanionSession(pbw.info, pkjsRunning = pkjsApp != null)) {
                 createPlatformSpecificCompanionAppControl(
                     device = device,
                     appInfo = pbw.info,

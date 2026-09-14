@@ -107,6 +107,42 @@ those columns exist so companions can do feature detection by model and
 firmware, and serving them per-caller-differently would break that purpose
 without hiding anything a Bluetooth scan does not already reveal.
 
+## A toggle flipped off and on across a session's start leaves it inert
+
+**Status: accepted; the session fails closed, and the second flip has about
+one dispatch to land in.**
+
+Each session class reads its toggle at `start()` and registers nothing
+while it is off, and the mid-session watcher restarts a session when the
+platform-session decision stops matching the one the session was built
+from. If the toggle goes off after the build snapshot and before `start()`
+reads it, then back on before the watcher's first collection, `start()`
+has refused and the watcher's first value matches the snapshot, so nothing
+restarts. The session stays inert until it is rebuilt, for example at the
+next app switch, another flip of the toggle, or a reconnection of the
+watch; while inert it registers no receivers and binds to nothing. Nothing
+in `handleNewRunningApp` suspends between the start loop and the watcher
+launch but the launch's own dispatch, which keeps the window that short as
+long as no suspending call is added there. Restarting a session on any
+config write during its start, or having sessions report their `start()`
+decision, are possible changes; neither is made for a fail-closed state
+with a window this short.
+
+## A PebbleKit 2 watchapp gets no NACK while PebbleKit 2 is off
+
+**Status: accepted; a responder for a surface meant to have no session is a
+design choice deferred.**
+
+With PebbleKit 2 on, a watchapp that names an Android companion and has no
+PebbleKit JS gets a PebbleKit 2 session, which NACKs an AppMessage its
+companion cannot receive, so the watchapp fails fast. With the toggle off
+no session exists and the watchapp waits for its AppMessage timeout
+instead, as a classic watchapp without a replying companion always has.
+The state follows from the user's own toggle, and the watchapp cannot
+reach its companion either way. Restoring the NACK would mean a NACK-only
+responder for a surface the toggle says does not exist; that is recorded
+here rather than added.
+
 ## No backups at all on Android 8.0 and 8.1
 
 **Status: accepted; these API levels cannot encrypt backups client-side.**

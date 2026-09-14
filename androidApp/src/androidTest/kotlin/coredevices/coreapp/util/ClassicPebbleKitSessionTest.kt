@@ -6,20 +6,18 @@ import android.content.Intent
 import android.content.IntentFilter
 import androidx.core.content.ContextCompat
 import androidx.test.platform.app.InstrumentationRegistry
-import io.rebble.libpebblecommon.connection.ConnectedPebble
+import io.rebble.libpebblecommon.LibPebbleConfig
+import io.rebble.libpebblecommon.WatchConfig
+import io.rebble.libpebblecommon.WatchConfigFlow
 import io.rebble.libpebblecommon.connection.PebbleIdentifier
 import io.rebble.libpebblecommon.di.ConnectionCoroutineScope
 import io.rebble.libpebblecommon.js.CompanionAppDevice
-import io.rebble.libpebblecommon.metadata.WatchColor
-import io.rebble.libpebblecommon.metadata.WatchHardwarePlatform
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.AndroidCompanionAppInstance
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.AndroidCompanionAppRoot
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.CompanionApp
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.PbwAppInfo
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.Resources
 import io.rebble.libpebblecommon.pebblekit.classic.PebbleKitClassic
-import io.rebble.libpebblecommon.services.FirmwareVersion
-import io.rebble.libpebblecommon.services.WatchInfo
 import io.rebble.libpebblecommon.services.appmessage.AppMessageData
 import io.rebble.libpebblecommon.services.appmessage.AppMessageResult
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +25,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -37,7 +36,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
-import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 /**
@@ -48,7 +46,10 @@ import kotlin.uuid.Uuid
  * companion with setPackage, falling back to an untargeted broadcast only when the watchapp
  * declares no companion. Upstream's version of PebbleKitClassic has neither the UUID filter nor
  * the targeting, so a mis-resolved upstream merge would revert exactly these lines; these tests
- * are what notices.
+ * are what notices. The classic PebbleKit toggle is pinned here too: a session built while the
+ * toggle is off registers no receiver and broadcasts nothing, and a session running when the
+ * toggle goes off relays nothing in either direction from then on, although its receivers stay
+ * registered until the restart that tears it down.
  *
  * Run with:
  * adb shell am instrument -w -e class \
@@ -140,28 +141,111 @@ class ClassicPebbleKitSessionTest {
         )
     }
 
-    // -- helpers --
+    @Test
+    fun registersNoReceiverWhileClassicIsOff() {
+        val watch = startSession(classicEnabled = false)
 
-    /** Fake watch: records what the session relays to it and ACKs everything. */
-    private class RecordingWatch : ConnectedPebble.AppMessages {
-        val sent = LinkedBlockingQueue<AppMessageData>()
-
-        override val transactionSequence: Iterator<UByte> =
-            generateSequence(0) { it + 1 }.map { it.toUByte() }.iterator()
-
-        override suspend fun sendAppMessage(appMessageData: AppMessageData): AppMessageResult {
-            sent.put(appMessageData)
-            return AppMessageResult.ACK(appMessageData.transactionId)
+        // No liveness probe is possible when the point is that nothing registers, so
+        // broadcast a few times and require silence throughout.
+        repeat(5) {
+            broadcastSend(SESSION_UUID, transactionId = LIVENESS_TID)
+            assertNull(
+                watch.sent.poll(300, TimeUnit.MILLISECONDS),
+                "a SEND was relayed while classic PebbleKit is off",
+            )
         }
-
-        override suspend fun sendAppMessageResult(appMessageResult: AppMessageResult) {}
-
-        override fun inboundAppMessages(appUuid: Uuid): Flow<AppMessageData> = emptyFlow()
     }
 
+    @Test
+    fun stopsRelayingSendsAfterClassicGoesOff() {
+        val config = configFlow(classicEnabled = true)
+        val watch = startSession(config = config)
+        awaitSendRelayed(watch)
+        drainRelays(watch)
+
+        config.value = config.value.withClassic(false)
+        repeat(5) {
+            broadcastSend(SESSION_UUID, transactionId = LIVENESS_TID)
+            assertNull(
+                watch.sent.poll(300, TimeUnit.MILLISECONDS),
+                "a SEND was relayed after classic PebbleKit went off",
+            )
+        }
+    }
+
+    @Test
+    fun relaysAnAckAndANackWhileClassicIsOn() {
+        val watch = startSession()
+        awaitResultRelayed(watch, ACK)
+        awaitResultRelayed(watch, NACK)
+    }
+
+    @Test
+    fun stopsRelayingAcksAndNacksAfterClassicGoesOff() {
+        val config = configFlow(classicEnabled = true)
+        val watch = startSession(config = config)
+        // Both receivers proven live first, so silence below means "gated", not "not registered".
+        awaitResultRelayed(watch, ACK)
+        awaitResultRelayed(watch, NACK)
+        drainResults(watch)
+
+        config.value = config.value.withClassic(false)
+        repeat(5) {
+            broadcastResult(ACK, transactionId = LIVENESS_TID)
+            broadcastResult(NACK, transactionId = LIVENESS_TID)
+            assertNull(
+                watch.results.poll(300, TimeUnit.MILLISECONDS),
+                "an ACK or NACK reached the watch after classic PebbleKit went off",
+            )
+        }
+    }
+
+    @Test
+    fun stopsBroadcastingInboundDataAfterClassicGoesOff() {
+        val incoming = MutableSharedFlow<AppMessageData>(extraBufferCapacity = 4)
+        val config = configFlow(classicEnabled = true)
+        startSession(config = config, incoming = incoming)
+        val broadcasts = captureReceiveBroadcasts()
+        awaitInboundCollected(incoming)
+
+        config.value = config.value.withClassic(false)
+        assertTrue(incoming.tryEmit(inboundMessage()))
+        assertNull(
+            broadcasts.poll(1500, TimeUnit.MILLISECONDS),
+            "inbound watch data was broadcast after classic PebbleKit went off",
+        )
+    }
+
+    @Test
+    fun broadcastsNoInboundDataWhileClassicIsOff() {
+        val incoming = MutableSharedFlow<AppMessageData>(extraBufferCapacity = 4)
+        startSession(classicEnabled = false, incoming = incoming)
+        val broadcasts = captureReceiveBroadcasts()
+
+        // The gated session never subscribes, so this cannot wait for a subscriber; the
+        // buffered emission is simply dropped, which is the behaviour under test.
+        assertTrue(incoming.tryEmit(inboundMessage()))
+
+        assertNull(
+            broadcasts.poll(1500, TimeUnit.MILLISECONDS),
+            "inbound watch data was broadcast while classic PebbleKit is off",
+        )
+    }
+
+    // -- helpers --
+
+    private fun configFlow(classicEnabled: Boolean) =
+        MutableStateFlow(LibPebbleConfig(watchConfig = WatchConfig(classicPebbleKitEnabled = classicEnabled)))
+
+    private fun LibPebbleConfig.withClassic(enabled: Boolean) =
+        copy(watchConfig = watchConfig.copy(classicPebbleKitEnabled = enabled))
+
+    /** [config] is the session's own toggle source, kept by the caller so a test can flip it mid-session. */
     private fun startSession(
         companionPackages: List<String> = emptyList(),
         incoming: Flow<AppMessageData> = emptyFlow(),
+        classicEnabled: Boolean = true,
+        config: MutableStateFlow<LibPebbleConfig> = configFlow(classicEnabled),
     ): RecordingWatch {
         val watch = RecordingWatch()
         val device = CompanionAppDevice(
@@ -173,7 +257,12 @@ class ClassicPebbleKitSessionTest {
         )
         val scope = ConnectionCoroutineScope(SupervisorJob() + Dispatchers.Default)
         sessionScope = scope
-        val classic = PebbleKitClassic(device, appInfo(companionPackages), scope)
+        val classic = PebbleKitClassic(
+            device,
+            appInfo(companionPackages),
+            scope,
+            WatchConfigFlow(config),
+        )
         session = classic
         runBlocking { classic.start(incoming) }
         return watch
@@ -191,8 +280,39 @@ class ClassicPebbleKitSessionTest {
         fail("the session never relayed a correctly addressed SEND")
     }
 
+    /** Lets the SENDs still in flight from a liveness probe finish before a negative check. */
+    private fun drainRelays(watch: RecordingWatch) {
+        while (watch.sent.poll(700, TimeUnit.MILLISECONDS) != null) Unit
+    }
+
+    /**
+     * The ACK/NACK receivers register asynchronously too; broadcast [action] until a result
+     * carrying its probe's transaction id lands. The ids differ per action because both actions
+     * put the same result type on the watch, so a late result of the other probe is skipped.
+     */
+    private fun awaitResultRelayed(watch: RecordingWatch, action: String): AppMessageResult {
+        val transactionId = if (action == ACK) ACK_PROBE_TID else NACK_PROBE_TID
+        repeat(25) {
+            broadcastResult(action, transactionId)
+            while (true) {
+                val result = watch.results.poll(200, TimeUnit.MILLISECONDS) ?: break
+                if (result.transactionId.toInt() == transactionId) return result
+            }
+        }
+        fail("the session never relayed a $action to the watch")
+    }
+
+    /** Lets the results still in flight from a liveness probe finish before a negative check. */
+    private fun drainResults(watch: RecordingWatch) {
+        while (watch.results.poll(700, TimeUnit.MILLISECONDS) != null) Unit
+    }
+
+    private fun broadcastResult(action: String, transactionId: Int) {
+        context.sendOrderedBroadcast(Intent(action).putExtra("transaction_id", transactionId), null)
+    }
+
     private fun broadcastSend(uuid: String, transactionId: Int) {
-        val intent = Intent("com.getpebble.action.app.SEND").apply {
+        val intent = Intent(SEND).apply {
             putExtra("uuid", uuid)
             putExtra("transaction_id", transactionId)
             putExtra("msg_data", """[{"key":1,"type":"string","length":0,"value":"ping"}]""")
@@ -255,42 +375,15 @@ class ClassicPebbleKitSessionTest {
         ),
     )
 
-    private fun testWatchInfo() = WatchInfo(
-        runningFwVersion = testFirmwareVersion(),
-        recoveryFwVersion = null,
-        platform = WatchHardwarePlatform.UNKNOWN,
-        bootloaderTimestamp = Instant.DISTANT_PAST,
-        board = "test",
-        serial = "TESTSERIAL",
-        btAddress = "00:00:00:00:00:00",
-        resourceCrc = 0L,
-        resourceTimestamp = Instant.DISTANT_PAST,
-        language = "en_US",
-        languageVersion = 1,
-        capabilities = emptySet(),
-        isUnfaithful = false,
-        healthInsightsVersion = null,
-        javascriptVersion = null,
-        color = WatchColor.entries.first(),
-    )
-
-    private fun testFirmwareVersion() = FirmwareVersion(
-        stringVersion = "1.0.0",
-        timestamp = Instant.DISTANT_PAST,
-        major = 1,
-        minor = 0,
-        patch = 0,
-        suffix = null,
-        gitHash = "",
-        isRecovery = false,
-        isDualSlot = false,
-        isSlot0 = false,
-    )
-
     private companion object {
         const val SESSION_UUID = "864369ab-1f37-4a2e-9243-dd6b21af9c14"
         const val OTHER_UUID = "5f2c1e08-9f61-4d3e-8a35-0d2f8e1b7a90"
         const val LIVENESS_TID = 1
+        const val ACK_PROBE_TID = 2
+        const val NACK_PROBE_TID = 3
         const val MISADDRESSED_TID = 99
+        const val SEND = "com.getpebble.action.app.SEND"
+        const val ACK = "com.getpebble.action.app.ACK"
+        const val NACK = "com.getpebble.action.app.NACK"
     }
 }
