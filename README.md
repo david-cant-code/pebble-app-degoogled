@@ -51,12 +51,23 @@ a security posture tightened beyond upstream's defaults.
   summary, anything you attach) for you to add to an issue yourself, and
   nothing in the app can upload it.
 - **Hardening beyond the de-Googling.** The app's own attack surface is in
-  scope, not just its Google dependencies. Landed so far: third-party
-  watchapps' phone-side code gets no internet or location access unless
-  granted (deny by default, per-app controls, revocation applies to running
-  apps), the app's exported Android interfaces are authorization-gated or
-  removed, and plain-HTTP (cleartext) traffic is blocked app-wide
-  ([KNOWN_ISSUES.md](KNOWN_ISSUES.md) records the trade-offs).
+  scope, not just its Google dependencies
+  ([KNOWN_ISSUES.md](KNOWN_ISSUES.md) records the trade-offs). Landed so far:
+  - The speech engine runs in an isolated process with no permissions and
+    no path into the app's files, so a memory-safety bug in the model
+    parser or decoder, reached through a model file, is contained to that
+    process.
+  - PebbleKit, the channel between watchapps and companion apps on the
+    phone, has two switches under Watch App Permissions. Classic PebbleKit,
+    which any app on the phone can listen to and send through, ships off.
+    PebbleKit 2, which only apps that an installed watchapp names can use,
+    stays on.
+  - The code third-party watchapps run inside Gravel gets no internet or
+    location access unless granted (deny by default, per-app controls,
+    revocation applies to running apps).
+  - The app's other exported Android interfaces are authorization-gated or
+    removed.
+  - Plain-HTTP (cleartext) traffic is blocked app-wide.
 - **Weather without Play services.** Manual latitude/longitude entry, since
   the stock place search relies on the GMS-backed platform geocoder.
 - **Free on-device dictation.** Voice dictation runs on whisper.cpp,

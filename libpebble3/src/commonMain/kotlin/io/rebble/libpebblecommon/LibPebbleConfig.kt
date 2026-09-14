@@ -119,6 +119,13 @@ data class WatchConfig(
      */
     val watchappDefaultLocationAllowed: Boolean = false,
     val musicSeekWhenAvailable: Boolean = true,
+    /**
+     * Fork: whether classic PebbleKit is reachable. Off by default: while on, any installed app
+     * can receive what classic watchapps send and send to them (DESIGN_NOTES).
+     */
+    val classicPebbleKitEnabled: Boolean = false,
+    /** Fork: whether PebbleKit 2 is reachable. On by default: its entry points check the caller. */
+    val pebbleKit2Enabled: Boolean = true,
 )
 
 class WatchConfigFlow(val flow: StateFlow<LibPebbleConfig>) {

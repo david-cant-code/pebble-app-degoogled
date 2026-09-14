@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
  * users on update. The popup auto-shows once per user per bump (`WhatsNewDialog` in
  * composeApp) and can be reopened any time from Settings > About.
  */
-const val WHATS_NEW_VERSION = 5
+const val WHATS_NEW_VERSION = 7
 
 /** A single announced change: a short heading and a sentence or two of body. */
 data class WhatsNewEntry(val title: String, val body: String)
@@ -32,6 +32,22 @@ data class WhatsNewEntry(val title: String, val body: String)
  * changelog (that lives in git history and the repo docs).
  */
 val whatsNewEntries: List<WhatsNewEntry> = listOf(
+    WhatsNewEntry(
+        title = "Companion apps are now your choice",
+        body = "Apps made for the original Pebble phone app talk to watchapps through " +
+            "classic PebbleKit, which broadcasts what any watchapp or watchface sends " +
+            "from the watch to every app on your phone that listens. That is now off by " +
+            "default. If a companion app of yours stops receiving watch data, turn it " +
+            "back on in Settings > Apps > Watch App Permissions. The newer PebbleKit 2, " +
+            "which only reaches apps a watchapp names, stays on and has its own switch. " +
+            "Notifications, replies and dictation are not affected.",
+    ),
+    WhatsNewEntry(
+        title = "A safer speech engine",
+        body = "The speech engine that transcribes your dictation now runs in an isolated " +
+            "process of its own, with no permissions, so a flaw reached through a speech " +
+            "model stays contained to that process.",
+    ),
     WhatsNewEntry(
         title = "Faster dictation, working in the background, and your own server",
         body = "Speech recognition is optimized: the engine now uses the cores your phone " +
@@ -66,7 +82,7 @@ val whatsNewEntries: List<WhatsNewEntry> = listOf(
     ),
     WhatsNewEntry(
         title = "Control what watchfaces and apps can reach",
-        body = "Watchfaces and apps can run code on your phone that uses the internet and " +
+        body = "Watchfaces and apps can run code inside Gravel that uses the internet and " +
             "your location. You can now turn that off, for everything or per app, in " +
             "Settings > Apps > Watch App Permissions. It starts off for apps you already " +
             "had installed; turn it on for the ones you trust.",

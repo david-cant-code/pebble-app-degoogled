@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- A PebbleKit 2 companion listener owned by the test package, so a session test can
+             observe whether the app binds out to a declared companion. -->
+        <service
+            android:name="coredevices.coreapp.util.RecordingPebbleKit2ListenerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="io.rebble.pebblekit2.RECEIVE_DATA_FROM_WATCH" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

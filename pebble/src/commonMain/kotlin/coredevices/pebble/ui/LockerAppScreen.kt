@@ -938,7 +938,7 @@ fun StoreCapabilityDisclosure(
             }
         }
         Text(
-            "Apps can also use the internet through code that runs on your phone (for example " +
+            "Apps can also use the internet through code that runs inside Gravel (for example " +
                 "to fetch weather). After installing, control internet and location for this app " +
                 "in Settings > Apps > Watch App Permissions.",
             style = MaterialTheme.typography.bodySmall,

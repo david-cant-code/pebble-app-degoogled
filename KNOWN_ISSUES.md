@@ -24,7 +24,18 @@ watch runs the end-to-end pass.
 
 ## Classic PebbleKit broadcasts cannot be restricted to authorized callers
 
-**Status: accepted, no fix available on Android.**
+**Status: accepted while the classic toggle is on; the surface is off by
+default.**
+
+Classic PebbleKit is governed by a toggle (Settings > Apps > Watch App
+Permissions) that ships off, for upgrading installs too. While it is off
+no classic session is created, the START and STOP receivers are not
+registered, and the basalt provider is disabled; a session running when
+the toggle goes off relays nothing from then on, though its SEND, ACK and
+NACK receivers stay registered until its restart (`DESIGN_NOTES.md`,
+"PebbleKit exposure toggles"). The rest of this entry describes the
+surface while the toggle is on, for every non-system watchapp that
+declares no PebbleKit 2 companion, JS-only watchfaces included.
 
 Classic PebbleKit's cross-app surface is broadcasts, and a
 `BroadcastReceiver` is given no caller identity at all: `onReceive` sees the
@@ -65,16 +76,18 @@ app can therefore read what a classic watchapp sends out, and combined with
 SEND injection can prompt a running classic watchapp and read its reply.
 
 The PebbleKit 2 surface does not share this hole: it travels over a bound
-service and a ContentProvider, where the caller is authoritative, and every
-entry point there is gated on the caller being a declared companion of the
-watchapp it addresses.
+service and a ContentProvider, where the caller is authoritative and is
+checked against the companions installed watchapps declare. Its change
+notifications reach every app but name no watch; see "PebbleKit 2 change
+notifications reach any observer".
 
 This entry leaves the file if a future Android release attaches sender
-identity to broadcasts, or if the classic surface is retired.
+identity to broadcasts, or if the classic surface is retired outright.
 
 ## Classic PebbleKit content provider stays exported without a caller gate
 
-**Status: accepted for compatibility; revisit if its exposure grows.**
+**Status: accepted for compatibility while the classic toggle is on; the
+component is disabled while it is off.**
 
 `content://com.getpebble.android.provider.basalt` serves whether a watch is
 connected, whether it supports AppMessage, and the running firmware version
@@ -88,24 +101,174 @@ this provider before any watchapp relationship exists, typically to show
 connection state up front. Gating it would break every classic companion
 while protecting little: the provider serves no identifier of any kind, and
 connection state already leaks through the untargeted classic broadcasts
-described above. This entry leaves the file if the provider ever grows a
-column beyond connection state and firmware version, at which point it gets
-the registry gate regardless of the compatibility cost.
+described above. With the classic toggle off (the default) the provider is
+disabled through `PackageManager` and its `query` returns null besides, so
+the acceptance covers only installs where the user turned classic on. This
+entry leaves the file if the provider ever grows a column beyond
+connection state and firmware version, at which point it gets the registry
+gate regardless of the compatibility cost.
 
-## PebbleKit 2 watch metadata is identical across callers at model level
+## PebbleKit 2 companions receive the watch's real serial
 
-**Status: accepted; the shared columns identify no individual device.**
+**Status: open; upstream-inherited, and only companions that installed
+watchapps name receive it.**
 
-Each PebbleKit 2 companion sees a per-caller pseudonymous watch identifier,
-and the name column serves the advertised model name with its device-unique
-suffix stripped, never the user's nickname. What remains identical across
-callers is model-level metadata: platform codename, board revision, and the
-running firmware version. Two colluding companions can still narrow "is this
-the same watch" to "same model on the same firmware release", an anonymity
-set of every watch of that model on that release. That residue is accepted:
-those columns exist so companions can do feature detection by model and
-firmware, and serving them per-caller-differently would break that purpose
-without hiding anything a Bluetooth scan does not already reveal.
+The `.pebblekit` provider's rows and the sender service's results give each
+calling package its own pseudonymous watch identifier, and the name column
+serves the advertised model name with its device-unique suffix stripped. The
+session's calls into a companion's listener service carry the real serial
+instead: when a watchapp opens, when it closes, and with each message from
+the watch, `PebbleKit2` passes `device.watchInfo.serial`, and pebblekit2
+1.1.0's `DefaultPebbleListenerConnector` takes a single watch identifier per
+call, not one per package. Two installed companions whose watchapps have opened
+while PebbleKit 2 was on therefore hold the same serial and can link the watch;
+the per-caller identifier keeps the serial only from a companion that
+receives no callback, which still shares the model-level columns (platform
+codename, board revision, firmware version) with every caller. The callbacks
+go only to the packages the running watchapp's appinfo names. Closing this
+means one listener connection per companion package, each passed that
+package's identifier; the sender already resolves both the identifier and
+the real serial, so companions that stored either keep working.
+
+## A toggle flipped off and on across a session's start leaves it inert
+
+**Status: accepted; the session fails closed, and the second flip has about
+one dispatch to land in.**
+
+Each session class reads its toggle at `start()` and registers nothing
+while it is off, and the mid-session watcher restarts a session when the
+platform-session decision stops matching the one the session was built
+from. If the toggle goes off after the build snapshot and before `start()`
+reads it, then back on before the watcher's first collection, `start()`
+has refused and the watcher's first value matches the snapshot, so nothing
+restarts. The session stays inert until it is rebuilt, for example at the
+next app switch, another flip of the toggle, or a reconnection of the
+watch; while inert it registers no receivers and binds to nothing. Nothing
+in `handleNewRunningApp` suspends between the start loop and the watcher
+launch but the launch's own dispatch, which keeps the window that short as
+long as no suspending call is added there. Restarting a session on any
+config write during its start, or having sessions report their `start()`
+decision, are possible changes; neither is made for a fail-closed state
+with a window this short.
+
+## The classic receivers deserialize what the sender puts in the extras
+
+**Status: accepted; the protocol's own UUID is a Java Serializable.**
+
+Reading an extra of a classic PebbleKit broadcast runs Java
+deserialization of bytes the sending app wrote, with the app's class
+loader. On Android 8 to 12L the first read of any extra deserializes
+every entry, so all five exported receivers (START, STOP, SEND, ACK and
+NACK) do it; from Android 13 START, STOP and SEND do it when they read
+the watchapp UUID. The platform code involved is named at
+`handleSenderInput`, which drops a broadcast whose handling throws,
+`OutOfMemoryError` and `StackOverflowError` included. It catches throws
+only:
+
+- A crafted object graph whose deserialization never finishes and never
+  throws blocks the collector that read it, and those collectors run on the
+  shared `Dispatchers.Default` pool. A crafted START holds one of its
+  workers and leaves classic app start dead until the process restarts, a
+  crafted STOP does the same for app stop, each classic session's SEND
+  holds another, and on Android 8 to 12L that session's ACK and NACK do
+  too. Cancelling a session does not interrupt a read that is not
+  suspending, so a held worker stays held while sessions are rebuilt around
+  it, and libpebble's other work on that dispatcher waits behind whatever
+  is still held.
+- A stream that allocates an array just under the heap limit can make an
+  allocation on another thread fail with `OutOfMemoryError`, outside any
+  catch.
+- `readObject` hooks of any loadable class run, and the typed
+  `getSerializableExtra(name, Class)` does not bound what is deserialized.
+
+SEND, ACK and NACK check the classic toggle before reading an extra, and
+START and STOP are registered only while it is on.
+
+## The PebbleKit 2 sender reads a caller's Bundle before it refuses anything
+
+**Status: open; the request arrives as a Bundle, and the platform reads it
+before the app sees a key.**
+
+The sender service is exported with no permission, and the binder it hands
+out (`PebbleSenderReceiver`) reads `ACTION` and `WATCHAPP_UUID` from the
+caller's Bundle on the binder thread. That read unparcels the Bundle, and
+what a parcel asks the platform to allocate is the caller's to choose, so a
+crafted request can exhaust this process's memory. The `OutOfMemoryError`
+that follows is an `Error`, which `Binder.execTransactInternal` does not
+catch (android16-release `Binder.java` catches `RemoteException` and
+`RuntimeException`), so the process is killed through the JNI error path
+(`android_util_Binder.cpp`, `report_java_lang_error`). A read that never
+finishes holds the binder thread instead.
+
+Any installed app can do this while PebbleKit 2 is on, without a
+permission, a companion relationship or a connected watch. While the toggle
+is off the binder refuses before it reads the request, including on a binder
+a caller held across the flip. The request never reaches the app's own
+handling, so what it costs is the process, which restarts. Bounding it means
+not unparcelling an untrusted Bundle on the binder thread, which is where
+the request's own keys are read from: the read would have to move to a
+thread where an `Error` can be caught, which is the handling the entry below
+needs too.
+
+## A PebbleKit 2 request's dictionary is read with no bound on what it allocates
+
+**Status: open; the read is the library's, and the app-side fix is an
+exception handler on the scope it runs in.**
+
+While PebbleKit 2 is on, any installed app can bind the exported sender
+service and send a request whose `DATA_DICTIONARY` bundle holds a value the
+platform reads eagerly, at a size the caller chose. The library reads that
+bundle in a coroutine on the
+scope this app supplies (pebblekit2 1.1.0
+`UniversalRequestResponseSuspending`), where the allocation raises
+`OutOfMemoryError`. That coroutine catches `CancellationException` and
+`Exception`, and the scope carries no `CoroutineExceptionHandler`, so the
+error reaches the thread's default handler, which this app chains to the
+platform's: the process dies, and the watch connection with it. The
+platform's 1 MB allocation guard does not cover the read, because it applies
+while a binder transaction is being handled and this read happens on a
+worker thread (android16-release `Parcel.ensureWithinMemoryLimit`).
+
+Nothing gates the request beforehand: the service is exported with no
+permission, the fork's own decision refuses START and STOP without a
+companion relationship but passes the rest, and the companion check for a
+send sits in `sendDataToPebble`, which the library calls after it has read
+the dictionary. No watch need be connected.
+
+The toggle closes it, since the binder refuses a request before the library
+sees it. Closing it while PebbleKit 2 is on means giving that scope a
+`CoroutineExceptionHandler`, which changes how every failure on the
+libpebble scope is handled, so it is recorded here instead.
+
+## A PebbleKit 2 watchapp gets no NACK while PebbleKit 2 is off
+
+**Status: accepted; a responder for a surface meant to have no session is a
+design choice deferred.**
+
+With PebbleKit 2 on, a watchapp that names an Android companion and has no
+PebbleKit JS gets a PebbleKit 2 session, which NACKs an AppMessage its
+companion cannot receive, so the watchapp fails fast. With the toggle off
+no session exists and the watchapp waits for its AppMessage timeout
+instead, as a classic watchapp without a replying companion always has.
+The state follows from the user's own toggle, and the watchapp cannot
+reach its companion either way. Restoring the NACK would mean a NACK-only
+responder for a surface the toggle says does not exist; that is recorded
+here rather than added.
+
+## PebbleKit 2 change notifications reach any observer
+
+**Status: accepted; a notification names the collection and nothing else.**
+
+Any app can register a `ContentObserver` on the `.pebblekit` authority,
+which is exported with no permission as the PebbleKit 2 protocol requires,
+and learn when the connected-watch list or some watch's running app
+changes. Gravel's provider announces those two collection URIs rather than
+the library's per-watch URI, which would carry the watch's real serial to
+every observer (the library and platform behaviour is cited at
+`PebbleKit2Change`). The timing signal is accepted: suppressing it would
+break companions that observe the provider to refresh, and the same timing
+reaches apps through the classic basalt notifier and broadcasts when that
+surface is on. Nothing is announced while PebbleKit 2 is off.
 
 ## No backups at all on Android 8.0 and 8.1
 
@@ -597,3 +760,38 @@ is not altered at the boundary. Closing this means escaping control
 characters at the log site, for every entry; deferred to a pass over
 what the log writer accepts, since the setting is off by default and a
 transcript's content is the engine's to choose either way.
+
+A transcript is not the only text that reaches those unescaped lines.
+While PebbleKit 2 is on, any installed app can make pebblekit2 1.1.0 log
+strings it chose, whatever the setting says. Its
+`BasePebbleSenderReceiver$Binder` warns about an unknown `ACTION`, quoting
+it and the calling package, and its `UniversalRequestResponseSuspending`
+logs a failed request with the exception attached, whose message quotes a
+`WATCHAPP_UUID` that does not parse (up to 36 characters, android16-release
+libcore `UUID.fromString1`) or a `DATA_DICTIONARY` key that is not a number
+(kotlin-stdlib 2.4.10 `numberFormatError`); the log writer appends a
+throwable's stack trace as it does an entry's text. So a line in an
+exported log can be another app's text rather than the app's own. Gravel's
+own refusal log writes the reason and nothing from the request.
+
+## Protocol debug logging writes AppMessage payloads to the app log
+
+**Status: open; deferred to the same pass over the log writer as the entry
+above.**
+
+Debug logging of the Pebble protocol writes each packet's contents:
+outbound in `RealPebbleProtocolHandler.send`, both the packet overload and
+the `ByteArray` one, and inbound in `PebbleProtocolRunner.run`. AppMessage
+payloads are written as byte values, which decode back to what they
+carried, so what a watchapp exchanges with PKJS, a classic companion or a
+PebbleKit 2 companion is in the log. Neither the "Show sensitive content in
+phone logs" setting nor the verbose-connection-logging setting gates these
+calls, and the app sets no minimum severity, so they are written whatever
+the settings say.
+
+The log stays on the phone until the user exports it (Settings > Get Help >
+Export logs) or attaches it to a bug report, so the disclosure is to
+whoever the user sends it to, which may be a public issue. Gating the
+payload bytes means changing upstream's own logging calls rather than the
+fork's seams, so it is recorded here and left to the pass over what the log
+writer accepts.

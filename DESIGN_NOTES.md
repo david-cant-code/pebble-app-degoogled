@@ -132,6 +132,13 @@ appstore capability vocabulary (`location`/`health`/`timeline`) has no
 ever showed "location". This fork adds a per-app, tri-state permission
 system over those two capabilities, denied by default.
 
+**Scope.** The grants gate the app's PebbleKit JS. A watchapp's other
+phone-side path is a companion app (classic PebbleKit or PebbleKit 2, see
+the classic PebbleKit entries in `KNOWN_ISSUES.md`), a separate Android app
+with its own permissions that these grants do not cover, so the user text
+is worded as "code the app runs inside Gravel" and never as "stops the app
+sending your data".
+
 **Decision authority.** `WatchappPermissionResolver`
 (`locker/WatchappPermissions.kt`) is the single place that resolves a
 grant. A capability is stored per app in the existing
@@ -217,14 +224,106 @@ control.
 (`WatchappPermissionsScreen`) holds the global defaults and an app list;
 the per-app tri-state controls live on each app's detail page
 (`WatchappPermissionControls`, reused by the list). Store listings gain an
-honest disclosure that phone-side code can reach the internet, and the
-location capability description states the real "may send it to outside
-servers" flow. A one-time "What's New" dialog announces the deny-by-default
-change to existing users (`WhatsNewDialog`).
+honest disclosure that code the app runs inside Gravel can reach the
+internet, and the location capability description states the real "may send
+it to outside servers" flow. A one-time "What's New" dialog announces the
+deny-by-default change to existing users (`WhatsNewDialog`).
 
 **Dependency.** `androidx.webkit` (1.16.0) is added for `ProxyController`
 only: current stable, Apache-2.0, on Google's Maven (F-Droid
 deliverable), no known advisories, non-deprecated API surface.
+
+## PebbleKit exposure toggles
+
+Two `WatchConfig` booleans, `classicPebbleKitEnabled` (default off) and
+`pebbleKit2Enabled` (default on), decide whether each PebbleKit surface
+exists at all. Both live under Settings > Apps > Watch App Permissions,
+beside the JS grants above, with an info dialog that explains the classic
+default.
+
+**Why classic is off by default.** Every non-system watchapp that declares
+no PebbleKit 2 companion package gets a classic PebbleKit session when the
+watch runs it, JS-only watchfaces included, because upstream's
+`appMessageToMultipleCompanions` default creates the platform session next
+to PKJS. A classic session broadcasts what the watch sends to any installed
+app and accepts a `SEND` from any app (KNOWN_ISSUES, "Classic PebbleKit
+broadcasts cannot be restricted to authorized callers"), a path the per-app
+Internet and Location grants never touched. Classic therefore ships off,
+for upgrading installs too, the same way the network default shipped. A
+classic companion registers runtime receivers with no manifest trace and
+cannot be reliably detected, so the mitigation for a user whose companion
+stops working is text: the toggle's description, the info dialog, the
+What's New entry and the release changelog. PebbleKit 2 travels over a
+bound service and a ContentProvider, where the caller is authoritative and
+checked against the companions installed watchapps declare, so its toggle
+reduces surface for a user with no PebbleKit 2 companion and stays on.
+
+**Routing and no fallback.** `PebbleKitSurface.kt` (common code) holds the
+routing rule: a declared companion package means PebbleKit 2, anything else
+classic, and both the Android session factory and the session gate read it.
+A disabled surface yields no platform session; a PebbleKit 2 watchapp is not
+given a classic session, which would turn a caller-gated surface into an
+ungated broadcast. `appMessageToMultipleCompanions` is left as upstream has
+it.
+
+**Layers per surface.**
+
+1. *Session creation.* `CompanionAppLifecycleManager.createCompanionApps`
+   consults `WatchConfig.allowsPlatformCompanionSession`, and each session
+   class checks its toggle again at `start()`; the classic session also
+   checks it at every broadcast, for the moment between a toggle-off and the
+   restart. A toggle flipped while an app runs restarts its session through
+   the coordinator, pinned to the session generation like the permission
+   restart (`launchPlatformSessionGateWatcher`). The watcher compares the
+   live decision with the one the session was built from, so a flip while
+   the session starts still counts; a flip off and back on across a
+   session's own `start()` does not (KNOWN_ISSUES).
+2. *Manifest component state.* `PebbleKitComponentState` disables the
+   basalt provider, the sender service and the `.pebblekit` provider through
+   `PackageManager` while their toggle is off, and applies a component
+   whose call threw again at the next config change. The platform behaviour
+   this layer rests on is listed, with AOSP symbols, in that class's KDoc.
+3. *Runtime entry points.* Classic START/STOP receivers are registered only
+   while classic is on. The basalt provider's `query` returns null while off
+   and before the setting is readable. The PebbleKit 2 sender hands out a
+   binder that refuses every request while off (`pebbleKitRequestDecision`),
+   before it reads anything the caller sent, and checked per request because
+   the system reuses that binder for later binds
+   (`PebbleSenderReceiver.onBind`). The PebbleKit 2 provider returns null
+   while off (`pebbleKitQueryDecision`, which reaches the companion registry
+   only once the toggle admits the query), and the state it serves
+   (`PebbleKit2ProviderState`, owned by the Koin graph rather than the
+   provider) tracks watches only while on and announces changes per
+   collection, never per watch. The basalt change
+   notifier fires only while classic is on, and once when it turns on.
+
+Runtime-registered receivers never appear in a manifest, so the release
+exported-component allowlist (`VerifyExportedComponents`) cannot see them;
+the runtime entry points govern those.
+
+**Accepted costs.** Flipping a toggle restarts the running watchapp's whole
+session, PKJS included, when that watchapp uses the flipped surface, so a JS
+watchface reloads once on a classic flip. Turning a surface off unpublishes
+its provider, which kills a companion process that still holds a stable
+connection to it when the deferred package-changed broadcast lands, and
+turning PebbleKit 2 off also drops the bindings companions hold to the
+sender service (`PebbleKitComponentState` KDoc).
+
+**Verification shape.** Host tests pin the routing, defaults and no
+fallback (`PebbleKitSurfaceTest`); the restart trigger and the watcher's
+restart request (`PlatformSessionGateChangesTest`); the listener
+registration, the notifier, the sender's and the provider's admission
+decisions, and that the sender's refusal on the toggle or the caller reads
+nothing from the request; the component map
+and its retry after a failed call; and which surface each factory's helper
+follows (`PebbleKitSurfaceWiringTest`). A source sentinel in `:androidApp`
+(`CompanionSessionGateSentinelTest`) checks that the upstream-owned manager,
+which no unit test can construct, still calls the gate and launches the
+watcher. On the device, `ClassicPebbleKitSessionTest` and
+`PebbleKit2SessionTest` drive real sessions across the toggles,
+`PebbleKitToggleGateTest` flips the real config against the real
+components, and `PebbleKitComponentStateTest` drives the real
+PackageManager.
 
 ## The whisper speech engine
 

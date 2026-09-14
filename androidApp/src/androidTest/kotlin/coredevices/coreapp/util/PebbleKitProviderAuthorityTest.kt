@@ -15,6 +15,12 @@ import kotlin.test.assertNotNull
  * authority. Either authority string is build-valid, so a merge that reverts
  * the manifest to another value would compile fine and only fail at runtime
  * when a client app cannot find the provider.
+ *
+ * Resolved with MATCH_DISABLED_COMPONENTS: the PebbleKit toggles disable these
+ * components at the system level (classic is off by default,
+ * PebbleKitComponentState), and this test pins the manifest declaration;
+ * whether a disabled provider resolves for a client is
+ * PebbleKitComponentStateTest's.
  */
 class PebbleKitProviderAuthorityTest {
 
@@ -40,11 +46,11 @@ class PebbleKitProviderAuthorityTest {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             context.packageManager.resolveContentProvider(
                 authority,
-                PackageManager.ComponentInfoFlags.of(0),
+                PackageManager.ComponentInfoFlags.of(PackageManager.MATCH_DISABLED_COMPONENTS.toLong()),
             )
         } else {
             // The int overload is deprecated from API 33; minSdk is below that.
             @Suppress("DEPRECATION")
-            context.packageManager.resolveContentProvider(authority, 0)
+            context.packageManager.resolveContentProvider(authority, PackageManager.MATCH_DISABLED_COMPONENTS)
         }
 }

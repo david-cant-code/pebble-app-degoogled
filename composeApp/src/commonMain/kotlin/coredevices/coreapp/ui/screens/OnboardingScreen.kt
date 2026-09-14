@@ -419,11 +419,12 @@ private fun WatchappPrivacyStage(onDone: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            text = "Some watchfaces and apps run code on your phone to fetch things like " +
+            text = "Some watchfaces and apps run code inside Gravel to fetch things like " +
                 "weather, which can use your internet connection and location. Choose what " +
-                "they're allowed to do by default. Off is the safer choice, but can stop " +
-                "features that need it, such as third-party weather, from working; you can " +
-                "allow individual apps later.",
+                "that code is allowed to do by default. Off is the safer choice, but can " +
+                "stop features that need it, such as third-party weather, from working; you " +
+                "can allow individual apps later. Separate companion apps on your phone use " +
+                "their own Android permissions.",
             textAlign = TextAlign.Center,
         )
         Spacer(modifier = Modifier.height(20.dp))

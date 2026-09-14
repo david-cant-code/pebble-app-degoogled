@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.IBinder
 import co.touchlab.kermit.Logger
+import io.rebble.libpebblecommon.WatchConfigFlow
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDevice
 import io.rebble.libpebblecommon.connection.LibPebble
 import io.rebble.libpebblecommon.connection.LockerApi
@@ -61,7 +62,10 @@ class PebbleSenderReceiver : BasePebbleSenderReceiver(), LibPebbleKoinComponent 
     private val remoteTimelineEmulator: RemoteTimelineEmulator = getKoin().get()
     private val companionRegistry: PebbleKitCompanionRegistry = getKoin().get()
     private val watchIdentity: PebbleKitWatchIdentity = getKoin().get()
+    private val watchConfig: WatchConfigFlow = getKoin().get()
     override val coroutineScope: LibPebbleCoroutineScope = getKoin().get()
+
+    private val pebbleKit2Enabled: Boolean get() = watchConfig.value.pebbleKit2Enabled
 
     /**
      * Wraps the base binder so requests can be inspected while the caller's identity is still
@@ -78,6 +82,10 @@ class PebbleSenderReceiver : BasePebbleSenderReceiver(), LibPebbleKoinComponent 
      * instead of the client's, silently defeating the checks it already performs.
      */
     override fun onBind(intent: Intent?): IBinder? {
+        // Fork: the PebbleKit 2 toggle is checked per request on the binder, not here. The system
+        // keeps the binder onBind returns and hands it to later binds until the service is
+        // destroyed (android16-release ActiveServices.publishServiceLocked, bindServiceLocked,
+        // bringDownServiceLocked), so a refusal returned here could outlive a toggle-on.
         val delegate = super.onBind(intent) as? UniversalRequestResponse ?: return null
         return AuthorizingBinder(delegate)
     }
@@ -87,21 +95,23 @@ class PebbleSenderReceiver : BasePebbleSenderReceiver(), LibPebbleKoinComponent 
     ) : UniversalRequestResponse.Stub() {
 
         override fun request(request: Bundle, callback: SendDataCallback) {
-            val caller = packageManager.getNameForUid(getCallingUid())
-            if (caller == null) {
-                logger.d { "Rejecting PebbleKit request from an unresolvable caller" }
-                callback.replyEmpty()
-                return
-            }
-
-            val action = request.getString(KEY_ACTION)
-            if (action == ACTION_START_APP || action == ACTION_STOP_APP) {
-                val watchapp = request.getString(KEY_WATCHAPP_UUID)
-                if (!companionRegistry.isAuthorizedFor(caller, watchapp)) {
-                    logger.d { "Denied $action of $watchapp from $caller" }
+            // Fork: the reads are lambdas so the toggle and the caller decide first. Reading one
+            // extra unparcels the whole Bundle on this binder thread (KNOWN_ISSUES).
+            val decision = pebbleKitRequestDecision(
+                pebbleKit2Enabled = pebbleKit2Enabled,
+                caller = packageManager.getNameForUid(getCallingUid()),
+                action = { request.getString(KEY_ACTION) },
+                watchapp = { request.getString(KEY_WATCHAPP_UUID) },
+                isAuthorizedFor = companionRegistry::isAuthorizedFor,
+            )
+            val caller = when (decision) {
+                is PebbleKitRequestDecision.Refuse -> {
+                    // Fork: the reason only. The request's strings are the calling app's, and log lines are not escaped.
+                    logger.d { "Refusing a PebbleKit request: ${decision.reason}" }
                     callback.replyEmpty()
                     return
                 }
+                is PebbleKitRequestDecision.Proceed -> decision.caller
             }
 
             // Callers only ever saw pseudonyms, so translate before the base class matches them
@@ -286,6 +296,37 @@ class PebbleSenderReceiver : BasePebbleSenderReceiver(), LibPebbleKoinComponent 
 
         return pbwInfo.info.companionApp?.android?.apps.orEmpty().any { it.pkg == pkg }
     }
+}
+
+internal enum class PebbleKitRequestRefusal { Disabled, UnresolvableCaller, Unauthorized }
+
+internal sealed class PebbleKitRequestDecision {
+    data class Proceed(val caller: String) : PebbleKitRequestDecision()
+    data class Refuse(val reason: PebbleKitRequestRefusal) : PebbleKitRequestDecision()
+}
+
+/**
+ * Fork: the binder's admission decision. START and STOP are gated on the companion here because
+ * their callbacks get no caller. [action] and [watchapp] are read only once the toggle and the
+ * caller have passed, so a refusal on either of those reads nothing from the request; an
+ * unauthorized START or STOP is refused after them.
+ */
+internal fun pebbleKitRequestDecision(
+    pebbleKit2Enabled: Boolean,
+    caller: String?,
+    action: () -> String?,
+    watchapp: () -> String?,
+    isAuthorizedFor: (String, String?) -> Boolean,
+): PebbleKitRequestDecision {
+    if (!pebbleKit2Enabled) return PebbleKitRequestDecision.Refuse(PebbleKitRequestRefusal.Disabled)
+    if (caller == null) return PebbleKitRequestDecision.Refuse(PebbleKitRequestRefusal.UnresolvableCaller)
+    val requested = action()
+    if (requested == ACTION_START_APP || requested == ACTION_STOP_APP) {
+        if (!isAuthorizedFor(caller, watchapp())) {
+            return PebbleKitRequestDecision.Refuse(PebbleKitRequestRefusal.Unauthorized)
+        }
+    }
+    return PebbleKitRequestDecision.Proceed(caller)
 }
 
 /**

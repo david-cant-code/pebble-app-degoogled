@@ -20,7 +20,7 @@ internal sealed class SessionEvent {
 
 /**
  * Fork: the decision layer for companion app session lifecycle. Watch-side app
- * changes and permission-triggered restart requests are merged into one serially
+ * changes and session watchers' restart requests are merged into one serially
  * collected stream: both kinds of event tear down and rebuild the same session
  * state, so they must never interleave. The effects (stopping and starting real
  * sessions) are injected, because they live in CompanionAppLifecycleManager among
@@ -38,7 +38,7 @@ internal sealed class SessionEvent {
  *    live session, checked as app uuid AND session generation: a dying session's
  *    watcher can race its request past teardown, and by the time the request is
  *    processed a fresh session of the same app may already be running with the
- *    grant in place, which the uuid alone cannot detect.
+ *    change in place, which the uuid alone cannot detect.
  */
 internal class CompanionSessionCoordinator(
     private val latestRunningApp: () -> Uuid?,
@@ -48,7 +48,7 @@ internal class CompanionSessionCoordinator(
 ) {
     private val logger = Logger.withTag("CompanionSessionCoordinator")
 
-    // Restart requests raised by session-bound permission watchers. DROP_OLDEST
+    // Restart requests raised by session-bound watchers. DROP_OLDEST
     // because restart requests are idempotent for the session they target.
     private val restartRequests = MutableSharedFlow<SessionEvent.RestartRequested>(
         extraBufferCapacity = 1,
@@ -110,7 +110,7 @@ internal class CompanionSessionCoordinator(
             is SessionEvent.RestartRequested -> {
                 if (currentSessionApp() != event.uuid) return
                 if (currentGeneration != event.generation) return
-                logger.d { "Restarting companion apps for ${event.uuid} after permission grant" }
+                logger.d { "Restarting companion apps for ${event.uuid} at a session watcher's request" }
                 stopSession()
                 currentGeneration++
                 startSession(event.uuid)

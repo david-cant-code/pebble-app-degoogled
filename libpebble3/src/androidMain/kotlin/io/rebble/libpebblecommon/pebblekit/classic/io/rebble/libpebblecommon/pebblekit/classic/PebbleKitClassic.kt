@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import co.touchlab.kermit.Logger
+import io.rebble.libpebblecommon.WatchConfigFlow
 import io.rebble.libpebblecommon.connection.CompanionApp
 import io.rebble.libpebblecommon.connection.ConnectedPebble
 import io.rebble.libpebblecommon.di.ConnectionCoroutineScope
@@ -26,15 +27,15 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeoutOrNull
-import java.util.UUID
 import kotlin.uuid.Uuid
 import kotlin.uuid.toJavaUuid
-import kotlin.uuid.toKotlinUuid
 
+/** Fork: checks the classic toggle at [start] and at every broadcast, so a session existing while it is off relays nothing. */
 class PebbleKitClassic(
     private val device: CompanionAppDevice,
     val appInfo: PbwAppInfo,
     private val connectionScope: ConnectionCoroutineScope,
+    private val watchConfig: WatchConfigFlow,
 ) :
     LibPebbleKoinComponent, CompanionApp {
     companion object {
@@ -46,6 +47,8 @@ class PebbleKitClassic(
 
     private val context: Context = getKoin().get()
 
+    private val enabled: Boolean get() = watchConfig.value.classicPebbleKitEnabled
+
     private val companionPackages: List<String> by lazy { appInfo.androidCompanionPackages() }
 
     /**
@@ -56,9 +59,15 @@ class PebbleKitClassic(
      * contents of every message the watch sends to any app that registers a receiver. Watchapps
      * predating companion declarations have nobody to target, so those keep broadcasting as
      * before: narrowing where the declaration exists costs nothing, whereas dropping the
-     * fallback would break apps that still work today.
+     * fallback would break apps that still work today. Fork: a watchapp that declares a companion
+     * package is routed to PebbleKit 2, so no classic session the factory creates reaches the
+     * targeted branch.
      */
     private fun broadcastToCompanions(intent: Intent) {
+        if (!enabled) {
+            logger.d { "Classic PebbleKit is off; dropping ${intent.action} for $uuid" }
+            return
+        }
         if (companionPackages.isEmpty()) {
             // Regular broadcasts are sometimes delayed on Android 14+. Use ordered ones instead.
             // https://stackoverflow.com/questions/77842817/slow-intent-broadcast-delivery-on-android-14
@@ -105,57 +114,76 @@ class PebbleKitClassic(
     private fun launchOutgoingAppMessageHandlers(device: ConnectedPebble.AppMessages, scope: CoroutineScope) {
         scope.launch {
             IntentFilter(INTENT_APP_ACK).asFlow(context, exported = true).collect { intent ->
-                logger.d { "Got outbound ack" }
-                val transactionId: Int = intent.getIntExtra(TRANSACTION_ID, 0)
-                replyACK(transactionId.toUByte())
+                if (!enabled) return@collect
+                handleSenderInput(onDropped = { logDropped("ACK", it) }) {
+                    logger.d { "Got outbound ack" }
+                    val transactionId: Int = intent.getIntExtra(TRANSACTION_ID, 0)
+                    replyACK(transactionId.toUByte())
+                }
             }
         }
 
         scope.launch {
             IntentFilter(INTENT_APP_NACK).asFlow(context, exported = true).collect { intent ->
-                logger.d { "Got outbound nack" }
-                val transactionId: Int = intent.getIntExtra(TRANSACTION_ID, 0)
-                replyNACK(transactionId.toUByte())
+                if (!enabled) return@collect
+                handleSenderInput(onDropped = { logDropped("NACK", it) }) {
+                    logger.d { "Got outbound nack" }
+                    val transactionId: Int = intent.getIntExtra(TRANSACTION_ID, 0)
+                    replyNACK(transactionId.toUByte())
+                }
             }
         }
 
         scope.launch {
             IntentFilter(INTENT_APP_SEND).asFlow(context, exported = true).collect { intent ->
-                logger.d { "Got outbound message" }
-                val uuid = (intent.getSerializableExtra(APP_UUID) as? UUID?)?.toKotlinUuid() ?:
-                    // Fallback to string
-                    intent.getStringExtra(APP_UUID)?.let { Uuid.parseOrNull(it) } ?: return@collect
-
-                // These receivers are exported and every live session sees every SEND broadcast,
-                // so without this a session would relay messages addressed to a different
-                // watchapp, and two concurrent sessions would each send the same message once.
-                if (uuid != this@PebbleKitClassic.uuid) {
+                if (!enabled) {
+                    logger.d { "Classic PebbleKit is off; ignoring SEND for $uuid" }
                     return@collect
                 }
+                handleSenderInput(onDropped = { logDropped("SEND", it) }) {
+                    logger.d { "Got outbound message" }
+                    val uuid = intent.watchappUuidExtra() ?: return@collect
 
-                val dictionary: PebbleClassicDictionary = PebbleClassicDictionary.fromJson(
-                    intent.getStringExtra(MSG_DATA)
-                )
-                val transactionId: Int = intent.getIntExtra(TRANSACTION_ID, 0)
+                    // These receivers are exported and every live session sees every SEND broadcast,
+                    // so without this a session would relay messages addressed to a different
+                    // watchapp, and two concurrent sessions would each send the same message once.
+                    if (uuid != this@PebbleKitClassic.uuid) {
+                        return@collect
+                    }
 
-                val msg = AppMessageData(transactionId.toUByte(), uuid, dictionary.toAppMessageDict())
-                val result = device.sendAppMessage(msg)
-                logger.d { "Result from the app: $result" }
-                val intentAction = when (result) {
-                    is AppMessageResult.ACK -> INTENT_APP_RECEIVE_ACK
-                    is AppMessageResult.NACK -> INTENT_APP_RECEIVE_NACK
+                    val dictionary: PebbleClassicDictionary = PebbleClassicDictionary.fromJson(
+                        intent.getStringExtra(MSG_DATA)
+                    )
+                    val transactionId: Int = intent.getIntExtra(TRANSACTION_ID, 0)
+
+                    val msg = AppMessageData(transactionId.toUByte(), uuid, dictionary.toAppMessageDict())
+                    val result = device.sendAppMessage(msg)
+                    logger.d { "Result from the app: $result" }
+                    val intentAction = when (result) {
+                        is AppMessageResult.ACK -> INTENT_APP_RECEIVE_ACK
+                        is AppMessageResult.NACK -> INTENT_APP_RECEIVE_NACK
+                    }
+
+                    val intent = Intent(intentAction).apply {
+                        putExtra(TRANSACTION_ID, result.transactionId.toInt())
+                    }
+
+                    broadcastToCompanions(intent)
                 }
-
-                val intent = Intent(intentAction).apply {
-                    putExtra(TRANSACTION_ID, result.transactionId.toInt())
-                }
-
-                broadcastToCompanions(intent)
             }
         }
     }
 
+    // Fork: the throwable's class only; a parser's message can quote the sender's payload.
+    private fun logDropped(action: String, t: Throwable) {
+        logger.w { "Dropped a broadcast of $action for $uuid: ${t::class.simpleName}" }
+    }
+
     override suspend fun start(incomingAppMessages: Flow<AppMessageData>) {
+        if (!enabled) {
+            logger.w { "Classic PebbleKit is off; session for $uuid registers nothing" }
+            return
+        }
         val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
             logger.e(throwable) { "Unhandled exception in PebbleKitClassic: ${throwable.message}" }
         }
