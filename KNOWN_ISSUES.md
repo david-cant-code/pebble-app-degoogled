@@ -194,12 +194,14 @@ catch (android16-release `Binder.java` catches `RemoteException` and
 finishes holds the binder thread instead.
 
 Any installed app can do this while PebbleKit 2 is on, without a
-permission, a companion relationship or a connected watch. The request
-never reaches the app's own handling, so what it costs is the process,
-which restarts. Bounding it means not unparcelling an untrusted Bundle on
-the binder thread, which is where the request's own keys are read from: the
-read would have to move to a thread where an `Error` can be caught, which
-is the handling the entry below needs too.
+permission, a companion relationship or a connected watch. While the toggle
+is off the binder refuses before it reads the request, including on a binder
+a caller held across the flip. The request never reaches the app's own
+handling, so what it costs is the process, which restarts. Bounding it means
+not unparcelling an untrusted Bundle on the binder thread, which is where
+the request's own keys are read from: the read would have to move to a
+thread where an `Error` can be caught, which is the handling the entry below
+needs too.
 
 ## A PebbleKit 2 request's dictionary is read with no bound on what it allocates
 

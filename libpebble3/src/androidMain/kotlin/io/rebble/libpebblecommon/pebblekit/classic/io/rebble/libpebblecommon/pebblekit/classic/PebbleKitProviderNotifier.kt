@@ -2,11 +2,13 @@ package io.rebble.libpebblecommon.pebblekit.classic
 
 import android.content.Context
 import co.touchlab.kermit.Logger
+import io.rebble.libpebblecommon.WatchConfigFlow
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDevice
 import io.rebble.libpebblecommon.connection.Watches
 import io.rebble.libpebblecommon.di.LibPebbleCoroutineScope
 import io.rebble.libpebblecommon.pebblekit.PebbleKitComponentState
 import io.rebble.libpebblecommon.pebblekit.PebbleKitSurface
+import io.rebble.libpebblecommon.pebblekit.pebbleKitSurfaceEnabled
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -32,9 +34,10 @@ class PebbleKitProviderNotifier(
             libPebbleCoroutineScope: LibPebbleCoroutineScope,
             context: Context,
             componentState: PebbleKitComponentState,
+            watchConfig: WatchConfigFlow,
         ) = PebbleKitProviderNotifier(
             watchConnected = watches.watches.map { devices -> devices.any { it is ConnectedPebbleDevice } },
-            classicEnabled = classicEnabled(componentState),
+            classicEnabled = classicEnabled(watchConfig, componentState),
             notifyChange = {
                 try {
                     context.contentResolver.notifyChange(PebbleKitProvider.URI_CONTENT_BASALT, null)
@@ -45,9 +48,15 @@ class PebbleKitProviderNotifier(
             scope = libPebbleCoroutineScope,
         )
 
-        // The provider component as applied: a client re-querying on the toggle-on notification must find it enabled.
-        internal fun classicEnabled(componentState: PebbleKitComponentState): Flow<Boolean> =
-            componentState.appliedEnabled(PebbleKitSurface.Classic)
+        // The toggle and the component as applied: the config goes off before the component is
+        // disabled, and a client re-querying on the toggle-on notification must find it enabled.
+        internal fun classicEnabled(
+            watchConfig: WatchConfigFlow,
+            componentState: PebbleKitComponentState,
+        ): Flow<Boolean> = combine(
+            watchConfig.pebbleKitSurfaceEnabled(PebbleKitSurface.Classic),
+            componentState.appliedEnabled(PebbleKitSurface.Classic),
+        ) { on, enabled -> on && enabled }
     }
 
     fun init() {

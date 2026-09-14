@@ -95,13 +95,13 @@ class PebbleSenderReceiver : BasePebbleSenderReceiver(), LibPebbleKoinComponent 
     ) : UniversalRequestResponse.Stub() {
 
         override fun request(request: Bundle, callback: SendDataCallback) {
-            val action = request.getString(KEY_ACTION)
-            val watchapp = request.getString(KEY_WATCHAPP_UUID)
+            // Fork: the reads are lambdas so the toggle and the caller decide first. Reading one
+            // extra unparcels the whole Bundle on this binder thread (KNOWN_ISSUES).
             val decision = pebbleKitRequestDecision(
                 pebbleKit2Enabled = pebbleKit2Enabled,
                 caller = packageManager.getNameForUid(getCallingUid()),
-                action = action,
-                watchapp = watchapp,
+                action = { request.getString(KEY_ACTION) },
+                watchapp = { request.getString(KEY_WATCHAPP_UUID) },
                 isAuthorizedFor = companionRegistry::isAuthorizedFor,
             )
             val caller = when (decision) {
@@ -305,18 +305,24 @@ internal sealed class PebbleKitRequestDecision {
     data class Refuse(val reason: PebbleKitRequestRefusal) : PebbleKitRequestDecision()
 }
 
-/** Fork: the binder's admission decision. START and STOP are gated on the companion here because their callbacks get no caller. */
+/**
+ * Fork: the binder's admission decision. START and STOP are gated on the companion here because
+ * their callbacks get no caller. [action] and [watchapp] are read only once the toggle and the
+ * caller have passed, so a refusal on either of those reads nothing from the request; an
+ * unauthorized START or STOP is refused after them.
+ */
 internal fun pebbleKitRequestDecision(
     pebbleKit2Enabled: Boolean,
     caller: String?,
-    action: String?,
-    watchapp: String?,
+    action: () -> String?,
+    watchapp: () -> String?,
     isAuthorizedFor: (String, String?) -> Boolean,
 ): PebbleKitRequestDecision {
     if (!pebbleKit2Enabled) return PebbleKitRequestDecision.Refuse(PebbleKitRequestRefusal.Disabled)
     if (caller == null) return PebbleKitRequestDecision.Refuse(PebbleKitRequestRefusal.UnresolvableCaller)
-    if (action == ACTION_START_APP || action == ACTION_STOP_APP) {
-        if (!isAuthorizedFor(caller, watchapp)) {
+    val requested = action()
+    if (requested == ACTION_START_APP || requested == ACTION_STOP_APP) {
+        if (!isAuthorizedFor(caller, watchapp())) {
             return PebbleKitRequestDecision.Refuse(PebbleKitRequestRefusal.Unauthorized)
         }
     }

@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.IBinder
+import android.os.Parcel
 import androidx.test.platform.app.InstrumentationRegistry
 import co.touchlab.kermit.LogWriter
 import co.touchlab.kermit.Logger
@@ -110,6 +111,22 @@ class PebbleKitToggleGateTest {
     }
 
     @Test
+    fun aRefusedRequestOnAHeldBinderIsNotRead() {
+        setToggles(pebbleKit2 = true)
+        val service = bindSender()
+        setToggles(pebbleKit2 = false)
+
+        // Reading one extra of this Bundle throws in the reading process, so a refusal that
+        // reads the request first ends the call instead of replying (KNOWN_ISSUES).
+        val reply = try {
+            requestRaw(service, unreadableRequest())
+        } catch (e: RuntimeException) {
+            fail("the request was read before it was refused: $e")
+        }
+        assertTrue(reply.isEmpty(), "a request refused while PebbleKit 2 is off came back with data")
+    }
+
+    @Test
     fun senderRefusesRequestsOnABindMadeWhilePebbleKit2IsOff() {
         setToggles(pebbleKit2 = false)
         // Toggle off, component enabled: the state during the second before the app's deferred
@@ -135,7 +152,7 @@ class PebbleKitToggleGateTest {
         } finally {
             Logger.setLogWriters(writersBefore)
         }
-        assertTrue(capture.messages.isNotEmpty(), "the refusal logged nothing, so this test cannot see what it would log")
+        assertTrue(capture.senderMessages.isNotEmpty(), "the refusal logged nothing, so this test cannot see what it would log")
         assertTrue(capture.messages.none { FORGED_LOG_LINE in it }, "a caller's request string reached the log: ${capture.messages}")
     }
 
@@ -222,12 +239,38 @@ class PebbleKitToggleGateTest {
         action: String,
         watchapp: String,
         extras: Bundle.() -> Unit = {},
-    ): Set<String> {
-        val request = Bundle().apply {
+    ): Set<String> = requestRaw(
+        service,
+        Bundle().apply {
             putString("ACTION", action)
             putString("WATCHAPP_UUID", watchapp)
             extras()
+        },
+    )
+
+    /** A single entry whose value type code the platform does not know: reading any extra throws. */
+    private fun unreadableRequest(): Bundle {
+        val parcel = Parcel.obtain()
+        try {
+            parcel.writeInt(0) // bundle length, patched below
+            parcel.writeInt(BUNDLE_MAGIC)
+            val start = parcel.dataPosition()
+            parcel.writeInt(1) // entry count
+            parcel.writeString("ACTION")
+            parcel.writeInt(UNKNOWN_VALUE_TYPE)
+            val end = parcel.dataPosition()
+            parcel.setDataPosition(0)
+            parcel.writeInt(end - start)
+            parcel.setDataPosition(end)
+            parcel.writeInt(0) // the has-intent flag android16-release BaseBundle.readFromParcelInner reads after the map
+            parcel.setDataPosition(0)
+            return Bundle.CREATOR.createFromParcel(parcel)
+        } finally {
+            parcel.recycle()
         }
+    }
+
+    private fun requestRaw(service: UniversalRequestResponse, request: Bundle): Set<String> {
         val replied = CountDownLatch(1)
         var reply: Bundle? = null
         service.request(request, object : SendDataCallback.Stub() {
@@ -240,15 +283,23 @@ class PebbleKitToggleGateTest {
         return reply!!.keySet()
     }
 
+    /**
+     * Every message, whatever its tag: a caller's string logged by another logger on the refusal
+     * path would go unseen by a check that kept only this file's tag.
+     */
     private class SenderLogCapture : LogWriter() {
         val messages = CopyOnWriteArrayList<String>()
+        val senderMessages = CopyOnWriteArrayList<String>()
 
         override fun log(severity: Severity, message: String, tag: String, throwable: Throwable?) {
-            if (tag == "PebbleSenderReceiver") messages += message
+            messages += message
+            if (tag == "PebbleSenderReceiver") senderMessages += message
         }
     }
 
     private companion object {
         const val FORGED_LOG_LINE = "2026-01-01T00:00:00Z [E] Forged: planted by the caller"
+        const val BUNDLE_MAGIC = 0x4C444E42 // 'B' 'N' 'D' 'L'
+        const val UNKNOWN_VALUE_TYPE = 1_000_000
     }
 }

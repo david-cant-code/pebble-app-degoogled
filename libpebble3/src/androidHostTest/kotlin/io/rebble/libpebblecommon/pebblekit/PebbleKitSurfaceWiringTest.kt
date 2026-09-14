@@ -24,11 +24,18 @@ class PebbleKitSurfaceWiringTest {
     private val defaults = WatchConfig()
 
     @Test
-    fun theBasaltNotifierFollowsTheClassicComponentAsApplied() = runTest {
-        assertTrue(PebbleKitProviderNotifier.classicEnabled(stateApplying(bothOn, failing = PK2_SENDER)).first())
+    fun theBasaltNotifierFollowsTheClassicToggleAndItsComponentAsApplied() = runTest {
+        assertTrue(
+            PebbleKitProviderNotifier.classicEnabled(configFlow(bothOn), stateApplying(bothOn, failing = PK2_SENDER)).first(),
+        )
         assertFalse(
-            PebbleKitProviderNotifier.classicEnabled(stateApplying(bothOn, failing = CLASSIC_PROVIDER)).first(),
+            PebbleKitProviderNotifier.classicEnabled(configFlow(bothOn), stateApplying(bothOn, failing = CLASSIC_PROVIDER)).first(),
             "the notifier reads as enabled although the classic provider's enable threw",
+        )
+        // The config goes off first: the component is still applied-on while apply(off) runs.
+        assertFalse(
+            PebbleKitProviderNotifier.classicEnabled(configFlow(defaults), stateApplying(bothOn)).first(),
+            "the notifier reads as enabled although the classic toggle is off",
         )
     }
 

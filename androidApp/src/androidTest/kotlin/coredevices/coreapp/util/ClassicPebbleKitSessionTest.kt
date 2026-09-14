@@ -300,6 +300,11 @@ class ClassicPebbleKitSessionTest {
             broadcasts.poll(1500, TimeUnit.MILLISECONDS),
             "inbound watch data was broadcast while classic PebbleKit is off",
         )
+        assertEquals(
+            0,
+            incoming.subscriptionCount.value,
+            "the session subscribed to the inbound flow while classic PebbleKit is off",
+        )
     }
 
     // -- helpers --

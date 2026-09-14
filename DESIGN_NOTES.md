@@ -226,8 +226,8 @@ the per-app tri-state controls live on each app's detail page
 (`WatchappPermissionControls`, reused by the list). Store listings gain an
 honest disclosure that code the app runs inside Gravel can reach the
 internet, and the location capability description states the real "may send
-it to outside servers" flow. A one-time "What's New" dialog announces the deny-by-default
-change to existing users (`WhatsNewDialog`).
+it to outside servers" flow. A one-time "What's New" dialog announces the
+deny-by-default change to existing users (`WhatsNewDialog`).
 
 **Dependency.** `androidx.webkit` (1.16.0) is added for `ProxyController`
 only: current stable, Apache-2.0, on Google's Maven (F-Droid
@@ -287,11 +287,14 @@ it.
    while classic is on. The basalt provider's `query` returns null while off
    and before the setting is readable. The PebbleKit 2 sender hands out a
    binder that refuses every request while off (`pebbleKitRequestDecision`),
-   checked per request because the system reuses that binder for later binds
+   before it reads anything the caller sent, and checked per request because
+   the system reuses that binder for later binds
    (`PebbleSenderReceiver.onBind`). The PebbleKit 2 provider returns null
-   while off, and the state it serves (`PebbleKit2ProviderState`, owned by
-   the Koin graph rather than the provider) tracks watches only while on and
-   announces changes per collection, never per watch. The basalt change
+   while off (`pebbleKitQueryDecision`, which reaches the companion registry
+   only once the toggle admits the query), and the state it serves
+   (`PebbleKit2ProviderState`, owned by the Koin graph rather than the
+   provider) tracks watches only while on and announces changes per
+   collection, never per watch. The basalt change
    notifier fires only while classic is on, and once when it turns on.
 
 Runtime-registered receivers never appear in a manifest, so the release
@@ -309,7 +312,9 @@ sender service (`PebbleKitComponentState` KDoc).
 **Verification shape.** Host tests pin the routing, defaults and no
 fallback (`PebbleKitSurfaceTest`); the restart trigger and the watcher's
 restart request (`PlatformSessionGateChangesTest`); the listener
-registration, the notifier and the admission decision; the component map
+registration, the notifier, the sender's and the provider's admission
+decisions, and that the sender's refusal on the toggle or the caller reads
+nothing from the request; the component map
 and its retry after a failed call; and which surface each factory's helper
 follows (`PebbleKitSurfaceWiringTest`). A source sentinel in `:androidApp`
 (`CompanionSessionGateSentinelTest`) checks that the upstream-owned manager,

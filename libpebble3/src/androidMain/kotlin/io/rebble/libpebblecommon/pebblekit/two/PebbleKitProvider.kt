@@ -45,16 +45,21 @@ class PebbleKitProvider : BasePebbleKitProvider(), LibPebbleKoinComponent {
       selectionArgs: Array<out String?>?,
       sortOrder: String?
    ): Cursor? {
-      val caller = callingPackage ?: return null
-      // Fork: the PebbleKit 2 toggle, read per call like everything below (see toggleAllows).
-      if (!toggleAllows { getKoin().getOrNull<WatchConfigFlow>()?.value?.pebbleKit2Enabled }) {
-         logger.d { "PebbleKit 2 is off; denied query from $caller" }
-         return null
-      }
-      val registry = runCatching { getKoin().getOrNull<PebbleKitCompanionRegistry>() }.getOrNull()
-      if (registry?.isAuthorized(caller) != true) {
-         logger.d { "Denied PebbleKit query from $caller" }
-         return null
+      // Fork: read per call like everything below (see toggleAllows); the registry is resolved
+      // only once the toggle admits the query.
+      val decision = pebbleKitQueryDecision(
+         pebbleKit2Enabled = { getKoin().getOrNull<WatchConfigFlow>()?.value?.pebbleKit2Enabled },
+         caller = callingPackage,
+         isAuthorized = { pkg ->
+            runCatching { getKoin().getOrNull<PebbleKitCompanionRegistry>() }.getOrNull()?.isAuthorized(pkg) == true
+         },
+      )
+      val caller = when (decision) {
+         is PebbleKitQueryDecision.Refuse -> {
+            logger.d { "Denied PebbleKit query from $callingPackage: ${decision.reason}" }
+            return null
+         }
+         is PebbleKitQueryDecision.Admit -> decision.caller
       }
       val identity = runCatching { getKoin().getOrNull<PebbleKitWatchIdentity>() }.getOrNull()
          ?: return null
@@ -184,6 +189,30 @@ internal fun createPebbleKit2ProviderState(
       },
       scope = scope,
    )
+}
+
+internal enum class PebbleKitQueryRefusal { Disabled, Unauthorized }
+
+internal sealed class PebbleKitQueryDecision {
+   data class Admit(val caller: String) : PebbleKitQueryDecision()
+   data class Refuse(val reason: PebbleKitQueryRefusal) : PebbleKitQueryDecision()
+}
+
+/**
+ * Fork: the `.pebblekit` provider's query admission. The toggle is checked before the registry,
+ * so a query while PebbleKit 2 is off is refused without resolving the caller's companions; a
+ * setting that cannot be read counts as off (see [toggleAllows]).
+ */
+internal fun pebbleKitQueryDecision(
+   pebbleKit2Enabled: () -> Boolean?,
+   caller: String?,
+   isAuthorized: (String) -> Boolean,
+): PebbleKitQueryDecision {
+   if (!toggleAllows(pebbleKit2Enabled)) return PebbleKitQueryDecision.Refuse(PebbleKitQueryRefusal.Disabled)
+   if (caller == null || !isAuthorized(caller)) {
+      return PebbleKitQueryDecision.Refuse(PebbleKitQueryRefusal.Unauthorized)
+   }
+   return PebbleKitQueryDecision.Admit(caller)
 }
 
 // "Pebble Time 4F2A": the model prefix plus four hex digits unique to the device.

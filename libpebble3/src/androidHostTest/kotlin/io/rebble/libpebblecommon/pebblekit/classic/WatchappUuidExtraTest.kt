@@ -59,6 +59,18 @@ class WatchappUuidExtraTest {
     }
 
     @Test
+    fun theMessageOfAReadThatThrewIsNotWrittenToTheLog() {
+        // The message of the read's throwable quotes a class name the sender chose.
+        val forged = "x\n2026-09-13T10:00:00.000Z [E] PebbleKitClassic: forged by the sender"
+        assertNull(watchappUuidFrom { throw RuntimeException(forged) })
+        assertTrue(capture.messages.isNotEmpty(), "nothing was logged, so this test cannot see what would be")
+        assertTrue(
+            capture.messages.none { "forged by the sender" in it },
+            "the throwable's message reached the log: ${capture.messages}",
+        )
+    }
+
+    @Test
     fun aMalformedUuidStringIsNotWrittenToTheLog() {
         val forged = "x\n2026-09-13T10:00:00.000Z [E] PebbleKitClassic: forged"
         assertNull(watchappUuidFrom { forged })
