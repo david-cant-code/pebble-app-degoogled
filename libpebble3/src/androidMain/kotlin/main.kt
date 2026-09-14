@@ -2,6 +2,7 @@ package io.rebble.libpebblecommon
 
 import io.rebble.libpebblecommon.di.LibPebbleKoinComponent
 import io.rebble.libpebblecommon.packets.PhoneAppVersion
+import io.rebble.libpebblecommon.pebblekit.PebbleKitComponentState
 import io.rebble.libpebblecommon.pebblekit.classic.PebbleKitClassicStartListeners
 import io.rebble.libpebblecommon.pebblekit.classic.PebbleKitProviderNotifier
 import io.rebble.libpebblecommon.pebblekit.two.PebbleKitCompanionRegistry
@@ -11,6 +12,9 @@ actual fun getPlatform(): PhoneAppVersion.OSType = PhoneAppVersion.OSType.Androi
 
 actual fun performPlatformSpecificInit() {
     val koin = object: LibPebbleKoinComponent {}.getKoin()
+    // Fork: first, because its init() applies the toggles to the manifest components before
+    // returning, ahead of the PebbleKit pieces below.
+    koin.get<PebbleKitComponentState>().init()
     koin.get<PebbleKitClassicStartListeners>().init()
     koin.get<PebbleKitProviderNotifier>().init()
     // Before the provider: it fails closed until the first scan lands, so starting the scan

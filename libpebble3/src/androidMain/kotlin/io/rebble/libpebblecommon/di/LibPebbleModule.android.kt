@@ -38,6 +38,7 @@ import io.rebble.libpebblecommon.notification.NotificationListenerConnection
 import io.rebble.libpebblecommon.notification.processor.BasicNotificationProcessor
 import io.rebble.libpebblecommon.packets.PhoneAppVersion
 import io.rebble.libpebblecommon.packets.ProtocolCapsFlag
+import io.rebble.libpebblecommon.pebblekit.PebbleKitComponentState
 import io.rebble.libpebblecommon.pebblekit.classic.PebbleKitClassicStartListeners
 import io.rebble.libpebblecommon.pebblekit.classic.PebbleKitProviderNotifier
 import io.rebble.libpebblecommon.pebblekit.two.PebbleKitCompanionRegistry
@@ -98,6 +99,7 @@ actual val platformModule: Module = module {
 
     singleOf(::AndroidClassicScanner) bind ClassicScanner::class
 
+    single { PebbleKitComponentState.create(get(), get(), get()) }
     single { PebbleKitClassicStartListeners(get(), get(), get()) }
     single { PebbleKitProviderNotifier(get<LibPebble>(), get(), get()) }
     single { PebbleKitCompanionRegistry.create(get<LibPebble>(), get(), get()) }

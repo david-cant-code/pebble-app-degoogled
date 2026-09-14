@@ -273,19 +273,29 @@ it.
    live decision with the one the session was built from, so a flip while
    the session starts still counts; a flip off and back on across a
    session's own `start()` does not (KNOWN_ISSUES).
+2. *Manifest component state.* `PebbleKitComponentState` disables the
+   basalt provider, the sender service and the `.pebblekit` provider through
+   `PackageManager` while their toggle is off, and applies a component
+   whose call threw again at the next config change. The platform behaviour
+   this layer rests on is listed, with AOSP symbols, in that class's KDoc.
 
 **Accepted costs.** Flipping a toggle restarts the running watchapp's whole
 session, PKJS included, when that watchapp uses the flipped surface, so a JS
-watchface reloads once on a classic flip.
+watchface reloads once on a classic flip. Turning a surface off unpublishes
+its provider, which kills a companion process that still holds a stable
+connection to it when the deferred package-changed broadcast lands, and
+turning PebbleKit 2 off also drops the bindings companions hold to the
+sender service (`PebbleKitComponentState` KDoc).
 
 **Verification shape.** Host tests pin the routing, defaults and no
-fallback (`PebbleKitSurfaceTest`) and the restart trigger and the
-watcher's restart request (`PlatformSessionGateChangesTest`). A source
-sentinel in `:androidApp` (`CompanionSessionGateSentinelTest`) checks that
-the upstream-owned manager, which no unit test can construct, still calls
-the gate and launches the watcher. On the device,
-`ClassicPebbleKitSessionTest` and `PebbleKit2SessionTest` drive real
-sessions across the toggles.
+fallback (`PebbleKitSurfaceTest`); the restart trigger and the watcher's
+restart request (`PlatformSessionGateChangesTest`); and the component map
+and its retry after a failed call. A source sentinel in `:androidApp`
+(`CompanionSessionGateSentinelTest`) checks that the upstream-owned manager,
+which no unit test can construct, still calls the gate and launches the
+watcher. On the device, `ClassicPebbleKitSessionTest` and
+`PebbleKit2SessionTest` drive real sessions across the toggles, and
+`PebbleKitComponentStateTest` drives the real PackageManager.
 
 ## The whisper speech engine
 
