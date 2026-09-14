@@ -11,11 +11,11 @@ import javax.crypto.SecretKey
 /**
  * Per-caller pseudonymous identifiers for watches on the PebbleKit 2 surface.
  *
- * The watch serial is a permanent hardware identifier. Handing it to every companion app would
- * give any two of them a shared key to correlate the same user across otherwise unrelated
- * installs, which is the tracking primitive this fork exists to avoid. Each calling package
- * instead sees a different, stable identifier for the same watch, so an app can still recognise
- * "the watch I talked to last time" while two apps comparing notes learn nothing.
+ * The watch serial is a permanent hardware identifier, so the provider's rows and the sender's
+ * results give each calling package a different, stable identifier for the same watch instead.
+ * The listener callbacks still carry the real serial (KNOWN_ISSUES, "PebbleKit 2 companions
+ * receive the watch's real serial"), so two companions that both receive callbacks can still link
+ * the watch.
  *
  * Derived with HMAC-SHA256 under a key that never leaves the Android Keystore, so the mapping is
  * not reversible by a caller and cannot be recomputed off-device even given a full copy of app

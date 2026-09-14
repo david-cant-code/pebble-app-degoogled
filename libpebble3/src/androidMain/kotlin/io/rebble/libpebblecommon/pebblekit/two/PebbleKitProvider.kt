@@ -223,9 +223,8 @@ private val DEVICE_NAME_SUFFIX = Regex(""" [0-9A-Fa-f]{4}$""")
  * suffix stripped.
  *
  * The full advertised name, and even more so the user's nickname (which `displayName()` would
- * prefer), is identical for every caller, so serving either would hand two companions the
- * shared correlator the per-caller pseudonymous IDs exist to remove. The model prefix keeps the
- * name informative; nothing more specific than the model is served.
+ * prefer), is device-specific and identical for every caller. The model prefix keeps the name
+ * informative without adding a device identifier to the columns.
  */
 internal fun pebbleKitWatchName(advertisedName: String): String =
     advertisedName.replace(DEVICE_NAME_SUFFIX, "")

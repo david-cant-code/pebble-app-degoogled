@@ -108,20 +108,27 @@ entry leaves the file if the provider ever grows a column beyond
 connection state and firmware version, at which point it gets the registry
 gate regardless of the compatibility cost.
 
-## PebbleKit 2 watch metadata is identical across callers at model level
+## PebbleKit 2 companions receive the watch's real serial
 
-**Status: accepted; the shared columns identify no individual device.**
+**Status: open; upstream-inherited, and only companions that installed
+watchapps name receive it.**
 
-Each PebbleKit 2 companion sees a per-caller pseudonymous watch identifier,
-and the name column serves the advertised model name with its device-unique
-suffix stripped, never the user's nickname. What remains identical across
-callers is model-level metadata: platform codename, board revision, and the
-running firmware version. Two colluding companions can still narrow "is this
-the same watch" to "same model on the same firmware release", an anonymity
-set of every watch of that model on that release. That residue is accepted:
-those columns exist so companions can do feature detection by model and
-firmware, and serving them per-caller-differently would break that purpose
-without hiding anything a Bluetooth scan does not already reveal.
+The `.pebblekit` provider's rows and the sender service's results give each
+calling package its own pseudonymous watch identifier, and the name column
+serves the advertised model name with its device-unique suffix stripped. The
+session's calls into a companion's listener service carry the real serial
+instead: when a watchapp opens, when it closes, and with each message from
+the watch, `PebbleKit2` passes `device.watchInfo.serial`, and pebblekit2
+1.1.0's `DefaultPebbleListenerConnector` takes a single watch identifier per
+call, not one per package. Two installed companions whose watchapps have opened
+while PebbleKit 2 was on therefore hold the same serial and can link the watch;
+the per-caller identifier keeps the serial only from a companion that
+receives no callback, which still shares the model-level columns (platform
+codename, board revision, firmware version) with every caller. The callbacks
+go only to the packages the running watchapp's appinfo names. Closing this
+means one listener connection per companion package, each passed that
+package's identifier; the sender already resolves both the identifier and
+the real serial, so companions that stored either keep working.
 
 ## A toggle flipped off and on across a session's start leaves it inert
 
