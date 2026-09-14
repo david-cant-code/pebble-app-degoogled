@@ -109,13 +109,19 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   cross-app interface (e.g. the third-party mic API) must be explicitly
   authorization-gated (signature/knownSigner-level permissions or equivalent),
   never openly exported.
-- **Comment density: this fork comments far more heavily than upstream, by
-  choice.** This overrides the upstream comment guidance below on density
+- **Comment density: this fork comments more than upstream, by choice, up to
+  a ceiling.** This overrides the upstream comment guidance below on density
   only; upstream's other comment rules (no ticket references, no comments
-  defending why a change is correct) still apply. New and changed code gets
-  comments stating intent, constraints, and trade-offs, even where the why
-  seems obvious at the time of writing. The reason is working conditions:
-  this fork is one person's free-time project, worked on AI-assisted, mostly
+  defending why a change is correct) still apply. New and changed code gets a
+  comment where its intent is not obvious from its name, and wherever it
+  relies on a constraint someone could break (ordering, threading, a platform
+  behaviour, a difference from upstream). It does not get comments that
+  restate the code, repeat a fact stated elsewhere, or claim more than a test
+  or a cited source backs. Roughly one comment line per five lines of code
+  across a change is a ceiling, not a target: fewer is fine, code that is
+  clear from its names and structure needs no comment, and nothing is added
+  to reach the ratio. The reason for commenting more than upstream is working
+  conditions: this fork is one person's free-time project, worked on AI-assisted, mostly
   at weekends around a demanding day job, so whoever picks the code up next
   (the maintainer after a week of unrelated work, or an agent with no
   session history) starts cold, and most fork changes remove or substitute
