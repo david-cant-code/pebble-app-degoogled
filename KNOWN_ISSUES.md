@@ -24,7 +24,18 @@ watch runs the end-to-end pass.
 
 ## Classic PebbleKit broadcasts cannot be restricted to authorized callers
 
-**Status: accepted, no fix available on Android.**
+**Status: accepted while the classic toggle is on; the surface is off by
+default.**
+
+Classic PebbleKit is governed by a toggle (Settings > Apps > Watch App
+Permissions) that ships off, for upgrading installs too. While it is off
+no classic session is created, the START and STOP receivers are not
+registered, and the basalt provider is disabled; a session running when
+the toggle goes off relays nothing from then on, though its SEND, ACK and
+NACK receivers stay registered until its restart (`DESIGN_NOTES.md`,
+"PebbleKit exposure toggles"). The rest of this entry describes the
+surface while the toggle is on, for every non-system watchapp that
+declares no PebbleKit 2 companion, JS-only watchfaces included.
 
 Classic PebbleKit's cross-app surface is broadcasts, and a
 `BroadcastReceiver` is given no caller identity at all: `onReceive` sees the
@@ -71,7 +82,7 @@ notifications reach every app but name no watch; see "PebbleKit 2 change
 notifications reach any observer".
 
 This entry leaves the file if a future Android release attaches sender
-identity to broadcasts, or if the classic surface is retired.
+identity to broadcasts, or if the classic surface is retired outright.
 
 ## Classic PebbleKit content provider stays exported without a caller gate
 

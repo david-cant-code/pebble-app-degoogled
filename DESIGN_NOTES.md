@@ -237,7 +237,9 @@ deliverable), no known advisories, non-deprecated API surface.
 
 Two `WatchConfig` booleans, `classicPebbleKitEnabled` (default off) and
 `pebbleKit2Enabled` (default on), decide whether each PebbleKit surface
-exists at all.
+exists at all. Both live under Settings > Apps > Watch App Permissions,
+beside the JS grants above, with an info dialog that explains the classic
+default.
 
 **Why classic is off by default.** Every non-system watchapp that declares
 no PebbleKit 2 companion package gets a classic PebbleKit session when the
@@ -247,11 +249,14 @@ to PKJS. A classic session broadcasts what the watch sends to any installed
 app and accepts a `SEND` from any app (KNOWN_ISSUES, "Classic PebbleKit
 broadcasts cannot be restricted to authorized callers"), a path the per-app
 Internet and Location grants never touched. Classic therefore ships off,
-for upgrading installs too, the same way the network default shipped.
-PebbleKit 2 travels over a bound service and a ContentProvider, where the
-caller is authoritative and checked against the companions installed
-watchapps declare, so its toggle reduces surface for a user with no
-PebbleKit 2 companion and stays on.
+for upgrading installs too, the same way the network default shipped. A
+classic companion registers runtime receivers with no manifest trace and
+cannot be reliably detected, so the mitigation for a user whose companion
+stops working is text: the toggle's description, the info dialog, the
+What's New entry and the release changelog. PebbleKit 2 travels over a
+bound service and a ContentProvider, where the caller is authoritative and
+checked against the companions installed watchapps declare, so its toggle
+reduces surface for a user with no PebbleKit 2 companion and stays on.
 
 **Routing and no fallback.** `PebbleKitSurface.kt` (common code) holds the
 routing rule: a declared companion package means PebbleKit 2, anything else

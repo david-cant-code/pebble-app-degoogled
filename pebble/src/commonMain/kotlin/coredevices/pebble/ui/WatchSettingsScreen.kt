@@ -630,13 +630,14 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     action = { nav.navigateTo(PebbleNavBarRoutes.AppstoreSettingsRoute()) },
                 ) },
                 // Fork: entry point to the watchapp/watchface phone-side permission
-                // controls (internet + location), global defaults and per-app.
+                // controls (internet + location, global defaults and per-app) and the
+                // PebbleKit companion toggles.
                 navBarNav?.let { nav -> basicSettingsActionItem(
                     title = "Watch App Permissions",
-                    description = "Control internet and location access for watchfaces and apps",
+                    description = "Control internet, location and companion app access for watchfaces and apps",
                     topLevelType = TopLevelType.Phone,
                     section = Section.Apps,
-                    keywords = "internet network location privacy watchface pkjs permission",
+                    keywords = "internet network location privacy watchface pkjs permission pebblekit companion classic",
                     action = { nav.navigateTo(PebbleNavBarRoutes.WatchappPermissionsRoute) },
                 ) },
                 basicSettingsDropdownItem(

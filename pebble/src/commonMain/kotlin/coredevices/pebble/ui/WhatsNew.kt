@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
  * users on update. The popup auto-shows once per user per bump (`WhatsNewDialog` in
  * composeApp) and can be reopened any time from Settings > About.
  */
-const val WHATS_NEW_VERSION = 5
+const val WHATS_NEW_VERSION = 6
 
 /** A single announced change: a short heading and a sentence or two of body. */
 data class WhatsNewEntry(val title: String, val body: String)
@@ -32,6 +32,16 @@ data class WhatsNewEntry(val title: String, val body: String)
  * changelog (that lives in git history and the repo docs).
  */
 val whatsNewEntries: List<WhatsNewEntry> = listOf(
+    WhatsNewEntry(
+        title = "Companion apps are now your choice",
+        body = "Apps made for the original Pebble phone app talk to watchapps through " +
+            "classic PebbleKit, which broadcasts what any watchapp or watchface sends " +
+            "from the watch to every app on your phone that listens. That is now off by " +
+            "default. If a companion app of yours stops receiving watch data, turn it " +
+            "back on in Settings > Apps > Watch App Permissions. The newer PebbleKit 2, " +
+            "which only reaches apps a watchapp names, stays on and has its own switch. " +
+            "Notifications, replies and dictation are not affected.",
+    ),
     WhatsNewEntry(
         title = "Faster dictation, working in the background, and your own server",
         body = "Speech recognition is optimized: the engine now uses the cores your phone " +

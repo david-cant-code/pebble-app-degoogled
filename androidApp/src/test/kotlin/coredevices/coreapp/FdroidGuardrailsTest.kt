@@ -48,6 +48,10 @@ import kotlin.test.assertTrue
 /** F-Droid's documented maximum for a changelog file; longer text is cut when published. */
 private const val FDROID_CHANGELOG_LIMIT = 500
 
+/** F-Droid's documented maxima for the listing's full and short descriptions. */
+private const val FDROID_FULL_DESCRIPTION_LIMIT = 4000
+private const val FDROID_SHORT_DESCRIPTION_LIMIT = 80
+
 class FdroidGuardrailsTest {
 
     /**
@@ -313,6 +317,24 @@ class FdroidGuardrailsTest {
             "F-Droid cuts a changelog at $FDROID_CHANGELOG_LIMIT characters; over the limit: " +
                 over.entries.joinToString { "${it.key} (${it.value})" },
         )
+    }
+
+    /** The full description sits close to its cap; counted like the changelogs. */
+    @Test
+    fun theListingDescriptionsFitFdroidsLimits() {
+        val limits = mapOf(
+            "full_description.txt" to FDROID_FULL_DESCRIPTION_LIMIT,
+            "short_description.txt" to FDROID_SHORT_DESCRIPTION_LIMIT,
+        )
+        val descriptions = scannedFiles.filter { path ->
+            path.startsWith("fastlane/metadata/android/") && limits.keys.any { path.endsWith("/$it") }
+        }
+        assertTrue(descriptions.isNotEmpty(), "no listing descriptions found under fastlane/metadata/android")
+        val over = descriptions.filter { path ->
+            val text = read(path).readText().trimEnd()
+            text.codePointCount(0, text.length) > limits.getValue(path.substringAfterLast('/'))
+        }
+        assertTrue(over.isEmpty(), "listing text over F-Droid's cap: $over")
     }
 
     /**

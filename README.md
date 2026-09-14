@@ -55,9 +55,10 @@ a security posture tightened beyond upstream's defaults.
   third-party watchapps run inside Gravel gets no internet or location
   access unless granted (deny by default, per-app controls, revocation
   applies to running apps), the app's exported Android interfaces are
-  authorization-gated or removed, and plain-HTTP (cleartext) traffic is
-  blocked app-wide
-  ([KNOWN_ISSUES.md](KNOWN_ISSUES.md) records the trade-offs).
+  authorization-gated, removed, or off by default (classic PebbleKit,
+  which any app on the phone can listen to, ships off with a switch under
+  Watch App Permissions), and plain-HTTP (cleartext) traffic is blocked
+  app-wide ([KNOWN_ISSUES.md](KNOWN_ISSUES.md) records the trade-offs).
 - **Weather without Play services.** Manual latitude/longitude entry, since
   the stock place search relies on the GMS-backed platform geocoder.
 - **Free on-device dictation.** Voice dictation runs on whisper.cpp,
