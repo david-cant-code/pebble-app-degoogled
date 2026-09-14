@@ -43,6 +43,7 @@ import io.rebble.libpebblecommon.pebblekit.classic.PebbleKitClassicStartListener
 import io.rebble.libpebblecommon.pebblekit.classic.PebbleKitProviderNotifier
 import io.rebble.libpebblecommon.pebblekit.two.PebbleKitCompanionRegistry
 import io.rebble.libpebblecommon.pebblekit.two.PebbleKitWatchIdentity
+import io.rebble.libpebblecommon.pebblekit.two.createPebbleKit2ProviderState
 import io.rebble.libpebblecommon.util.OtherPebbleAndroidApps
 import io.rebble.libpebblecommon.util.SystemGeolocation
 import org.koin.core.module.Module
@@ -100,8 +101,9 @@ actual val platformModule: Module = module {
     singleOf(::AndroidClassicScanner) bind ClassicScanner::class
 
     single { PebbleKitComponentState.create(get(), get(), get()) }
-    single { PebbleKitClassicStartListeners(get(), get(), get()) }
-    single { PebbleKitProviderNotifier(get<LibPebble>(), get(), get()) }
+    single { PebbleKitClassicStartListeners.create(get(), get(), get(), get()) }
+    single { PebbleKitProviderNotifier.create(get<LibPebble>(), get(), get(), get()) }
     single { PebbleKitCompanionRegistry.create(get<LibPebble>(), get(), get()) }
     single { PebbleKitWatchIdentity() }
+    single { createPebbleKit2ProviderState(get(), get<LibPebble>(), get(), get(), get()) }
 }

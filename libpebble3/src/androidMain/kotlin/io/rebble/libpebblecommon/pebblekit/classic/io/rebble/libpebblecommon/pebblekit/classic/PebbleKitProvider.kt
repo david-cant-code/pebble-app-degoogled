@@ -6,11 +6,13 @@ import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import androidx.core.net.toUri
+import io.rebble.libpebblecommon.WatchConfigFlow
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDevice
 import io.rebble.libpebblecommon.connection.LibPebble
 import io.rebble.libpebblecommon.connection.Watches
 import io.rebble.libpebblecommon.di.LibPebbleCoroutineScope
 import io.rebble.libpebblecommon.di.LibPebbleKoinComponent
+import io.rebble.libpebblecommon.pebblekit.toggleAllows
 
 class PebbleKitProvider : ContentProvider(), LibPebbleKoinComponent {
     private var initialized = false
@@ -43,6 +45,10 @@ class PebbleKitProvider : ContentProvider(), LibPebbleKoinComponent {
         selectionArgs: Array<out String>?,
         sortOrder: String?
     ): Cursor? {
+        // Fork: the classic toggle first.
+        if (!classicEnabled()) {
+            return null
+        }
         if (uri != URI_CONTENT_BASALT) {
             return null
         }
@@ -101,6 +107,10 @@ class PebbleKitProvider : ContentProvider(), LibPebbleKoinComponent {
 
         return cursor
     }
+
+    // Per call, so a toggle-off applies to the next query (see toggleAllows).
+    private fun classicEnabled(): Boolean =
+        toggleAllows { getKoin().getOrNull<WatchConfigFlow>()?.value?.classicPebbleKitEnabled }
 
     override fun getType(uri: Uri): String? {
         return null

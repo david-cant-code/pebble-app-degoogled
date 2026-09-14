@@ -1,9 +1,11 @@
 package io.rebble.libpebblecommon.pebblekit.two
 
+import android.content.Context
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import co.touchlab.kermit.Logger
+import io.rebble.libpebblecommon.WatchConfigFlow
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDevice
 import io.rebble.libpebblecommon.connection.LibPebble
 import io.rebble.libpebblecommon.connection.LockerApi
@@ -11,6 +13,9 @@ import io.rebble.libpebblecommon.connection.Watches
 import io.rebble.libpebblecommon.di.LibPebbleCoroutineScope
 import io.rebble.libpebblecommon.di.LibPebbleKoinComponent
 import io.rebble.libpebblecommon.locker.AppType
+import io.rebble.libpebblecommon.pebblekit.PebbleKitComponentState
+import io.rebble.libpebblecommon.pebblekit.toggleAllows
+import io.rebble.pebblekit2.PebbleKitProviderContract
 import io.rebble.pebblekit2.PebbleKitProviderContract.ActiveApp
 import io.rebble.pebblekit2.PebbleKitProviderContract.ConnectedWatch
 import io.rebble.pebblekit2.common.model.WatchIdentifier
@@ -20,22 +25,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
+/** The `.pebblekit` ContentProvider. Fork: serves from [PebbleKit2ProviderState], never the library's `initialize()` or `query()`. */
 class PebbleKitProvider : BasePebbleKitProvider(), LibPebbleKoinComponent {
-   private lateinit var watchManager: Watches
-   private lateinit var locker: LockerApi
-   override lateinit var coroutineScope: LibPebbleCoroutineScope
-
-   init {
-      instance = this
-   }
-
-   override fun initialize() {
-      watchManager = getKoin().get<LibPebble>()
-      locker = getKoin().get<LibPebble>()
-      coroutineScope = getKoin().get()
-
-      super.initialize()
-   }
 
    /**
     * The provider is exported, so every read is gated on the caller being a companion of an
@@ -55,6 +46,11 @@ class PebbleKitProvider : BasePebbleKitProvider(), LibPebbleKoinComponent {
       sortOrder: String?
    ): Cursor? {
       val caller = callingPackage ?: return null
+      // Fork: the PebbleKit 2 toggle, read per call like everything below (see toggleAllows).
+      if (!toggleAllows { getKoin().getOrNull<WatchConfigFlow>()?.value?.pebbleKit2Enabled }) {
+         logger.d { "PebbleKit 2 is off; denied query from $caller" }
+         return null
+      }
       val registry = runCatching { getKoin().getOrNull<PebbleKitCompanionRegistry>() }.getOrNull()
       if (registry?.isAuthorized(caller) != true) {
          logger.d { "Denied PebbleKit query from $caller" }
@@ -62,138 +58,132 @@ class PebbleKitProvider : BasePebbleKitProvider(), LibPebbleKoinComponent {
       }
       val identity = runCatching { getKoin().getOrNull<PebbleKitWatchIdentity>() }.getOrNull()
          ?: return null
+      val state = runCatching { getKoin().getOrNull<PebbleKit2ProviderState>() }.getOrNull()
+         ?: return null
 
       return when (uri.pathSegments.firstOrNull()) {
-         ConnectedWatch.CONTENT_PATH ->
-            super.query(uri, projection, selection, selectionArgs, sortOrder)
-               ?.let { pseudonymiseWatchIds(it, caller, identity) }
+         ConnectedWatch.CONTENT_PATH -> cursorOf(
+            ConnectedWatch.ALL_COLUMNS,
+            projection,
+            pseudonymiseRows(state.connectedWatches(), ConnectedWatch.ID) { serial ->
+               identity.pseudonymFor(caller, serial)
+            },
+         )
 
          // The watch is addressed by a path segment, and the caller only ever saw a pseudonym,
-         // so translate it back before the base class tries to match it against a real serial.
+         // so translate it back before looking the watch up by its real serial.
          ActiveApp.CONTENT_PATH -> {
             val supplied = uri.pathSegments.getOrNull(1) ?: return null
-            val serial = identity.resolveSerial(caller, supplied, connectedSerials())
+            val serial = identity.resolveSerial(caller, supplied, state.connectedSerials())
                ?: return null
-            val rebuilt = uri.buildUpon()
-               .path(null)
-               .appendPath(ActiveApp.CONTENT_PATH)
-               .appendPath(serial)
-               .build()
-            super.query(rebuilt, projection, selection, selectionArgs, sortOrder)
+            cursorOf(ActiveApp.ALL_COLUMNS, projection, listOfNotNull(state.activeApp(serial)))
          }
 
          // Fail closed on paths this override does not recognise. The base class serves only
          // the two paths above today, but a library upgrade could add one that carries watch
-         // data, and delegating would hand it to callers unpseudonymised with no diff here to
+         // data, and serving it would hand it to callers unpseudonymised with no diff here to
          // review.
          else -> null
       }
    }
 
-   // Deliberately more defensive than the same helper in PebbleSenderReceiver: a provider can
-   // be queried before initialize() has populated the lateinit fields, so this must resolve
-   // Koin per call, whereas the bound service's constructor-resolved field is always safe.
-   private fun connectedSerials(): List<String> =
-      runCatching {
-         getKoin().getOrNull<LibPebble>()?.watches?.value
-            ?.filterIsInstance<ConnectedPebbleDevice>()
-            ?.map { it.watchInfo.serial }
-      }.getOrNull().orEmpty()
-
-   /**
-    * Rebuilds the connected-watch rows with the serial replaced by this caller's pseudonym.
-    *
-    * A row whose identifier cannot be derived is dropped rather than passed through, so a
-    * failure in the identity layer cannot degrade into disclosing the serial it was meant to
-    * replace.
-    */
-   private fun pseudonymiseWatchIds(
-      cursor: Cursor,
-      callingPackage: String,
-      identity: PebbleKitWatchIdentity,
+   private fun cursorOf(
+      allColumns: List<String>,
+      projection: Array<out String?>?,
+      rows: List<Map<String, Any?>>,
    ): Cursor {
-      val columns = cursor.columnNames
-      val idIndex = columns.indexOf(ConnectedWatch.ID)
-      if (idIndex < 0) return cursor
-
-      val out = MatrixCursor(columns, cursor.count)
-      cursor.use { source ->
-         while (source.moveToNext()) {
-            val serial = source.getString(idIndex) ?: continue
-            val pseudonym = identity.pseudonymFor(callingPackage, serial) ?: continue
-            val row = arrayOfNulls<Any>(columns.size)
-            for (index in columns.indices) {
-               row[index] = if (index == idIndex) {
-                  pseudonym
-               } else {
-                  when (source.getType(index)) {
-                     Cursor.FIELD_TYPE_NULL -> null
-                     Cursor.FIELD_TYPE_INTEGER -> source.getLong(index)
-                     Cursor.FIELD_TYPE_FLOAT -> source.getDouble(index)
-                     Cursor.FIELD_TYPE_BLOB -> source.getBlob(index)
-                     else -> source.getString(index)
-                  }
-               }
-            }
-            out.addRow(row)
-         }
+      val columns = projectedColumns(projection?.toList(), allColumns)
+      return MatrixCursor(columns.toTypedArray(), rows.size).apply {
+         rows.forEach { addRow(rowValues(it, columns).toTypedArray()) }
       }
-      return out
    }
 
-   override fun getConnectedWatches(): Flow<List<Map<String, Any?>>> {
-      return watchManager.watches.map { watches ->
-         watches.filterIsInstance<ConnectedPebbleDevice>()
-            .map { watch ->
-               val watchInfo = watch.watchInfo
-               val runningFwVersion = watchInfo.runningFwVersion
+   override fun getConnectedWatches(): Flow<List<Map<String, Any?>>> =
+      connectedWatchRows(getKoin().get<LibPebble>())
 
+   override fun getActiveApp(watch: WatchIdentifier): Flow<Map<String, Any?>?> =
+      activeAppRow(getKoin().get<LibPebble>(), getKoin().get<LibPebble>(), watch.value)
+
+   private companion object {
+      val logger = Logger.withTag("PebbleKitProvider")
+   }
+}
+
+/** The connected-watch rows in the library's column vocabulary, real serial under [ConnectedWatch.ID]. */
+internal fun connectedWatchRows(watches: Watches): Flow<List<Map<String, Any?>>> =
+   watches.watches.map { devices ->
+      devices.filterIsInstance<ConnectedPebbleDevice>()
+         .map { watch ->
+            val watchInfo = watch.watchInfo
+            val runningFwVersion = watchInfo.runningFwVersion
+
+            mapOf(
+               ConnectedWatch.ID to watchInfo.serial,
+               ConnectedWatch.NAME to pebbleKitWatchName(watch.name),
+               ConnectedWatch.PLATFORM to watchInfo.platform.watchType.codename,
+               ConnectedWatch.REVISION to watchInfo.platform.revision,
+               ConnectedWatch.FIRMWARE_VERSION_MAJOR to runningFwVersion.major,
+               ConnectedWatch.FIRMWARE_VERSION_MINOR to runningFwVersion.minor,
+               ConnectedWatch.FIRMWARE_VERSION_PATCH to runningFwVersion.patch,
+               ConnectedWatch.FIRMWARE_VERSION_TAG to runningFwVersion.suffix
+            )
+         }
+   }
+
+internal fun activeAppRow(watches: Watches, locker: LockerApi, serial: String): Flow<Map<String, Any?>?> =
+   watches.watches.flatMapLatest { devices ->
+      val targetWatch = devices.filterIsInstance<ConnectedPebbleDevice>().firstOrNull { it.watchInfo.serial == serial }
+      if (targetWatch == null) {
+         return@flatMapLatest flowOf(null)
+      }
+
+      targetWatch.runningApp.flatMapLatest { appId ->
+         if (appId != null) {
+            locker.getLockerApp(appId).map { lockerEntry ->
                mapOf(
-                  ConnectedWatch.ID to watchInfo.serial,
-                  ConnectedWatch.NAME to pebbleKitWatchName(watch.name),
-                  ConnectedWatch.PLATFORM to watchInfo.platform.watchType.codename,
-                  ConnectedWatch.REVISION to watchInfo.platform.revision,
-                  ConnectedWatch.FIRMWARE_VERSION_MAJOR to runningFwVersion.major,
-                  ConnectedWatch.FIRMWARE_VERSION_MINOR to runningFwVersion.minor,
-                  ConnectedWatch.FIRMWARE_VERSION_PATCH to runningFwVersion.patch,
-                  ConnectedWatch.FIRMWARE_VERSION_TAG to runningFwVersion.suffix
+                  ActiveApp.ID to appId,
+                  ActiveApp.NAME to lockerEntry?.properties?.title,
+                  ActiveApp.TYPE to when (lockerEntry?.properties?.type) {
+                     AppType.Watchface -> ActiveApp.TYPE_VALUE_WATCHFACE
+                     AppType.Watchapp -> ActiveApp.TYPE_VALUE_WATCHAPP
+                     null -> ActiveApp.TYPE_VALUE_UNKNOWN
+                  },
                )
             }
-      }
-   }
-
-   override fun getActiveApp(watch: WatchIdentifier): Flow<Map<String, Any?>?> {
-      return watchManager.watches.flatMapLatest { watches ->
-         val targetWatch = watches.filterIsInstance<ConnectedPebbleDevice>().firstOrNull { it.watchInfo.serial == watch.value }
-         if (targetWatch == null) {
-            return@flatMapLatest flowOf(null)
-         }
-
-         targetWatch.runningApp.flatMapLatest { appId ->
-            if (appId != null) {
-               locker.getLockerApp(appId).map { lockerEntry ->
-                  mapOf(
-                     ActiveApp.ID to appId,
-                     ActiveApp.NAME to lockerEntry?.properties?.title,
-                     ActiveApp.TYPE to when (lockerEntry?.properties?.type) {
-                        AppType.Watchface -> ActiveApp.TYPE_VALUE_WATCHFACE
-                        AppType.Watchapp -> ActiveApp.TYPE_VALUE_WATCHAPP
-                        null -> ActiveApp.TYPE_VALUE_UNKNOWN
-                     },
-                  )
-               }
-            } else {
-               flowOf(null)
-            }
+         } else {
+            flowOf(null)
          }
       }
    }
 
-   companion object {
-      var instance: PebbleKitProvider? = null
-
-      private val logger = Logger.withTag("PebbleKitProvider")
-   }
+internal fun createPebbleKit2ProviderState(
+   context: Context,
+   libPebble: LibPebble,
+   watchConfig: WatchConfigFlow,
+   componentState: PebbleKitComponentState,
+   scope: LibPebbleCoroutineScope,
+): PebbleKit2ProviderState {
+   val packageName = context.packageName
+   val logger = Logger.withTag("PebbleKit2ProviderState")
+   return PebbleKit2ProviderState(
+      enabled = pebbleKit2Tracking(watchConfig, componentState),
+      connectedWatches = connectedWatchRows(libPebble),
+      activeAppOf = { serial -> activeAppRow(libPebble, libPebble, serial) },
+      idColumn = ConnectedWatch.ID,
+      notify = { change ->
+         val uri = when (change) {
+            PebbleKit2Change.ConnectedWatches -> ConnectedWatch.getContentUri(packageName)
+            PebbleKit2Change.ActiveApps ->
+               Uri.withAppendedPath(PebbleKitProviderContract.getAuthorityUri(packageName), ActiveApp.CONTENT_PATH)
+         }
+         try {
+            context.contentResolver.notifyChange(uri, null)
+         } catch (e: SecurityException) {
+            logger.e(e) { "Failed to notify $uri - is the provider present in app manifest?" }
+         }
+      },
+      scope = scope,
+   )
 }
 
 // "Pebble Time 4F2A": the model prefix plus four hex digits unique to the device.

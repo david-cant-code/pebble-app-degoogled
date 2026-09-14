@@ -27,10 +27,8 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeoutOrNull
-import java.util.UUID
 import kotlin.uuid.Uuid
 import kotlin.uuid.toJavaUuid
-import kotlin.uuid.toKotlinUuid
 
 /** Fork: checks the classic toggle at [start] and at every broadcast, so a session existing while it is off relays nothing. */
 class PebbleKitClassic(
@@ -117,18 +115,22 @@ class PebbleKitClassic(
         scope.launch {
             IntentFilter(INTENT_APP_ACK).asFlow(context, exported = true).collect { intent ->
                 if (!enabled) return@collect
-                logger.d { "Got outbound ack" }
-                val transactionId: Int = intent.getIntExtra(TRANSACTION_ID, 0)
-                replyACK(transactionId.toUByte())
+                handleSenderInput(onDropped = { logDropped("ACK", it) }) {
+                    logger.d { "Got outbound ack" }
+                    val transactionId: Int = intent.getIntExtra(TRANSACTION_ID, 0)
+                    replyACK(transactionId.toUByte())
+                }
             }
         }
 
         scope.launch {
             IntentFilter(INTENT_APP_NACK).asFlow(context, exported = true).collect { intent ->
                 if (!enabled) return@collect
-                logger.d { "Got outbound nack" }
-                val transactionId: Int = intent.getIntExtra(TRANSACTION_ID, 0)
-                replyNACK(transactionId.toUByte())
+                handleSenderInput(onDropped = { logDropped("NACK", it) }) {
+                    logger.d { "Got outbound nack" }
+                    val transactionId: Int = intent.getIntExtra(TRANSACTION_ID, 0)
+                    replyNACK(transactionId.toUByte())
+                }
             }
         }
 
@@ -138,38 +140,43 @@ class PebbleKitClassic(
                     logger.d { "Classic PebbleKit is off; ignoring SEND for $uuid" }
                     return@collect
                 }
-                logger.d { "Got outbound message" }
-                val uuid = (intent.getSerializableExtra(APP_UUID) as? UUID?)?.toKotlinUuid() ?:
-                    // Fallback to string
-                    intent.getStringExtra(APP_UUID)?.let { Uuid.parseOrNull(it) } ?: return@collect
+                handleSenderInput(onDropped = { logDropped("SEND", it) }) {
+                    logger.d { "Got outbound message" }
+                    val uuid = intent.watchappUuidExtra() ?: return@collect
 
-                // These receivers are exported and every live session sees every SEND broadcast,
-                // so without this a session would relay messages addressed to a different
-                // watchapp, and two concurrent sessions would each send the same message once.
-                if (uuid != this@PebbleKitClassic.uuid) {
-                    return@collect
+                    // These receivers are exported and every live session sees every SEND broadcast,
+                    // so without this a session would relay messages addressed to a different
+                    // watchapp, and two concurrent sessions would each send the same message once.
+                    if (uuid != this@PebbleKitClassic.uuid) {
+                        return@collect
+                    }
+
+                    val dictionary: PebbleClassicDictionary = PebbleClassicDictionary.fromJson(
+                        intent.getStringExtra(MSG_DATA)
+                    )
+                    val transactionId: Int = intent.getIntExtra(TRANSACTION_ID, 0)
+
+                    val msg = AppMessageData(transactionId.toUByte(), uuid, dictionary.toAppMessageDict())
+                    val result = device.sendAppMessage(msg)
+                    logger.d { "Result from the app: $result" }
+                    val intentAction = when (result) {
+                        is AppMessageResult.ACK -> INTENT_APP_RECEIVE_ACK
+                        is AppMessageResult.NACK -> INTENT_APP_RECEIVE_NACK
+                    }
+
+                    val intent = Intent(intentAction).apply {
+                        putExtra(TRANSACTION_ID, result.transactionId.toInt())
+                    }
+
+                    broadcastToCompanions(intent)
                 }
-
-                val dictionary: PebbleClassicDictionary = PebbleClassicDictionary.fromJson(
-                    intent.getStringExtra(MSG_DATA)
-                )
-                val transactionId: Int = intent.getIntExtra(TRANSACTION_ID, 0)
-
-                val msg = AppMessageData(transactionId.toUByte(), uuid, dictionary.toAppMessageDict())
-                val result = device.sendAppMessage(msg)
-                logger.d { "Result from the app: $result" }
-                val intentAction = when (result) {
-                    is AppMessageResult.ACK -> INTENT_APP_RECEIVE_ACK
-                    is AppMessageResult.NACK -> INTENT_APP_RECEIVE_NACK
-                }
-
-                val intent = Intent(intentAction).apply {
-                    putExtra(TRANSACTION_ID, result.transactionId.toInt())
-                }
-
-                broadcastToCompanions(intent)
             }
         }
+    }
+
+    // Fork: the throwable's class only; a parser's message can quote the sender's payload.
+    private fun logDropped(action: String, t: Throwable) {
+        logger.w { "Dropped a broadcast of $action for $uuid: ${t::class.simpleName}" }
     }
 
     override suspend fun start(incomingAppMessages: Flow<AppMessageData>) {

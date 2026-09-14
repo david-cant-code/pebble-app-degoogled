@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Bundle
+import android.os.Parcel
 import androidx.core.content.ContextCompat
 import androidx.test.platform.app.InstrumentationRegistry
 import io.rebble.libpebblecommon.LibPebbleConfig
@@ -201,6 +203,74 @@ class ClassicPebbleKitSessionTest {
     }
 
     @Test
+    fun aSendWithUnreadableMsgDataIsDroppedAndTheSessionKeepsRelaying() {
+        val watch = startSession()
+        awaitSendRelayed(watch)
+        drainRelays(watch)
+
+        val malformed = Intent(SEND).apply {
+            putExtra("uuid", SESSION_UUID)
+            putExtra("transaction_id", MISADDRESSED_TID)
+            putExtra("msg_data", "not json")
+        }
+        context.sendOrderedBroadcast(malformed, null)
+        assertNull(watch.sent.poll(1500, TimeUnit.MILLISECONDS), "a SEND with unreadable msg_data was relayed")
+
+        // The session survives it: a well-formed SEND still gets through.
+        awaitSendRelayed(watch)
+    }
+
+    @Test
+    fun aSendWithNoMsgDataIsDroppedAndTheSessionKeepsRelaying() {
+        val watch = startSession()
+        awaitSendRelayed(watch)
+        drainRelays(watch)
+
+        val empty = Intent(SEND).apply {
+            putExtra("uuid", SESSION_UUID)
+            putExtra("transaction_id", MISADDRESSED_TID)
+        }
+        context.sendOrderedBroadcast(empty, null)
+        assertNull(watch.sent.poll(1500, TimeUnit.MILLISECONDS), "a SEND with no msg_data was relayed")
+
+        awaitSendRelayed(watch)
+    }
+
+    @Test
+    fun aSendWithUnreadableExtrasIsDroppedAndTheSessionKeepsRelaying() {
+        val watch = startSession()
+        awaitSendRelayed(watch)
+        drainRelays(watch)
+
+        context.sendOrderedBroadcast(Intent(SEND).replaceExtras(unreadableExtras()), null)
+        assertNull(watch.sent.poll(1500, TimeUnit.MILLISECONDS), "a SEND with unreadable extras was relayed")
+
+        awaitSendRelayed(watch)
+    }
+
+    @Test
+    fun anAckWithUnreadableExtrasIsDroppedAndTheSessionKeepsRelaying() {
+        assertAResultBroadcastWithUnreadableExtrasIsDropped(ACK)
+    }
+
+    @Test
+    fun aNackWithUnreadableExtrasIsDroppedAndTheSessionKeepsRelaying() {
+        assertAResultBroadcastWithUnreadableExtrasIsDropped(NACK)
+    }
+
+    private fun assertAResultBroadcastWithUnreadableExtrasIsDropped(action: String) {
+        val watch = startSession()
+        awaitResultRelayed(watch, action)
+        drainResults(watch)
+
+        context.sendOrderedBroadcast(Intent(action).replaceExtras(unreadableExtras()), null)
+        assertNull(watch.results.poll(1500, TimeUnit.MILLISECONDS), "a $action with unreadable extras reached the watch")
+
+        // The session survives it: a well-formed broadcast of the same action still gets through.
+        awaitResultRelayed(watch, action)
+    }
+
+    @Test
     fun stopsBroadcastingInboundDataAfterClassicGoesOff() {
         val incoming = MutableSharedFlow<AppMessageData>(extraBufferCapacity = 4)
         val config = configFlow(classicEnabled = true)
@@ -307,6 +377,33 @@ class ClassicPebbleKitSessionTest {
         while (watch.results.poll(700, TimeUnit.MILLISECONDS) != null) Unit
     }
 
+    /**
+     * Extras whose first read throws in the receiving process: a single entry whose value type
+     * code the platform does not know, written as raw bundle bytes. The Intent carries parcelled
+     * extras to the receiver without reading them, so the throw happens in the session's own read
+     * (the platform code is named at handleSenderInput).
+     */
+    private fun unreadableExtras(): Bundle {
+        val parcel = Parcel.obtain()
+        try {
+            parcel.writeInt(0) // bundle length, patched below
+            parcel.writeInt(BUNDLE_MAGIC)
+            val start = parcel.dataPosition()
+            parcel.writeInt(1) // entry count
+            parcel.writeString("unreadable")
+            parcel.writeInt(UNKNOWN_VALUE_TYPE)
+            val end = parcel.dataPosition()
+            parcel.setDataPosition(0)
+            parcel.writeInt(end - start)
+            parcel.setDataPosition(end)
+            parcel.writeInt(0) // the has-intent flag android16-release BaseBundle.readFromParcelInner reads after the map
+            parcel.setDataPosition(0)
+            return Bundle.CREATOR.createFromParcel(parcel)
+        } finally {
+            parcel.recycle()
+        }
+    }
+
     private fun broadcastResult(action: String, transactionId: Int) {
         context.sendOrderedBroadcast(Intent(action).putExtra("transaction_id", transactionId), null)
     }
@@ -385,5 +482,7 @@ class ClassicPebbleKitSessionTest {
         const val SEND = "com.getpebble.action.app.SEND"
         const val ACK = "com.getpebble.action.app.ACK"
         const val NACK = "com.getpebble.action.app.NACK"
+        const val BUNDLE_MAGIC = 0x4C444E42 // 'B' 'N' 'D' 'L'
+        const val UNKNOWN_VALUE_TYPE = 1_000_000
     }
 }

@@ -35,7 +35,7 @@ internal fun PebbleKitToggles.enables(surface: PebbleKitSurface): Boolean = when
  *   without MATCH_DISABLED_COMPONENTS, so a bind or acquisition of a disabled component fails.
  * - PackageManagerService.setEnabledSettings: DONT_KILL_APP defers the package-changed broadcast
  *   by about a second (ten just after boot); until it lands a held provider and a live service
- *   record keep working.
+ *   record keep working, which the in-code gates cover.
  * - ContentProviderHelper.removeDyingProviderLocked, reached while that broadcast is handled:
  *   unpublishing the provider kills a foreign, non-persistent process that still holds a stable
  *   connection to it then.

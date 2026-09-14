@@ -237,7 +237,7 @@ deliverable), no known advisories, non-deprecated API surface.
 
 Two `WatchConfig` booleans, `classicPebbleKitEnabled` (default off) and
 `pebbleKit2Enabled` (default on), decide whether each PebbleKit surface
-gets a session.
+exists at all.
 
 **Why classic is off by default.** Every non-system watchapp that declares
 no PebbleKit 2 companion package gets a classic PebbleKit session when the
@@ -278,6 +278,20 @@ it.
    `PackageManager` while their toggle is off, and applies a component
    whose call threw again at the next config change. The platform behaviour
    this layer rests on is listed, with AOSP symbols, in that class's KDoc.
+3. *Runtime entry points.* Classic START/STOP receivers are registered only
+   while classic is on. The basalt provider's `query` returns null while off
+   and before the setting is readable. The PebbleKit 2 sender hands out a
+   binder that refuses every request while off (`pebbleKitRequestDecision`),
+   checked per request because the system reuses that binder for later binds
+   (`PebbleSenderReceiver.onBind`). The PebbleKit 2 provider returns null
+   while off, and the state it serves (`PebbleKit2ProviderState`, owned by
+   the Koin graph rather than the provider) tracks watches only while on and
+   announces changes per collection, never per watch. The basalt change
+   notifier fires only while classic is on, and once when it turns on.
+
+Runtime-registered receivers never appear in a manifest, so the release
+exported-component allowlist (`VerifyExportedComponents`) cannot see them;
+the runtime entry points govern those.
 
 **Accepted costs.** Flipping a toggle restarts the running watchapp's whole
 session, PKJS included, when that watchapp uses the flipped surface, so a JS
@@ -289,13 +303,17 @@ sender service (`PebbleKitComponentState` KDoc).
 
 **Verification shape.** Host tests pin the routing, defaults and no
 fallback (`PebbleKitSurfaceTest`); the restart trigger and the watcher's
-restart request (`PlatformSessionGateChangesTest`); and the component map
-and its retry after a failed call. A source sentinel in `:androidApp`
+restart request (`PlatformSessionGateChangesTest`); the listener
+registration, the notifier and the admission decision; the component map
+and its retry after a failed call; and which surface each factory's helper
+follows (`PebbleKitSurfaceWiringTest`). A source sentinel in `:androidApp`
 (`CompanionSessionGateSentinelTest`) checks that the upstream-owned manager,
 which no unit test can construct, still calls the gate and launches the
 watcher. On the device, `ClassicPebbleKitSessionTest` and
-`PebbleKit2SessionTest` drive real sessions across the toggles, and
-`PebbleKitComponentStateTest` drives the real PackageManager.
+`PebbleKit2SessionTest` drive real sessions across the toggles,
+`PebbleKitToggleGateTest` flips the real config against the real
+components, and `PebbleKitComponentStateTest` drives the real
+PackageManager.
 
 ## The whisper speech engine
 
