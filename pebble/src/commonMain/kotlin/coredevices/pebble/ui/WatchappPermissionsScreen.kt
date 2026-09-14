@@ -80,10 +80,12 @@ fun WatchappPermissionsScreen(nav: NavBarNav, topBarParams: TopBarParams) {
         item {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    "Some watchfaces and apps run code on your phone to fetch things like " +
-                        "weather. These settings control what that code can reach. Turning " +
-                        "access off can stop features that rely on it, such as third-party " +
-                        "weather, from working for those apps.",
+                    "Some watchfaces and apps run code inside Gravel to fetch things like " +
+                        "weather. These settings control what that code can reach. They do " +
+                        "not cover separate companion apps installed on your phone, which " +
+                        "use their own Android permissions. Turning access off can stop " +
+                        "features that rely on it, such as third-party weather, from working " +
+                        "for those apps.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -206,9 +208,9 @@ private fun WatchappPermissionListRow(
 
 /**
  * Shared per-app permission controls, embedded on an app's detail page. Renders the two
- * tri-state selectors (Default / Allow / Deny) plus an honest disclosure of what phone-side
- * network access means. [WatchappPermissionsScreen] deliberately reuses the app detail page
- * rather than duplicating these controls.
+ * tri-state selectors (Default / Allow / Deny) plus a disclosure of what they cover: the app's
+ * PebbleKit JS, not a separate companion app. [WatchappPermissionsScreen] deliberately reuses
+ * the app detail page rather than duplicating these controls.
  */
 @Composable
 fun WatchappPermissionControls(uuid: Uuid, modifier: Modifier = Modifier) {
@@ -221,10 +223,11 @@ fun WatchappPermissionControls(uuid: Uuid, modifier: Modifier = Modifier) {
             modifier = Modifier.padding(bottom = 4.dp),
         )
         Text(
-            "If this app runs code on your phone (many watchfaces do, to fetch weather), " +
-                "these control what it can reach. Turning internet off also stops it sending " +
-                "your data to outside servers, but can stop features that need it, such as " +
-                "third-party weather, from working.",
+            "If this app runs code inside Gravel (many watchfaces do, to fetch weather), " +
+                "these control what that code can reach. They do not cover a separate " +
+                "companion app on your phone, which uses its own Android permissions. " +
+                "Turning internet off can stop features that need it, such as third-party " +
+                "weather, from working.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 12.dp),

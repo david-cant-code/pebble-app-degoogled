@@ -51,11 +51,12 @@ a security posture tightened beyond upstream's defaults.
   summary, anything you attach) for you to add to an issue yourself, and
   nothing in the app can upload it.
 - **Hardening beyond the de-Googling.** The app's own attack surface is in
-  scope, not just its Google dependencies. Landed so far: third-party
-  watchapps' phone-side code gets no internet or location access unless
-  granted (deny by default, per-app controls, revocation applies to running
-  apps), the app's exported Android interfaces are authorization-gated or
-  removed, and plain-HTTP (cleartext) traffic is blocked app-wide
+  scope, not just its Google dependencies. Landed so far: the code
+  third-party watchapps run inside Gravel gets no internet or location
+  access unless granted (deny by default, per-app controls, revocation
+  applies to running apps), the app's exported Android interfaces are
+  authorization-gated or removed, and plain-HTTP (cleartext) traffic is
+  blocked app-wide
   ([KNOWN_ISSUES.md](KNOWN_ISSUES.md) records the trade-offs).
 - **Weather without Play services.** Manual latitude/longitude entry, since
   the stock place search relies on the GMS-backed platform geocoder.

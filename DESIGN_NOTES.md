@@ -132,6 +132,13 @@ appstore capability vocabulary (`location`/`health`/`timeline`) has no
 ever showed "location". This fork adds a per-app, tri-state permission
 system over those two capabilities, denied by default.
 
+**Scope.** The grants gate the app's PebbleKit JS. A watchapp's other
+phone-side path is a companion app (classic PebbleKit or PebbleKit 2, see
+the classic PebbleKit entries in `KNOWN_ISSUES.md`), a separate Android app
+with its own permissions that these grants do not cover, so the user text
+is worded as "code the app runs inside Gravel" and never as "stops the app
+sending your data".
+
 **Decision authority.** `WatchappPermissionResolver`
 (`locker/WatchappPermissions.kt`) is the single place that resolves a
 grant. A capability is stored per app in the existing
@@ -217,9 +224,9 @@ control.
 (`WatchappPermissionsScreen`) holds the global defaults and an app list;
 the per-app tri-state controls live on each app's detail page
 (`WatchappPermissionControls`, reused by the list). Store listings gain an
-honest disclosure that phone-side code can reach the internet, and the
-location capability description states the real "may send it to outside
-servers" flow. A one-time "What's New" dialog announces the deny-by-default
+honest disclosure that code the app runs inside Gravel can reach the
+internet, and the location capability description states the real "may send
+it to outside servers" flow. A one-time "What's New" dialog announces the deny-by-default
 change to existing users (`WhatsNewDialog`).
 
 **Dependency.** `androidx.webkit` (1.16.0) is added for `ProxyController`

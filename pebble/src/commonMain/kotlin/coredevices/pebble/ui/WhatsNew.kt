@@ -66,7 +66,7 @@ val whatsNewEntries: List<WhatsNewEntry> = listOf(
     ),
     WhatsNewEntry(
         title = "Control what watchfaces and apps can reach",
-        body = "Watchfaces and apps can run code on your phone that uses the internet and " +
+        body = "Watchfaces and apps can run code inside Gravel that uses the internet and " +
             "your location. You can now turn that off, for everything or per app, in " +
             "Settings > Apps > Watch App Permissions. It starts off for apps you already " +
             "had installed; turn it on for the ones you trust.",
