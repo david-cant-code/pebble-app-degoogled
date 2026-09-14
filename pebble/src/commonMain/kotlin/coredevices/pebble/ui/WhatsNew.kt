@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
  * users on update. The popup auto-shows once per user per bump (`WhatsNewDialog` in
  * composeApp) and can be reopened any time from Settings > About.
  */
-const val WHATS_NEW_VERSION = 6
+const val WHATS_NEW_VERSION = 7
 
 /** A single announced change: a short heading and a sentence or two of body. */
 data class WhatsNewEntry(val title: String, val body: String)
@@ -41,6 +41,12 @@ val whatsNewEntries: List<WhatsNewEntry> = listOf(
             "back on in Settings > Apps > Watch App Permissions. The newer PebbleKit 2, " +
             "which only reaches apps a watchapp names, stays on and has its own switch. " +
             "Notifications, replies and dictation are not affected.",
+    ),
+    WhatsNewEntry(
+        title = "A safer speech engine",
+        body = "The speech engine that transcribes your dictation now runs in an isolated " +
+            "process of its own, with no permissions, so a flaw reached through a speech " +
+            "model stays contained to that process.",
     ),
     WhatsNewEntry(
         title = "Faster dictation, working in the background, and your own server",
