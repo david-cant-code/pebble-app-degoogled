@@ -1,7 +1,7 @@
 # Known issues
 
 Deliberately deferred issues, each with the rationale and threat-model
-context, per the fork rule that nothing is deferred silently. An entry
+context, per the project rule that nothing is deferred silently. An entry
 leaves this file when the fix lands.
 
 ## GitHub firmware update path not hardware-tested on single-slot watches

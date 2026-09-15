@@ -1,8 +1,19 @@
-# Gravel (de-Googled Pebble app fork)
+# Gravel
 
 [<img src="https://f-droid.org/badge/get-it-on.png" alt="Get it on F-Droid" height="80">](https://f-droid.org/packages/com.anopticlabs.gravel/)
 
 [<img src="https://img.shields.io/f-droid/v/com.anopticlabs.gravel" alt="F-Droid version" hspace="13">](https://f-droid.org/packages/com.anopticlabs.gravel/)
+
+Gravel is a companion app for Pebble watches that runs fully featured
+without Google Play services or Firebase, for GrapheneOS, LineageOS, and
+similar phones, with as little telemetry as technically possible and a
+security posture tightened beyond upstream's defaults.
+
+Gravel is an **unofficial, Android-only fork** of the
+[Pebble mobile app by Core Devices](https://github.com/coredevices/mobileapp).
+It is not affiliated with or endorsed by Core Devices. It ships under its
+own name, icon, and application id (`com.anopticlabs.gravel`) precisely so
+it cannot be mistaken for the official app.
 
 ## Status
 
@@ -21,26 +32,14 @@ De-google work is completed, all telemetry is removed. What remains is polish an
       cloud services (approach open)
 - [x] F-Droid inclusion (listing live)
 
-
-Gravel is an **unofficial, Android-only fork** of the
-[Pebble mobile app by Core Devices](https://github.com/coredevices/mobileapp).
-This fork is not affiliated with or endorsed by Core Devices. It ships under
-its own name, icon, and application id (`com.anopticlabs.gravel`) precisely so
-it cannot be mistaken for the official app.
-
-The goal is a companion app for Pebble watches that runs fully featured
-without Google Play services or Firebase, for GrapheneOS, LineageOS, and
-similar phones with as little telemetry as technically possible, and with
-a security posture tightened beyond upstream's defaults.
-
-## Fork goals
+## Goals
 
 - **No Google Play services / Firebase.** Everything the watch needs must
   work on a de-Googled phone.
 - **No telemetry.** Crash reporting, analytics heartbeats, and the watch
   firmware-diagnostics relay are removed. Upstream's battery-analytics
   screen is a server-rendered page fed by that relay, so it has no data
-  source in this fork and its entry points are disabled; usable battery
+  source in Gravel and its entry points are disabled; usable battery
   analytics would need a local, on-device reimplementation. The hosts the
   app talks to are fixed in the app, with two exceptions you control: an
   app store source you add yourself is fetched from the host you entered,
@@ -68,6 +67,23 @@ a security posture tightened beyond upstream's defaults.
   - The app's other exported Android interfaces are authorization-gated or
     removed.
   - Plain-HTTP (cleartext) traffic is blocked app-wide.
+- **Firmware updates without device reporting.** Core watch firmware
+  updates come from the official
+  [PebbleOS GitHub releases](https://github.com/coredevices/PebbleOS/releases):
+  the release list is fetched anonymously with no device data in the
+  request, the firmware asset is picked on the phone, and every download
+  is verified against the GitHub-declared SHA-256 digest and size plus the
+  firmware bundle's own manifest and CRCs before it is handed to the
+  watch. The default channel offers a release line once its first release
+  has been public for a week, and picks up later hotfix patches within
+  that line immediately; a debug-settings toggle ("Early PebbleOS
+  updates") offers the newest release immediately. Legacy Pebble watches
+  keep using the Rebble cohorts endpoint. Gravel builds ship no Memfault
+  token and make no Memfault requests; upstream's optional `memfaultToken`
+  Gradle property would route Core watch update checks through
+  `api.memfault.com`, periodically sending the watch serial number (or a
+  MAC-derived identifier), hardware revision, and firmware version in the
+  background.
 - **Weather without Play services.** Manual latitude/longitude entry, since
   the stock place search relies on the GMS-backed platform geocoder.
 - **Free on-device dictation.** Voice dictation runs on whisper.cpp,
@@ -85,7 +101,7 @@ a security posture tightened beyond upstream's defaults.
 - **A watch microphone API for third-party applications** documented and
   authorization-gated, rather than locking watch mic audio to first-party
   features.
-- **Distribution through F-Droid.** The fork is in F-Droid's main
+- **Distribution through F-Droid.** Gravel is in F-Droid's main
   repository, as
   [`com.anopticlabs.gravel`](https://f-droid.org/packages/com.anopticlabs.gravel/),
   and staying there constrains every change: the tree holds no binaries
@@ -156,7 +172,7 @@ each rotation would ask you to confirm again. The bearer token belongs
 to the server it was saved with: a URL edited to another host or port is
 tested and saved without it unless you type one.
 
-## Building (Android)
+## Building
 
 - Clone with `--recursive` (or run `git submodule update --init`): the
   whisper.cpp speech engine is a pinned git submodule, compiled from
@@ -171,22 +187,6 @@ tested and saved without it unless you type one.
   `RELEASE_KEY_PASSWORD` environment variables), produces an unsigned APK
   when it is absent, and signs with the debug key instead if
   `LOCAL_RELEASE_BUILD=true` is set in the root `local.properties`.
-- Fork builds ship no Memfault token and make no Memfault requests.
-  Upstream's optional `memfaultToken` Gradle property would route Core
-  watch update checks through `api.memfault.com`, periodically sending the
-  watch serial number (or a MAC-derived identifier), hardware revision,
-  and firmware version in the background.
-- Core watch firmware updates come from the official
-  [PebbleOS GitHub releases](https://github.com/coredevices/PebbleOS/releases):
-  the release list is fetched anonymously with no device data in the
-  request, the firmware asset is picked on the phone, and every download
-  is verified against the GitHub-declared SHA-256 digest and size plus the
-  firmware bundle's own manifest and CRCs before it is handed to the
-  watch. The default channel offers a release line once its first release
-  has been public for a week, and picks up later hotfix patches within
-  that line immediately; a debug-settings toggle ("Early PebbleOS
-  updates") offers the newest release immediately. Legacy Pebble watches
-  keep using the Rebble cohorts endpoint.
 
 ## Architecture
 
@@ -194,14 +194,41 @@ The app is the watch's companion and gateway: it holds a persistent
 Bluetooth connection to relay notifications, sync data (time, weather,
 calendar, health), install watchapps, and proxy network requests on the
 watch's behalf. The codebase is Kotlin Multiplatform + Compose
-Multiplatform; watch communication lives in the `libpebble3` module (Pebble
-protocol, services, BlobDB sync).
+Multiplatform, and Gravel builds and maintains only the Android app. The
+stack is Koin (dependency injection), Ktor (HTTP), Room (storage), and
+Kermit (logging).
 
-For the full architecture write-up, module map, and developer documentation,
-see the [upstream README](https://github.com/coredevices/mobileapp#readme),
-which applies to this fork aside from the removals above. The fork-specific
-de-Googling architecture (the DI seams, the Firebase stubs, the unplugged
-Ring module) is described in [DESIGN_NOTES.md](DESIGN_NOTES.md).
+| Module | What it is |
+|---|---|
+| `androidApp` | Android application shell: manifest, launcher resources, signing, R8 |
+| `composeApp` | App-level Compose UI, navigation, and Koin wiring; the Activity and Service classes the shell declares live here |
+| `libpebble3` | Talking to Pebble watches: Bluetooth transport, Pebble protocol, services, BlobDB sync |
+| `pebble` | Watch features and screens above the library layer |
+| `util` | Shared utilities (logging, IO, theme) |
+| `whisper`, `whisper-native` | The speech engine: Kotlin bindings, and the NDK/CMake build of the pinned whisper.cpp submodule |
+| `resampler` | Audio resampling |
+| `blobannotations`, `blobdbgen` | KSP annotations and code generator for BlobDB records |
+| `libindex`, `index-ai`, `mcp` | Ring and Index AI libraries, compiled because the watch UI depends on them, with their runtime disabled |
+| `firebase-stubs`, `haversine-stubs`, `krisp-stubs` | Inert stand-ins that keep upstream code compiling without the Firebase SDKs, the Ring satellite library, and the Krisp noise-cancellation SDK |
+| `experimental` | The Ring feature module, kept in the tree but not built |
+| `iosApp` | The iOS app shell, unmaintained |
+
+How the de-Googling is wired (the DI seams, the stubs, the unplugged Ring
+module) is described in [DESIGN_NOTES.md](DESIGN_NOTES.md).
+
+## Reporting bugs
+
+Open an issue on
+[GitHub](https://github.com/david-cant-code/pebble-app-degoogled/issues).
+A log export from Settings > Get Help > Export logs helps; issues are
+public, so look through the zip before attaching it.
+
+Do not report security vulnerabilities in a public issue; see
+[SECURITY.md](SECURITY.md) for private reporting.
+
+## Contributing
+
+Pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License and attribution
 
@@ -221,7 +248,7 @@ under GPLv3 with no contributor license agreement (see
 "Pebble" and "Core Devices" are trademarks of
 their respective owners; this project is an independent fork of their
 GPLv3-licensed source code. References to Pebble watches in this app and its
-documentation describe device compatibility, nothing more; the fork's own
+documentation describe device compatibility, nothing more; Gravel's own
 branding (name, icon, colors) is deliberately distinct so users are never
 confused about which app they are running.
 
@@ -230,5 +257,5 @@ Authors) is licensed under the SIL Open Font License 1.1; the notice and
 license text are in [LICENSE-Inter-OFL](LICENSE-Inter-OFL). The whisper.cpp
 speech engine submodule carries its own MIT license file.
 
-Development of this fork uses AI assistance; commits carry `Co-Authored-By`
-trailers accordingly, matching upstream's disclosure practice.
+Development of Gravel uses AI assistance; commits carry `Co-Authored-By`
+trailers accordingly.

@@ -3,7 +3,8 @@
 Pull requests are welcome: bug fixes, features, documentation and tests
 alike. For a large change, opening an issue first to talk it through can
 save wasted work. [README.md](README.md) sets out what the fork is for and
-what is out of scope.
+what is out of scope. Security vulnerabilities are reported privately, not
+as issues or pull requests; see [SECURITY.md](SECURITY.md).
 
 ## Licensing of contributions
 
