@@ -206,9 +206,19 @@ Ring module) is described in [DESIGN_NOTES.md](DESIGN_NOTES.md).
 ## License and attribution
 
 Upstream code is © Core Devices and contributors, licensed under
-[GPLv3](LICENSE); this fork's changes are GPLv3 as well. Upstream offers
-separate commercial licensing (`LICENSE-COMMERCIAL`); that option applies to
-upstream, not to this fork. "Pebble" and "Core Devices" are trademarks of
+[GPLv3](LICENSE); this fork's changes are © david-cant-code and
+contributors, licensed under GPLv3 as well. No commercial license for
+Gravel exists, and none is offered.
+
+Upstream's README states that Core Devices dual-licenses the upstream app,
+under GPLv3 or under a paid commercial license agreement. That commercial
+option does not extend to Gravel: a commercial license or any other
+agreement with Core Devices grants no rights to this fork's changes, which
+are not Core Devices' to license. Contributions to Gravel are accepted
+under GPLv3 with no contributor license agreement (see
+[CONTRIBUTING.md](CONTRIBUTING.md)).
+
+"Pebble" and "Core Devices" are trademarks of
 their respective owners; this project is an independent fork of their
 GPLv3-licensed source code. References to Pebble watches in this app and its
 documentation describe device compatibility, nothing more; the fork's own

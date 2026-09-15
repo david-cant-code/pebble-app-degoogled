@@ -127,7 +127,12 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   session history) starts cold, and most fork changes remove or substitute
   code the fork did not write.
 - **License compliance.** Keep `LICENSE` and copyright notices intact; changes
-  are tracked through git history per GPLv3 §5.
+  are tracked through git history per GPLv3 §5. Gravel has no commercial
+  license and no contributor license agreement: upstream's
+  `LICENSE-COMMERCIAL` is deleted and its CLA-based `CONTRIBUTING.md` is
+  replaced with the fork's own, which supersedes the upstream
+  "Contribution / licensing" reference below. An upstream sync keeps both
+  that way.
 - **Branch discipline.** Feature work happens on branches, each reviewed
   before merging to master. Commits are logical units that build and pass
   tests, with an imperative subject and a body explaining what and why.
