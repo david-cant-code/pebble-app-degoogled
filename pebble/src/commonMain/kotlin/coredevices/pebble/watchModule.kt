@@ -1,5 +1,6 @@
 package coredevices.pebble
 
+import com.anopticlabs.gravel.pkjs.FixedNetworkDenyEnforcement
 import co.touchlab.kermit.Logger
 import com.algolia.client.api.SearchClient
 import coredevices.pebble.health.createPlatformHealthManager
@@ -125,6 +126,8 @@ val watchModule = module {
                 .stateIn(GlobalScope, started = SharingStarted.Lazily, initialValue = null),
             get(),
             get(),
+            // Gravel: bound by the platform's app module; absent means not enforced.
+            networkDenyEnforcement = getOrNull() ?: FixedNetworkDenyEnforcement(primaryLayerActive = false),
         )
     } binds arrayOf(LibPebble3::class, NotificationApps::class, SystemGeolocation::class)
 

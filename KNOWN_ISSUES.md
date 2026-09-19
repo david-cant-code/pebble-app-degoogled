@@ -309,6 +309,38 @@ warning when the feature is unavailable. This entry leaves the file if
 minSdk/WebView baseline guarantees `PROXY_OVERRIDE`, or if a WebView-level
 WebSocket intercept becomes available.
 
+## No UDP for web content inside Gravel
+
+**Status: deliberate.**
+
+Gravel installs a filter at process start that refuses the creation of UDP
+sockets in its own process, for as long as it runs. Web content inside
+Gravel (PebbleKit JS with internet access on, configuration pages, other
+in-app web pages) therefore has no UDP, which WebRTC over UDP,
+WebTransport and HTTP/3 need. A release build fails if its dex names a
+Java UDP socket type (`VerifyApkContents`).
+
+## The UDP filter starts with the app process, not before it
+
+**Status: accepted.**
+
+The filter is installed in `MainApplication.attachBaseContext`, ahead of
+the app's content providers, library initializers and `onCreate`. A socket
+opened earlier than that by platform code would be outside the filter; none
+is known. The speech engine's isolated process gets no filter. A process
+that Android starts for a full backup or restore uses the base
+`Application` class, so neither the filter nor the rest of Gravel's startup
+runs in it.
+
+## If Android refuses the UDP filter
+
+**Status: accepted; no affected device is known.**
+
+If the platform does not let Gravel install the filter, Gravel logs the
+result at startup and does not run a watchapp's phone-side script while
+that watchapp's internet access is off. The watchapp's permission controls
+say so.
+
 ## A watchapp whose WebView renderer exits stays stopped until relaunched
 
 **Status: accepted.**

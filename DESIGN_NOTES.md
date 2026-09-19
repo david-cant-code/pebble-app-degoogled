@@ -228,6 +228,19 @@ internet, and the location capability description states the real "may send
 it to outside servers" flow. A one-time "What's New" dialog announces the
 deny-by-default change to existing users (`WhatsNewDialog`).
 
+**UDP socket filter.** Under the three layers above sits a process-wide
+one: `:socketfilter` installs a seccomp filter in
+`MainApplication.attachBaseContext` that refuses the creation of `AF_INET`
+and `AF_INET6` datagram sockets in the app's process for as long as it
+runs, whatever a watchapp's grant says (costs and limits in
+`KNOWN_ISSUES.md`).
+libpebble3 does not depend on the module: the app reports the install
+result through `NetworkDenyEnforcement`, a `LibPebble3.create` parameter
+whose default is "not active". When it is not active,
+`CompanionAppLifecycleManager.createCompanionApps` builds no PebbleKit JS
+session for an app whose Network grant is denied (`shouldRunPkjs`), and the
+grant watcher restarts the session once the grant changes.
+
 **Renderer exit.** `WebViewJsRunner`, `PebbleWebview` and the watchapp
 settings page each handle `onRenderProcessGone`; left unhandled, a WebView
 renderer's exit ends the app process (source cited at `WebViewJsRunner`'s

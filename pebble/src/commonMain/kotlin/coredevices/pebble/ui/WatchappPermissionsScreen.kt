@@ -1,5 +1,6 @@
 package coredevices.pebble.ui
 
+import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -46,6 +47,7 @@ import io.rebble.libpebblecommon.locker.PermissionSetting
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlin.uuid.Uuid
+import org.koin.compose.getKoin
 
 /**
  * Fork feature: Settings > Apps > Watch App Permissions.
@@ -325,6 +327,7 @@ private fun WatchappPermissionListRow(
 @Composable
 fun WatchappPermissionControls(uuid: Uuid, modifier: Modifier = Modifier) {
     val libPebble = rememberLibPebble()
+    val koin = getKoin()
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
             "This app's access on your phone",
@@ -348,6 +351,19 @@ fun WatchappPermissionControls(uuid: Uuid, modifier: Modifier = Modifier) {
             label = "Internet access",
             libPebble = libPebble,
         )
+        val networkDenyEnforced = remember {
+            koin.getOrNull<NetworkDenyEnforcement>()?.primaryLayerActive == true
+        }
+        if (!networkDenyEnforced) {
+            Text(
+                "Gravel could not turn on its network block on this device, so this app's " +
+                    "phone-side code does not run while internet access is off. Turn internet " +
+                    "access on to run it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
         Spacer(Modifier.height(12.dp))
         WatchappPermissionSelector(
             uuid = uuid,

@@ -40,7 +40,7 @@ class CompanionSessionGateSentinelTest {
     @Test
     fun oneConfigSnapshotBuildsTheSessionAndSeedsTheWatcher() {
         assertTrue(
-            Regex("""createCompanionApps\(\s*pbw\s*,\s*lockerEntry\s*,\s*watchConfig\s*,?\s*\)""").containsMatchIn(source),
+            Regex("""createCompanionApps\(\s*pbw\s*,\s*lockerEntry\s*,\s*watchConfig\s*,\s*networkGranted\s*,?\s*\)""").containsMatchIn(source),
             "createCompanionApps no longer builds the session from the config snapshot",
         )
         assertTrue(
@@ -50,6 +50,24 @@ class CompanionSessionGateSentinelTest {
         assertTrue(
             Regex("""requestRestart\s*=\s*sessionCoordinator\s*::\s*requestRestart""").containsMatchIn(source),
             "the toggle watcher no longer asks the session coordinator for the restart",
+        )
+    }
+
+    @Test
+    fun thePkjsSessionIsGatedOnTheGrantAndThePrimaryDenyLayer() {
+        assertTrue(
+            Regex(
+                """val\s+runPkjs\s*=\s*shouldRunPkjs\(\s*pbw\s*\.\s*hasPKJS\s*,\s*networkGranted\s*,\s*networkDenyEnforcement\s*\.\s*primaryLayerActive\s*\)""",
+            ).containsMatchIn(source),
+            "createCompanionApps no longer consults shouldRunPkjs",
+        )
+        assertTrue(
+            Regex("""val\s+pkjsApp\s*=\s*if\s*\(\s*runPkjs\s*\)""").containsMatchIn(source),
+            "the PebbleKit JS session is no longer created under shouldRunPkjs's answer",
+        )
+        assertTrue(
+            Regex("""builtWith\s*=\s*networkGranted""").containsMatchIn(source),
+            "the grant watcher's baseline is no longer the grant the session was built with",
         )
     }
 

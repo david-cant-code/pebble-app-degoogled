@@ -123,14 +123,14 @@ internal class CompanionSessionCoordinator(
 }
 
 /**
- * Emits once each time the upstream grant flips, in either direction. The initial value
- * never emits, and repeated equal values are ignored: the resolved grant flow re-emits on
- * unrelated permission-table and config writes.
+ * Emits once each time the upstream grant differs from the value before it, starting from
+ * [builtWith], the grant the session was built with. Repeated equal values are ignored: the
+ * resolved grant flow re-emits on unrelated permission-table and config writes.
  */
-internal fun Flow<Boolean>.grantChanges(): Flow<Unit> = flow {
-    var previous: Boolean? = null
+internal fun Flow<Boolean>.grantChanges(builtWith: Boolean): Flow<Unit> = flow {
+    var previous = builtWith
     collect { allowed ->
-        if (previous != null && previous != allowed) {
+        if (previous != allowed) {
             emit(Unit)
         }
         previous = allowed
@@ -143,11 +143,12 @@ internal fun Flow<Boolean>.grantChanges(): Flow<Unit> = flow {
  */
 internal fun CoroutineScope.launchNetworkGrantWatcher(
     grant: Flow<Boolean>,
+    builtWith: Boolean,
     app: Uuid,
     sessionGeneration: Long,
     requestRestart: (app: Uuid, generation: Long) -> Unit,
 ): Job = launch {
-    grant.grantChanges().collect {
+    grant.grantChanges(builtWith).collect {
         watcherLogger.d { "Network grant for $app changed mid-session; requesting restart" }
         requestRestart(app, sessionGeneration)
     }

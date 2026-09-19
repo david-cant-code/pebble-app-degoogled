@@ -187,6 +187,7 @@ dependencies {
     // (watchModule seam checks, whisper STT lifecycle), and project deps of
     // :composeApp are not on the androidTest compile classpath transitively.
     androidTestImplementation(project(":pebble"))
+    androidTestImplementation(project(":socketfilter"))
     androidTestImplementation(project(":whisper"))
     androidTestImplementation(project(":libpebble3"))
     androidTestImplementation(libs.serialization)
@@ -366,6 +367,8 @@ abstract class VerifyIsolatedServices : DefaultTask() {
  * - no entry matches [forbiddenEntries]: the Wispr Flow logo assets ignoreAssetsPattern drops,
  *   the two native libraries of the Ring satellite AAR that :haversine-stubs replaces, and in
  *   release the debug variant's dictation test clip;
+ * - both ABIs carry the UDP socket filter's library, and no release dex names a Java UDP
+ *   socket type;
  * - the APK Signing Block is present or absent as the variant's signing configuration says
  *   ([expectSigned]: a release built without a keystore must come out unsigned, which is the
  *   shape F-Droid builds), and when present never carries the dependency-metadata pair
@@ -386,6 +389,18 @@ abstract class VerifyApkContents : DefaultTask() {
     @get:Input
     abstract val forbiddenEntries: ListProperty<String>
 
+    /** Exact zip entry names; a missing one fails the build. */
+    @get:Input
+    abstract val requiredEntries: ListProperty<String>
+
+    /**
+     * Type descriptors that no classes*.dex may name. Gravel's UDP socket filter refuses UDP
+     * socket creation in the whole process, so code that names a Java UDP socket type would
+     * fail at run time with EACCES; this turns it into a build failure.
+     */
+    @get:Input
+    abstract val forbiddenDexTypes: ListProperty<String>
+
     @get:Input
     abstract val expectSigned: Property<Boolean>
 
@@ -399,6 +414,21 @@ abstract class VerifyApkContents : DefaultTask() {
             ZipFile(apk).use { zip ->
                 val hits = zip.entries().asSequence().map { it.name }.filter { name -> forbidden.any { it.matches(name) } }.toList()
                 if (hits.isNotEmpty()) report.appendLine("${apk.name} packages forbidden entries: $hits")
+                val missing = requiredEntries.get().filter { zip.getEntry(it) == null }
+                if (missing.isNotEmpty()) report.appendLine("${apk.name} lacks required entries: $missing")
+                val dexTypes = forbiddenDexTypes.get().map { it to it.toByteArray(Charsets.UTF_8) }
+                if (dexTypes.isNotEmpty()) {
+                    zip.entries().asSequence().filter { Regex("classes\\d*\\.dex").matches(it.name) }.forEach { dex ->
+                        val bytes = zip.getInputStream(dex).use { it.readBytes() }
+                        val named = dexTypes.filter { (_, needle) -> bytes.indexOfSequence(needle) >= 0 }.map { it.first }
+                        if (named.isNotEmpty()) {
+                            report.appendLine(
+                                "${apk.name} ${dex.name} names $named, but the UDP socket filter " +
+                                    "(:socketfilter) refuses UDP sockets in this process",
+                            )
+                        }
+                    }
+                }
             }
             val ids = signingBlockIds(apk)
             if (expectSigned.get() && ids == null) report.appendLine("${apk.name} has no APK Signing Block but this variant is configured to sign")
@@ -407,6 +437,14 @@ abstract class VerifyApkContents : DefaultTask() {
         }
         if (report.isNotEmpty()) throw GradleException("APK contents check failed:\n$report")
         logger.lifecycle("APK contents verified: ${apks.joinToString { it.name }}")
+    }
+
+    private fun ByteArray.indexOfSequence(needle: ByteArray): Int {
+        outer@ for (start in 0..size - needle.size) {
+            for (offset in needle.indices) if (this[start + offset] != needle[offset]) continue@outer
+            return start
+        }
+        return -1
     }
 
     /**
@@ -557,6 +595,23 @@ androidComponents {
                     // The dictation test clip lives in src/debug/assets and must stay out of release.
                     """assets/debug-dictation-clip\.raw""".takeIf { variant.buildType == "release" },
                 ),
+            )
+            requiredEntries.set(
+                listOf("lib/arm64-v8a/libgravelsocketfilter.so", "lib/armeabi-v7a/libgravelsocketfilter.so"),
+            )
+            // Release only: unminified debug dex carries the unused UDP halves of androidx.core
+            // and ktor-network, which R8 removes.
+            forbiddenDexTypes.set(
+                if (variant.buildType == "release") {
+                    listOf(
+                        "Ljava/net/DatagramSocket;",
+                        "Ljava/net/DatagramPacket;",
+                        "Ljava/net/MulticastSocket;",
+                        "Ljava/nio/channels/DatagramChannel;",
+                    )
+                } else {
+                    emptyList()
+                },
             )
             expectSigned.set(variant.buildType != "release" || localReleaseBuild || signReleaseWithKeystore)
         }

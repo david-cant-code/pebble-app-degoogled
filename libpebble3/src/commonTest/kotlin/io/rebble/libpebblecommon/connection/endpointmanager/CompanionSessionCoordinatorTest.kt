@@ -205,10 +205,11 @@ class CompanionSessionCoordinatorTest {
 
     @Test
     fun grantChangesEmitsOncePerFlipInEitherDirection() = runTest {
-        assertEquals(0, flowOf(true).grantChanges().toList().size, "the initial value emitted")
-        assertEquals(0, flowOf(false, false).grantChanges().toList().size, "a repeated value emitted")
-        assertEquals(1, flowOf(true, true, false, false).grantChanges().toList().size, "a revocation must emit once")
-        assertEquals(3, flowOf(false, true, true, false, true).grantChanges().toList().size, "each flip must emit once")
+        assertEquals(0, flowOf(true).grantChanges(builtWith = true).toList().size, "the built-with value emitted")
+        assertEquals(0, flowOf(false, false).grantChanges(builtWith = false).toList().size, "a repeated value emitted")
+        assertEquals(1, flowOf(true, true, false, false).grantChanges(builtWith = true).toList().size, "a revocation must emit once")
+        assertEquals(3, flowOf(false, true, true, false, true).grantChanges(builtWith = false).toList().size, "each flip must emit once")
+        assertEquals(1, flowOf(true).grantChanges(builtWith = false).toList().size, "a flip before the first collection was missed")
     }
 
     @Test
@@ -217,6 +218,7 @@ class CompanionSessionCoordinatorTest {
         val requests = mutableListOf<Pair<Uuid, Long>>()
         val watcher = launchNetworkGrantWatcher(
             grant = grant,
+            builtWith = false,
             app = appA,
             sessionGeneration = 3L,
             requestRestart = { uuid, generation -> requests += uuid to generation },
