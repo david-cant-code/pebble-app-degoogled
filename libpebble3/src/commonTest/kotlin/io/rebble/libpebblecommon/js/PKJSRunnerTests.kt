@@ -102,7 +102,7 @@ abstract class PKJSRunnerTests(
         ),
     )
 
-    private fun makeRunner(
+    protected fun makeRunner(
         js: String,
         uuid: Uuid,
         scope: CoroutineScope = CoroutineScope(Dispatchers.Default),

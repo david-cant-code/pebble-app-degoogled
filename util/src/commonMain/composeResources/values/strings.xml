@@ -6,4 +6,6 @@
     <string name="dark">Dark</string>
     <string name="black">Black</string>
     <string name="system">System</string>
+    <string name="webview_page_stopped">This page stopped working.</string>
+    <string name="webview_settings_page_stopped">The settings page stopped working. Open it again to retry.</string>
 </resources>

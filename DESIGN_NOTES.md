@@ -229,8 +229,16 @@ internet, and the location capability description states the real "may send
 it to outside servers" flow. A one-time "What's New" dialog announces the
 deny-by-default change to existing users (`WhatsNewDialog`).
 
-**Dependency.** `androidx.webkit` (1.16.0) is added for `ProxyController`
-only: current stable, Apache-2.0, on Google's Maven (F-Droid
+**Renderer exit.** `WebViewJsRunner`, `PebbleWebview` and the watchapp
+settings page each handle `onRenderProcessGone`; left unhandled, a WebView
+renderer's exit ends the app process (source cited at `WebViewJsRunner`'s
+override). The runner does not restart a PebbleKit JS session whose
+renderer exits (`KNOWN_ISSUES.md`), `PebbleWebview` shows a message in
+place of the page, and the settings page closes with a message.
+
+**Dependency.** `androidx.webkit` (1.16.0) is added for `ProxyController`,
+and the runner also logs its multi-process query at session start: current
+stable, Apache-2.0, on Google's Maven (F-Droid
 deliverable), no known advisories, non-deprecated API surface.
 
 ## PebbleKit exposure toggles

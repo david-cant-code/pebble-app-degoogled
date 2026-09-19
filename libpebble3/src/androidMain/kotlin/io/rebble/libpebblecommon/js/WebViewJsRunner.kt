@@ -11,6 +11,7 @@ import android.webkit.GeolocationPermissions
 import android.webkit.JsPromptResult
 import android.webkit.JsResult
 import android.webkit.PermissionRequest
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -20,9 +21,11 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.annotation.VisibleForTesting
 import androidx.core.net.toUri
 import androidx.webkit.ProxyConfig
 import androidx.webkit.ProxyController
+import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import co.touchlab.kermit.Logger
 import io.rebble.libpebblecommon.NotificationConfigFlow
@@ -35,6 +38,7 @@ import io.rebble.libpebblecommon.io.rebble.libpebblecommon.js.WebViewGeolocation
 import io.rebble.libpebblecommon.io.rebble.libpebblecommon.js.WebViewJSLocalStorageInterface
 import io.rebble.libpebblecommon.locker.WatchappPermissionResolver
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.PbwAppInfo
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -99,6 +103,16 @@ class WebViewJsRunner(
     }
 
     private var webView: WebView? = null
+
+    // Set once the renderer process has exited. The session then stays dead until the
+    // lifecycle stops it; it does not restart itself, so a script that ends its renderer
+    // on every start cannot loop.
+    @Volatile
+    internal var rendererGone = false
+        private set
+
+    // Main thread only. The stop() persist wait, parked so a renderer exit can release it.
+    private var persistWait: CancellableContinuation<Unit>? = null
 
     // The live-toggle collector launched in start(); stop() cancels it before any
     // proxy teardown so the two can never interleave on the process-global override.
@@ -171,6 +185,30 @@ class WebViewJsRunner(
                 return blockedResponse("Network access denied for this app")
             }
             return super.shouldInterceptRequest(view, request)
+        }
+
+        // Returning false ends the app process, and the view cannot be used again
+        // (android16-release, WebViewClient.java, onRenderProcessGone).
+        override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+            logger.w {
+                "Renderer gone for ${appInfo.longName} (${appInfo.uuid}): didCrash=${detail.didCrash()} " +
+                        "networkAllowed=$networkAllowed provider=${webViewProvider()}"
+            }
+            rendererGone = true
+            _readyState.value = false
+            releasePersistWait()
+            view.destroy()
+            synchronized(initializedLock) {
+                webView = null
+            }
+            return true
+        }
+    }
+
+    private fun releasePersistWait() {
+        persistWait?.let {
+            persistWait = null
+            if (it.isActive) it.resume(Unit)
         }
     }
 
@@ -320,7 +358,7 @@ class WebViewJsRunner(
             throw e
         }
         check(webView != null) { "WebView not initialized" }
-        logger.d { "WebView initialized (provider=${webViewProvider()})" }
+        logger.d { "WebView initialized (provider=${webViewProvider()}, multiProcess=${multiProcessState()})" }
 
         // Resolve the app's Network grant and put the enforcement layers in place
         // BEFORE any app page/script loads, so there is no window in which a denied
@@ -401,9 +439,25 @@ class WebViewJsRunner(
     private fun webViewProvider(): String = WebView.getCurrentWebViewPackage()
         ?.let { "${it.packageName} ${it.versionName}" } ?: "none"
 
+    // A single-process WebView has no separate renderer, so onRenderProcessGone cannot fire there.
+    private fun multiProcessState(): String =
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROCESS)) {
+            WebViewCompat.isMultiProcessEnabled().toString()
+        } else {
+            "unknown"
+        }
+
+    // Called on the main thread. With no WebView left nothing would resume the wait, so it is
+    // skipped; onRenderProcessGone also releases a wait that is already parked.
     private suspend fun persistLocalStorage() {
+        val view = webView
+        if (rendererGone || view == null) {
+            logger.d { "Skipping persistLocalStorage: no usable WebView" }
+            return
+        }
         suspendCancellableCoroutine { cont ->
-            webView?.evaluateJavascript("""
+            persistWait = cont
+            view.evaluateJavascript("""
                 (function() {
                     const data = {};
                     for (let i = 0; i < window.localStorage.length; i++) {
@@ -416,7 +470,7 @@ class WebViewJsRunner(
                 })();
                     """.trimIndent()
             ) {
-                cont.resume(Unit)
+                releasePersistWait()
             }
         }
     }
@@ -487,6 +541,11 @@ class WebViewJsRunner(
                     .toString()
             )
         }
+    }
+
+    @VisibleForTesting
+    internal suspend fun loadUrlForTest(url: String) = withContext(Dispatchers.Main) {
+        webView?.loadUrl(url)
     }
 
     override suspend fun loadAppJs(jsUrl: String) {

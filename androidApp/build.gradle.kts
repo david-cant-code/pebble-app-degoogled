@@ -181,6 +181,8 @@ dependencies {
     androidTestImplementation(libs.koin.android)
     androidTestImplementation(libs.coroutines)
     androidTestImplementation(libs.kotlin.test)
+    // RendererGoneAwareWebViewClient's supertype, which :util does not export.
+    androidTestImplementation(libs.webview)
     // The fork suites reach through the app into these modules directly
     // (watchModule seam checks, whisper STT lifecycle), and project deps of
     // :composeApp are not on the androidTest compile classpath transitively.

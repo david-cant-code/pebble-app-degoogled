@@ -15,11 +15,21 @@ import io.rebble.libpebblecommon.database.entity.LockerEntry
 import io.rebble.libpebblecommon.locker.WatchappPermissionResolver
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.PbwAppInfo
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.serialization.json.Json
 import org.junit.Test
+import kotlin.test.assertFalse
+import kotlin.time.Duration.Companion.seconds
+import kotlin.uuid.Uuid
 
 fun createJsRunner(
     libPebble: LibPebble,
@@ -94,5 +104,41 @@ class PKJSRunnerTestsAndroid: PKJSRunnerTests(::createJsRunner) {
     @Test
     override fun testLocalStorageEarlyExecution() {
         super.testLocalStorageEarlyExecution()
+    }
+
+    @Test
+    fun rendererExitLeavesAStoppableSessionWithNetworkGranted() = rendererExitCase(networkGranted = true)
+
+    @Test
+    fun rendererExitLeavesAStoppableSessionWithNetworkDenied() = rendererExitCase(networkGranted = false)
+
+    // chrome://crash is the platform's documented way to end the renderer in a test
+    // (android16-release, WebViewClient.java, onRenderProcessGone). Reaching the assertions at
+    // all shows the process outlived the exit.
+    @OptIn(DelicateCoroutinesApi::class)
+    private fun rendererExitCase(networkGranted: Boolean) = runBlocking {
+        val uuid = Uuid.random()
+        val runner = makeRunner("", uuid, networkGranted = networkGranted) as WebViewJsRunner
+        runner.start()
+        withTimeout(5.seconds) { runner.readyState.first { it } }
+        // stop() waits on the localStorage persist only once the restore has completed.
+        withTimeout(5.seconds) {
+            while (runner.evalWithResult("window.__localStorageShimmed === true;") != "true") delay(20)
+        }
+
+        runner.loadUrlForTest("chrome://crash")
+        withTimeout(10.seconds) {
+            while (!runner.rendererGone) delay(20)
+        }
+        assertFalse(runner.readyState.value)
+        runner.eval("window.test = true;")
+        // stop() runs its teardown NonCancellable, so a timeout around it could not fire.
+        val stopJob = GlobalScope.launch { runner.stop() }
+        withTimeout(10.seconds) { stopJob.join() }
+
+        val second = makeRunner("", uuid, networkGranted = networkGranted)
+        second.start()
+        withTimeout(5.seconds) { second.readyState.first { it } }
+        second.stop()
     }
 }

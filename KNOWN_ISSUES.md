@@ -309,6 +309,15 @@ warning when the feature is unavailable. This entry leaves the file if
 minSdk/WebView baseline guarantees `PROXY_OVERRIDE`, or if a WebView-level
 WebSocket intercept becomes available.
 
+## A watchapp whose WebView renderer exits stays stopped until relaunched
+
+**Status: accepted.**
+
+Gravel keeps running when a PebbleKit JS session's WebView renderer exits,
+and does not restart that session on its own; opening the app on the watch
+again starts a new one. `localStorage` values the script set by property
+assignment after its last `setItem` are lost in that case.
+
 ## Cleartext HTTP is blocked app-wide, breaking http-only watchapps
 
 **Status: deliberate; a guarded per-app opt-in may lift it later.**
