@@ -133,6 +133,11 @@ abstract class PKJSRunnerTests(
         val runner = makeRunner("", Uuid.random(), scope = scope)
         runBlocking {
             runner.start()
+            // start() returns before the startup page has loaded, and that load replaces the
+            // document an earlier eval wrote to.
+            withTimeout(5.seconds) {
+                runner.readyState.first { it }
+            }
             runner.eval("window.test = true;")
             val result = runner.evalWithResult("window.test;")
             when (result) {
