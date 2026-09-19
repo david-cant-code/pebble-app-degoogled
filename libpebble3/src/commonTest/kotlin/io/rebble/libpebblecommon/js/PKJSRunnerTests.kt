@@ -1,11 +1,16 @@
 package io.rebble.libpebblecommon.js
 
+import io.rebble.libpebblecommon.LibPebbleConfig
+import io.rebble.libpebblecommon.LibPebbleConfigFlow
+import io.rebble.libpebblecommon.WatchConfig
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDevice
 import io.rebble.libpebblecommon.connection.FakeAppMessages
 import io.rebble.libpebblecommon.connection.FakeLibPebble
 import io.rebble.libpebblecommon.connection.LibPebble
 import io.rebble.libpebblecommon.connection.fakeWatch
+import io.rebble.libpebblecommon.database.dao.FakeLockerAppPermissionDao
 import io.rebble.libpebblecommon.database.entity.LockerEntry
+import io.rebble.libpebblecommon.locker.WatchappPermissionResolver
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.PbwAppInfo
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.Resources
 import kotlinx.coroutines.CoroutineScope
@@ -13,7 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -42,7 +47,8 @@ abstract class PKJSRunnerTests(
         jsPath: Path,
         device: CompanionAppDevice,
         urlOpenRequests: Channel<String>,
-        logMessages: MutableSharedFlow<String>
+        logMessages: Channel<String>,
+        watchappPermissions: WatchappPermissionResolver,
     ) -> JsRunner
 ) {
     companion object {
@@ -75,19 +81,33 @@ abstract class PKJSRunnerTests(
         return jsPath
     }
 
-    private val logMessageFlow = MutableSharedFlow<String>().also {
+    private val logMessageChannel = Channel<String>(Channel.UNLIMITED).also {
         GlobalScope.launch {
-            it.collect { msg ->
+            for (msg in it) {
                 println("JSLOG: $msg")
             }
         }
     }
 
+    // A real resolver over a fake DAO: the app has no override row, so the global
+    // default alone decides its Network grant.
+    private fun permissionResolver(networkGranted: Boolean) = WatchappPermissionResolver(
+        FakeLockerAppPermissionDao(),
+        LibPebbleConfigFlow(
+            MutableStateFlow(
+                LibPebbleConfig(
+                    watchConfig = WatchConfig(watchappDefaultNetworkAllowed = networkGranted),
+                ),
+            ),
+        ),
+    )
+
     private fun makeRunner(
         js: String,
         uuid: Uuid,
         scope: CoroutineScope = CoroutineScope(Dispatchers.Default),
-        appMessages: FakeAppMessages = FakeAppMessages()
+        appMessages: FakeAppMessages = FakeAppMessages(),
+        networkGranted: Boolean = true,
     ): JsRunner {
         val libPebble = FakeLibPebble()
         val watch = fakeWatch(connected = true) as ConnectedPebbleDevice
@@ -103,7 +123,8 @@ abstract class PKJSRunnerTests(
                 appMessages
             ),
             Channel(Channel.UNLIMITED),
-            logMessageFlow,
+            logMessageChannel,
+            permissionResolver(networkGranted),
         )
     }
 

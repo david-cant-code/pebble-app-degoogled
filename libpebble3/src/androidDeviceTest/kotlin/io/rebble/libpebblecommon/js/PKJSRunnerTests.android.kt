@@ -2,16 +2,23 @@ package io.rebble.libpebblecommon.js
 
 import androidx.test.filters.MediumTest
 import androidx.test.platform.app.InstrumentationRegistry
+import io.rebble.libpebblecommon.LibPebbleConfig
+import io.rebble.libpebblecommon.NotificationConfigFlow
+import io.rebble.libpebblecommon.WatchConfigFlow
 import io.rebble.libpebblecommon.connection.AppContext
 import io.rebble.libpebblecommon.connection.LibPebble
 import io.rebble.libpebblecommon.connection.TokenProvider
 import io.rebble.libpebblecommon.database.dao.FakeLockerEntryDao
+import io.rebble.libpebblecommon.database.dao.FakeTimelinePinRealDao
+import io.rebble.libpebblecommon.database.dao.FakeTimelineReminderRealDao
 import io.rebble.libpebblecommon.database.entity.LockerEntry
+import io.rebble.libpebblecommon.locker.WatchappPermissionResolver
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.PbwAppInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.io.files.Path
+import kotlinx.serialization.json.Json
 import org.junit.Test
 
 fun createJsRunner(
@@ -22,9 +29,20 @@ fun createJsRunner(
     jsPath: Path,
     device: CompanionAppDevice,
     urlOpenRequests: Channel<String>,
-    logMessages: MutableSharedFlow<String>
+    logMessages: Channel<String>,
+    watchappPermissions: WatchappPermissionResolver,
 ): JsRunner {
     val context = InstrumentationRegistry.getInstrumentation().context
+    val configFlow = MutableStateFlow(LibPebbleConfig())
+    val watchConfigFlow = WatchConfigFlow(configFlow)
+    // Remote timeline emulation is off in the default config, so the emulator's DAOs
+    // are never reached; HttpInterceptorManager requires the concrete type.
+    val emulator = RemoteTimelineEmulator(
+        watchConfigFlow,
+        Json,
+        FakeTimelinePinRealDao(),
+        FakeTimelineReminderRealDao(),
+    )
     return WebViewJsRunner(
         appContext = AppContext(context),
         libPebble = libPebble,
@@ -34,7 +52,8 @@ fun createJsRunner(
                     return null
                 }
             },
-            lockerEntryDao = FakeLockerEntryDao()
+            lockerEntryDao = FakeLockerEntryDao(),
+            watchConfigFlow = watchConfigFlow,
         ),
         device = device,
         appInfo = appInfo,
@@ -42,7 +61,11 @@ fun createJsRunner(
         jsPath = jsPath,
         urlOpenRequests = urlOpenRequests,
         logMessages = logMessages,
-        scope = scope
+        scope = scope,
+        remoteTimelineEmulator = emulator,
+        httpInterceptorManager = HttpInterceptorManager(emulator, InjectedPKJSHttpInterceptors(emptyList())),
+        notificationConfigFlow = NotificationConfigFlow(configFlow),
+        watchappPermissions = watchappPermissions,
     )
 }
 
