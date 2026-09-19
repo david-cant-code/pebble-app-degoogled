@@ -4,10 +4,10 @@ import kotlin.test.Test
 import kotlin.test.assertTrue
 
 /**
- * Source sentinel for the two PebbleKit toggle call sites in the upstream-owned
+ * Source sentinel for Gravel's call sites in the upstream-owned
  * `CompanionAppLifecycleManager`, which no unit test can construct (Room and WebView
- * dependencies): the session gate in `createCompanionApps` and the mid-session watcher launch in
- * `handleNewRunningApp`. A sync merge that resolves either to upstream's text removes the call,
+ * dependencies): the PebbleKit toggle session gate in `createCompanionApps`, and the PebbleKit
+ * toggle and Network grant watcher launches in `handleNewRunningApp`. A sync merge that resolves either to upstream's text removes the call,
  * which the called functions' own tests cannot notice. These checks match text only: they cover
  * the gate call, the snapshot the session and the watcher's baseline are built from and the
  * restart callback, not the session generation the watcher is given, and a commented-out copy
@@ -50,6 +50,26 @@ class CompanionSessionGateSentinelTest {
         assertTrue(
             Regex("""requestRestart\s*=\s*sessionCoordinator\s*::\s*requestRestart""").containsMatchIn(source),
             "the toggle watcher no longer asks the session coordinator for the restart",
+        )
+    }
+
+    @Test
+    fun aPkjsAppsSessionLaunchesTheNetworkGrantWatcher() {
+        val launch = Regex(
+            """if\s*\(\s*pbw\s*\.\s*hasPKJS\s*\)\s*\{\s*activeAppScope\s*\.\s*launchNetworkGrantWatcher\(""",
+        )
+        assertTrue(
+            launch.containsMatchIn(source),
+            "handleNewRunningApp no longer launches the Network grant watcher on the session scope " +
+                "for an app with a PebbleKit JS side",
+        )
+        assertTrue(
+            Regex("""requestRestart\s*=\s*sessionCoordinator\s*::\s*requestRestart""").findAll(source).count() == 2,
+            "the Network grant watcher no longer asks the session coordinator for the restart",
+        )
+        assertTrue(
+            !source.contains("denyToAllowTransitions"),
+            "upstream sync brought back the one-direction restart",
         )
     }
 

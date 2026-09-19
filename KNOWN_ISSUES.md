@@ -318,6 +318,15 @@ and does not restart that session on its own; opening the app on the watch
 again starts a new one. `localStorage` values the script set by property
 assignment after its last `setItem` are lost in that case.
 
+## Changing the Network permission restarts the watchapp's phone-side script
+
+**Status: deliberate.**
+
+A change to a watchapp's Network permission, in either direction, stops its
+PebbleKit JS session and starts a new one. Whether a connection opened
+while Network was on is cut in the moment before that restart completes has
+not been measured.
+
 ## Cleartext HTTP is blocked app-wide, breaking http-only watchapps
 
 **Status: deliberate; a guarded per-app opt-in may lift it later.**

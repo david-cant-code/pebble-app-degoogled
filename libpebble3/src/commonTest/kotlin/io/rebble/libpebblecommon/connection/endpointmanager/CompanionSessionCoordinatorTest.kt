@@ -204,16 +204,37 @@ class CompanionSessionCoordinatorTest {
     }
 
     @Test
-    fun denyToAllowEmitsOnlyOnThatTransition() = runTest {
-        assertEquals(
-            0,
-            flowOf(true, true, false, false).denyToAllowTransitions().toList().size,
-            "allowed at load or revoked mid-session must not restart",
+    fun grantChangesEmitsOncePerFlipInEitherDirection() = runTest {
+        assertEquals(0, flowOf(true).grantChanges().toList().size, "the initial value emitted")
+        assertEquals(0, flowOf(false, false).grantChanges().toList().size, "a repeated value emitted")
+        assertEquals(1, flowOf(true, true, false, false).grantChanges().toList().size, "a revocation must emit once")
+        assertEquals(3, flowOf(false, true, true, false, true).grantChanges().toList().size, "each flip must emit once")
+    }
+
+    @Test
+    fun theNetworkGrantWatcherRequestsARestartOfItsSessionOnEachFlip() = runTest {
+        val grant = MutableStateFlow(false)
+        val requests = mutableListOf<Pair<Uuid, Long>>()
+        val watcher = launchNetworkGrantWatcher(
+            grant = grant,
+            app = appA,
+            sessionGeneration = 3L,
+            requestRestart = { uuid, generation -> requests += uuid to generation },
         )
-        assertEquals(
-            2,
-            flowOf(false, true, true, false, true).denyToAllowTransitions().toList().size,
-            "each denied-to-allowed flip restarts exactly once",
-        )
+        runCurrent()
+        assertEquals(emptyList(), requests, "the grant the session started with requested a restart")
+
+        grant.value = true
+        runCurrent()
+        assertEquals(listOf(appA to 3L), requests, "deny to allow did not request a restart")
+
+        grant.value = false
+        runCurrent()
+        assertEquals(listOf(appA to 3L, appA to 3L), requests, "allow to deny did not request a restart")
+
+        watcher.cancel()
+        grant.value = true
+        runCurrent()
+        assertEquals(2, requests.size, "a cancelled watcher requested a restart")
     }
 }

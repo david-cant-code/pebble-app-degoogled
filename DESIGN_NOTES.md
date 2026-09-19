@@ -175,12 +175,11 @@ socket type):
    `EventSource`/`sendBeacon` in failing guards when the app loads while
    denied, gated on a synchronous `_Pebble.isNetworkAllowed()` bridge
    call. The guards re-read the live grant on every use and restore the
-   original entry points the moment access is granted, so granting a
-   running app takes effect without a session restart (the page loads
-   only once per session, so a load-time-only stub would freeze the deny
-   until the app restarts). They do not reinstall on a later revoke; the
-   native layers enforce that direction live. Best-effort (same-realm JS
-   a hostile bundle could try to work around), so it never stands alone.
+   original entry points once access is granted; they do not reinstall
+   on a later revoke. A grant change also requests the session restart
+   described below, which loads the page again. Best-effort (same-realm
+   JS a hostile bundle could try to work around), so it never stands
+   alone.
 3. `ProxyController` (androidx.webkit) sets a process-wide WebView proxy
    override that black-holes all egress (every scheme, including ws/wss)
    to an unroutable address while a network-denied app runs, and clears it
@@ -197,13 +196,13 @@ socket type):
    nothing legitimate needs the network while it is set. Requires the
    `PROXY_OVERRIDE` feature; the degraded case is in `KNOWN_ISSUES.md`.
 
-A deny-to-allow flip while the app is running also restarts its PKJS
-session (`CompanionAppLifecycleManager` funnels the restart through the
-same serially processed stream as watch-side app switches): an app that
-fetches only at launch never touches the network again after its first
-attempt fails, so without the restart a mid-session grant would take
-visible effect only at the next app switch. Allow-to-deny needs no
-restart; the enforcement layers apply it live.
+A change of the app's Network grant while it is running, in either
+direction, also restarts its PKJS session (`launchNetworkGrantWatcher`;
+`CompanionAppLifecycleManager` funnels the restart through the same
+serially processed stream as watch-side app switches). What a session
+sets up for the grant is fixed when it starts, and an app that fetches
+only at launch never touches the network again after its first attempt
+fails.
 
 The phone-side interceptor path (`PrivatePKJSInterface.onIntercepted`,
 which the weather interceptors use to fetch on the app's behalf) is gated
