@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Without it the platform refuses inet sockets itself, and the test's unfiltered
+         baseline could not create one. Test APK only. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

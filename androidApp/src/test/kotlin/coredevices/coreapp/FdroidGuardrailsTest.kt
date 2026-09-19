@@ -267,6 +267,26 @@ class FdroidGuardrailsTest {
     }
 
     /**
+     * The F-Droid recipe provisions one NDK and one CMake for the whole build (recipe contract
+     * in `DESIGN_NOTES.md`), so every module that names either has to name the same value; a
+     * bump applied to one module alone fails configuration there for the other.
+     */
+    @Test
+    fun everyNativeModulePinsTheSameNdkAndCmake() {
+        val ndk = Regex("""\bndkVersion\s*=\s*"([^"]+)"""")
+        val cmake = Regex("""\bcmake\s*\{[^}]*?\bversion\s*=\s*"([^"]+)"""")
+        val pins = scannedGradleFiles().associateWith { path ->
+            val code = read(path).readLines().filterNot { it.trimStart().startsWith("//") }.joinToString("\n")
+            ndk.find(code)?.groupValues?.get(1) to cmake.find(code)?.groupValues?.get(1)
+        }
+        val ndkPins = pins.mapNotNull { (path, pin) -> pin.first?.let { path to it } }
+        val cmakePins = pins.mapNotNull { (path, pin) -> pin.second?.let { path to it } }
+        assertTrue(ndkPins.size >= 2 && cmakePins.size >= 2, "the matcher no longer finds both native modules: $ndkPins $cmakePins")
+        assertTrue(ndkPins.map { it.second }.distinct().size == 1, "ndkVersion differs between modules: $ndkPins")
+        assertTrue(cmakePins.map { it.second }.distinct().size == 1, "the CMake version differs between modules: $cmakePins")
+    }
+
+    /**
      * `androidApp/version.properties` is what the recipe's UpdateCheckData
      * regex reads as the versionCode of a tag, so it is held to exactly one
      * `versionCode=<digits>` line: no comment, no second key, nothing the

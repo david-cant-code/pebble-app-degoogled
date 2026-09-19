@@ -716,10 +716,11 @@ What the tree guarantees, and how it is pinned:
   graphics-path) next to the whisper engine built from source. What the
   fork removed was prebuilt native code with no public source (the Cactus
   engine, the Ring satellite AAR), which the policy does reject.
-- The engine toolchain is pinned in `whisper-native/build.gradle.kts`
-  (`ndkVersion` 28.2.13676358, that is NDK r28c, and CMake 3.22.1), so a
-  build is the same on every machine and the recipe has exact values to
-  provision.
+- The native toolchain is pinned in `whisper-native/build.gradle.kts` and
+  `socketfilter/build.gradle.kts` (`ndkVersion` 28.2.13676358, that is NDK
+  r28c, and CMake 3.22.1), so a build is the same on every machine and the
+  recipe has exact values to provision. `FdroidGuardrailsTest` fails when
+  the two modules name different values.
 - `versionName` is `git describe --tags --first-parent HEAD` and
   `versionCode` the commit count, both functions of the built commit
   (`androidApp/build.gradle.kts`), so a tag checkout reports exactly the
