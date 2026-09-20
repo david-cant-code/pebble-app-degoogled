@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.net.http.SslError
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.Message
 import android.view.View
 import android.webkit.GeolocationPermissions
@@ -28,6 +30,10 @@ import androidx.webkit.ProxyController
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.pkjs.DENY_HOST_PAGE_URL
+import com.anopticlabs.gravel.pkjs.PkjsRequestPlan
+import com.anopticlabs.gravel.pkjs.planPkjsRequest
+import com.anopticlabs.gravel.pkjs.toWebResourceResponse
 import io.rebble.libpebblecommon.NotificationConfigFlow
 import io.rebble.libpebblecommon.connection.AppContext
 import io.rebble.libpebblecommon.connection.LibPebble
@@ -53,6 +59,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.files.Path
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
 import kotlin.uuid.Uuid
 import kotlinx.serialization.json.Json
@@ -92,6 +99,13 @@ class WebViewJsRunner(
     @Volatile
     private var networkAllowed: Boolean = false
 
+    // Fixed in start() from the same grant read that seeds networkAllowed, and never changed:
+    // a denied session runs the watchapp's script in a sandboxed frame under the host page
+    // (DESIGN_NOTES.md, watchapp network gate). A grant change restarts the session.
+    @Volatile
+    internal var denyConstruction: Boolean = false
+        private set
+
     // Read by startup.js (via the _Pebble bridge) to install the JS-shim layer.
     fun isNetworkAllowedForJs(): Boolean = networkAllowed
     companion object {
@@ -99,6 +113,20 @@ class WebViewJsRunner(
         const val PRIVATE_API_NAMESPACE = "_$API_NAMESPACE"
         const val STARTUP_URL = "file:///android_asset/webview_startup.html"
         private val PAGE_LOAD_TIMEOUT = 15.seconds
+        private val FRAME_EVAL_TIMEOUT = 10.seconds
+        private const val DENY_VIEW_WIDTH_PX = 320
+        private const val DENY_VIEW_HEIGHT_PX = 240
+        private const val DENY_HOST_PAGE_ASSET = "webview_deny_host.html"
+        private const val DENY_FRAME_BOOTSTRAP_ASSET = "webview_deny_frame_bootstrap.js"
+        private const val STARTUP_SCRIPT_ASSET = "startup.js"
+        private const val LOAD_APP_SCRIPT_IN_FRAME = """
+            (function () {
+                var script = document.createElement("script");
+                script.textContent = _Pebble.readAppScript();
+                document.head.appendChild(script);
+                _Pebble.signalAppScriptLoadedByBootstrap();
+            })();
+        """
         private val logger = Logger.withTag(WebViewJsRunner::class.simpleName!!)
     }
 
@@ -110,6 +138,19 @@ class WebViewJsRunner(
     @Volatile
     internal var rendererGone = false
         private set
+
+    // Document-commit guard. Set once the frame of a deny session has loaded a second
+    // document; the session is then dead the same way as after a renderer exit.
+    @Volatile
+    internal var frameRecommitted = false
+        private set
+    private val frameDocumentCounts = ConcurrentHashMap<FrameDocumentSignal, Int>()
+
+    @Volatile
+    internal var refusedNavigationCount = 0
+        private set
+
+    private val frameEvalResults = ConcurrentHashMap<String, CompletableDeferred<String>>()
 
     // Main thread only. The stop() persist wait, parked so a renderer exit can release it.
     private var persistWait: CancellableContinuation<Unit>? = null
@@ -123,6 +164,8 @@ class WebViewJsRunner(
     private val publicJsInterface = WebViewPKJSInterface(this, device, context, libPebble, jsTokenUtil)
     private val privateJsInterface = WebViewPrivatePKJSInterface(this, device, scope, _outgoingAppMessages, logMessages, jsTokenUtil, remoteTimelineEmulator, httpInterceptorManager, notificationConfigFlow, watchappPermissions)
     private val localStorageInterface = WebViewJSLocalStorageInterface(appInfo.uuid, appContext) {
+        // The frame's localStorage stand-in computes its own length.
+        if (denyConstruction) return@WebViewJSLocalStorageInterface
         runBlocking(Dispatchers.Main) {
             webView?.evaluateJavascript(
                 it,
@@ -140,7 +183,7 @@ class WebViewJsRunner(
 
     private val webViewClient = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-            return true
+            return refusePageNavigation(request)
         }
 
         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -172,19 +215,26 @@ class WebViewJsRunner(
 
         override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
             val url = request?.url
-            if (isForbidden(url)) {
-                return blockedResponse("Forbidden")
-            }
             // Fork network gate (layer 1, deterministic for http/https). When the app's
-            // Network permission is denied, refuse every non-file request so no XHR,
-            // fetch, page subresource or navigation reaches the network. WebSocket
-            // handshakes do NOT pass through this callback (a documented WebView
-            // limitation); the proxy override layer is what covers those.
-            if (!networkAllowed && url != null && url.scheme?.uppercase() != "FILE") {
-                logger.d { "Network denied; blocking ${url.scheme} request to ${url.host}" }
-                return blockedResponse("Network access denied for this app")
+            // Network permission is denied, refuse every request so no XHR, fetch, page
+            // subresource or navigation reaches the network. WebSocket handshakes do NOT
+            // pass through this callback (a documented WebView limitation); the proxy
+            // override layer is what covers those.
+            val plan = planPkjsRequest(
+                denyConstruction = denyConstruction,
+                networkAllowed = networkAllowed,
+                scheme = url?.scheme,
+                host = url?.host,
+                path = url?.path,
+                isForMainFrame = request?.isForMainFrame == true,
+                appJsPath = jsPath.toString(),
+            )
+            if (plan is PkjsRequestPlan.Block) {
+                logger.d { "Blocking ${url?.scheme} request to ${url?.host ?: url?.path}: ${plan.reason}" }
             }
-            return super.shouldInterceptRequest(view, request)
+            return plan.toWebResourceResponse(denyConstruction) {
+                context.assets.open(DENY_HOST_PAGE_ASSET)
+            } ?: super.shouldInterceptRequest(view, request)
         }
 
         // Returning false ends the app process, and the view cannot be used again
@@ -195,12 +245,7 @@ class WebViewJsRunner(
                         "networkAllowed=$networkAllowed provider=${webViewProvider()}"
             }
             rendererGone = true
-            _readyState.value = false
-            releasePersistWait()
-            view.destroy()
-            synchronized(initializedLock) {
-                webView = null
-            }
+            endSession(view)
             return true
         }
     }
@@ -212,23 +257,79 @@ class WebViewJsRunner(
         }
     }
 
-    private fun blockedResponse(reason: String): WebResourceResponse =
-        object : WebResourceResponse("text/plain", "utf-8", null) {
-            override fun getStatusCode(): Int = 403
-            override fun getReasonPhrase(): String = reason
+    // Main thread only. The dead state: not ready, no WebView, until the lifecycle stops the session.
+    private fun endSession(view: WebView) {
+        _readyState.value = false
+        releasePersistWait()
+        view.destroy()
+        synchronized(initializedLock) {
+            webView = null
+        }
+    }
+
+    // Navigation lock (first holder; the document-commit guard is the deterministic one).
+    // The watchapp frame must keep the document it was created with, which the network-deny
+    // frame construction relies on (DESIGN_NOTES.md, watchapp network gate). Returning true
+    // aborts a navigation the app is consulted for; WebView does not consult the app for every
+    // subframe navigation (Chromium M153, aw_content_browser_client.cc,
+    // AwContentBrowserClient::ShouldOverrideUrlLoading), which is why the commit guard exists.
+    // Do not return false for any request, and do not drop this override in an upstream sync.
+    private fun refusePageNavigation(request: WebResourceRequest?): Boolean {
+        refusedNavigationCount++
+        logger.d {
+            "Refused navigation to ${request?.url?.scheme}://${request?.url?.host} " +
+                    "mainFrame=${request?.isForMainFrame}"
+        }
+        return true
+    }
+
+    // Document-commit guard (the deterministic holder of the navigation lock's requirement).
+    // Each signal is expected once per session: the frame's bootstrap runs once, and the host
+    // page sees one load event on the frame. A second of either means the frame loaded another
+    // document, and the session ends. Called on the JavaScript bridge thread; false tells the
+    // bootstrap to load nothing.
+    internal fun onFrameDocument(signal: FrameDocumentSignal): Boolean {
+        if (!denyConstruction) return false
+        val count = frameDocumentCounts.merge(signal, 1, Int::plus) ?: 1
+        if (count == 1 && !frameRecommitted) return true
+        logger.w { "Frame of ${appInfo.longName} (${appInfo.uuid}) loaded a second document ($signal); ending the session" }
+        frameRecommitted = true
+        _readyState.value = false
+        Handler(Looper.getMainLooper()).post { webView?.let { endSession(it) } }
+        return false
+    }
+
+    private fun readAsset(name: String): String =
+        context.assets.open(name).bufferedReader().use { it.readText() }
+
+    private fun frameMayReadScripts() = denyConstruction && !frameRecommitted
+
+    internal fun readFrameBootstrap(): String =
+        if (frameMayReadScripts()) readAsset(DENY_FRAME_BOOTSTRAP_ASSET) else ""
+
+    internal fun readStartupScript(): String =
+        if (frameMayReadScripts()) readAsset(STARTUP_SCRIPT_ASSET) else ""
+
+    // The sourceURL line keeps the file name in stack traces, which console logging reads.
+    internal fun readAppScript(): String =
+        if (frameMayReadScripts()) {
+            val file = File(jsPath.toString())
+            file.readText() + "\n//# sourceURL=${file.name}"
+        } else {
+            ""
         }
 
-    private fun isForbidden(url: Uri?): Boolean {
-        return if (url == null) {
-            logger.w { "Blocking null URL" }
-            true
-        } else if (url.scheme?.uppercase() != "FILE") {
-            false
-        } else if (url.path?.uppercase() == jsPath.toString().uppercase()) {
-            false
+    internal fun onFrameEvalResult(id: String, json: String) {
+        frameEvalResults.remove(id)?.complete(json)
+    }
+
+    // Main thread only. In a deny session the top document parses only this fixed call; the
+    // payload is a string to it, and the host page forwards it to the frame.
+    private fun evaluateInPage(js: String) {
+        if (denyConstruction) {
+            webView?.evaluateJavascript("__pkjsHost.run(${Json.encodeToString(js)})", null)
         } else {
-            logger.w { "Blocking access to file: ${url.path}" }
-            true
+            webView?.evaluateJavascript(js, null)
         }
     }
 
@@ -367,6 +468,26 @@ class WebViewJsRunner(
         val uuid = Uuid.parse(appInfo.uuid)
         networkAllowed = watchappPermissions.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network)
         applyNetworkProxy(networkAllowed)
+        denyConstruction = !networkAllowed
+        if (denyConstruction) {
+            withContext(Dispatchers.Main) {
+                // Nothing in the deny construction uses a file URL.
+                webView?.settings?.apply {
+                    allowFileAccess = false
+                    allowFileAccessFromFileURLs = false
+                    allowUniversalAccessFromFileURLs = false
+                }
+                // The view is never attached to a window. Until it has a size that contains
+                // the frame, timers in the frame fire once a second.
+                webView?.apply {
+                    measure(
+                        View.MeasureSpec.makeMeasureSpec(DENY_VIEW_WIDTH_PX, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(DENY_VIEW_HEIGHT_PX, View.MeasureSpec.EXACTLY),
+                    )
+                    layout(0, 0, DENY_VIEW_WIDTH_PX, DENY_VIEW_HEIGHT_PX)
+                }
+            }
+        }
         // Track live toggles: a change in the resolved grant (per-app override or the
         // global default) re-caches the value and re-applies/clears the proxy while the
         // app keeps running. The job is kept so stop() can cancel it FIRST, before it
@@ -496,7 +617,10 @@ class WebViewJsRunner(
                 // Skip if restoreLocalStorage() never completed: window.localStorage is
                 // still empty and persisting it would clear the user's stored settings
                 // (saveState() does a clear() first). MOB-6881.
-                if (restoreCompleted) {
+                // A deny session writes every change through as it happens and has no copy step.
+                if (denyConstruction) {
+                    logger.d { "Skipping persistLocalStorage: deny session" }
+                } else if (restoreCompleted) {
                     persistLocalStorage()
                 } else {
                     logger.d { "Skipping persistLocalStorage: restore did not complete" }
@@ -534,6 +658,10 @@ class WebViewJsRunner(
     private suspend fun loadApp(url: String) {
         check(webView != null) { "WebView not initialized" }
         withContext(Dispatchers.Main) {
+            if (denyConstruction) {
+                webView?.loadUrl(DENY_HOST_PAGE_URL)
+                return@withContext
+            }
             webView?.loadUrl(
                 STARTUP_URL.toUri().buildUpon()
                     .appendQueryParameter("params", "{\"loadUrl\": \"$url\"}")
@@ -544,16 +672,37 @@ class WebViewJsRunner(
     }
 
     @VisibleForTesting
+    internal suspend fun evalInTopDocumentForTest(js: String): String = withContext(Dispatchers.Main) {
+        suspendCancellableCoroutine { cont ->
+            webView?.evaluateJavascript(js) { cont.resume(it) }
+                ?: cont.resumeWithException(IllegalStateException("WebView not initialized"))
+        }
+    }
+
+    @VisibleForTesting
+    internal suspend fun webViewSettingsForTest(): WebSettings? = withContext(Dispatchers.Main) {
+        webView?.settings
+    }
+
+    @VisibleForTesting
     internal suspend fun loadUrlForTest(url: String) = withContext(Dispatchers.Main) {
         webView?.loadUrl(url)
     }
 
     override suspend fun loadAppJs(jsUrl: String) {
         webView?.let { webView ->
-            restoreLocalStorage()
+            if (!denyConstruction) restoreLocalStorage()
 
             if (jsUrl.isBlank() || !jsUrl.endsWith(".js")) {
                 logger.e { "loadUrl passed to loadAppJs empty or invalid" }
+                return
+            }
+
+            if (denyConstruction) {
+                withContext(Dispatchers.Main) {
+                    evaluateInPage(LOAD_APP_SCRIPT_IN_FRAME)
+                    webView.evaluateJavascript("document.title = ${Json.encodeToString("PKJS: ${appInfo.longName}")};", null)
+                }
                 return
             }
 
@@ -590,21 +739,21 @@ class WebViewJsRunner(
         }.toString()
         withContext(Dispatchers.Main) {
             // No Json.encodeToString here, we want the raw object {} in the JS call
-            webView?.evaluateJavascript("window.signalInterceptResponse($jsonString)", null)
+            evaluateInPage("window.signalInterceptResponse($jsonString)")
         }
     }
 
     override suspend fun signalTimelineToken(callId: String, token: String) {
         val tokenJson = Json.encodeToString(mapOf("userToken" to token, "callId" to callId))
         withContext(Dispatchers.Main) {
-            webView?.evaluateJavascript("window.signalTimelineTokenSuccess(${Json.encodeToString(tokenJson)})", null)
+            evaluateInPage("window.signalTimelineTokenSuccess(${Json.encodeToString(tokenJson)})")
         }
     }
 
     override suspend fun signalTimelineTokenFail(callId: String) {
         val tokenJson = Json.encodeToString(mapOf("userToken" to null, "callId" to callId))
         withContext(Dispatchers.Main) {
-            webView?.evaluateJavascript("window.signalTimelineTokenFailure(${Json.encodeToString(tokenJson)})", null)
+            evaluateInPage("window.signalTimelineTokenFailure(${Json.encodeToString(tokenJson)})")
         }
     }
 
@@ -612,15 +761,17 @@ class WebViewJsRunner(
         val readyDeviceIds = listOf(device.identifier.asString)
         val readyJson = Json.encodeToString(readyDeviceIds)
         withContext(Dispatchers.Main) {
-            webView?.evaluateJavascript("window.signalReady(${readyJson})", null)
+            evaluateInPage("window.signalReady(${readyJson})")
+            // Checked on the main thread, where endSession clears the view: a dead session
+            // never becomes ready.
+            if (webView != null) _readyState.value = true
         }
-        _readyState.value = true
     }
 
     override suspend fun signalNewAppMessageData(data: String?): Boolean {
         readyState.first { it }
         withContext(Dispatchers.Main) {
-            webView?.evaluateJavascript("window.signalNewAppMessageData(${data?.let { Json.encodeToString(data) } ?: "null"})", null)
+            evaluateInPage("window.signalNewAppMessageData(${data?.let { Json.encodeToString(data) } ?: "null"})")
         }
         return true
     }
@@ -628,25 +779,27 @@ class WebViewJsRunner(
     override suspend fun signalShowConfiguration() {
         readyState.first { it }
         withContext(Dispatchers.Main) {
-            webView?.evaluateJavascript("window.signalShowConfiguration()", null)
+            evaluateInPage("window.signalShowConfiguration()")
         }
     }
 
     override suspend fun signalWebviewClosed(data: String?) {
         withContext(Dispatchers.Main) {
-            webView?.evaluateJavascript("window.signalWebviewClosedEvent(${Json.encodeToString(data)})", null)
+            evaluateInPage("window.signalWebviewClosedEvent(${Json.encodeToString(data)})")
         }
     }
 
     override suspend fun eval(js: String) {
         withContext(Dispatchers.Main) {
-            webView?.evaluateJavascript(js, null) ?: run {
+            if (webView == null) {
                 logger.e { "WebView not initialized, cannot evaluate JS" }
             }
+            evaluateInPage(js)
         }
     }
 
     override suspend fun evalWithResult(js: String): Any? {
+        if (denyConstruction) return evalInFrameWithResult(js)
         return withContext(Dispatchers.Main) {
             return@withContext suspendCancellableCoroutine { cont ->
                 webView?.evaluateJavascript(js) { result ->
@@ -656,7 +809,40 @@ class WebViewJsRunner(
         }
     }
 
+    // The frame cannot answer evaluateJavascript's callback, so the result comes back over the
+    // bridge as JSON, in the same form the callback gives.
+    private suspend fun evalInFrameWithResult(js: String): String {
+        val id = Uuid.random().toString()
+        val result = CompletableDeferred<String>()
+        frameEvalResults[id] = result
+        try {
+            withContext(Dispatchers.Main) {
+                check(webView != null) { "WebView not initialized" }
+                evaluateInPage(
+                    """
+                    (function () {
+                        var json = "null";
+                        try {
+                            var value = (0, eval)(${Json.encodeToString(js)});
+                            if (value !== undefined) json = JSON.stringify(value) || "null";
+                        } finally {
+                            _Pebble.onFrameEvalResult(${Json.encodeToString(id)}, json);
+                        }
+                    })();
+                    """.trimIndent()
+                )
+            }
+            return withTimeoutOrNull(FRAME_EVAL_TIMEOUT) { result.await() }
+                ?: error("No result from the frame within $FRAME_EVAL_TIMEOUT")
+        } finally {
+            frameEvalResults.remove(id)
+        }
+    }
+
     override fun debugForceGC() {
         // No-op on Android
     }
 }
+
+/** Which observer reported that the deny session's frame loaded a document. */
+internal enum class FrameDocumentSignal { Bootstrap, HostLoadEvent }

@@ -79,8 +79,7 @@ fun createJsRunner(
     )
 }
 
-@MediumTest
-class PKJSRunnerTestsAndroid: PKJSRunnerTests(::createJsRunner) {
+abstract class PKJSRunnerSharedTestsAndroid(networkGranted: Boolean): PKJSRunnerTests(::createJsRunner, networkGranted) {
     @Test
     override fun testJSExecution() {
         super.testJSExecution()
@@ -106,6 +105,14 @@ class PKJSRunnerTestsAndroid: PKJSRunnerTests(::createJsRunner) {
         super.testLocalStorageEarlyExecution()
     }
 
+}
+
+/** The shared runner tests in a network-denied session, which runs the app in the sandboxed frame. */
+@MediumTest
+class PKJSRunnerTestsAndroidNetworkDenied: PKJSRunnerSharedTestsAndroid(networkGranted = false)
+
+@MediumTest
+class PKJSRunnerTestsAndroid: PKJSRunnerSharedTestsAndroid(networkGranted = true) {
     @Test
     fun rendererExitLeavesAStoppableSessionWithNetworkGranted() = rendererExitCase(networkGranted = true)
 

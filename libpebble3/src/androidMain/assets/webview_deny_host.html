@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>PKJS</title>
+</head>
+<body>
+<script>
+    // Host page of a network-denied PebbleKit JS session (DESIGN_NOTES.md, watchapp network
+    // gate). It holds no watchapp script: text handed to __pkjsHost.run is forwarded to the
+    // frame as a string and never evaluated here.
+    (function () {
+        var frame = document.createElement("iframe");
+        // Exactly this token. The sandbox and srcdoc are in place before the frame is inserted.
+        frame.setAttribute("sandbox", "allow-scripts");
+        frame.srcdoc = "<!DOCTYPE html><html><head><script>" +
+            "(0, eval)(_Pebble.readFrameBootstrap())" +
+            "<\/script></head><body></body></html>";
+
+        var frameReady = false;
+        var pending = [];
+        function post(text) {
+            // An opaque-origin frame can only be addressed with "*".
+            frame.contentWindow.postMessage(text, "*");
+        }
+        window.addEventListener("message", function (event) {
+            if (frameReady || event.source !== frame.contentWindow || event.data !== "pkjs-frame-ready") return;
+            frameReady = true;
+            pending.forEach(post);
+            pending = [];
+        });
+        // Part of the document-commit guard: native counts the documents the frame loads.
+        frame.addEventListener("load", function () {
+            _Pebble.hostObservedFrameLoad();
+        });
+        window.__pkjsHost = {
+            run: function (text) {
+                if (frameReady) post(String(text)); else pending.push(String(text));
+            }
+        };
+        document.body.appendChild(frame);
+    })();
+</script>
+</body>
+</html>

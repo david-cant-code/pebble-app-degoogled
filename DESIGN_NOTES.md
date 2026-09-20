@@ -167,7 +167,8 @@ defence-in-depth rule, with at least one deterministic cover for every
 socket type):
 
 1. `WebViewJsRunner.shouldInterceptRequest` returns a 403 for every
-   non-`file://` request when the app is network-denied. Deterministic for
+   non-`file://` request when the app is network-denied (in a
+   denied-session page, below, for `file://` as well). Deterministic for
    http/https (XHR, fetch, subresources, navigations). WebSocket
    handshakes do not pass through this callback (a documented WebView
    limitation), which is why layer 3 exists.
@@ -240,6 +241,32 @@ whose default is "not active". When it is not active,
 `CompanionAppLifecycleManager.createCompanionApps` builds no PebbleKit JS
 session for an app whose Network grant is denied (`shouldRunPkjs`), and the
 grant watcher restarts the session once the grant changes.
+
+**Denied-session page.** A session that starts with the Network grant
+denied is built differently from a granted one (`denyConstruction`, fixed
+in `WebViewJsRunner.start`; the grant watcher above is what lets it be
+fixed). Its top document is a host page served by the runner's own
+interceptor at `https://pkjs.gravel.invalid/host.html`, the only URL the
+session is served (`planPkjsRequest`), and that response and every 403 of
+the session carry a `Connection-Allowlist` header with an empty allowlist
+and WebRTC blocked (source cited at the constant in `PkjsRequestPlan.kt`;
+WebView version caveat in `KNOWN_ISSUES.md`). The host page holds no
+watchapp script. It creates one `sandbox="allow-scripts"` `srcdoc` frame,
+and `startup.js` and the app's script run there, read as text through
+`_Pebble` bridge methods that take no argument. Native calls reach the
+frame as strings the host page forwards with `postMessage`
+(`evaluateInPage`), and `localStorage`, which a sandboxed frame lacks, is
+a stand-in that writes through to the same native store a granted session
+uses. File access is off in the session's WebView, and the view is given a
+laid-out size, without which the frame's timers fire once a second.
+The frame has to keep the document it was created with, and two controls
+hold that: the navigation lock (`refusePageNavigation`, which refuses every
+navigation the WebView consults the app for, in granted sessions too) and
+the document-commit guard (`onFrameDocument`), which ends the session,
+the same way a renderer exit does, when the frame's bootstrap runs a second
+time or the host page sees the frame load a second document.
+`PKJSDenyConstructionTest` covers the construction and both controls on a
+device; a granted session is built as before.
 
 **Renderer exit.** `WebViewJsRunner`, `PebbleWebview` and the watchapp
 settings page each handle `onRenderProcessGone`; left unhandled, a WebView

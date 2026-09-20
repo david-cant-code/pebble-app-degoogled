@@ -290,8 +290,8 @@ minSdk reaches 28.
 
 **Status: accepted; degrades safely and is rare in practice.**
 
-The watchapp network gate (see `DESIGN_NOTES.md`) enforces a denied app's
-network block in three layers. Two of them, the `shouldInterceptRequest`
+Of the layers the watchapp network gate puts under a denied app (see
+`DESIGN_NOTES.md`), three act on web requests. Two of them, the `shouldInterceptRequest`
 403 and the `startup.js` API stubs, always apply, but only the third, the
 `ProxyController` black-hole, deterministically covers WebSocket, because
 `ws`/`wss` handshakes never reach `shouldInterceptRequest` (a documented
@@ -358,6 +358,36 @@ A change to a watchapp's Network permission, in either direction, stops its
 PebbleKit JS session and starts a new one. Whether a connection opened
 while Network was on is cut in the moment before that restart completes has
 not been measured.
+
+## The WebRTC response-header layer needs WebView 152 or newer
+
+**Status: accepted; improves as WebView updates.**
+
+With Network off, Gravel serves the watchapp's page with a
+`Connection-Allowlist` header that allows no connections and switches
+WebRTC off for it. Android System WebView honors the header from version
+152, and Gravel cannot read back whether it is honored, so on older
+WebViews the UDP filter is the only layer under WebRTC and the header is
+never relied on alone.
+
+## With Network off, PebbleKit JS runs without cookies, IndexedDB or the Cache API
+
+**Status: deliberate.**
+
+With Network off, a watchapp's script runs in a sandboxed frame that has
+none of the browser's origin-bound storage. `localStorage` is provided by
+Gravel there and persists as before. If the script navigates or reloads
+its own frame, Gravel stops that session; opening the app on the watch
+again starts a new one.
+
+## Name lookups are not covered by the watchapp Network permission
+
+**Status: open.**
+
+The Network permission's layers act on connections, not on name lookups,
+which go through the system resolver. Whether a watchapp with Network off
+can cause a lookup has not been measured; measuring it comes first, then a
+decision.
 
 ## Cleartext HTTP is blocked app-wide, breaking http-only watchapps
 

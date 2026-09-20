@@ -49,7 +49,10 @@ abstract class PKJSRunnerTests(
         urlOpenRequests: Channel<String>,
         logMessages: Channel<String>,
         watchappPermissions: WatchappPermissionResolver,
-    ) -> JsRunner
+    ) -> JsRunner,
+    // The Network grant of a runner made without an explicit one. On Android it selects the
+    // page construction, so a subclass runs the shared tests once per construction.
+    private val networkGrantedByDefault: Boolean = true,
 ) {
     companion object {
         private val APPINFO = PbwAppInfo(
@@ -107,7 +110,8 @@ abstract class PKJSRunnerTests(
         uuid: Uuid,
         scope: CoroutineScope = CoroutineScope(Dispatchers.Default),
         appMessages: FakeAppMessages = FakeAppMessages(),
-        networkGranted: Boolean = true,
+        networkGranted: Boolean = networkGrantedByDefault,
+        urlOpenRequests: Channel<String> = Channel(Channel.UNLIMITED),
     ): JsRunner {
         val libPebble = FakeLibPebble()
         val watch = fakeWatch(connected = true) as ConnectedPebbleDevice
@@ -122,7 +126,7 @@ abstract class PKJSRunnerTests(
                 watch.watchInfo,
                 appMessages
             ),
-            Channel(Channel.UNLIMITED),
+            urlOpenRequests,
             logMessageChannel,
             permissionResolver(networkGranted),
         )

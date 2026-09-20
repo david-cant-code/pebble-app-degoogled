@@ -57,6 +57,36 @@ class WebViewPrivatePKJSInterface(
         }
     }
 
+    // Network-denied sessions only (DESIGN_NOTES.md, watchapp network gate): the frame gets
+    // every script as text through these. None takes an argument that names what is read.
+    @JavascriptInterface
+    fun readFrameBootstrap(): String = webViewJsRunner.readFrameBootstrap()
+
+    @JavascriptInterface
+    fun readStartupScript(): String = webViewJsRunner.readStartupScript()
+
+    @JavascriptInterface
+    fun readAppScript(): String = webViewJsRunner.readAppScript()
+
+    @JavascriptInterface
+    fun frameStartupScriptHasLoaded() {
+        scope.launch {
+            jsRunner.loadAppJs(jsRunner.jsPath.toString())
+        }
+    }
+
+    @JavascriptInterface
+    fun onFrameEvalResult(id: String, json: String) = webViewJsRunner.onFrameEvalResult(id, json)
+
+    // The document-commit guard's two signals; see WebViewJsRunner.onFrameDocument.
+    @JavascriptInterface
+    fun frameDocumentLoaded(): Boolean = webViewJsRunner.onFrameDocument(FrameDocumentSignal.Bootstrap)
+
+    @JavascriptInterface
+    fun hostObservedFrameLoad() {
+        webViewJsRunner.onFrameDocument(FrameDocumentSignal.HostLoadEvent)
+    }
+
     @JavascriptInterface
     override fun getTimelineTokenAsync(): String {
         return super.getTimelineTokenAsync()
