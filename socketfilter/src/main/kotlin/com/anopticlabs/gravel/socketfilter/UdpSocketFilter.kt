@@ -9,7 +9,10 @@ sealed interface InstallResult {
 
     data object AlreadyInstalled : InstallResult
 
-    /** The facility exists and the platform said no. [detail] is a signal, errno or thread id. */
+    /**
+     * The facility exists and the install did not complete. [detail] depends on the stage: a
+     * signal, an errno or a thread id, and 0 where the stage has none.
+     */
     data class Refused(val stage: RefusalStage, val detail: Int) : InstallResult
 
     /** This environment cannot carry the filter. */
@@ -91,7 +94,7 @@ object UdpSocketFilter {
     }
 
     // Mirrors pack() and the result enums in socket_filter.c.
-    private fun decode(packed: Long): InstallResult {
+    internal fun decode(packed: Long): InstallResult {
         val sub = ((packed shr 32) and 0xff).toInt()
         val detail = packed.toInt()
         return when ((packed shr 40).toInt()) {

@@ -89,8 +89,9 @@ static jlong pack(int kind, int sub, int detail) {
     return ((jlong)kind << 40) | ((jlong)sub << 32) | (jlong)(uint32_t)detail;
 }
 
-// ENOSYS: no seccomp system call. EINVAL: the kernel's stub for a build without filter mode
-// (linux v6.1, kernel/seccomp.c, seccomp_set_mode_filter).
+// ENOSYS: no seccomp system call. EINVAL: a kernel built without filter mode, or one that
+// rejects the call's flags or program (linux v6.1, kernel/seccomp.c, seccomp_set_mode_filter
+// and seccomp_prepare_filter). probe() and install_locked() pass the same flags and program.
 static jlong seccomp_error(int error) {
     if (error == ENOSYS || error == EINVAL) {
         return pack(KIND_UNSUPPORTED, REASON_KERNEL_LACKS_FILTER_MODE, error);
@@ -123,7 +124,8 @@ static bool exe_machine_matches(const char *path) {
 
 #ifndef NDEBUG
 // Debug builds only: lets a test make the probe child die of SIGSYS (1) or exit with
-// probe_test_exit_code (2) in place of the real calls.
+// probe_test_exit_code (2) in place of the real calls, or make the post-check see
+// probe_test_exit_code as its errno (3).
 static int probe_test_mode = 0;
 static int probe_test_exit_code = 0;
 
@@ -167,7 +169,7 @@ static bool probe(jlong *failure) {
         if (probe_test_mode == 2) _exit(probe_test_exit_code);
 #endif
         if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) _exit(PROBE_EXIT_NO_NEW_PRIVS);
-        if (set_filter(0) != 0) _exit(errno);
+        if (set_filter(SECCOMP_FILTER_FLAG_TSYNC) != 0) _exit(errno);
         _exit(0);
     }
     int status = 0;
@@ -207,13 +209,16 @@ static jlong install_locked(const char *exe_path) {
     long result = set_filter(SECCOMP_FILTER_FLAG_TSYNC);
     if (result < 0) return seccomp_error(errno);
     if (result > 0) return pack(KIND_REFUSED, STAGE_THREAD_SYNC, (int)result);
+    // The program is attached from here on, whatever the check below reports.
+    installed = true;
 
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (fd >= 0 || errno != EACCES) {
-        if (fd >= 0) close(fd);
-        return pack(KIND_REFUSED, STAGE_POST_CHECK, 0);
-    }
-    installed = true;
+    int error = fd >= 0 ? 0 : errno;
+    if (fd >= 0) close(fd);
+#ifndef NDEBUG
+    if (probe_test_mode == 3) error = probe_test_exit_code;
+#endif
+    if (error != EACCES) return pack(KIND_REFUSED, STAGE_POST_CHECK, error);
     return pack(KIND_INSTALLED, 0, 0);
 }
 
@@ -300,5 +305,39 @@ Java_com_anopticlabs_gravel_socketfilter_ProbeTestHooks_setProbeBehavior(
     (void)thiz;
     probe_test_mode = mode;
     probe_test_exit_code = exit_code;
+}
+
+// Runs the install twice in a forked child that starts as not installed, and returns both packed
+// results. An install that gets as far as attaching the program can happen once per process, so
+// a test that needs another one takes it here. The child makes async-signal-safe calls only.
+JNIEXPORT jlongArray JNICALL
+Java_com_anopticlabs_gravel_socketfilter_ProbeTestHooks_installTwiceInAChild(
+    JNIEnv *env, jobject thiz, jstring exe_path) {
+    (void)thiz;
+    const char *path = (*env)->GetStringUTFChars(env, exe_path, NULL);
+    if (path == NULL) return NULL;
+    jlong results[2] = {0, 0};
+    ssize_t count = -1;
+    int fds[2];
+    if (pipe(fds) == 0) {
+        pid_t child = fork();
+        if (child == 0) {
+            installed = false;
+            results[0] = install_locked(path);
+            results[1] = install_locked(path);
+            _exit(write(fds[1], results, sizeof(results)) == (ssize_t)sizeof(results) ? 0 : 1);
+        }
+        close(fds[1]);
+        if (child > 0) {
+            count = read(fds[0], results, sizeof(results));
+            waitpid(child, NULL, 0);
+        }
+        close(fds[0]);
+    }
+    (*env)->ReleaseStringUTFChars(env, exe_path, path);
+    if (count != (ssize_t)sizeof(results)) return NULL;
+    jlongArray array = (*env)->NewLongArray(env, 2);
+    if (array != NULL) (*env)->SetLongArrayRegion(env, array, 0, 2, results);
+    return array;
 }
 #endif

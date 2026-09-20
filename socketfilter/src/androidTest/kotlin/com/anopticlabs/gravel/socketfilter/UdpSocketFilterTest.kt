@@ -23,7 +23,8 @@ import kotlin.test.assertTrue
 // This test APK has the platform's default Application, so its process starts unfiltered.
 class UdpSocketFilterTest {
 
-    // One ordered method: the filter is one-way and the process is shared by the class.
+    // Everything that needs the real install is in this one ordered method: the filter is
+    // one-way and the class shares one process.
     @Test
     fun theFilterRefusesUdpSocketsInEveryThreadAndNothingElse() {
         assumeTrue("needs an ARM device", deviceIsArm)
@@ -33,7 +34,7 @@ class UdpSocketFilterTest {
         val baseline = assertNotNull(UdpSocketFilter.selfTest())
         assertEquals(listOf(0, 0, 0, 0), baseline.datagram, "a UDP socket was refused before install")
         assertTrue(baseline.othersCreated, "baseline: ${baseline.others}")
-        val lookupBefore = lookupOutcome()
+        val lookupBefore = lookupOutcome("example.com")
         val release = CountDownLatch(1)
         val parkedReports = ConcurrentHashMap<Int, SelfTestReport>()
         val parked = (0 until 3).map { index ->
@@ -87,7 +88,11 @@ class UdpSocketFilterTest {
                 }
             }
         }
-        assertEquals(lookupBefore, lookupOutcome(), "a name lookup changed its outcome")
+        if (lookupBefore == "resolved") {
+            assertEquals(lookupBefore, lookupOutcome("example.org"), "a name lookup failed under the filter")
+        } else {
+            println("No name resolution on this device ($lookupBefore); lookups under the filter not checked")
+        }
 
         // Threads that existed before the install, and one started after it.
         release.countDown()
@@ -113,15 +118,22 @@ class UdpSocketFilterTest {
         }
     }
 
+    // The program is attached by the time the post-check runs, so this install cannot share
+    // the class's process with the ordered method's.
     @Test
-    fun aPrimaryAbiOtherThanArmIsAnArchitectureMismatch() {
-        val mismatch = InstallResult.Unsupported(UnsupportedReason.ArchitectureMismatch, 0)
-        assertTrue(UdpSocketFilter.primaryAbiIsArm(listOf("arm64-v8a", "armeabi-v7a", "armeabi")))
-        assertTrue(UdpSocketFilter.primaryAbiIsArm(listOf("armeabi-v7a", "armeabi")))
-        for (abis in listOf(listOf("x86_64", "arm64-v8a"), listOf("x86", "armeabi-v7a"), listOf("riscv64"), emptyList())) {
-            assertEquals(mismatch, UdpSocketFilter.install("/proc/self/exe", abis), "$abis")
+    fun anInstallWhosePostCheckFailsIsNotRepeated() {
+        assumeTrue("needs an ARM device", deviceIsArm)
+        assertTrue(UdpSocketFilter.loadLibrary(), "the library did not load")
+        ProbeTestHooks.setProbeBehavior(3, OsConstants.EPERM)
+        val results = try {
+            ProbeTestHooks.installTwiceInAChild("/proc/self/exe")
+        } finally {
+            ProbeTestHooks.setProbeBehavior(0, 0)
         }
-        assertEquals(mismatch, UdpSocketFilter.lastResult)
+        assertEquals(
+            listOf(InstallResult.Refused(RefusalStage.PostCheck, OsConstants.EPERM), InstallResult.AlreadyInstalled),
+            assertNotNull(results, "the child reported nothing").map(UdpSocketFilter::decode),
+        )
     }
 
     // Runs where the device itself is not ARM, such as an x86_64 emulator image that translates
@@ -163,8 +175,11 @@ class UdpSocketFilterTest {
         }
     }
 
-    private fun lookupOutcome(): String =
-        runCatching { InetAddress.getByName("example.com") }.fold({ "resolved" }, { it.javaClass.name })
+    // Callers pass a different name after the install: one this process has resolved is
+    // answered from a cache without reaching the resolver (android16-release, libcore,
+    // Inet6AddressImpl.lookupHostByName).
+    private fun lookupOutcome(host: String): String =
+        runCatching { InetAddress.getByName(host) }.fold({ "resolved" }, { it.javaClass.name })
 
     // Per-thread filter counts, where the kernel reports them (Seccomp_filters in the task status).
     private fun seccompFilterCounts(): Map<String, Int> =
