@@ -31,8 +31,10 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import co.touchlab.kermit.Logger
 import com.anopticlabs.gravel.pkjs.DENY_HOST_PAGE_URL
+import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
 import com.anopticlabs.gravel.pkjs.PkjsRequestPlan
 import com.anopticlabs.gravel.pkjs.planPkjsRequest
+import com.anopticlabs.gravel.pkjs.shouldRunPkjs
 import com.anopticlabs.gravel.pkjs.toWebResourceResponse
 import io.rebble.libpebblecommon.NotificationConfigFlow
 import io.rebble.libpebblecommon.connection.AppContext
@@ -87,6 +89,7 @@ class WebViewJsRunner(
     httpInterceptorManager: HttpInterceptorManager,
     notificationConfigFlow: NotificationConfigFlow,
     private val watchappPermissions: WatchappPermissionResolver,
+    private val networkDenyEnforcement: NetworkDenyEnforcement,
 ): JsRunner(appInfo, lockerEntry, jsPath, device, urlOpenRequests), LibPebbleKoinComponent {
     private val context = appContext.context
 
@@ -469,6 +472,12 @@ class WebViewJsRunner(
         networkAllowed = watchappPermissions.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network)
         applyNetworkProxy(networkAllowed)
         denyConstruction = !networkAllowed
+        // CompanionAppLifecycleManager decides the same from an earlier read of the grant; this
+        // is the read the session is built from.
+        if (!shouldRunPkjs(hasPkjs = true, networkAllowed, networkDenyEnforcement.primaryLayerActive)) {
+            logger.w { "Not loading ${appInfo.longName} (${appInfo.uuid}): Network is denied and the primary deny layer is not active" }
+            return
+        }
         if (denyConstruction) {
             withContext(Dispatchers.Main) {
                 // Nothing in the deny construction uses a file URL.
@@ -762,10 +771,19 @@ class WebViewJsRunner(
         val readyJson = Json.encodeToString(readyDeviceIds)
         withContext(Dispatchers.Main) {
             evaluateInPage("window.signalReady(${readyJson})")
-            // Checked on the main thread, where endSession clears the view: a dead session
-            // never becomes ready.
-            if (webView != null) _readyState.value = true
+            markReadyUnlessEnded()
         }
+    }
+
+    // Called on the JavaScript bridge thread, by any script in the session.
+    override fun onReadyConfirmed(success: Boolean) {
+        Handler(Looper.getMainLooper()).post { markReadyUnlessEnded() }
+    }
+
+    // Main thread only, where endSession clears the view: a session it has ended is not marked
+    // ready afterwards.
+    private fun markReadyUnlessEnded() {
+        if (webView != null) _readyState.value = true
     }
 
     override suspend fun signalNewAppMessageData(data: String?): Boolean {

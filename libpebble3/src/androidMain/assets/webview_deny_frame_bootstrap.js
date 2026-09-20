@@ -44,7 +44,7 @@
                 if (typeof prop === "symbol") return undefined;
                 if (prop === "length") return items.size;
                 if (isBuiltIn(prop)) return methods[prop];
-                return items.has(prop) ? items.get(prop) : undefined;
+                return items.has(prop) ? items.get(prop) : target[prop];
             },
             set: function (target, prop, value) {
                 if (typeof prop !== "symbol" && !isBuiltIn(prop)) methods.setItem(prop, value);
@@ -55,7 +55,7 @@
                 return true;
             },
             has: function (target, prop) {
-                return typeof prop !== "symbol" && (isBuiltIn(prop) || items.has(prop));
+                return typeof prop !== "symbol" && (isBuiltIn(prop) || items.has(prop) || prop in target);
             },
             ownKeys: function () {
                 return Array.from(items.keys());

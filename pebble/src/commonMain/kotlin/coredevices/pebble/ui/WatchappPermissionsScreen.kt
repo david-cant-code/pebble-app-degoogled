@@ -1,6 +1,5 @@
 package coredevices.pebble.ui
 
-import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -36,6 +35,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
+import com.anopticlabs.gravel.pkjs.shouldRunPkjs
 import coredevices.pebble.rememberLibPebble
 import coredevices.ui.M3Dialog
 import io.rebble.libpebblecommon.WatchConfig
@@ -354,11 +355,13 @@ fun WatchappPermissionControls(uuid: Uuid, modifier: Modifier = Modifier) {
         val networkDenyEnforced = remember {
             koin.getOrNull<NetworkDenyEnforcement>()?.primaryLayerActive == true
         }
-        if (!networkDenyEnforced) {
+        // Counts as on until the stored grant arrives, so the notice does not flash.
+        val networkGranted by libPebble.watchappPermissionGranted(uuid, LockerAppPermissionType.Network)
+            .collectAsState(true)
+        if (!shouldRunPkjs(hasPkjs = true, networkGranted, networkDenyEnforced)) {
             Text(
-                "Gravel could not turn on its network block on this device, so this app's " +
-                    "phone-side code does not run while internet access is off. Turn internet " +
-                    "access on to run it.",
+                "Gravel could not turn on its network block on this device, so while internet " +
+                    "access is off it does not run this app's code inside Gravel.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(top = 8.dp),

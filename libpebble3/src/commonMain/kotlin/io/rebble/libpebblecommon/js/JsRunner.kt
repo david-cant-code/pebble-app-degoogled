@@ -31,7 +31,7 @@ abstract class JsRunner(
     abstract suspend fun evalWithResult(js: String): Any?
     abstract fun debugForceGC()
 
-    fun onReadyConfirmed(success: Boolean) {
+    open fun onReadyConfirmed(success: Boolean) {
         _readyState.value = true
     }
 

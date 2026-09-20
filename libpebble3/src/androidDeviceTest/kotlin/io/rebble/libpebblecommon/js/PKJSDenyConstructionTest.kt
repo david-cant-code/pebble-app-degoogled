@@ -47,6 +47,12 @@ class PKJSDenyConstructionTest : PKJSRunnerTests(::createJsRunner, networkGrante
     private suspend fun WebViewJsRunner.inTopDocument(js: String): String =
         Json.decodeFromString<JsonElement>(evalInTopDocumentForTest(js)).jsonPrimitive.content
 
+    // The commit guard posts the end of the session to the main thread, so the view goes a
+    // moment after frameRecommitted is set.
+    private suspend fun awaitNoWebView(runner: WebViewJsRunner) = withTimeout(5.seconds) {
+        while (runner.webViewSettingsForTest() != null) delay(20)
+    }
+
     // stop() runs its teardown NonCancellable, so a timeout around it could not fire.
     @OptIn(DelicateCoroutinesApi::class)
     private suspend fun stopWithinTimeout(runner: JsRunner) {
@@ -99,6 +105,9 @@ class PKJSDenyConstructionTest : PKJSRunnerTests(::createJsRunner, networkGrante
         assertEquals("bar", second.inFrame("localStorage.foo"))
         assertEquals("""{"foo":"bar"}""", second.inFrame("JSON.stringify(localStorage)"))
         assertEquals("1", second.inFrame("localStorage.length"))
+        assertEquals("function", second.inFrame("typeof localStorage.hasOwnProperty"))
+        assertEquals("true", second.inFrame("localStorage.hasOwnProperty('foo')"))
+        assertEquals("false", second.inFrame("localStorage.hasOwnProperty('gone')"))
         first.stop()
         second.stop()
 
@@ -172,6 +181,7 @@ class PKJSDenyConstructionTest : PKJSRunnerTests(::createJsRunner, networkGrante
             withTimeout(5.seconds) {
                 while (!runner.frameRecommitted) delay(20)
             }
+            awaitNoWebView(runner)
             assertFalse(runner.readyState.value, vector)
             assertEquals("", runner.readAppScript(), vector)
             stopWithinTimeout(runner)
@@ -189,7 +199,25 @@ class PKJSDenyConstructionTest : PKJSRunnerTests(::createJsRunner, networkGrante
         withTimeout(10.seconds) {
             while (!runner.frameRecommitted) delay(20)
         }
-        delay(1000)
+        awaitNoWebView(runner)
+        assertFalse(runner.readyState.value)
+        stopWithinTimeout(runner)
+    }
+
+    // Any script in the frame can call the bridge's ready confirmation, here in a stream that
+    // runs across the end of the session.
+    @Test
+    fun readyConfirmationsDoNotReadyASessionTheCommitGuardEnded() = runBlocking {
+        val runner = startedRunner()
+        runner.eval(
+            "_Pebble.frameDocumentLoaded(); " +
+                "var end = Date.now() + 300; while (Date.now() < end) _Pebble.privateFnConfirmReadySignal(true);"
+        )
+        withTimeout(5.seconds) {
+            while (!runner.frameRecommitted) delay(20)
+        }
+        awaitNoWebView(runner)
+        delay(500)
         assertFalse(runner.readyState.value)
         stopWithinTimeout(runner)
     }

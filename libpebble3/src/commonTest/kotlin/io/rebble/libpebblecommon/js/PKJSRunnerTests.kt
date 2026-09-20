@@ -155,6 +155,7 @@ abstract class PKJSRunnerTests(
                     error("Unexpected result type: ${result?.let { it::class }}")
                 }
             }
+            runner.stop()
         }
         assertTrue(scope.isActive)
     }
@@ -185,6 +186,7 @@ abstract class PKJSRunnerTests(
                     error("Unexpected result type: ${result?.let { it::class }}")
                 }
             }
+            runner.stop()
         }
     }
 
@@ -232,6 +234,7 @@ abstract class PKJSRunnerTests(
                     error("Unexpected result type: ${result?.let { it::class }}")
                 }
             }
+            runner.stop()
         }
     }
 
@@ -278,6 +281,7 @@ abstract class PKJSRunnerTests(
                     error("Unexpected result type: ${result?.let { it::class }}")
                 }
             }
+            runner.stop()
         }
     }
 
@@ -349,6 +353,7 @@ abstract class PKJSRunnerTests(
                     error("Unexpected result type: ${resultEarlyGet?.let { it::class }}")
                 }
             }
+            runner.stop()
         }
     }
 

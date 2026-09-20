@@ -2,6 +2,8 @@ package io.rebble.libpebblecommon.js
 
 import androidx.test.filters.MediumTest
 import androidx.test.platform.app.InstrumentationRegistry
+import com.anopticlabs.gravel.pkjs.FixedNetworkDenyEnforcement
+import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
 import io.rebble.libpebblecommon.LibPebbleConfig
 import io.rebble.libpebblecommon.NotificationConfigFlow
 import io.rebble.libpebblecommon.WatchConfigFlow
@@ -41,6 +43,7 @@ fun createJsRunner(
     urlOpenRequests: Channel<String>,
     logMessages: Channel<String>,
     watchappPermissions: WatchappPermissionResolver,
+    networkDenyEnforcement: NetworkDenyEnforcement = FixedNetworkDenyEnforcement(primaryLayerActive = true),
 ): JsRunner {
     val context = InstrumentationRegistry.getInstrumentation().context
     val configFlow = MutableStateFlow(LibPebbleConfig())
@@ -76,6 +79,7 @@ fun createJsRunner(
         httpInterceptorManager = HttpInterceptorManager(emulator, InjectedPKJSHttpInterceptors(emptyList())),
         notificationConfigFlow = NotificationConfigFlow(configFlow),
         watchappPermissions = watchappPermissions,
+        networkDenyEnforcement = networkDenyEnforcement,
     )
 }
 
