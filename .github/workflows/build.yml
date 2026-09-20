@@ -48,9 +48,14 @@ jobs:
             android-deps-${{ runner.os }}-
       # assembleRelease on a checkout with no keystore is the F-Droid shape:
       # release packages unsigned, and the packaging-time APK checks in
-      # androidApp/build.gradle.kts run against both variants.
+      # androidApp/build.gradle.kts run against both variants. The device-test
+      # source sets are compiled here and run nowhere in CI.
       - name: Build and Test
-        run: ./gradlew :androidApp:assembleDebug :androidApp:assembleRelease testDebugUnitTest testAndroidHostTest jvmTest lintDebug
+        run: >-
+          ./gradlew :androidApp:assembleDebug :androidApp:assembleRelease
+          testDebugUnitTest testAndroidHostTest jvmTest lintDebug
+          :androidApp:assembleDebugAndroidTest :socketfilter:assembleDebugAndroidTest
+          :libpebble3:compileAndroidDeviceTest
       - name: Check the built version against the built commit
         run: |
           expected="$(git describe --tags --first-parent HEAD 2>/dev/null || echo unknown)"
