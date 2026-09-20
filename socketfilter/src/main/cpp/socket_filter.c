@@ -46,7 +46,8 @@
 #define SOCKET_TYPE_MASK 0xf
 
 // An architecture other than the compiled-in one is refused for every call, so install() must
-// never run where the two disagree; exe_machine_matches() is the check that prevents it.
+// never run where the two disagree; UdpSocketFilter.primaryAbiIsArm and exe_machine_matches()
+// are the checks that prevent it.
 static struct sock_filter filter_program[] = {
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, FILTER_AUDIT_ARCH, 1, 0),
@@ -102,9 +103,10 @@ static long set_filter(unsigned int flags) {
     return syscall(__NR_seccomp, SECCOMP_SET_MODE_FILTER, flags, &program);
 }
 
-// True unless the file at path is a readable ELF header for another machine. The process's own
-// executable has the kernel-facing architecture even where this library runs under binary
-// translation. An unreadable header does not stop the install.
+// True unless the file at path is a readable ELF header for another machine. An unreadable
+// header does not stop the install. Under binary translation this read can see an executable
+// of this library's own architecture, so UdpSocketFilter.install checks the device's ABI list
+// before it calls in here.
 static bool exe_machine_matches(const char *path) {
     unsigned char header[EI_NIDENT + 4];
     int fd = open(path, O_RDONLY | O_CLOEXEC);

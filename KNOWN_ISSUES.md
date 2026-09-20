@@ -341,6 +341,17 @@ result at startup and does not run a watchapp's phone-side script while
 that watchapp's internet access is off. The watchapp's permission controls
 say so.
 
+## The UDP filter is untested on Android versions before 17
+
+**Status: accepted.**
+
+The filter has been run on hardware on Android 17. On older versions, down
+to Android 8, it has not been tested. If the platform there refuses the
+install, Gravel behaves as described under "If Android refuses the UDP
+filter". On a device that is not ARM, such as an x86 device that runs ARM
+code under translation, Gravel does not install the filter and behaves the
+same way.
+
 ## A watchapp whose WebView renderer exits stays stopped until relaunched
 
 **Status: accepted.**

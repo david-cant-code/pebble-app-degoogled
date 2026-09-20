@@ -1,5 +1,6 @@
 package com.anopticlabs.gravel.socketfilter
 
+import android.os.Build
 import android.system.OsConstants
 
 sealed interface InstallResult {
@@ -45,12 +46,26 @@ object UdpSocketFilter {
     /** Idempotent and safe from any thread; a second program is never stacked. */
     fun install(): InstallResult = install(SELF_EXE)
 
-    // The path is a parameter so a test can present an executable of another architecture.
-    internal fun install(exePath: String): InstallResult = synchronized(lock) {
-        val result = if (loadLibrary()) decode(nativeInstall(exePath)) else LIBRARY_MISSING
+    // The path and the ABI list are parameters so a test can present another architecture.
+    internal fun install(
+        exePath: String,
+        deviceAbis: List<String> = Build.SUPPORTED_ABIS.toList(),
+    ): InstallResult = synchronized(lock) {
+        val result = when {
+            !primaryAbiIsArm(deviceAbis) -> ARCHITECTURE_MISMATCH
+            loadLibrary() -> decode(nativeInstall(exePath))
+            else -> LIBRARY_MISSING
+        }
         if (result != InstallResult.AlreadyInstalled) lastResult = result
         result
     }
+
+    // The library is built for the ARM ABIs only, and its filter refuses every call of another
+    // architecture. The first entry is the device's most preferred ABI (android16-release,
+    // Build.java, SUPPORTED_ABIS); an x86_64 image that runs ARM code under translation lists
+    // x86_64 first. Decided here because the native check runs translated on such a device.
+    internal fun primaryAbiIsArm(deviceAbis: List<String>): Boolean =
+        deviceAbis.firstOrNull()?.startsWith("arm") == true
 
     /** Tries to create sockets from the calling thread; null when the library is absent. */
     fun selfTest(): SelfTestReport? {
@@ -88,6 +103,7 @@ object UdpSocketFilter {
     }
 
     private val LIBRARY_MISSING = InstallResult.Unsupported(UnsupportedReason.LibraryMissing, 0)
+    private val ARCHITECTURE_MISMATCH = InstallResult.Unsupported(UnsupportedReason.ArchitectureMismatch, 0)
 
     private val REFUSAL_STAGES = listOf(
         RefusalStage.ProbeSignaled,

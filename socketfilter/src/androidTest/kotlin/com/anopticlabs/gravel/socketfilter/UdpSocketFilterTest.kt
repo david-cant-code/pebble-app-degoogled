@@ -1,7 +1,9 @@
 package com.anopticlabs.gravel.socketfilter
 
+import android.os.Build
 import android.system.OsConstants
 import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
 import java.net.DatagramSocket
@@ -24,6 +26,7 @@ class UdpSocketFilterTest {
     // One ordered method: the filter is one-way and the process is shared by the class.
     @Test
     fun theFilterRefusesUdpSocketsInEveryThreadAndNothingElse() {
+        assumeTrue("needs an ARM device", deviceIsArm)
         assertTrue(UdpSocketFilter.loadLibrary(), "the library did not load")
 
         // Baseline, so a later refusal is the filter's doing.
@@ -109,6 +112,31 @@ class UdpSocketFilterTest {
             countsAfter[tid]?.let { assertEquals(it, count, "a second install stacked a program on thread $tid") }
         }
     }
+
+    @Test
+    fun aPrimaryAbiOtherThanArmIsAnArchitectureMismatch() {
+        val mismatch = InstallResult.Unsupported(UnsupportedReason.ArchitectureMismatch, 0)
+        assertTrue(UdpSocketFilter.primaryAbiIsArm(listOf("arm64-v8a", "armeabi-v7a", "armeabi")))
+        assertTrue(UdpSocketFilter.primaryAbiIsArm(listOf("armeabi-v7a", "armeabi")))
+        for (abis in listOf(listOf("x86_64", "arm64-v8a"), listOf("x86", "armeabi-v7a"), listOf("riscv64"), emptyList())) {
+            assertEquals(mismatch, UdpSocketFilter.install("/proc/self/exe", abis), "$abis")
+        }
+        assertEquals(mismatch, UdpSocketFilter.lastResult)
+    }
+
+    // Runs where the device itself is not ARM, such as an x86_64 emulator image that translates
+    // ARM code: the real install() reports the mismatch and leaves the process unfiltered.
+    @Test
+    fun onADeviceThatIsNotArmTheRealInstallIsAnArchitectureMismatch() {
+        assumeTrue("needs a device whose primary ABI is not ARM", !deviceIsArm)
+        assertEquals(
+            InstallResult.Unsupported(UnsupportedReason.ArchitectureMismatch, 0),
+            UdpSocketFilter.install(),
+        )
+        DatagramSocket().close()
+    }
+
+    private val deviceIsArm = UdpSocketFilter.primaryAbiIsArm(Build.SUPPORTED_ABIS.toList())
 
     @Test
     fun theProgramRefusesOnlyInetDatagramSocketsAndForeignArchitectures() {
