@@ -162,9 +162,10 @@ immediately (a watchface can hold a watch for days) and re-granting
 restarts it. Denial is reported to the JS callback as a geolocation
 error in both cases.
 
-**Network enforcement is layered** (three independent layers, per the
-defence-in-depth rule, with at least one deterministic cover for every
-socket type):
+**Network enforcement is layered** (per the defense-in-depth rule, with at
+least one deterministic cover for every socket type). Three layers act on
+the WebView's requests; the UDP socket filter and the denied-session page's
+response header, both below, are two more:
 
 1. `WebViewJsRunner.shouldInterceptRequest` returns a 403 for every
    non-`file://` request when the app is network-denied (in a
@@ -190,11 +191,11 @@ socket type):
    network segment). Applied and awaited before the app page loads and
    kept in sync with live toggles; on stop, the live-toggle collector is
    cancelled first and the override is cleared only after the WebView is
-   destroyed, so a denied app's scripts never run without the black-hole
-   and nothing can re-install it once teardown has cleared it.
-   Process-global is inherent to the API, but only one PKJS WebView runs
-   at a time and the config page (below) is gated for denied apps, so
-   nothing legitimate needs the network while it is set. Requires the
+   destroyed (the reasons are at `WebViewJsRunner.stop`).
+   The override is process-wide, so while it is set it also covers any
+   other WebView in the app, such as a page left open for another app. Only
+   one PKJS WebView runs at a time, and the config page (below) is gated
+   for denied apps. Requires the
    `PROXY_OVERRIDE` feature; the degraded case is in `KNOWN_ISSUES.md`.
 
 A change of the app's Network grant while it is running, in either
@@ -241,13 +242,16 @@ whose default is "not active". When it is not active,
 `CompanionAppLifecycleManager.createCompanionApps` builds no PebbleKit JS
 session for an app whose Network grant is denied (`shouldRunPkjs`), and the
 grant watcher restarts the session once the grant changes.
+`WebViewJsRunner.start` makes the same check on the grant read its session
+is built from, and loads nothing when it fails.
 
 **Denied-session page.** A session that starts with the Network grant
 denied is built differently from a granted one (`denyConstruction`, fixed
 in `WebViewJsRunner.start`; the grant watcher above is what lets it be
 fixed). Its top document is a host page served by the runner's own
-interceptor at `https://pkjs.gravel.invalid/host.html`, the only URL the
-session is served (`planPkjsRequest`), and that response and every 403 of
+interceptor at `https://pkjs.gravel.invalid/host.html`, the only URL that
+interceptor serves while the grant stays denied (`planPkjsRequest`), and
+that response and every 403 of
 the session carry a `Connection-Allowlist` header with an empty allowlist
 and WebRTC blocked (source cited at the constant in `PkjsRequestPlan.kt`;
 WebView version caveat in `KNOWN_ISSUES.md`). The host page holds no
@@ -258,7 +262,8 @@ frame as strings the host page forwards with `postMessage`
 (`evaluateInPage`), and `localStorage`, which a sandboxed frame lacks, is
 a stand-in that writes through to the same native store a granted session
 uses. File access is off in the session's WebView, and the view is given a
-laid-out size, without which the frame's timers fire once a second.
+laid-out size, without which the frame's timers fall behind their interval
+(`frameTimersRunAtTheirInterval`).
 The frame has to keep the document it was created with, and two controls
 hold that: the navigation lock (`refusePageNavigation`, which refuses every
 navigation the WebView consults the app for, in granted sessions too) and

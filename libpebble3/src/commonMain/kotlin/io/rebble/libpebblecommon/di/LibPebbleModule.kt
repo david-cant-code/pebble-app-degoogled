@@ -1,6 +1,7 @@
 package io.rebble.libpebblecommon.di
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
 import com.russhwolf.settings.Settings
 import io.ktor.client.HttpClient
 import io.rebble.libpebblecommon.BleConfigFlow
@@ -111,7 +112,6 @@ import io.rebble.libpebblecommon.datalogging.Datalogging
 import io.rebble.libpebblecommon.datalogging.HealthDataProcessor
 import io.rebble.libpebblecommon.health.Health
 import io.rebble.libpebblecommon.js.HttpInterceptorManager
-import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
 import io.rebble.libpebblecommon.js.InjectedPKJSHttpInterceptors
 import io.rebble.libpebblecommon.js.JsTokenUtil
 import io.rebble.libpebblecommon.js.RemoteTimelineEmulator

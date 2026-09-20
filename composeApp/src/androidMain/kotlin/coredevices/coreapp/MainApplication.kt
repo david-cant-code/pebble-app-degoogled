@@ -18,8 +18,6 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.Severity
-import com.anopticlabs.gravel.socketfilter.InstallResult
-import com.anopticlabs.gravel.socketfilter.UdpSocketFilter
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
@@ -27,6 +25,8 @@ import coil3.gif.GifDecoder
 import coil3.memory.MemoryCache
 import coil3.request.crossfade
 import coil3.svg.SvgDecoder
+import com.anopticlabs.gravel.socketfilter.InstallResult
+import com.anopticlabs.gravel.socketfilter.UdpSocketFilter
 import coredevices.ExperimentalDevices
 import coredevices.coreapp.di.androidDefaultModule
 import coredevices.coreapp.di.apiModule

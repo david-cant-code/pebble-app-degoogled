@@ -1,13 +1,13 @@
 package coredevices.coreapp.di
 
-import com.anopticlabs.gravel.pkjs.FixedNetworkDenyEnforcement
-import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
-import com.anopticlabs.gravel.socketfilter.InstallResult
-import com.anopticlabs.gravel.socketfilter.UdpSocketFilter
 import CoreAppVersion
 import PlatformContext
 import PlatformShareLauncher
 import android.content.Context
+import com.anopticlabs.gravel.pkjs.FixedNetworkDenyEnforcement
+import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
+import com.anopticlabs.gravel.socketfilter.InstallResult
+import com.anopticlabs.gravel.socketfilter.UdpSocketFilter
 import coredevices.analytics.createAndroidAnalytics
 import coredevices.coreapp.PebbleBackgroundManager
 import coredevices.coreapp.appVersionName

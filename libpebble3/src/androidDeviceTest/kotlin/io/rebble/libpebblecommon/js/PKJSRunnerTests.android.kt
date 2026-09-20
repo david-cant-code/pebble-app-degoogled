@@ -132,7 +132,9 @@ class PKJSRunnerTestsAndroid: PKJSRunnerSharedTestsAndroid(networkGranted = true
         val runner = makeRunner("", uuid, networkGranted = networkGranted) as WebViewJsRunner
         runner.start()
         withTimeout(5.seconds) { runner.readyState.first { it } }
-        // stop() waits on the localStorage persist only once the restore has completed.
+        // In a granted session the restore has completed once this holds, so stop() takes the
+        // localStorage persist path. A denied session has no restore or persist step; its leg
+        // covers the teardown and the session that follows.
         withTimeout(5.seconds) {
             while (runner.evalWithResult("window.__localStorageShimmed === true;") != "true") delay(20)
         }

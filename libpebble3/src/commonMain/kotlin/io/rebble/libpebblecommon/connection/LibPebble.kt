@@ -4,6 +4,8 @@ import androidx.compose.runtime.Stable
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.paging.PagingSource
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.pkjs.FixedNetworkDenyEnforcement
+import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
 import io.rebble.libpebblecommon.ErrorTracker
 import io.rebble.libpebblecommon.Housekeeping
 import io.rebble.libpebblecommon.LibPebbleConfig
@@ -41,8 +43,6 @@ import io.rebble.libpebblecommon.di.initKoin
 import io.rebble.libpebblecommon.health.Health
 import io.rebble.libpebblecommon.health.HealthDebugStats
 import io.rebble.libpebblecommon.health.HealthSettings
-import com.anopticlabs.gravel.pkjs.FixedNetworkDenyEnforcement
-import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
 import io.rebble.libpebblecommon.js.InjectedPKJSHttpInterceptors
 import io.rebble.libpebblecommon.js.JsTokenUtil
 import io.rebble.libpebblecommon.locker.AppBasicProperties

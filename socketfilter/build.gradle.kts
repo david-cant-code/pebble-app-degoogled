@@ -1,6 +1,6 @@
 // Gravel's process-wide filter that refuses the creation of UDP sockets, built from the C
-// source in src/main/cpp. A plain Android library because the KMP Android library plugin has
-// no NDK support; the Kotlin API is Android-only and lives in the same module.
+// source in src/main/cpp. A plain Android library for the reason :whisper-native's build file
+// gives; the Kotlin API is Android-only and lives in the same module.
 plugins {
     alias(libs.plugins.android.library)
 }

@@ -158,8 +158,7 @@ class WebViewJsRunner(
     // Main thread only. The stop() persist wait, parked so a renderer exit can release it.
     private var persistWait: CancellableContinuation<Unit>? = null
 
-    // The live-toggle collector launched in start(); stop() cancels it before any
-    // proxy teardown so the two can never interleave on the process-global override.
+    // The live-toggle collector launched in start(), kept so stop() can cancel it (see there).
     private var networkPermissionCollector: Job? = null
     private val pageLoaded = CompletableDeferred<Unit>()
     private var restoreCompleted: Boolean = false
@@ -486,8 +485,9 @@ class WebViewJsRunner(
                     allowFileAccessFromFileURLs = false
                     allowUniversalAccessFromFileURLs = false
                 }
-                // The view is never attached to a window. Until it has a size that contains
-                // the frame, timers in the frame fire once a second.
+                // The view is never attached to a window, so it gets its size here. Without one
+                // the frame's timers fall behind their interval
+                // (PKJSDenyConstructionTest.frameTimersRunAtTheirInterval).
                 webView?.apply {
                     measure(
                         View.MeasureSpec.makeMeasureSpec(DENY_VIEW_WIDTH_PX, View.MeasureSpec.EXACTLY),
@@ -499,11 +499,7 @@ class WebViewJsRunner(
         }
         // Track live toggles: a change in the resolved grant (per-app override or the
         // global default) re-caches the value and re-applies/clears the proxy while the
-        // app keeps running. The job is kept so stop() can cancel it FIRST, before it
-        // touches the proxy itself: the runner scope outlives stop()'s suspension
-        // points (PKJSApp cancels it only after stop() returns), so an emission landing
-        // mid-teardown would otherwise re-install the process-wide black-hole after
-        // stop() cleared it, with nothing left alive to ever clear it again.
+        // app keeps running.
         networkPermissionCollector = scope.launch {
             watchappPermissions.watchappPermissionGranted(uuid, LockerAppPermissionType.Network)
                 .collect { allowed ->
@@ -531,9 +527,10 @@ class WebViewJsRunner(
      * black-holes all egress (every scheme, including ws/wss that shouldInterceptRequest
      * cannot see) when the running app's network is denied, and is cleared when allowed.
      *
-     * Process-global is inherent to the ProxyController API, but only one PKJS WebView
-     * runs at a time and the developer config page is gated for network-denied apps, so
-     * nothing legitimate needs the network while the black-hole is active. Requires the
+     * The override applies to every WebView in the app (androidx.webkit 1.16.0,
+     * ProxyController.setProxyOverride), so while the black-hole is active it also covers a
+     * page left open for another app. Only one PKJS WebView runs at a time, and the developer
+     * config page is gated for network-denied apps. Requires the
      * PROXY_OVERRIDE WebView feature; when unsupported, layers 1 and 2 still apply and
      * only the WebSocket-deny corner degrades to best-effort (recorded in KNOWN_ISSUES).
      */

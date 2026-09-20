@@ -12,8 +12,9 @@ import kotlin.test.assertSame
 import kotlin.time.Duration.Companion.seconds
 
 class RendererGoneAwareWebViewClientTest {
-    // Ends the renderer the way PKJSRunnerTestsAndroid does. The process surviving to the
-    // assertion shows the callback returned true.
+    // Ends the renderer the way PKJSRunnerTestsAndroid does. A false return from the callback
+    // ends the app process (WebViewJsRunner's override has the contract), so what shows the
+    // true is the test completing: the main thread still serves the destroy() hop afterwards.
     // No page is loaded first: the library client's page callbacks need state that only its
     // composable sets.
     @Test

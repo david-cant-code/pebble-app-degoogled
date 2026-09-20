@@ -1,8 +1,8 @@
 package coredevices.pebble
 
-import com.anopticlabs.gravel.pkjs.FixedNetworkDenyEnforcement
 import co.touchlab.kermit.Logger
 import com.algolia.client.api.SearchClient
+import com.anopticlabs.gravel.pkjs.FixedNetworkDenyEnforcement
 import coredevices.pebble.health.createPlatformHealthManager
 import coredevices.pebble.account.BootConfigProvider
 import coredevices.pebble.account.FirestoreKnownWatchesDao

@@ -76,8 +76,8 @@ internal actual fun rememberPlatformWebViewParams(onRendererGone: () -> Unit): P
     val goneView = remember { AtomicReference<WebView?>(null) }
     DisposableEffect(Unit) {
         onDispose {
-            // Posted so the destroy lands after this disposal pass has taken the view out of
-            // the hierarchy, which WebView.destroy() requires.
+            // The view left composition with this screen (RendererGoneAwareWebViewClient has
+            // the constraint). The destroy is posted, so it runs after this disposal pass.
             goneView.getAndSet(null)?.let { view ->
                 Handler(Looper.getMainLooper()).post { view.destroy() }
             }

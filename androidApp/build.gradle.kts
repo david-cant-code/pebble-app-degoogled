@@ -367,8 +367,8 @@ abstract class VerifyIsolatedServices : DefaultTask() {
  * - no entry matches [forbiddenEntries]: the Wispr Flow logo assets ignoreAssetsPattern drops,
  *   the two native libraries of the Ring satellite AAR that :haversine-stubs replaces, and in
  *   release the debug variant's dictation test clip;
- * - both ABIs carry the UDP socket filter's library, and no release dex names a Java UDP
- *   socket type;
+ * - both ABIs carry the UDP socket filter's library, and no release dex names one of the
+ *   [forbiddenDexTypes];
  * - the APK Signing Block is present or absent as the variant's signing configuration says
  *   ([expectSigned]: a release built without a keystore must come out unsigned, which is the
  *   shape F-Droid builds), and when present never carries the dependency-metadata pair
@@ -394,9 +394,9 @@ abstract class VerifyApkContents : DefaultTask() {
     abstract val requiredEntries: ListProperty<String>
 
     /**
-     * Type descriptors that no classes*.dex may name. Gravel's UDP socket filter refuses UDP
-     * socket creation in the whole process, so code that names a Java UDP socket type would
-     * fail at run time with EACCES; this turns it into a build failure.
+     * Type descriptors that no classes*.dex may name. Where Gravel's UDP socket filter is
+     * installed, code that opens one of the listed Java UDP socket types fails at run time
+     * with EACCES; this turns naming one into a build failure.
      */
     @get:Input
     abstract val forbiddenDexTypes: ListProperty<String>

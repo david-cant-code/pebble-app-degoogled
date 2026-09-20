@@ -122,7 +122,7 @@ class PKJSDenyConstructionTest : PKJSRunnerTests(::createJsRunner, networkGrante
         val before = runner.inFrame("window.ticks").toInt()
         delay(3000)
         val ticks = runner.inFrame("window.ticks").toInt() - before
-        // 30 at the full rate; 3 when the frame's timers are held to one a second.
+        // 30 at the full rate.
         assertTrue(ticks >= 20, "only $ticks ticks of a 100 ms interval in 3 s")
         runner.stop()
     }

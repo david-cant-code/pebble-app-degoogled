@@ -11,9 +11,6 @@ interface NetworkDenyEnforcement {
 
 class FixedNetworkDenyEnforcement(override val primaryLayerActive: Boolean) : NetworkDenyEnforcement
 
-/**
- * Whether an app's PebbleKit JS side gets a session: a denied Network grant is only honored
- * by running the script when the primary layer is there to enforce it.
- */
+/** A Network-denied app's PebbleKit JS side runs only where the primary layer is active. */
 fun shouldRunPkjs(hasPkjs: Boolean, networkGranted: Boolean, primaryLayerActive: Boolean): Boolean =
     hasPkjs && (networkGranted || primaryLayerActive)

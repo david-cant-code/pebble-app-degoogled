@@ -3,7 +3,10 @@ package com.anopticlabs.gravel.pkjs
 import android.webkit.WebResourceResponse
 import java.io.InputStream
 
-/** The only URL a network-denied PebbleKit JS session is served. `.invalid` never resolves (RFC 2606). */
+/**
+ * The host page of a network-denied PebbleKit JS session: the only URL its interceptor serves
+ * while the grant stays denied. `.invalid` never resolves (RFC 2606).
+ */
 const val DENY_HOST_PAGE_SCHEME = "https"
 const val DENY_HOST_PAGE_HOST = "pkjs.gravel.invalid"
 const val DENY_HOST_PAGE_PATH = "/host.html"
@@ -13,8 +16,7 @@ const val CONNECTION_ALLOWLIST_HEADER = "Connection-Allowlist"
 
 // One inner list with no URL patterns, and WebRTC blocked (Chromium M153,
 // refs/branch-heads/8010, connection_allowlist_parser.cc, ParseConnectionAllowlist). A WebView
-// that does not know the header ignores it. If one mishandles the empty list, the equivalent
-// never-matching form is ("https://blocked.invalid/*");webrtc=block
+// that does not know the header ignores it.
 const val CONNECTION_ALLOWLIST_DENY_ALL = "();webrtc=block"
 
 const val BLOCK_REASON_FORBIDDEN = "Forbidden"

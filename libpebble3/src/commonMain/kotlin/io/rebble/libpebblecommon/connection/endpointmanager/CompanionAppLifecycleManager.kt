@@ -1,8 +1,8 @@
 package io.rebble.libpebblecommon.connection.endpointmanager
 
+import co.touchlab.kermit.Logger
 import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
 import com.anopticlabs.gravel.pkjs.shouldRunPkjs
-import co.touchlab.kermit.Logger
 import io.rebble.libpebblecommon.LibPebbleConfigFlow
 import io.rebble.libpebblecommon.connection.CompanionApp
 import io.rebble.libpebblecommon.connection.ConnectedPebble

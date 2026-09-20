@@ -16,8 +16,8 @@ import kotlin.uuid.Uuid
  * Pins the fork's companion session decision model: watch-side app changes are
  * conflated to the newest state (no session churn for apps the watch has already
  * left), restart requests serialize with app changes and are dropped unless they
- * still target the exact session that raised them, and the deny-to-allow detector
- * fires only on that transition. CompanionAppLifecycleManager itself cannot be
+ * still target the exact session that raised them, and the Network grant detector
+ * fires once per change of the grant, in either direction. CompanionAppLifecycleManager itself cannot be
  * constructed here (Room-backed dependencies), which is why the decisions live in
  * the coordinator with injected effects; these tests drive the real coordinator
  * with recording effects whose begin/end markers make any interleaving visible.

@@ -290,8 +290,9 @@ minSdk reaches 28.
 
 **Status: accepted; degrades safely and is rare in practice.**
 
-Of the layers the watchapp network gate puts under a denied app (see
-`DESIGN_NOTES.md`), three act on web requests. Two of them, the `shouldInterceptRequest`
+Leaving aside the `Connection-Allowlist` header, which has its own entry
+below, three of the layers the watchapp network gate puts under a denied app
+(see `DESIGN_NOTES.md`) act on web requests. Two of them, the `shouldInterceptRequest`
 403 and the `startup.js` API stubs, always apply, but only the third, the
 `ProxyController` black-hole, deterministically covers WebSocket, because
 `ws`/`wss` handshakes never reach `shouldInterceptRequest` (a documented
@@ -317,20 +318,23 @@ Gravel installs a filter at process start that refuses the creation of UDP
 sockets in its own process, for as long as it runs. Web content inside
 Gravel (PebbleKit JS with internet access on, configuration pages, other
 in-app web pages) therefore has no UDP, which WebRTC over UDP,
-WebTransport and HTTP/3 need. A release build fails if its dex names a
-Java UDP socket type (`VerifyApkContents`).
+WebTransport and HTTP/3 need. Building a release APK fails if its dex names
+one of the Java UDP socket types that `VerifyApkContents` lists; an app
+bundle build does not run that check.
 
 ## The UDP filter starts with the app process, not before it
 
 **Status: accepted.**
 
 The filter is installed in `MainApplication.attachBaseContext`, ahead of
-the app's content providers, library initializers and `onCreate`. A socket
+the app's content providers, library initializers and `onCreate` (platform
+source cited there). A socket
 opened earlier than that by platform code would be outside the filter; none
 is known. The speech engine's isolated process gets no filter. A process
 that Android starts for a full backup or restore uses the base
-`Application` class, so neither the filter nor the rest of Gravel's startup
-runs in it.
+`Application` class (android16-release,
+`ActivityThread.handleBindApplication`, `LoadedApk.makeApplicationInner`),
+so neither the filter nor the rest of Gravel's startup runs in it.
 
 ## If Android refuses the UDP filter
 
@@ -358,8 +362,10 @@ same way.
 
 Gravel keeps running when a PebbleKit JS session's WebView renderer exits,
 and does not restart that session on its own; opening the app on the watch
-again starts a new one. `localStorage` values the script set by property
-assignment after its last `setItem` are lost in that case.
+again starts a new one. With Network on, `localStorage` values the script
+set by property assignment rather than by `setItem` are lost in that case;
+with Network off, every change is written through as it happens, so none
+are.
 
 ## Changing the Network permission restarts the watchapp's phone-side script
 

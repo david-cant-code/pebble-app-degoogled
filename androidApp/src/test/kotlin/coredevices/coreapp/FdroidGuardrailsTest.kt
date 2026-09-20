@@ -37,13 +37,16 @@ import kotlin.test.assertTrue
  * list is the tree's half of a contract with the out-of-tree recipe, and
  * DESIGN_NOTES.md (F-Droid section) records the whole contract.
  *
- * The tests after the scanner checks are the other two halves of that
- * contract the tree can verify about itself, each with a positive control
- * proving its matcher fires: the build runs on the buildserver's JDK (no
- * toolchain pin, [noGradleFileConfiguresAJvmToolchain]) and the version file
- * F-Droid's update checker reads has the shape its regex expects and, on a
- * tag checkout, the value the build produces
- * ([versionFileMatchesTheBuiltCommitOnATagCheckout]).
+ * The tests after the scanner checks are the other parts of that contract
+ * the tree can verify about itself: the build runs on the buildserver's JDK
+ * (no toolchain pin, [noGradleFileConfiguresAJvmToolchain]), the native
+ * modules pin one NDK and one CMake ([everyNativeModulePinsTheSameNdkAndCmake]),
+ * and the version file F-Droid's update checker reads has the shape its regex
+ * expects and, on a tag checkout, the value the build produces
+ * ([versionFileMatchesTheBuiltCommitOnATagCheckout]). The toolchain and
+ * version-file checks each have a positive control proving the matcher
+ * fires; the pin check only asserts that it found both modules, and the
+ * listing-limit checks at the end have none.
  */
 /** F-Droid's documented maximum for a changelog file; longer text is cut when published. */
 private const val FDROID_CHANGELOG_LIMIT = 500
