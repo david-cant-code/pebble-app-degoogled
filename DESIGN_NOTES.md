@@ -139,6 +139,20 @@ with its own permissions that these grants do not cover, so the user text
 is worded as "code the app runs inside Gravel" and never as "stops the app
 sending your data".
 
+**What a granted watchapp can reach.** A Network grant lets the app's JS
+talk to whatever its WebView can, and that JS is less confined than a web
+page: it loads from a `file://` page with universal access, so the
+same-origin rules that stop a website reading another origin's responses do
+not apply to it. Beyond the internet, two kinds of destination are in
+range: services other apps run on the phone's loopback interface, and
+devices on the user's network. Both are commonly plain HTTP with no
+authentication, on the assumption that only the local user can reach them.
+The app-wide cleartext denial covers the plain-HTTP ones, and it is kept
+whole for that reason: Android 17 permits cleartext to loopback unless the
+app's network security config names a localhost domain, so the config names
+one (platform source in that file's comment; `CleartextPolicyTest` asks the
+platform on a device).
+
 **Decision authority.** `WatchappPermissionResolver`
 (`locker/WatchappPermissions.kt`) is the single place that resolves a
 grant. A capability is stored per app in the existing

@@ -425,7 +425,7 @@ lookup has not been measured; measuring it comes first, then a decision.
 
 ## Cleartext HTTP is blocked app-wide, breaking http-only watchapps
 
-**Status: deliberate; a guarded per-app opt-in may lift it later.**
+**Status: deliberate.**
 
 Watchapps whose developer config pages or PebbleKit JS requests use plain
 `http://` fail even when the app's Network permission is granted: the
@@ -450,20 +450,18 @@ and drops the manifest's `usesCleartextTraffic` attribute, so the built
 manifest states what is true rather than relying on the precedence rule;
 both are re-asserted against upstream at every merge and pinned by
 `NetworkSecurityConfigTest` (source) and the CI check on the built
-manifest (artifact). The fork keeps the block because a config
+manifest (artifact). The config also names `localhost` in a
+cleartext-denying domain-config, because Android 17 otherwise permits
+cleartext to loopback hosts (platform source in that file's comment);
+`CleartextPolicyTest` asks the platform on a device, and is not part of
+CI. The fork keeps the block because a config
 page is remote code executed in a WebView on the phone: fetched over
 cleartext, it hands any network-position attacker script injection into
 that WebView, plus whatever app state rides in the config URL. Legacy
 http-only watchapps break, and that is the accepted cost.
 
-A possible future resolution is a per-app "allow insecure HTTP" toggle in
-the watchapp permission controls, default off and gated behind an
-explicit warning, enforced through the same layered gate as the Network
-permission: the request interceptor and the config-page WebView can
-refuse the scheme per app, and the proxy layer supports scheme-filtered
-rules that would keep insecure WebSocket covered deterministically. This
-entry leaves the file if that ships, or if the ecosystem's http-only
-apps age out.
+No opt-in is planned. This entry leaves the file if the ecosystem's
+http-only apps age out.
 
 ## Language pack downloads are not digest-pinned
 

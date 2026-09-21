@@ -61,6 +61,24 @@ class NetworkSecurityConfigTest {
         }
     }
 
+    // Why the entry exists is stated once, in the config file's own comment.
+    @Test
+    fun localhostIsNamedInADomainConfigThatDeniesCleartext() {
+        val document = parse(configFile())
+        val domains = document.getElementsByTagName("domain")
+        val localhost = (0 until domains.length)
+            .map { domains.item(it) as Element }
+            .filter { it.textContent.trim() == "localhost" }
+        assertEquals(1, localhost.size, "expected exactly one <domain>localhost</domain>")
+        val domainConfig = localhost.single().parentNode as Element
+        assertEquals("domain-config", domainConfig.tagName)
+        assertEquals(
+            "false",
+            domainConfig.getAttribute("cleartextTrafficPermitted"),
+            "the localhost domain-config must set cleartextTrafficPermitted=\"false\"",
+        )
+    }
+
     @Test
     fun manifestDeclaresNoCleartextAttributeAndPointsAtTheConfig() {
         val document = parse(manifestFile())
