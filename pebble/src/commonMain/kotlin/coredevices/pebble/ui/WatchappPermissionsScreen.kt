@@ -35,6 +35,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
+import com.anopticlabs.gravel.pkjs.shouldRunPkjs
 import coredevices.pebble.rememberLibPebble
 import coredevices.ui.M3Dialog
 import io.rebble.libpebblecommon.WatchConfig
@@ -46,6 +48,7 @@ import io.rebble.libpebblecommon.locker.PermissionSetting
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlin.uuid.Uuid
+import org.koin.compose.getKoin
 
 /**
  * Fork feature: Settings > Apps > Watch App Permissions.
@@ -325,6 +328,7 @@ private fun WatchappPermissionListRow(
 @Composable
 fun WatchappPermissionControls(uuid: Uuid, modifier: Modifier = Modifier) {
     val libPebble = rememberLibPebble()
+    val koin = getKoin()
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
             "This app's access on your phone",
@@ -348,6 +352,21 @@ fun WatchappPermissionControls(uuid: Uuid, modifier: Modifier = Modifier) {
             label = "Internet access",
             libPebble = libPebble,
         )
+        val networkDenyEnforced = remember {
+            koin.getOrNull<NetworkDenyEnforcement>()?.primaryLayerActive == true
+        }
+        // Counts as on until the stored grant arrives, so the notice does not flash.
+        val networkGranted by libPebble.watchappPermissionGranted(uuid, LockerAppPermissionType.Network)
+            .collectAsState(true)
+        if (!shouldRunPkjs(hasPkjs = true, networkGranted, networkDenyEnforced)) {
+            Text(
+                "Gravel could not turn on its network block on this device. While internet " +
+                    "access is off, it does not run an app's code inside Gravel.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
         Spacer(Modifier.height(12.dp))
         WatchappPermissionSelector(
             uuid = uuid,

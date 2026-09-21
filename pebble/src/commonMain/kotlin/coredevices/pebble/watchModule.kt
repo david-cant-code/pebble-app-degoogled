@@ -2,6 +2,7 @@ package coredevices.pebble
 
 import co.touchlab.kermit.Logger
 import com.algolia.client.api.SearchClient
+import com.anopticlabs.gravel.pkjs.FixedNetworkDenyEnforcement
 import coredevices.pebble.health.createPlatformHealthManager
 import coredevices.pebble.account.BootConfigProvider
 import coredevices.pebble.account.FirestoreKnownWatchesDao
@@ -125,6 +126,8 @@ val watchModule = module {
                 .stateIn(GlobalScope, started = SharingStarted.Lazily, initialValue = null),
             get(),
             get(),
+            // Gravel: bound by the platform's app module; absent means not enforced.
+            networkDenyEnforcement = getOrNull() ?: FixedNetworkDenyEnforcement(primaryLayerActive = false),
         )
     } binds arrayOf(LibPebble3::class, NotificationApps::class, SystemGeolocation::class)
 

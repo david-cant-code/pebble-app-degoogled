@@ -72,8 +72,9 @@ internal expect fun webViewFactory(
 internal expect suspend fun restoreLocalStorage(webView: NativeWebView)
 internal expect fun persistLocalStorage(webView: NativeWebView)
 
+// onRendererGone runs on the main thread once the page's renderer process has exited.
 @Composable
-internal expect fun rememberWebViewFileChooserParams(): PlatformWebViewParams?
+internal expect fun rememberPlatformWebViewParams(onRendererGone: () -> Unit): PlatformWebViewParams?
 
 private val logger = Logger.withTag("WatchappSettingsScreen")
 
@@ -118,7 +119,12 @@ fun WatchappSettingsScreen(
                 }
             }
         }
-        val fileChooserParams = rememberWebViewFileChooserParams()
+        val platformWebViewParams = rememberPlatformWebViewParams(
+            onRendererGone = {
+                logger.w { "Settings page renderer gone; closing settings" }
+                coreNav.goBack()
+            },
+        )
         val state = rememberWebViewState(url) {
             androidWebSettings.domStorageEnabled = true
             iOSWebSettings.isInspectable = true
@@ -178,7 +184,7 @@ fun WatchappSettingsScreen(
                     state = state,
                     modifier = Modifier.fillMaxSize().padding(paddingValues),
                     navigator = navigator,
-                    platformWebViewParams = fileChooserParams,
+                    platformWebViewParams = platformWebViewParams,
                     factory = { webViewFactory(it, uuid) }
                 )
             }

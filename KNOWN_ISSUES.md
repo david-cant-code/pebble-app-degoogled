@@ -290,8 +290,9 @@ minSdk reaches 28.
 
 **Status: accepted; degrades safely and is rare in practice.**
 
-The watchapp network gate (see `DESIGN_NOTES.md`) enforces a denied app's
-network block in three layers. Two of them, the `shouldInterceptRequest`
+Leaving aside the `Connection-Allowlist` header, which has its own entry
+below, three of the layers the watchapp network gate puts under a denied app
+(see `DESIGN_NOTES.md`) act on web requests. Two of them, the `shouldInterceptRequest`
 403 and the `startup.js` API stubs, always apply, but only the third, the
 `ProxyController` black-hole, deterministically covers WebSocket, because
 `ws`/`wss` handshakes never reach `shouldInterceptRequest` (a documented
@@ -303,11 +304,124 @@ builds. Where it is absent, a network-denied app's http/https egress is
 still deterministically blocked (layer 1) and its JS network APIs are
 stubbed (layer 2), but a hostile bundle that recovers a fresh `WebSocket`
 constructor could open a WebSocket. The exposure is narrow: it needs a
-`PROXY_OVERRIDE`-less WebView and a deliberately hostile watchapp, and it
-is limited to WebSocket only. `WebViewJsRunner.applyNetworkProxy` logs a
+`PROXY_OVERRIDE`-less WebView and a deliberately hostile watchapp. It is
+not limited to WebSocket; WebRTC over TCP is reachable the same way, since
+the UDP filter covers only UDP (see the WebRTC header entry below).
+`WebViewJsRunner.applyNetworkProxy` logs a
 warning when the feature is unavailable. This entry leaves the file if
 minSdk/WebView baseline guarantees `PROXY_OVERRIDE`, or if a WebView-level
 WebSocket intercept becomes available.
+
+## No UDP for web content inside Gravel
+
+**Status: deliberate.**
+
+Gravel installs a filter at process start that refuses the creation of UDP
+sockets in its own process, for as long as it runs. On devices where the
+filter installs, web content inside Gravel (PebbleKit JS with internet
+access on, configuration pages, other in-app web pages) therefore has no
+UDP, which WebRTC over UDP, WebTransport and HTTP/3 need. This holds
+because Android System WebView runs its network service in the app process,
+so the WebView's own UDP sockets are created where the filter acts (Chromium
+M153, `refs/branch-heads/8010`, `aw_main_delegate.cc`,
+`AwMainDelegate::BasicStartupComplete` calling
+`content::ForceInProcessNetworkService`); a WebView that moved its network
+service out of the app process would need this re-checked at the sync that
+brought it in. Building a release APK fails if its dex names
+one of the types that `VerifyApkContents` lists, three Java UDP socket
+types and `DatagramPacket`, which opens no socket; an app bundle build does
+not run that check.
+
+## The UDP filter starts with the app process, not before it
+
+**Status: accepted.**
+
+The filter is installed in `MainApplication.attachBaseContext`, ahead of
+the app's content providers, library initializers and `onCreate` (platform
+source cited there). A socket
+opened earlier than that by platform code would be outside the filter; none
+is known. The speech engine's isolated process gets no filter. A process
+that Android starts for a full backup or restore uses the base
+`Application` class (android16-release,
+`ActivityThread.handleBindApplication`, `LoadedApk.makeApplicationInner`),
+so neither the filter nor the rest of Gravel's startup runs in it.
+
+## If Android refuses the UDP filter
+
+**Status: accepted; no affected device is known.**
+
+If the platform does not let Gravel install the filter, Gravel logs the
+result at startup and does not run a watchapp's phone-side script while
+that watchapp's internet access is off. The watchapp's permission controls
+say so.
+
+## The UDP filter is untested on Android versions before 17
+
+**Status: accepted.**
+
+The filter has been run on hardware on Android 17. On older versions, down
+to Android 8, it has not been tested. If the platform there refuses the
+install, Gravel behaves as described under "If Android refuses the UDP
+filter". On a device that is not ARM, such as an x86 device that runs ARM
+code under translation, Gravel does not install the filter and behaves the
+same way.
+
+## A watchapp whose WebView renderer exits stays stopped until relaunched
+
+**Status: accepted.**
+
+Gravel keeps running when a PebbleKit JS session's WebView renderer exits,
+and does not restart that session on its own; opening the app on the watch
+again starts a new one. With Network on, `localStorage` values the script
+set by property assignment rather than by `setItem` are lost in that case;
+with Network off, every change is written through as it happens, so none
+are.
+
+## Changing the Network permission restarts the watchapp's phone-side script
+
+**Status: deliberate.**
+
+A change to a watchapp's Network permission, in either direction, stops its
+PebbleKit JS session and starts a new one. Whether a connection opened
+while Network was on is cut in the moment before that restart completes has
+not been measured.
+
+## The WebRTC response-header layer needs WebView 152 or newer
+
+**Status: accepted; improves as WebView updates.**
+
+With Network off, Gravel serves the watchapp's page with a
+`Connection-Allowlist` header that allows no connections and switches
+WebRTC off for it. Android System WebView honors the header from version
+152, and Gravel cannot read back whether it is honored. Below version 152
+the header does nothing: the UDP filter still stops WebRTC over UDP, WebRTC
+over TCP is outside the filter and is stopped by the black-hole proxy where
+the WebView supports proxy override (Chromium M153, `refs/branch-heads/8010`,
+`services/network/p2p/socket_tcp.cc`, `P2PSocketTcpBase::Init`, which opens
+the socket through the proxy-resolving socket factory), and on a WebView
+without proxy override (see the WebSocket entry above) WebRTC over TCP has
+no deterministic cover.
+The header is never relied on alone.
+
+## With Network off, PebbleKit JS runs without cookies, IndexedDB or the Cache API
+
+**Status: deliberate.**
+
+With Network off, a watchapp's script runs in a sandboxed frame that has
+none of the browser's origin-bound storage. `localStorage` is provided by
+Gravel there and persists as before. If the script navigates or reloads
+its own frame, Gravel stops that session; opening the app on the watch
+again starts a new one.
+
+## Name lookups are not covered by the watchapp Network permission
+
+**Status: open.**
+
+The Network permission's layers act on connections, not on name lookups,
+which go through the system resolver. A lookup is itself outbound data: the
+queried name reaches the domain's nameserver, so an uncovered lookup is a
+low-bandwidth channel out. Whether a watchapp with Network off can cause a
+lookup has not been measured; measuring it comes first, then a decision.
 
 ## Cleartext HTTP is blocked app-wide, breaking http-only watchapps
 

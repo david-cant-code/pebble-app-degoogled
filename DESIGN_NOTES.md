@@ -162,12 +162,16 @@ immediately (a watchface can hold a watch for days) and re-granting
 restarts it. Denial is reported to the JS callback as a geolocation
 error in both cases.
 
-**Network enforcement is layered** (three independent layers, per the
-defence-in-depth rule, with at least one deterministic cover for every
-socket type):
+**Network enforcement is layered** (per the defense-in-depth rule; on a
+WebView that supports proxy override, with at least one deterministic cover
+for every socket type, and `KNOWN_ISSUES.md` records what a WebView without
+it leaves open). Three layers act on
+the WebView's requests; the UDP socket filter and the denied-session page's
+response header, both below, are two more:
 
 1. `WebViewJsRunner.shouldInterceptRequest` returns a 403 for every
-   non-`file://` request when the app is network-denied. Deterministic for
+   non-`file://` request when the app is network-denied (in a
+   denied-session page, below, for `file://` as well). Deterministic for
    http/https (XHR, fetch, subresources, navigations). WebSocket
    handshakes do not pass through this callback (a documented WebView
    limitation), which is why layer 3 exists.
@@ -175,12 +179,11 @@ socket type):
    `EventSource`/`sendBeacon` in failing guards when the app loads while
    denied, gated on a synchronous `_Pebble.isNetworkAllowed()` bridge
    call. The guards re-read the live grant on every use and restore the
-   original entry points the moment access is granted, so granting a
-   running app takes effect without a session restart (the page loads
-   only once per session, so a load-time-only stub would freeze the deny
-   until the app restarts). They do not reinstall on a later revoke; the
-   native layers enforce that direction live. Best-effort (same-realm JS
-   a hostile bundle could try to work around), so it never stands alone.
+   original entry points once access is granted; they do not reinstall
+   on a later revoke. A grant change also requests the session restart
+   described below, which loads the page again. Best-effort (same-realm
+   JS a hostile bundle could try to work around), so it never stands
+   alone.
 3. `ProxyController` (androidx.webkit) sets a process-wide WebView proxy
    override that black-holes all egress (every scheme, including ws/wss)
    to an unroutable address while a network-denied app runs, and clears it
@@ -190,20 +193,20 @@ socket type):
    network segment). Applied and awaited before the app page loads and
    kept in sync with live toggles; on stop, the live-toggle collector is
    cancelled first and the override is cleared only after the WebView is
-   destroyed, so a denied app's scripts never run without the black-hole
-   and nothing can re-install it once teardown has cleared it.
-   Process-global is inherent to the API, but only one PKJS WebView runs
-   at a time and the config page (below) is gated for denied apps, so
-   nothing legitimate needs the network while it is set. Requires the
+   destroyed (the reasons are at `WebViewJsRunner.stop`).
+   The override is process-wide, so while it is set it also covers any
+   other WebView in the app, such as a page left open for another app. Only
+   one PKJS WebView runs at a time, and the config page (below) is gated
+   for denied apps. Requires the
    `PROXY_OVERRIDE` feature; the degraded case is in `KNOWN_ISSUES.md`.
 
-A deny-to-allow flip while the app is running also restarts its PKJS
-session (`CompanionAppLifecycleManager` funnels the restart through the
-same serially processed stream as watch-side app switches): an app that
-fetches only at launch never touches the network again after its first
-attempt fails, so without the restart a mid-session grant would take
-visible effect only at the next app switch. Allow-to-deny needs no
-restart; the enforcement layers apply it live.
+A change of the app's Network grant while it is running, in either
+direction, also restarts its PKJS session (`launchNetworkGrantWatcher`;
+`CompanionAppLifecycleManager` funnels the restart through the same
+serially processed stream as watch-side app switches). What a session
+sets up for the grant is fixed when it starts, and an app that fetches
+only at launch never touches the network again after its first attempt
+fails.
 
 The phone-side interceptor path (`PrivatePKJSInterface.onIntercepted`,
 which the weather interceptors use to fetch on the app's behalf) is gated
@@ -229,8 +232,59 @@ internet, and the location capability description states the real "may send
 it to outside servers" flow. A one-time "What's New" dialog announces the
 deny-by-default change to existing users (`WhatsNewDialog`).
 
-**Dependency.** `androidx.webkit` (1.16.0) is added for `ProxyController`
-only: current stable, Apache-2.0, on Google's Maven (F-Droid
+**UDP socket filter.** Under the three layers above sits a process-wide
+one: `:socketfilter` installs a seccomp filter in
+`MainApplication.attachBaseContext` that refuses the creation of `AF_INET`
+and `AF_INET6` datagram sockets in the app's process for as long as it
+runs, whatever a watchapp's grant says (costs and limits in
+`KNOWN_ISSUES.md`).
+libpebble3 does not depend on the module: the app reports the install
+result through `NetworkDenyEnforcement`, a `LibPebble3.create` parameter
+whose default is "not active". When it is not active,
+`CompanionAppLifecycleManager.createCompanionApps` builds no PebbleKit JS
+session for an app whose Network grant is denied (`shouldRunPkjs`), and the
+grant watcher restarts the session once the grant changes.
+`WebViewJsRunner.start` makes the same check on the grant read its session
+is built from, and loads nothing when it fails.
+
+**Denied-session page.** A session that starts with the Network grant
+denied is built differently from a granted one (`denyConstruction`, fixed
+in `WebViewJsRunner.start`; the grant watcher above is what lets it be
+fixed). Its top document is a host page served by the runner's own
+interceptor at `https://pkjs.gravel.invalid/host.html`, the only URL that
+interceptor serves while the grant stays denied (`planPkjsRequest`), and
+that response and every 403 of
+the session carry a `Connection-Allowlist` header with an empty allowlist
+and WebRTC blocked (source cited at the constant in `PkjsRequestPlan.kt`;
+WebView version caveat in `KNOWN_ISSUES.md`). The host page holds no
+watchapp script. It creates one `sandbox="allow-scripts"` `srcdoc` frame,
+and `startup.js` and the app's script run there, read as text through
+`_Pebble` bridge methods that take no argument. Native calls reach the
+frame as strings the host page forwards with `postMessage`
+(`evaluateInPage`), and `localStorage`, which a sandboxed frame lacks, is
+a stand-in that writes through to the same native store a granted session
+uses. File access is off in the session's WebView, and the view is given a
+laid-out size, without which the frame's timers fall behind their interval
+(`frameTimersRunAtTheirInterval`).
+The frame has to keep the document it was created with, and two controls
+hold that: the navigation lock (`refusePageNavigation`, which refuses every
+navigation the WebView consults the app for, in granted sessions too) and
+the document-commit guard (`onFrameDocument`), which ends the session,
+the same way a renderer exit does, when the frame's bootstrap runs a second
+time or the host page sees the frame load a second document.
+`PKJSDenyConstructionTest` covers the construction and both controls on a
+device; a granted session is built as before.
+
+**Renderer exit.** `WebViewJsRunner`, `PebbleWebview` and the watchapp
+settings page each handle `onRenderProcessGone`; left unhandled, a WebView
+renderer's exit ends the app process (source cited at `WebViewJsRunner`'s
+override). The runner does not restart a PebbleKit JS session whose
+renderer exits (`KNOWN_ISSUES.md`), `PebbleWebview` shows a message in
+place of the page, and the settings page closes with a message.
+
+**Dependency.** `androidx.webkit` (1.16.0) is added for `ProxyController`,
+and the runner also logs its multi-process query at session start: current
+stable, Apache-2.0, on Google's Maven (F-Droid
 deliverable), no known advisories, non-deprecated API surface.
 
 ## PebbleKit exposure toggles
@@ -709,10 +763,11 @@ What the tree guarantees, and how it is pinned:
   graphics-path) next to the whisper engine built from source. What the
   fork removed was prebuilt native code with no public source (the Cactus
   engine, the Ring satellite AAR), which the policy does reject.
-- The engine toolchain is pinned in `whisper-native/build.gradle.kts`
-  (`ndkVersion` 28.2.13676358, that is NDK r28c, and CMake 3.22.1), so a
-  build is the same on every machine and the recipe has exact values to
-  provision.
+- The native toolchain is pinned in `whisper-native/build.gradle.kts` and
+  `socketfilter/build.gradle.kts` (`ndkVersion` 28.2.13676358, that is NDK
+  r28c, and CMake 3.22.1), so a build is the same on every machine and the
+  recipe has exact values to provision. `FdroidGuardrailsTest` fails when
+  the two modules name different values.
 - `versionName` is `git describe --tags --first-parent HEAD` and
   `versionCode` the commit count, both functions of the built commit
   (`androidApp/build.gradle.kts`), so a tag checkout reports exactly the

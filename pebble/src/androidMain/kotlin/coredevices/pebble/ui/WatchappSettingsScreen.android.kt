@@ -2,23 +2,34 @@ package coredevices.pebble.ui
 
 import android.content.ActivityNotFoundException
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebView
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.platform.LocalContext
+import com.anopticlabs.gravel.ui.RendererGoneAwareWebViewClient
 import com.multiplatform.webview.web.AccompanistWebChromeClient
 import com.multiplatform.webview.web.NativeWebView
 import com.multiplatform.webview.web.PlatformWebViewParams
 import com.multiplatform.webview.web.WebViewFactoryParam
 import com.multiplatform.webview.web.defaultWebViewFactory
+import coreapp.util.generated.resources.Res
+import coreapp.util.generated.resources.webview_settings_page_stopped
 import io.rebble.libpebblecommon.connection.AppContext
 import io.rebble.libpebblecommon.io.rebble.libpebblecommon.js.WebViewJSLocalStorageInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.stringResource
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.io.path.Path
 import kotlin.uuid.Uuid
@@ -58,7 +69,20 @@ internal actual suspend fun restoreLocalStorage(webView: NativeWebView) {
 }
 
 @Composable
-internal actual fun rememberWebViewFileChooserParams(): PlatformWebViewParams? {
+internal actual fun rememberPlatformWebViewParams(onRendererGone: () -> Unit): PlatformWebViewParams? {
+    val context = LocalContext.current
+    val stoppedMessage = stringResource(Res.string.webview_settings_page_stopped)
+    val currentOnRendererGone by rememberUpdatedState(onRendererGone)
+    val goneView = remember { AtomicReference<WebView?>(null) }
+    DisposableEffect(Unit) {
+        onDispose {
+            // The view left composition with this screen (RendererGoneAwareWebViewClient has
+            // the constraint). The destroy is posted, so it runs after this disposal pass.
+            goneView.getAndSet(null)?.let { view ->
+                Handler(Looper.getMainLooper()).post { view.destroy() }
+            }
+        }
+    }
     val pending = remember { AtomicReference<ValueCallback<Array<Uri>>?>(null) }
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -68,6 +92,11 @@ internal actual fun rememberWebViewFileChooserParams(): PlatformWebViewParams? {
     }
     return remember(launcher) {
         PlatformWebViewParams(
+            client = RendererGoneAwareWebViewClient { view, _ ->
+                goneView.set(view)
+                Toast.makeText(context, stoppedMessage, Toast.LENGTH_LONG).show()
+                currentOnRendererGone()
+            },
             chromeClient = object : AccompanistWebChromeClient() {
                 override fun onShowFileChooser(
                     webView: WebView?,

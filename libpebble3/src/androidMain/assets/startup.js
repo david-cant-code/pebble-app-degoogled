@@ -498,14 +498,10 @@ navigator.geolocation.clearWatch = (id) => {
     // only exists on Android; iOS falls through and leaves the network APIs intact.
     //
     // The guards re-read the live grant (a synchronous bridge call into the runner's
-    // cached permission state) on every use: the page loads exactly once per session,
-    // so a load-time-only check would freeze the deny for the whole session and a
-    // user granting access to a running app (the normal "watchface weather is broken,
-    // let me allow it" flow, and watchfaces run indefinitely) would see no effect
-    // until the app restarts. Once the grant is seen, the guards restore the saved
-    // originals and get out of the way entirely; they do not reinstall on a later
-    // revoke. Revoking mid-session is enforced by the native layers, which act on the
-    // live value: the shim only exists to make load-time denial fail cleanly.
+    // cached permission state) on every use, and once the grant is seen they restore
+    // the saved originals; they do not reinstall on a later revoke. A change of the
+    // grant also requests a session restart (launchNetworkGrantWatcher), which loads
+    // this page again. The shim exists to make load-time denial fail cleanly.
     try {
         if (_Pebble.isNetworkAllowed && _Pebble.isNetworkAllowed() === false) {
             // Saved AFTER the interception wrappers above are installed, so restoring

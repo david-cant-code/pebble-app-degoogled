@@ -1,6 +1,8 @@
 package io.rebble.libpebblecommon.connection.endpointmanager
 
 import co.touchlab.kermit.Logger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -10,6 +12,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
 import kotlin.uuid.Uuid
 
 // Fork: event vocabulary for the serialized companion session stream.
@@ -120,16 +123,35 @@ internal class CompanionSessionCoordinator(
 }
 
 /**
- * Emits once each time the upstream grant flips from denied to allowed. The initial
- * value never emits (a session that loads with the grant already in place needs no
- * restart), and repeated equal values are ignored.
+ * Emits once each time the upstream grant differs from the value before it, starting from
+ * [builtWith], the grant the session was built with. Repeated equal values are ignored: the
+ * resolved grant flow re-emits on unrelated permission-table and config writes.
  */
-internal fun Flow<Boolean>.denyToAllowTransitions(): Flow<Unit> = flow {
-    var previous: Boolean? = null
+internal fun Flow<Boolean>.grantChanges(builtWith: Boolean): Flow<Unit> = flow {
+    var previous = builtWith
     collect { allowed ->
-        if (previous == false && allowed) {
+        if (previous != allowed) {
             emit(Unit)
         }
         previous = allowed
     }
 }
+
+/**
+ * Requests a restart of [app]'s session [sessionGeneration] on each [grantChanges] emission
+ * of its Network grant; a generation read at emission could be a successor session's.
+ */
+internal fun CoroutineScope.launchNetworkGrantWatcher(
+    grant: Flow<Boolean>,
+    builtWith: Boolean,
+    app: Uuid,
+    sessionGeneration: Long,
+    requestRestart: (app: Uuid, generation: Long) -> Unit,
+): Job = launch {
+    grant.grantChanges(builtWith).collect {
+        watcherLogger.d { "Network grant for $app changed mid-session; requesting restart" }
+        requestRestart(app, sessionGeneration)
+    }
+}
+
+private val watcherLogger = Logger.withTag("NetworkGrantWatcher")

@@ -1,11 +1,16 @@
 package io.rebble.libpebblecommon.js
 
+import io.rebble.libpebblecommon.LibPebbleConfig
+import io.rebble.libpebblecommon.LibPebbleConfigFlow
+import io.rebble.libpebblecommon.WatchConfig
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDevice
 import io.rebble.libpebblecommon.connection.FakeAppMessages
 import io.rebble.libpebblecommon.connection.FakeLibPebble
 import io.rebble.libpebblecommon.connection.LibPebble
 import io.rebble.libpebblecommon.connection.fakeWatch
+import io.rebble.libpebblecommon.database.dao.FakeLockerAppPermissionDao
 import io.rebble.libpebblecommon.database.entity.LockerEntry
+import io.rebble.libpebblecommon.locker.WatchappPermissionResolver
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.PbwAppInfo
 import io.rebble.libpebblecommon.metadata.pbw.appinfo.Resources
 import kotlinx.coroutines.CoroutineScope
@@ -13,7 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -42,8 +47,12 @@ abstract class PKJSRunnerTests(
         jsPath: Path,
         device: CompanionAppDevice,
         urlOpenRequests: Channel<String>,
-        logMessages: MutableSharedFlow<String>
-    ) -> JsRunner
+        logMessages: Channel<String>,
+        watchappPermissions: WatchappPermissionResolver,
+    ) -> JsRunner,
+    // The Network grant of a runner made without an explicit one. On Android it selects the
+    // page construction, so a subclass runs the shared tests once per construction.
+    private val networkGrantedByDefault: Boolean = true,
 ) {
     companion object {
         private val APPINFO = PbwAppInfo(
@@ -75,19 +84,34 @@ abstract class PKJSRunnerTests(
         return jsPath
     }
 
-    private val logMessageFlow = MutableSharedFlow<String>().also {
+    private val logMessageChannel = Channel<String>(Channel.UNLIMITED).also {
         GlobalScope.launch {
-            it.collect { msg ->
+            for (msg in it) {
                 println("JSLOG: $msg")
             }
         }
     }
 
-    private fun makeRunner(
+    // A real resolver over a fake DAO: the app has no override row, so the global
+    // default alone decides its Network grant.
+    private fun permissionResolver(networkGranted: Boolean) = WatchappPermissionResolver(
+        FakeLockerAppPermissionDao(),
+        LibPebbleConfigFlow(
+            MutableStateFlow(
+                LibPebbleConfig(
+                    watchConfig = WatchConfig(watchappDefaultNetworkAllowed = networkGranted),
+                ),
+            ),
+        ),
+    )
+
+    protected fun makeRunner(
         js: String,
         uuid: Uuid,
         scope: CoroutineScope = CoroutineScope(Dispatchers.Default),
-        appMessages: FakeAppMessages = FakeAppMessages()
+        appMessages: FakeAppMessages = FakeAppMessages(),
+        networkGranted: Boolean = networkGrantedByDefault,
+        urlOpenRequests: Channel<String> = Channel(Channel.UNLIMITED),
     ): JsRunner {
         val libPebble = FakeLibPebble()
         val watch = fakeWatch(connected = true) as ConnectedPebbleDevice
@@ -102,8 +126,9 @@ abstract class PKJSRunnerTests(
                 watch.watchInfo,
                 appMessages
             ),
-            Channel(Channel.UNLIMITED),
-            logMessageFlow,
+            urlOpenRequests,
+            logMessageChannel,
+            permissionResolver(networkGranted),
         )
     }
 
@@ -112,6 +137,11 @@ abstract class PKJSRunnerTests(
         val runner = makeRunner("", Uuid.random(), scope = scope)
         runBlocking {
             runner.start()
+            // start() returns before the startup page has loaded, and that load replaces the
+            // document an earlier eval wrote to.
+            withTimeout(5.seconds) {
+                runner.readyState.first { it }
+            }
             runner.eval("window.test = true;")
             val result = runner.evalWithResult("window.test;")
             when (result) {
@@ -125,6 +155,7 @@ abstract class PKJSRunnerTests(
                     error("Unexpected result type: ${result?.let { it::class }}")
                 }
             }
+            runner.stop()
         }
         assertTrue(scope.isActive)
     }
@@ -155,6 +186,7 @@ abstract class PKJSRunnerTests(
                     error("Unexpected result type: ${result?.let { it::class }}")
                 }
             }
+            runner.stop()
         }
     }
 
@@ -202,6 +234,7 @@ abstract class PKJSRunnerTests(
                     error("Unexpected result type: ${result?.let { it::class }}")
                 }
             }
+            runner.stop()
         }
     }
 
@@ -248,6 +281,7 @@ abstract class PKJSRunnerTests(
                     error("Unexpected result type: ${result?.let { it::class }}")
                 }
             }
+            runner.stop()
         }
     }
 
@@ -319,6 +353,7 @@ abstract class PKJSRunnerTests(
                     error("Unexpected result type: ${resultEarlyGet?.let { it::class }}")
                 }
             }
+            runner.stop()
         }
     }
 

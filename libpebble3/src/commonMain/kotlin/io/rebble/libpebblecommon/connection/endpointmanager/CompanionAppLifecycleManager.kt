@@ -1,6 +1,8 @@
 package io.rebble.libpebblecommon.connection.endpointmanager
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
+import com.anopticlabs.gravel.pkjs.shouldRunPkjs
 import io.rebble.libpebblecommon.LibPebbleConfigFlow
 import io.rebble.libpebblecommon.connection.CompanionApp
 import io.rebble.libpebblecommon.connection.ConnectedPebble
@@ -52,6 +54,7 @@ class CompanionAppLifecycleManager(
     private val libPebbleConfigFlow: LibPebbleConfigFlow,
     private val libpebbleCoroutineScope: LibPebbleCoroutineScope,
     private val watchappPermissions: WatchappPermissionResolver,
+    private val networkDenyEnforcement: NetworkDenyEnforcement,
 ): ConnectedPebble.PKJS, ConnectedPebble.CompanionAppControl {
     companion object {
         private val logger = Logger.withTag(CompanionAppLifecycleManager::class.simpleName!!)
@@ -124,7 +127,11 @@ class CompanionAppLifecycleManager(
 
             // Fork: one config snapshot builds the session and seeds the toggle watcher's baseline.
             val watchConfig = libPebbleConfigFlow.value.watchConfig
-            val newApps = createCompanionApps(pbw, lockerEntry, watchConfig)
+            // Gravel: one read of the Network grant decides whether the session gets its
+            // PebbleKit JS side and seeds the grant watcher's baseline.
+            val networkGranted = watchappPermissions
+                .isWatchappPermissionGranted(lockerEntry.id, LockerAppPermissionType.Network)
+            val newApps = createCompanionApps(pbw, lockerEntry, watchConfig, networkGranted)
             runningApps.value = newApps
             val pkjsRunning = newApps.any { it is PKJSApp }
 
@@ -157,27 +164,19 @@ class CompanionAppLifecycleManager(
                 requestRestart = sessionCoordinator::requestRestart,
             )
 
-            // Fork: restart the session when the app's Network grant flips from deny
-            // to allow. A PKJS session that loaded while denied had its JS network
-            // entry points guarded from page load, and an app that only fetches at
-            // launch never touches the network again after that first attempt throws,
-            // so a mid-session grant would otherwise take visible effect only at the
-            // next app switch. Restarting re-runs the app's JS with the grant in
-            // place, which is the same transition apps already handle when the watch
-            // switches away and back. The allow-to-deny direction needs no restart:
-            // the enforcement layers apply it live. The watcher dies with
-            // activeAppScope, and a fresh session's watcher starts with a clean
-            // transition history, so a restart cannot retrigger itself.
-            if (pkjsRunning) {
-                activeAppScope.launch {
-                    watchappPermissions
-                        .watchappPermissionGranted(lockerEntry.id, LockerAppPermissionType.Network)
-                        .denyToAllowTransitions()
-                        .collect {
-                            logger.d { "Network grant for ${lockerEntry.id} allowed mid-session; requesting restart" }
-                            sessionCoordinator.requestRestart(lockerEntry.id, sessionGeneration)
-                        }
-                }
+            // Gravel: the session is rebuilt on any change of the app's Network grant, because
+            // what a PebbleKit JS session sets up for the grant is fixed when it starts. The
+            // watcher ends with activeAppScope, and a fresh session's watcher starts with no
+            // history, so a restart cannot retrigger itself.
+            if (pbw.hasPKJS) {
+                activeAppScope.launchNetworkGrantWatcher(
+                    grant = watchappPermissions
+                        .watchappPermissionGranted(lockerEntry.id, LockerAppPermissionType.Network),
+                    builtWith = networkGranted,
+                    app = lockerEntry.id,
+                    sessionGeneration = sessionGeneration,
+                    requestRestart = sessionCoordinator::requestRestart,
+                )
             }
         } catch (e: CancellationException) {
             throw e
@@ -192,9 +191,14 @@ class CompanionAppLifecycleManager(
         pbw: PbwApp,
         lockerEntry: LockerEntry,
         watchConfig: WatchConfig,
+        networkGranted: Boolean,
     ): List<CompanionApp> {
         return buildList {
-            val pkjsApp = if (pbw.hasPKJS) {
+            val runPkjs = shouldRunPkjs(pbw.hasPKJS, networkGranted, networkDenyEnforcement.primaryLayerActive)
+            if (pbw.hasPKJS && !runPkjs) {
+                logger.w { "Not running PebbleKit JS for ${lockerEntry.id}: Network is denied and the primary deny layer is absent" }
+            }
+            val pkjsApp = if (runPkjs) {
                 val jsPath = lockerPBWCache.getPKJSFileForApp(lockerEntry.id, lockerEntry.version)
                 PKJSApp(
                     device,

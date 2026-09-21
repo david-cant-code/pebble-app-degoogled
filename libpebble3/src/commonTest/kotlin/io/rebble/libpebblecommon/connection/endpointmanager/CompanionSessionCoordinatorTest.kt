@@ -16,8 +16,8 @@ import kotlin.uuid.Uuid
  * Pins the fork's companion session decision model: watch-side app changes are
  * conflated to the newest state (no session churn for apps the watch has already
  * left), restart requests serialize with app changes and are dropped unless they
- * still target the exact session that raised them, and the deny-to-allow detector
- * fires only on that transition. CompanionAppLifecycleManager itself cannot be
+ * still target the exact session that raised them, and the Network grant detector
+ * fires once per change of the grant, in either direction. CompanionAppLifecycleManager itself cannot be
  * constructed here (Room-backed dependencies), which is why the decisions live in
  * the coordinator with injected effects; these tests drive the real coordinator
  * with recording effects whose begin/end markers make any interleaving visible.
@@ -204,16 +204,39 @@ class CompanionSessionCoordinatorTest {
     }
 
     @Test
-    fun denyToAllowEmitsOnlyOnThatTransition() = runTest {
-        assertEquals(
-            0,
-            flowOf(true, true, false, false).denyToAllowTransitions().toList().size,
-            "allowed at load or revoked mid-session must not restart",
+    fun grantChangesEmitsOncePerFlipInEitherDirection() = runTest {
+        assertEquals(0, flowOf(true).grantChanges(builtWith = true).toList().size, "the built-with value emitted")
+        assertEquals(0, flowOf(false, false).grantChanges(builtWith = false).toList().size, "a repeated value emitted")
+        assertEquals(1, flowOf(true, true, false, false).grantChanges(builtWith = true).toList().size, "a revocation must emit once")
+        assertEquals(3, flowOf(false, true, true, false, true).grantChanges(builtWith = false).toList().size, "each flip must emit once")
+        assertEquals(1, flowOf(true).grantChanges(builtWith = false).toList().size, "a flip before the first collection was missed")
+    }
+
+    @Test
+    fun theNetworkGrantWatcherRequestsARestartOfItsSessionOnEachFlip() = runTest {
+        val grant = MutableStateFlow(false)
+        val requests = mutableListOf<Pair<Uuid, Long>>()
+        val watcher = launchNetworkGrantWatcher(
+            grant = grant,
+            builtWith = false,
+            app = appA,
+            sessionGeneration = 3L,
+            requestRestart = { uuid, generation -> requests += uuid to generation },
         )
-        assertEquals(
-            2,
-            flowOf(false, true, true, false, true).denyToAllowTransitions().toList().size,
-            "each denied-to-allowed flip restarts exactly once",
-        )
+        runCurrent()
+        assertEquals(emptyList(), requests, "the grant the session started with requested a restart")
+
+        grant.value = true
+        runCurrent()
+        assertEquals(listOf(appA to 3L), requests, "deny to allow did not request a restart")
+
+        grant.value = false
+        runCurrent()
+        assertEquals(listOf(appA to 3L, appA to 3L), requests, "allow to deny did not request a restart")
+
+        watcher.cancel()
+        grant.value = true
+        runCurrent()
+        assertEquals(2, requests.size, "a cancelled watcher requested a restart")
     }
 }

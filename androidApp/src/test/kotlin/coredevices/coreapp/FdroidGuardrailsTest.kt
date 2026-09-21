@@ -37,13 +37,16 @@ import kotlin.test.assertTrue
  * list is the tree's half of a contract with the out-of-tree recipe, and
  * DESIGN_NOTES.md (F-Droid section) records the whole contract.
  *
- * The tests after the scanner checks are the other two halves of that
- * contract the tree can verify about itself, each with a positive control
- * proving its matcher fires: the build runs on the buildserver's JDK (no
- * toolchain pin, [noGradleFileConfiguresAJvmToolchain]) and the version file
- * F-Droid's update checker reads has the shape its regex expects and, on a
- * tag checkout, the value the build produces
- * ([versionFileMatchesTheBuiltCommitOnATagCheckout]).
+ * The tests after the scanner checks are the other parts of that contract
+ * the tree can verify about itself: the build runs on the buildserver's JDK
+ * (no toolchain pin, [noGradleFileConfiguresAJvmToolchain]), the native
+ * modules pin one NDK and one CMake ([everyNativeModulePinsTheSameNdkAndCmake]),
+ * and the version file F-Droid's update checker reads has the shape its regex
+ * expects and, on a tag checkout, the value the build produces
+ * ([versionFileMatchesTheBuiltCommitOnATagCheckout]). The toolchain and
+ * version-file checks each have a positive control proving the matcher
+ * fires; the pin check only asserts that it found both modules, and the
+ * listing-limit checks at the end have none.
  */
 /** F-Droid's documented maximum for a changelog file; longer text is cut when published. */
 private const val FDROID_CHANGELOG_LIMIT = 500
@@ -264,6 +267,26 @@ class FdroidGuardrailsTest {
             .filterNot { (_, line) -> line.trimStart().startsWith("//") }
             .filter { (_, line) -> pin.containsMatchIn(line) }
             .map { (index, line) -> "${index + 1}: ${line.trim()}" }
+    }
+
+    /**
+     * The F-Droid recipe provisions one NDK and one CMake for the whole build (recipe contract
+     * in `DESIGN_NOTES.md`), so every module that names either has to name the same value; a
+     * bump applied to one module alone fails configuration there for the other.
+     */
+    @Test
+    fun everyNativeModulePinsTheSameNdkAndCmake() {
+        val ndk = Regex("""\bndkVersion\s*=\s*"([^"]+)"""")
+        val cmake = Regex("""\bcmake\s*\{[^}]*?\bversion\s*=\s*"([^"]+)"""")
+        val pins = scannedGradleFiles().associateWith { path ->
+            val code = read(path).readLines().filterNot { it.trimStart().startsWith("//") }.joinToString("\n")
+            ndk.find(code)?.groupValues?.get(1) to cmake.find(code)?.groupValues?.get(1)
+        }
+        val ndkPins = pins.mapNotNull { (path, pin) -> pin.first?.let { path to it } }
+        val cmakePins = pins.mapNotNull { (path, pin) -> pin.second?.let { path to it } }
+        assertTrue(ndkPins.size >= 2 && cmakePins.size >= 2, "the matcher no longer finds both native modules: $ndkPins $cmakePins")
+        assertTrue(ndkPins.map { it.second }.distinct().size == 1, "ndkVersion differs between modules: $ndkPins")
+        assertTrue(cmakePins.map { it.second }.distinct().size == 1, "the CMake version differs between modules: $cmakePins")
     }
 
     /**

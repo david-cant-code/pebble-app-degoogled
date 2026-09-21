@@ -39,6 +39,8 @@ include(":resampler")
 // and the pinned engine submodule).
 include(":whisper")
 include(":whisper-native")
+// Gravel module: the UDP socket-creation filter, built from source.
+include(":socketfilter")
 include(":libindex")
 // :experimental (the Ring/Index feature module) is unplugged from the fork's
 // build: it carries firebase-auth/firestore/storage, the googleServices
