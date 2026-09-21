@@ -124,8 +124,8 @@ static bool exe_machine_matches(const char *path) {
 
 #ifndef NDEBUG
 // Debug builds only: lets a test make the probe child die of SIGSYS (1) or exit with
-// probe_test_exit_code (2) in place of the real calls, or make the post-check see
-// probe_test_exit_code as its errno (3).
+// probe_test_exit_code (2) in place of the real calls, or make a post-check that saw EACCES
+// report probe_test_exit_code in its place (3).
 static int probe_test_mode = 0;
 static int probe_test_exit_code = 0;
 
@@ -216,7 +216,7 @@ static jlong install_locked(const char *exe_path) {
     int error = fd >= 0 ? 0 : errno;
     if (fd >= 0) close(fd);
 #ifndef NDEBUG
-    if (probe_test_mode == 3) error = probe_test_exit_code;
+    if (probe_test_mode == 3 && error == EACCES) error = probe_test_exit_code;
 #endif
     if (error != EACCES) return pack(KIND_REFUSED, STAGE_POST_CHECK, error);
     return pack(KIND_INSTALLED, 0, 0);
@@ -329,7 +329,10 @@ Java_com_anopticlabs_gravel_socketfilter_ProbeTestHooks_installTwiceInAChild(
         }
         close(fds[1]);
         if (child > 0) {
-            count = read(fds[0], results, sizeof(results));
+            int attempts = 0;
+            while ((count = read(fds[0], results, sizeof(results))) < 0) {
+                if (errno != EINTR || ++attempts > 16) break;
+            }
             waitpid(child, NULL, 0);
         }
         close(fds[0]);
