@@ -304,8 +304,10 @@ builds. Where it is absent, a network-denied app's http/https egress is
 still deterministically blocked (layer 1) and its JS network APIs are
 stubbed (layer 2), but a hostile bundle that recovers a fresh `WebSocket`
 constructor could open a WebSocket. The exposure is narrow: it needs a
-`PROXY_OVERRIDE`-less WebView and a deliberately hostile watchapp, and it
-is limited to WebSocket only. `WebViewJsRunner.applyNetworkProxy` logs a
+`PROXY_OVERRIDE`-less WebView and a deliberately hostile watchapp. It is
+not limited to WebSocket; WebRTC over TCP is reachable the same way, since
+the UDP filter covers only UDP (see the WebRTC header entry below).
+`WebViewJsRunner.applyNetworkProxy` logs a
 warning when the feature is unavailable. This entry leaves the file if
 minSdk/WebView baseline guarantees `PROXY_OVERRIDE`, or if a WebView-level
 WebSocket intercept becomes available.
@@ -315,10 +317,16 @@ WebSocket intercept becomes available.
 **Status: deliberate.**
 
 Gravel installs a filter at process start that refuses the creation of UDP
-sockets in its own process, for as long as it runs. Web content inside
-Gravel (PebbleKit JS with internet access on, configuration pages, other
-in-app web pages) therefore has no UDP, which WebRTC over UDP,
-WebTransport and HTTP/3 need. Building a release APK fails if its dex names
+sockets in its own process, for as long as it runs. On devices where the
+filter installs, web content inside Gravel (PebbleKit JS with internet
+access on, configuration pages, other in-app web pages) therefore has no
+UDP, which WebRTC over UDP, WebTransport and HTTP/3 need. This holds
+because Android System WebView runs its network service in the app process,
+so the WebView's own UDP sockets are created where the filter acts (Chromium
+`android_webview/browser/network_service/README.md`,
+`features::kNetworkServiceInProcess`); a WebView that moved its network
+service out of the app process would need this re-checked at the sync that
+brought it in. Building a release APK fails if its dex names
 one of the Java UDP socket types that `VerifyApkContents` lists; an app
 bundle build does not run that check.
 
@@ -383,9 +391,12 @@ not been measured.
 With Network off, Gravel serves the watchapp's page with a
 `Connection-Allowlist` header that allows no connections and switches
 WebRTC off for it. Android System WebView honors the header from version
-152, and Gravel cannot read back whether it is honored, so on older
-WebViews the UDP filter is the only layer under WebRTC and the header is
-never relied on alone.
+152, and Gravel cannot read back whether it is honored. Below version 152
+the header does nothing: the UDP filter still stops WebRTC over UDP, WebRTC
+over TCP is outside the filter and is stopped by the black-hole proxy where
+the WebView supports proxy override, and on a WebView without proxy override
+(see the WebSocket entry above) WebRTC over TCP has no deterministic cover.
+The header is never relied on alone.
 
 ## With Network off, PebbleKit JS runs without cookies, IndexedDB or the Cache API
 
@@ -402,9 +413,10 @@ again starts a new one.
 **Status: open.**
 
 The Network permission's layers act on connections, not on name lookups,
-which go through the system resolver. Whether a watchapp with Network off
-can cause a lookup has not been measured; measuring it comes first, then a
-decision.
+which go through the system resolver. A lookup is itself outbound data: the
+queried name reaches the domain's nameserver, so an uncovered lookup is a
+low-bandwidth channel out. Whether a watchapp with Network off can cause a
+lookup has not been measured; measuring it comes first, then a decision.
 
 ## Cleartext HTTP is blocked app-wide, breaking http-only watchapps
 
