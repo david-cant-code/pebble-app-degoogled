@@ -450,7 +450,11 @@ and drops the manifest's `usesCleartextTraffic` attribute, so the built
 manifest states what is true rather than relying on the precedence rule;
 both are re-asserted against upstream at every merge and pinned by
 `NetworkSecurityConfigTest` (source) and the CI check on the built
-manifest (artifact). The fork keeps the block because a config
+manifest (artifact). The config also names `localhost` in a
+cleartext-denying domain-config, because Android 17 otherwise permits
+cleartext to loopback hosts (platform source in that file's comment);
+`CleartextPolicyTest` asks the platform on a device, and is not part of
+CI. The fork keeps the block because a config
 page is remote code executed in a WebView on the phone: fetched over
 cleartext, it hands any network-position attacker script injection into
 that WebView, plus whatever app state rides in the config URL. Legacy

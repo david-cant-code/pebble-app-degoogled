@@ -19,4 +19,17 @@
             <certificates src="user" />
         </trust-anchors>
     </base-config>
+    <!-- Android 17, under its networkSecurityConfigLocalhost flag, builds an
+         implicit localhost config that permits cleartext unless a <domain> in
+         this file is a localhost name (android17-release,
+         frameworks/base packages/NetworkSecurityConfig:
+         XmlConfigSource.parseNetworkSecurityConfig, Domain.isLocalhost,
+         NetworkSecurityConfig.getLocalhostBuilder). This entry is that domain;
+         do not remove it as redundant with base-config. It is also the file's
+         first domain-config, and with one present the platform trust manager
+         rejects a server-trust check made without a hostname (same package,
+         RootTrustManager.checkServerTrusted). -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
 </network-security-config>
