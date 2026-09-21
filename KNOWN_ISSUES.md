@@ -425,7 +425,7 @@ lookup has not been measured; measuring it comes first, then a decision.
 
 ## Cleartext HTTP is blocked app-wide, breaking http-only watchapps
 
-**Status: deliberate; a guarded per-app opt-in may lift it later.**
+**Status: deliberate.**
 
 Watchapps whose developer config pages or PebbleKit JS requests use plain
 `http://` fail even when the app's Network permission is granted: the
@@ -460,14 +460,8 @@ cleartext, it hands any network-position attacker script injection into
 that WebView, plus whatever app state rides in the config URL. Legacy
 http-only watchapps break, and that is the accepted cost.
 
-A possible future resolution is a per-app "allow insecure HTTP" toggle in
-the watchapp permission controls, default off and gated behind an
-explicit warning, enforced through the same layered gate as the Network
-permission: the request interceptor and the config-page WebView can
-refuse the scheme per app, and the proxy layer supports scheme-filtered
-rules that would keep insecure WebSocket covered deterministically. This
-entry leaves the file if that ships, or if the ecosystem's http-only
-apps age out.
+No opt-in is planned. This entry leaves the file if the ecosystem's
+http-only apps age out.
 
 ## Language pack downloads are not digest-pinned
 
