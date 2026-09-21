@@ -469,7 +469,6 @@ class WebViewJsRunner(
         // 2 (JS shim); the proxy (layer 3) is applied and awaited here too.
         val uuid = Uuid.parse(appInfo.uuid)
         networkAllowed = watchappPermissions.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network)
-        applyNetworkProxy(networkAllowed)
         denyConstruction = !networkAllowed
         // CompanionAppLifecycleManager decides the same from an earlier read of the grant; this
         // is the read the session is built from.
@@ -477,6 +476,9 @@ class WebViewJsRunner(
             logger.w { "Not loading ${appInfo.longName} (${appInfo.uuid}): Network is denied and the primary deny layer is not active" }
             return
         }
+        // Below the gate's return, so a session refused there installs no override
+        // (WebViewJsRunnerStartOrderSentinelTest).
+        applyNetworkProxy(networkAllowed)
         if (denyConstruction) {
             withContext(Dispatchers.Main) {
                 // Nothing in the deny construction uses a file URL.
