@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
  * users on update. The popup auto-shows once per user per bump (`WhatsNewDialog` in
  * composeApp) and can be reopened any time from Settings > About.
  */
-const val WHATS_NEW_VERSION = 7
+const val WHATS_NEW_VERSION = 8
 
 /** A single announced change: a short heading and a sentence or two of body. */
 data class WhatsNewEntry(val title: String, val body: String)
@@ -32,6 +32,18 @@ data class WhatsNewEntry(val title: String, val body: String)
  * changelog (that lives in git history and the repo docs).
  */
 val whatsNewEntries: List<WhatsNewEntry> = listOf(
+    WhatsNewEntry(
+        title = "Internet access off covers more than web requests",
+        body = "With internet access turned off for a watchface or app, Gravel already " +
+            "refused the web requests of the code it runs. Connections that are not web " +
+            "requests, WebRTC for example, now have two layers of their own: Gravel " +
+            "blocks UDP sockets in its own process, and an app with internet access off " +
+            "runs in a sandboxed page set to allow no connections. Web pages inside " +
+            "Gravel lose HTTP/3 and WebRTC over UDP as a result. Changing the setting " +
+            "restarts the app's session. Also, Android 17 began permitting plain-HTTP " +
+            "connections to services on the phone itself; Gravel denies those again, as " +
+            "it does all other plain HTTP.",
+    ),
     WhatsNewEntry(
         title = "Companion apps are now your choice",
         body = "Apps made for the original Pebble phone app talk to watchapps through " +
