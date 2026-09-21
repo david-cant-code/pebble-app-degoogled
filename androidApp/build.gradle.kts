@@ -396,7 +396,8 @@ abstract class VerifyApkContents : DefaultTask() {
     /**
      * Type descriptors that no classes*.dex may name. Where Gravel's UDP socket filter is
      * installed, code that opens one of the listed Java UDP socket types fails at run time
-     * with EACCES; this turns naming one into a build failure.
+     * with EACCES; this turns naming one into a build failure. DatagramPacket is listed with
+     * them and opens no socket.
      */
     @get:Input
     abstract val forbiddenDexTypes: ListProperty<String>

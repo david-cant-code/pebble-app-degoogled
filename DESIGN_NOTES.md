@@ -162,8 +162,10 @@ immediately (a watchface can hold a watch for days) and re-granting
 restarts it. Denial is reported to the JS callback as a geolocation
 error in both cases.
 
-**Network enforcement is layered** (per the defense-in-depth rule, with at
-least one deterministic cover for every socket type). Three layers act on
+**Network enforcement is layered** (per the defense-in-depth rule; on a
+WebView that supports proxy override, with at least one deterministic cover
+for every socket type, and `KNOWN_ISSUES.md` records what a WebView without
+it leaves open). Three layers act on
 the WebView's requests; the UDP socket filter and the denied-session page's
 response header, both below, are two more:
 

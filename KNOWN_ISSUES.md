@@ -323,12 +323,14 @@ access on, configuration pages, other in-app web pages) therefore has no
 UDP, which WebRTC over UDP, WebTransport and HTTP/3 need. This holds
 because Android System WebView runs its network service in the app process,
 so the WebView's own UDP sockets are created where the filter acts (Chromium
-`android_webview/browser/network_service/README.md`,
-`features::kNetworkServiceInProcess`); a WebView that moved its network
+M153, `refs/branch-heads/8010`, `aw_main_delegate.cc`,
+`AwMainDelegate::BasicStartupComplete` calling
+`content::ForceInProcessNetworkService`); a WebView that moved its network
 service out of the app process would need this re-checked at the sync that
 brought it in. Building a release APK fails if its dex names
-one of the Java UDP socket types that `VerifyApkContents` lists; an app
-bundle build does not run that check.
+one of the types that `VerifyApkContents` lists, three Java UDP socket
+types and `DatagramPacket`, which opens no socket; an app bundle build does
+not run that check.
 
 ## The UDP filter starts with the app process, not before it
 
@@ -394,8 +396,11 @@ WebRTC off for it. Android System WebView honors the header from version
 152, and Gravel cannot read back whether it is honored. Below version 152
 the header does nothing: the UDP filter still stops WebRTC over UDP, WebRTC
 over TCP is outside the filter and is stopped by the black-hole proxy where
-the WebView supports proxy override, and on a WebView without proxy override
-(see the WebSocket entry above) WebRTC over TCP has no deterministic cover.
+the WebView supports proxy override (Chromium M153, `refs/branch-heads/8010`,
+`services/network/p2p/socket_tcp.cc`, `P2PSocketTcpBase::Init`, which opens
+the socket through the proxy-resolving socket factory), and on a WebView
+without proxy override (see the WebSocket entry above) WebRTC over TCP has
+no deterministic cover.
 The header is never relied on alone.
 
 ## With Network off, PebbleKit JS runs without cookies, IndexedDB or the Cache API

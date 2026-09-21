@@ -7,9 +7,8 @@ import kotlin.test.assertTrue
 
 /**
  * Source sentinel for the statement order in `WebViewJsRunner.start()`: the `shouldRunPkjs` gate's
- * return, then the proxy override, then the app load. A device test cannot see which override a
- * session installed: ProxyController has no getter for it (androidx.webkit 1.16.0,
- * ProxyController).
+ * return, then the proxy override, then the app load. A device test cannot read the override
+ * back: ProxyController has no getter for it (androidx.webkit 1.16.0, ProxyController).
  *
  * The checks match text inside `start()` with line comments removed, and take a statement of
  * `start()`'s own block by its indentation. Text inside a block comment would satisfy them.

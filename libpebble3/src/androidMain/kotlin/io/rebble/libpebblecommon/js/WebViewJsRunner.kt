@@ -533,13 +533,13 @@ class WebViewJsRunner(
      * ProxyController.setProxyOverride), so while the black-hole is active it also covers a
      * page left open for another app. Only one PKJS WebView runs at a time, and the developer
      * config page is gated for network-denied apps. Requires the
-     * PROXY_OVERRIDE WebView feature; when unsupported, layers 1 and 2 still apply and
-     * only the WebSocket-deny corner degrades to best-effort (recorded in KNOWN_ISSUES).
+     * PROXY_OVERRIDE WebView feature; when unsupported, layers 1 and 2 still apply, and
+     * WebSocket and WebRTC over TCP lose this cover (recorded in KNOWN_ISSUES).
      */
     private suspend fun applyNetworkProxy(allowed: Boolean) {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
             if (!allowed) {
-                logger.w { "PROXY_OVERRIDE unsupported; WebSocket deny is best-effort for this app" }
+                logger.w { "PROXY_OVERRIDE unsupported; WebSocket and WebRTC over TCP deny is best-effort for this app" }
             }
             return
         }

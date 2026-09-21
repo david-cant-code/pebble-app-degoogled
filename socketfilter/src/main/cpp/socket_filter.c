@@ -89,9 +89,10 @@ static jlong pack(int kind, int sub, int detail) {
     return ((jlong)kind << 40) | ((jlong)sub << 32) | (jlong)(uint32_t)detail;
 }
 
-// ENOSYS: no seccomp system call. EINVAL: a kernel built without filter mode, or one that
-// rejects the call's flags or program (linux v6.1, kernel/seccomp.c, seccomp_set_mode_filter
-// and seccomp_prepare_filter). probe() and install_locked() pass the same flags and program.
+// ENOSYS: no seccomp system call. EINVAL: the kernel did not take this call; a build without
+// filter mode answers that way, and it is one of several paths that do (linux v6.1,
+// kernel/seccomp.c, seccomp_set_mode_filter). The packed reason stands for any of them.
+// probe() and install_locked() pass the same flags and program.
 static jlong seccomp_error(int error) {
     if (error == ENOSYS || error == EINVAL) {
         return pack(KIND_UNSUPPORTED, REASON_KERNEL_LACKS_FILTER_MODE, error);

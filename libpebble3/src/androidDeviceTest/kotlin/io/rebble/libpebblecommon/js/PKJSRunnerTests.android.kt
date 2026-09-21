@@ -133,8 +133,9 @@ class PKJSRunnerTestsAndroid: PKJSRunnerSharedTestsAndroid(networkGranted = true
         runner.start()
         withTimeout(5.seconds) { runner.readyState.first { it } }
         // In a granted session the restore has completed once this holds, so stop() takes the
-        // localStorage persist path. A denied session has no restore or persist step; its leg
-        // covers the teardown and the session that follows.
+        // localStorage persist path. A denied session's frame sets the flag after it has seeded
+        // its stand-in from restoreState(), and stop() has no persist step for it; its leg covers
+        // the teardown and the session that follows.
         withTimeout(5.seconds) {
             while (runner.evalWithResult("window.__localStorageShimmed === true;") != "true") delay(20)
         }

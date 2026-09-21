@@ -10,8 +10,10 @@ sealed interface InstallResult {
     data object AlreadyInstalled : InstallResult
 
     /**
-     * The facility exists and the install did not complete. [detail] depends on the stage: a
-     * signal, an errno or a thread id, and 0 where the stage has none.
+     * The facility exists and the install did not end as [Installed]. [detail] depends on the
+     * stage: a signal, an errno or a thread id, and 0 where the stage has none. At
+     * [RefusalStage.PostCheck] the program is attached and stays attached, and [detail] is the
+     * errno of the check's socket() call, 0 when the socket was created.
      */
     data class Refused(val stage: RefusalStage, val detail: Int) : InstallResult
 

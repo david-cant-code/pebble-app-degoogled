@@ -15,8 +15,10 @@ import kotlin.test.assertTrue
  *
  * The checks match text with line comments removed. Each watcher's arguments are matched inside
  * that watcher's own call or block. Not checked: the session generation the watchers are given,
- * and text inside a block comment, which would satisfy a check.
- * [knownBadEditsAreNoticed] applies the edits these checks exist for to the real source.
+ * text inside a block comment, which would satisfy a check, and which function the matched text
+ * sits in: every check but the watchers' arguments is satisfied by a match anywhere in the file.
+ * [knownBadEditsAreNoticed] applies seven known-bad edits to the real source, which trip nine
+ * of the seventeen checks.
  */
 class CompanionSessionGateSentinelTest {
 
