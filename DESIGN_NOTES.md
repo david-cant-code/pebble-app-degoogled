@@ -771,6 +771,9 @@ in the app's device suite:
   shorter month's last day does not move the occurrences after it. An
   occurrence's status is decided as completed, then canceled, then by its
   latest fire against now.
+- A capture's queue entry is written before any processing and
+  removed after it, so a capture survives process death; the in-memory
+  capture rows are a projection of that entry.
 
 ## In-app links and the What's-new popup
 
