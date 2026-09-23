@@ -312,6 +312,23 @@ warning when the feature is unavailable. This entry leaves the file if
 minSdk/WebView baseline guarantees `PROXY_OVERRIDE`, or if a WebView-level
 WebSocket intercept becomes available.
 
+## The UDP filter is off
+
+**Status: temporary; the filter returns once Gravel can tell where it stops
+name lookups.**
+
+On LineageOS and systems built on it, the platform's DNS client creates an
+IPv6 UDP socket before it hands a lookup to the system resolver, and when
+that fails, the lookup runs inside the app over UDP instead (LineageOS
+`lineage-23.0`, `android_system_netd`, `client/NetdClient.cpp`,
+`dns_open_proxy`; `android16-release`, bionic `libc/dns/net/getaddrinfo.c`,
+`android_getaddrinfofornetcontext`). Gravel 0.3.1's filter refused both, so
+name lookups in Gravel failed there and the app closed when it made a web
+request. Gravel does not install the filter on any device at present. While
+it is off, Gravel does not run a watchapp's phone-side script while that
+watchapp's internet access is off, and the entries below that describe the
+filter or sessions with Network off do not apply.
+
 ## No UDP for web content inside Gravel
 
 **Status: deliberate.**
@@ -336,9 +353,9 @@ not run that check.
 
 **Status: accepted.**
 
-The filter is installed in `MainApplication.attachBaseContext`, ahead of
-the app's content providers, library initializers and `onCreate` (platform
-source cited there). A socket
+When installed, the filter goes in at `MainApplication.attachBaseContext`,
+ahead of the app's content providers, library initializers and `onCreate`
+(android16-release, `ActivityThread.handleBindApplication`). A socket
 opened earlier than that by platform code would be outside the filter; none
 is known. The speech engine's isolated process gets no filter. A process
 that Android starts for a full backup or restore uses the base

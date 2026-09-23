@@ -6,32 +6,18 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * Source sentinels for the UDP socket filter. The install call is in `MainApplication`, an
- * upstream-owned file a sync merge could resolve to upstream's text; that check matches text only,
- * and UdpFilterInstalledTest is the run-time check.
+ * Source sentinels for the UDP socket filter, which the app does not install at present
+ * (KNOWN_ISSUES.md, "The UDP filter is off"). These match text only; UdpFilterNotInstalledTest is
+ * the run-time check.
  */
 class UdpFilterInstallSentinelTest {
 
-    private val source by lazy {
-        TrackedTree.file("composeApp/src/androidMain/kotlin/coredevices/coreapp/MainApplication.kt").readText()
-    }
-
     @Test
-    fun attachBaseContextInstallsTheFilterBeforeAnythingElse() {
-        val body = assertNotNull(
-            Regex("""override fun attachBaseContext\(base: Context\) \{\n(.*?)\n    \}""", RegexOption.DOT_MATCHES_ALL)
-                .find(source)?.groupValues?.get(1),
-            "MainApplication no longer overrides attachBaseContext",
-        )
-        val statements = body.lines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("//") }
-        assertTrue(
-            statements == listOf(
-                "super.attachBaseContext(base)",
-                "if (runningInIsolatedProcess()) return",
-                "udpFilterResult = UdpSocketFilter.install()",
-            ),
-            "attachBaseContext must hold the super call, the isolated-process check and the install, in that order: $statements",
-        )
+    fun noAppSourceInstallsTheFilter() {
+        val callers = TrackedTree.files
+            .filter { it.endsWith(".kt") && !it.startsWith("socketfilter/") && !Regex("""/src/\w*[Tt]est/""").containsMatchIn(it) }
+            .filter { "UdpSocketFilter.install(" in TrackedTree.file(it).readText() }
+        assertTrue(callers.isEmpty(), "the UDP socket filter is installed from $callers")
     }
 
     // Both files are upstream-owned, and both lookups of the binding fall back silently

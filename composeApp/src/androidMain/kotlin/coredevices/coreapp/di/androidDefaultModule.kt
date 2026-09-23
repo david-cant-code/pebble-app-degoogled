@@ -48,8 +48,8 @@ import kotlin.time.Duration
 import kotlin.time.toJavaDuration
 
 val androidDefaultModule = module {
-    // Gravel: what libpebble3 and the permission screen learn about the UDP socket filter that
-    // MainApplication installs. The result is fixed once the process has started.
+    // Gravel: what libpebble3 and the permission screen learn about the UDP socket filter. The app
+    // does not install it at present (KNOWN_ISSUES.md, "The UDP filter is off"), so this is false.
     single<NetworkDenyEnforcement> {
         FixedNetworkDenyEnforcement(UdpSocketFilter.lastResult == InstallResult.Installed)
     }

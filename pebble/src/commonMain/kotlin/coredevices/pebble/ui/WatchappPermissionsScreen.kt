@@ -360,8 +360,8 @@ fun WatchappPermissionControls(uuid: Uuid, modifier: Modifier = Modifier) {
             .collectAsState(true)
         if (!shouldRunPkjs(hasPkjs = true, networkGranted, networkDenyEnforced)) {
             Text(
-                "Gravel could not turn on its network block on this device. While internet " +
-                    "access is off, it does not run an app's code inside Gravel.",
+                "While internet access is off, Gravel does not run this app's code inside " +
+                    "Gravel, so features that depend on it won't work.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(top = 8.dp),
