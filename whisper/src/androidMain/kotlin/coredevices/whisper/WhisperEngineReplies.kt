@@ -1,12 +1,18 @@
 package coredevices.whisper
 
+import com.anopticlabs.gravel.whisper.WhisperEngineTimeoutException
+import com.anopticlabs.gravel.whisper.WhisperLongForm
+import com.anopticlabs.gravel.whisper.WhisperLongFormResult
+import com.anopticlabs.gravel.whisper.parseLongFormReply
 import coredevices.whisper.WhisperEngineProtocol.STATUS_BUSY
 import coredevices.whisper.WhisperEngineProtocol.STATUS_ENGINE_ERROR
 import coredevices.whisper.WhisperEngineProtocol.STATUS_STALE_HANDLE
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_BENCHMARK
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_INIT
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_TRANSCRIBE
+import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_TRANSCRIBE_LONG
 import coredevices.whisper.WhisperEngineProtocol.UNKNOWN_INT
+import java.nio.FloatBuffer
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
@@ -24,25 +30,28 @@ import kotlin.time.Duration.Companion.seconds
 /**
  * The exception a failure status maps to, which is what callers act on:
  * a stale handle means the engine process the handle came from is gone,
- * so it is reported as an unavailable engine, as is a status this
- * process does not know; a busy handle is a serialization failure in
- * this process; an engine error keeps the engine's text.
+ * so it is reported as an unavailable engine; a status this process does
+ * not know is a refused reply; a busy handle is a serialization failure
+ * in this process; an engine error keeps the engine's text.
  */
 internal fun exceptionForStatus(operation: String, status: Int, message: String): RuntimeException = when (status) {
     STATUS_STALE_HANDLE -> WhisperEngineUnavailableException("whisper $operation failed: $message")
     STATUS_BUSY -> IllegalStateException("whisper $operation failed: $message")
     STATUS_ENGINE_ERROR -> RuntimeException("whisper $operation failed: $message")
-    else -> WhisperEngineUnavailableException("whisper $operation failed: unknown status $status")
+    else -> ReplyRefusedException("whisper $operation failed: unknown status $status")
 }
 
+/** A reply outside the protocol; [readPastReplyHeader] ends the engine process for it. */
+internal class ReplyRefusedException(message: String) : RuntimeException(message)
+
 /**
- * Refuses a reply payload over its bound as an unavailable engine: a
- * process that answers past the protocol's bounds is not one this
- * process reads from, whatever else the reply says.
+ * Refuses a reply payload over its bound: a process that answers past
+ * the protocol's bounds is not one this process reads from, whatever
+ * else the reply says.
  */
 internal fun checkReplyBound(kind: String, size: Int, max: Int) {
     if (size > max) {
-        throw WhisperEngineUnavailableException("engine reply $kind of $size exceeds the $max bound")
+        throw ReplyRefusedException("engine reply $kind of $size exceeds the $max bound")
     }
 }
 
@@ -53,16 +62,52 @@ internal fun checkReplyBound(kind: String, size: Int, max: Int) {
  * a bound only has to sit well above the slowest legitimate call of its
  * kind: a model load reads up to a gigabyte from flash, a decode of the
  * longest watch recording on the slowest catalog model takes tens of
- * seconds on a slow phone, the probe runs for about a second of CPU, and
- * the rest are procfs reads or a flag. A code this table does not know
- * gets the shortest.
+ * seconds on a slow phone, a long-form call's scales with its recording
+ * ([longFormDeadline]; the table holds the longest recording's), the probe
+ * runs for about a second of CPU, and the rest are procfs reads or a
+ * flag. A code this table does not know gets the shortest.
  */
 internal fun transactionDeadline(code: Int): Duration = when (code) {
     TRANSACTION_INIT -> 2.minutes
     TRANSACTION_TRANSCRIBE -> 3.minutes
     TRANSACTION_BENCHMARK -> 1.minutes
+    TRANSACTION_TRANSCRIBE_LONG -> longFormDeadline(WhisperLongForm.MAX_CALL_SAMPLES)
     else -> 15.seconds
 }
+
+/** Two minutes plus three times the audio: a slower decode is treated as a hung engine. */
+internal fun longFormDeadline(samples: Int): Duration =
+    2.minutes + (samples.toLong() * 3 / WhisperLongForm.SAMPLE_RATE).seconds
+
+/** [pcm16] as engine floats, through a fixed chunk, so no float copy of a recording sits on the heap. */
+internal fun writePcm16AsFloats(pcm16: ByteArray, out: FloatBuffer) {
+    val samples = pcm16.size / 2
+    val chunk = FloatArray(PCM_CHUNK_SAMPLES)
+    var done = 0
+    while (done < samples) {
+        val count = minOf(PCM_CHUNK_SAMPLES, samples - done)
+        for (i in 0 until count) {
+            val at = 2 * (done + i)
+            chunk[i] = ((pcm16[at].toInt() and 0xFF) or (pcm16[at + 1].toInt() shl 8)).toShort() / 32768f
+        }
+        out.put(chunk, 0, count)
+        done += count
+    }
+}
+
+private const val PCM_CHUNK_SAMPLES = 64 * 1024
+
+/** Parses a reply for a recording of [audioMillis]; an unreadable one is refused, which ends its engine process. */
+internal fun readLongFormReply(packed: ByteArray, audioMillis: Long): WhisperLongFormResult =
+    try {
+        parseLongFormReply(packed, audioMillis)
+    } catch (e: IllegalArgumentException) {
+        throw ReplyRefusedException("engine reply to long-form transcription is malformed (${e.message})")
+    }
+
+/** The failure for a call whose engine process went away: a timeout when the call's deadline ended it. */
+internal fun engineLostException(message: String, timedOut: Boolean, cause: Throwable?): WhisperEngineUnavailableException =
+    if (timedOut) WhisperEngineTimeoutException(message, cause) else WhisperEngineUnavailableException(message, cause)
 
 /**
  * The byte size of the shared-memory region that carries [samples]
@@ -112,17 +157,23 @@ internal fun replyHeaderViolation(operation: String, header: Int): String? =
 
 /**
  * What the client does with a reply once its [header] is read: the
- * no-exception marker lets [read] consume the payload; any other value
- * runs [expire] with the message [replyHeaderViolation] gives it, which
- * ends the engine process, and then fails the call as an unavailable
- * engine with that same message, without reading further.
+ * no-exception marker lets [read] consume the payload; any other value,
+ * or a [ReplyRefusedException] from [read], runs [expire], which ends the
+ * engine process, and then fails the call as an unavailable engine with
+ * the message [expire] got.
  */
 internal inline fun <T> readPastReplyHeader(operation: String, header: Int, expire: (String) -> Unit, read: () -> T): T {
     replyHeaderViolation(operation, header)?.let { message ->
         expire(message)
         throw WhisperEngineUnavailableException(message)
     }
-    return read()
+    return try {
+        read()
+    } catch (e: ReplyRefusedException) {
+        val message = "${e.message}; its process is ended"
+        expire(message)
+        throw WhisperEngineUnavailableException(message, e)
+    }
 }
 
 /**

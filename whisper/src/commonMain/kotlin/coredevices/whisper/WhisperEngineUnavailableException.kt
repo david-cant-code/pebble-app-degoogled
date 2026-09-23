@@ -10,5 +10,5 @@ package coredevices.whisper
  * availability reports local recognition unavailable rather than broken.
  * Never thrown on iOS, where no engine exists.
  */
-class WhisperEngineUnavailableException(message: String, cause: Throwable? = null) :
+open class WhisperEngineUnavailableException(message: String, cause: Throwable? = null) :
     RuntimeException(message, cause)

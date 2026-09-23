@@ -1,5 +1,7 @@
 package coredevices.whisper
 
+import com.anopticlabs.gravel.whisper.WhisperLongFormResult
+
 /**
  * iOS stubs. This fork is Android-only and its iOS sources are
  * unmaintained; these actuals exist so the commonMain consumers keep
@@ -21,6 +23,16 @@ actual fun whisperTranscribe(
     placement: EnginePlacement,
     stats: TranscribeStats?,
 ): String =
+    throw UnsupportedOperationException("The whisper engine is Android-only in this fork")
+
+actual fun whisperTranscribeLongForm(
+    handle: Long,
+    pcm16: ByteArray,
+    threads: Int,
+    language: String?,
+    callId: Long,
+    placement: EnginePlacement,
+): WhisperLongFormResult =
     throw UnsupportedOperationException("The whisper engine is Android-only in this fork")
 
 // No-op rather than a throw: cancellation runs from generic cleanup paths

@@ -11,6 +11,7 @@ import android.os.Process
 import android.os.SharedMemory
 import android.util.Log
 import coredevices.whisper.WhisperEngineProtocol.DESCRIPTOR
+import coredevices.whisper.WhisperEngineProtocol.LAST_TRANSACTION
 import coredevices.whisper.WhisperEngineProtocol.STATUS_BUSY
 import coredevices.whisper.WhisperEngineProtocol.STATUS_ENGINE_ERROR
 import coredevices.whisper.WhisperEngineProtocol.STATUS_OK
@@ -21,6 +22,7 @@ import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_FREE
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_INIT
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_RUNTIME
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_TRANSCRIBE
+import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_TRANSCRIBE_LONG
 import coredevices.whisper.WhisperEngineProtocol.UNKNOWN_INT
 import coredevices.whisper.WhisperEngineProtocol.replyCarriesSampleCount
 import java.io.File
@@ -109,7 +111,7 @@ private class EngineBinder(private val service: Service) : Binder() {
     private var cpuChecked = false
 
     override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
-        if (code < TRANSACTION_INIT || code > TRANSACTION_RUNTIME) {
+        if (code < TRANSACTION_INIT || code > LAST_TRANSACTION) {
             return super.onTransact(code, data, reply, flags)
         }
         data.enforceInterface(DESCRIPTOR)
@@ -131,6 +133,7 @@ private class EngineBinder(private val service: Service) : Binder() {
                 TRANSACTION_FREE -> free(data, out)
                 TRANSACTION_BENCHMARK -> benchmark(data, out)
                 TRANSACTION_RUNTIME -> runtime(out)
+                TRANSACTION_TRANSCRIBE_LONG -> transcribeLong(data, out)
             }
         } catch (t: Throwable) {
             // The handler may have written part of a reply; start over
@@ -253,6 +256,62 @@ private class EngineBinder(private val service: Service) : Binder() {
                     reply.writeInt(STATUS_OK)
                     reply.writeInt(stats[0])
                     reply.writeByteArray(text)
+                }
+            } finally {
+                busy.set(false)
+            }
+        } finally {
+            region.close()
+        }
+    }
+
+    /**
+     * TRANSCRIBE_LONG: in = handle, region, sample count, then as
+     * TRANSCRIBE; out = status, then the packed result (WhisperLongForm)
+     * or the message. The shim reads the region in place, mapped for the call.
+     */
+    private fun transcribeLong(data: Parcel, reply: Parcel) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) {
+            writeFailure(reply, STATUS_ENGINE_ERROR, "the audio transport needs API 27")
+            return
+        }
+        val handle = data.readLong()
+        val region = SharedMemory.CREATOR.createFromParcel(data)
+        try {
+            val samples = data.readInt()
+            val threads = data.readInt()
+            val language = data.readString()
+            val callId = data.readLong()
+            val cpuMask = data.readLong()
+            val nice = data.readInt()
+            val busy = handles[handle]
+            if (busy == null) {
+                writeFailure(reply, STATUS_STALE_HANDLE, "handle $handle was not issued by this engine process")
+                return
+            }
+            if (!busy.compareAndSet(false, true)) {
+                writeFailure(reply, STATUS_BUSY, "handle $handle is inside another call")
+                return
+            }
+            try {
+                if (!longFormRequestFits(samples, region.size)) {
+                    writeFailure(
+                        reply, STATUS_ENGINE_ERROR,
+                        "long-form audio of $samples samples does not fit its ${region.size} byte region",
+                    )
+                    return
+                }
+                val mapped = region.mapReadOnly()
+                val packed = try {
+                    WhisperJNI.nativeTranscribeLong(handle, mapped, samples, threads, language, callId, cpuMask, nice)
+                } finally {
+                    SharedMemory.unmap(mapped)
+                }
+                if (packed == null) {
+                    writeFailure(reply, STATUS_ENGINE_ERROR, lastError())
+                } else {
+                    reply.writeInt(STATUS_OK)
+                    reply.writeByteArray(packed)
                 }
             } finally {
                 busy.set(false)

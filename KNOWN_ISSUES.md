@@ -824,6 +824,63 @@ level floor measured after the microphone's start-up transient, or the
 engine's own per-segment no-speech probability) needs captures from
 more than one watch before its threshold can be set.
 
+## A Notebook recording can lose a phrase at a whisper window boundary
+
+**Status: accepted for now; engine behavior.**
+
+Whisper transcribes a recording in 30-second windows and chooses where
+the next window starts from its own timestamps. When it judges a window
+finished before the window's end, it skips the rest of that window
+(whisper.cpp v1.9.3, `src/whisper.cpp`, `whisper_full_with_state`, the
+single-timestamp ending), so speech it did not transcribe there is lost;
+on-device runs of a four-minute test recording that repeats its phrases
+lost whole sentences within a single call. Starting each window at a
+pause, instead of where whisper's timestamps put it, might address this;
+it is not built.
+
+## A watch dictation restarts a Notebook transcription in progress
+
+**Status: accepted.**
+
+Watch dictation and Notebook transcription share one speech engine, and
+a dictation must answer within the watch's deadline. A dictation the
+phone transcribes while a Notebook recording is being transcribed, such
+as a spoken reply to a message, stops that transcription, which then
+starts again from the beginning once the dictation is done; where the
+phone answers first (Local Only, Local (with Server Fallback)) a
+watch session opening stops it
+already. The recording
+itself is kept; the transcript arrives later, and the stopped work is
+done again. Recordings are capped at 5 minutes, so each stop repeats at
+most one recording's transcription; the number of stops is not limited.
+
+## A dictation can wait for a Notebook transcription's first seconds
+
+**Status: accepted; whisper offers no way to stop that part.**
+
+A Notebook transcription stops for a dictation only at whisper's next
+abort check, and whisper checks nothing while it prepares the whole
+recording, detects its language when none is set, and encodes the first
+30 seconds (whisper.cpp v1.9.3, `src/whisper.cpp`,
+`whisper_full_with_state`). A dictation that arrives in that stretch
+waits for it: on the test phone with the base model and a four-minute
+recording, a cancel at the start of a call took about 4 seconds to land,
+about 7 when whisper detected the language, and a slower phone or larger
+model takes longer, possibly past the watch's deadline. In the modes where
+local transcription is only a fallback, no hold on the speech engine is
+raised when the watch session opens, so a local fallback meets this whenever a transcription has
+just started.
+
+## Local (with Rebble Fallback) raises no dictation hold when a watch session opens
+
+**Status: open; raising the hold at the session's opening in that mode
+would close it.**
+
+Under Local (with Rebble Fallback) the phone transcribes a watch dictation
+first, but unlike Local Only and Local (with Server Fallback) the watch
+session's opening does not stop a Notebook transcription, so the dictation
+waits for that transcription to stop as described in the entry above.
+
 ## Notebook reminder times are read only from the phrasings the rules know
 
 **Status: open; covering more needs more phrasings in the rules.**

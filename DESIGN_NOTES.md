@@ -493,7 +493,9 @@ The replacement is whisper.cpp (MIT), compiled from source:
   one that died; a decode that ignores its abort past the service's
   unwind bound ends its process the same way, and so does a reply whose
   header is not the plain no-exception marker, which the client reads
-  itself rather than through the framework's exception reader. The
+  itself rather than through the framework's exception reader, one with
+  an unknown status, a payload past its bound, or a long-form reply the
+  parser refuses. The
   engine side keeps a live-handle set
   and a per-handle busy flag, so a handle from an earlier engine process
   or one inside another call is refused rather than dereferenced,
@@ -618,6 +620,29 @@ The replacement is whisper.cpp (MIT), compiled from source:
   seconds under the default parameters, the bounded configuration
   returns the correct text in under 10 seconds on the slowest catalog
   model.
+- Notebook recordings, capped at 5 minutes, take a
+  second decode path on the same model and handle,
+  `whisperTranscribeLongForm`, with the opposite trade: timestamps kept,
+  whole 30-second windows, no token cap, and without dictation's extra
+  no-speech filter, which judges a whole window and would drop a sentence
+  that shares one with a pause. Whisper's own no-speech check still drops
+  a window it judges silent; a silent stretch it lets through can come
+  back as a short filler line. A recording is one engine call on a whisper
+  state of the call's own (the shim says why); it crosses as one
+  shared-memory region the engine reads in place, and the result comes
+  back as one packed reply of at most 256 KiB, bounded and parsed in the
+  app process (`WhisperLongForm`). Dictation keeps priority: a dictation
+  transcribed on the phone, and a transcription opening (`earlyInit`)
+  where the phone answers first (LocalOnly, LocalFirst), raises a
+  `DictationHold`, which
+  stops a long-form call at the engine's next abort poll (the shim cites
+  where whisper polls and what runs before the first poll); once the hold
+  ends (the dictation is done, or the watch's own clock has run out) the
+  recording is transcribed again from the beginning, which on device gave
+  the uninterrupted call's transcript at the same thread count
+  (`WhisperLongFormDeviceTest`; `KNOWN_ISSUES.md`). A stop nothing asked
+  for is refused like a malformed reply, and a call past its transaction
+  deadline fails the transcription without a retry.
 - Nothing CI runs reaches `whisper_jni.cpp`: the host suites stop at the
   binding's Kotlin side, so the shim's semantics (cancellation,
   cold-start init) are guarded only by the instrumented
@@ -626,9 +651,12 @@ The replacement is whisper.cpp (MIT), compiled from source:
   the model installed (each KDoc carries the command); the process
   boundary (an isolated uid, a dictation and a full window across it, a
   refused stale handle, the app outliving a crashed engine process) by
-  `WhisperEngineIsolationTest` beside them. An engine bump, a shim edit
-  or a protocol change gets a device run of those three before it
-  merges.
+  `WhisperEngineIsolationTest` beside them; the long-form path (a
+  recording across the boundary, a cancel and the call made again, a
+  deadline timeout, a dictation answered mid-recording) by
+  `WhisperLongFormDeviceTest`. An
+  engine bump, a shim edit or a protocol change gets a device run of
+  those four before it merges.
 - The watch's dictation deadline is owned by `VoiceSessionCoordinator`
   in libpebble3, not by the provider. The firmware records for at most
   15 seconds, gives the phone 15 seconds from the end of the recording,

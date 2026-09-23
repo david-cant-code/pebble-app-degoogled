@@ -1,5 +1,6 @@
 package coredevices.util.transcription
 
+import com.anopticlabs.gravel.whisper.WhisperLongFormResult
 import coredevices.analytics.CoreAnalytics
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigFlow
@@ -97,6 +98,14 @@ class WhisperHandleLifecycleTest {
                 return "hello world"
             }
 
+            override fun transcribeLongForm(
+                handle: Long,
+                pcm16: ByteArray,
+                threads: Int,
+                language: String?,
+                callId: Long,
+                placement: coredevices.whisper.EnginePlacement,
+            ): WhisperLongFormResult = error("long-form is not modeled by this fake")
             override fun cancel(callId: Long) {}
 
             override fun free(handle: Long) {

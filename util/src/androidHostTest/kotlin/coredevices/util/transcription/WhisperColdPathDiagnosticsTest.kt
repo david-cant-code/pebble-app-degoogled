@@ -7,6 +7,7 @@ import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigFlow
 import coredevices.util.STTConfig
 import coredevices.util.models.CactusSTTMode
+import com.anopticlabs.gravel.whisper.WhisperLongFormResult
 import coredevices.whisper.EnginePlacement
 import coredevices.whisper.TranscribeStats
 import coredevices.whisper.WhisperEngineUnavailableException
@@ -127,6 +128,14 @@ class WhisperColdPathDiagnosticsTest {
             return "hello world"
         }
 
+        override fun transcribeLongForm(
+            handle: Long,
+            pcm16: ByteArray,
+            threads: Int,
+            language: String?,
+            callId: Long,
+            placement: EnginePlacement,
+        ): WhisperLongFormResult = error("long-form is not modeled by this fake")
         override fun cancel(callId: Long) {}
         override fun free(handle: Long) {}
     }

@@ -4,6 +4,7 @@ import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigFlow
 import coredevices.util.STTConfig
 import coredevices.util.models.CactusSTTMode
+import com.anopticlabs.gravel.whisper.WhisperLongFormResult
 import coredevices.whisper.EnginePlacement
 import coredevices.whisper.TranscribeStats
 import coredevices.whisper.WhisperEngineUnavailableException
@@ -144,6 +145,14 @@ class WhisperEngineDeathTest {
                 }
             }
 
+            override fun transcribeLongForm(
+                handle: Long,
+                pcm16: ByteArray,
+                threads: Int,
+                language: String?,
+                callId: Long,
+                placement: EnginePlacement,
+            ): WhisperLongFormResult = error("long-form is not modeled by this fake")
             override fun cancel(callId: Long) {}
             override fun free(handle: Long) {}
             override fun processGeneration(): Long = generation
@@ -341,6 +350,8 @@ class WhisperEngineDeathTest {
         val fake = ProcessEngine()
         val service = serviceFor(fake)
         awaitUntil("the first load and its warm-up") { service.isModelReady && fake.warmUps == 1 }
+        // A dictation waits for the load job, its warm-up included.
+        assertEquals("hello world", service.transcribeLocal(realPcmBytes(), sampleRate = 16_000))
 
         fake.initGate = CountDownLatch(1)
         fake.die(report = true)
@@ -367,6 +378,8 @@ class WhisperEngineDeathTest {
         val provider = FakeModelProvider()
         val service = serviceFor(fake, provider)
         awaitUntil("the first load") { service.isModelReady }
+        // A dictation waits for the load job, its warm-up included.
+        assertEquals("hello world", service.transcribeLocal(realPcmBytes(), sampleRate = 16_000))
 
         val gap = CountDownLatch(1)
         fake.supportedGate = gap

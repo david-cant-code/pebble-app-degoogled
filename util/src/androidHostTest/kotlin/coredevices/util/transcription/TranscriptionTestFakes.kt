@@ -1,6 +1,7 @@
 package coredevices.util.transcription
 
 import coredevices.analytics.CoreAnalytics
+import com.anopticlabs.gravel.whisper.WhisperLongFormResult
 import coredevices.whisper.EnginePlacement
 import coredevices.whisper.TranscribeStats
 import java.util.concurrent.CopyOnWriteArrayList
@@ -85,6 +86,14 @@ internal class FakeWhisperEngine(@Volatile var reply: String = "hello world") {
             }
             return reply
         }
+        override fun transcribeLongForm(
+            handle: Long,
+            pcm16: ByteArray,
+            threads: Int,
+            language: String?,
+            callId: Long,
+            placement: EnginePlacement,
+        ): WhisperLongFormResult = error("long-form is not modeled by this fake")
         override fun cancel(callId: Long) {}
         override fun free(handle: Long) {}
     }

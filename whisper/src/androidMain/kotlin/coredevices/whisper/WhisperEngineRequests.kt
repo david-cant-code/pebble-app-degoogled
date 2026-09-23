@@ -1,5 +1,6 @@
 package coredevices.whisper
 
+import com.anopticlabs.gravel.whisper.WhisperLongForm
 import coredevices.whisper.WhisperEngineProtocol.MAX_MESSAGE_BYTES
 
 /**
@@ -17,6 +18,10 @@ import coredevices.whisper.WhisperEngineProtocol.MAX_MESSAGE_BYTES
  */
 internal fun audioFitsRegion(samples: Int, regionBytes: Int): Boolean =
     samples >= 0 && samples.toLong() * Float.SIZE_BYTES <= regionBytes
+
+/** A recording within the per-call bound that fits its region. */
+internal fun longFormRequestFits(samples: Int, regionBytes: Int): Boolean =
+    samples in 1..WhisperLongForm.MAX_CALL_SAMPLES && audioFitsRegion(samples, regionBytes)
 
 /**
  * A failure message as the bytes the reply carries, cut at the

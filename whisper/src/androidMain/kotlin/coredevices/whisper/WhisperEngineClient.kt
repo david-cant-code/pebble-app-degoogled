@@ -14,8 +14,13 @@ import android.os.RemoteException
 import android.os.SharedMemory
 import android.os.StrictMode
 import android.os.SystemClock
+import android.system.ErrnoException
 import android.system.OsConstants
 import android.util.Log
+import com.anopticlabs.gravel.whisper.WhisperEngineTimeoutException
+import com.anopticlabs.gravel.whisper.WhisperLongForm
+import com.anopticlabs.gravel.whisper.WhisperLongFormResult
+import com.anopticlabs.gravel.whisper.WhisperMemoryException
 import coredevices.whisper.WhisperEngineProtocol.DESCRIPTOR
 import coredevices.whisper.WhisperEngineProtocol.MAX_MESSAGE_BYTES
 import coredevices.whisper.WhisperEngineProtocol.MAX_TEXT_BYTES
@@ -27,6 +32,7 @@ import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_FREE
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_INIT
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_RUNTIME
 import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_TRANSCRIBE
+import coredevices.whisper.WhisperEngineProtocol.TRANSACTION_TRANSCRIBE_LONG
 import java.io.File
 import java.io.IOException
 import java.nio.ByteOrder
@@ -35,6 +41,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration
 
 /**
@@ -48,11 +55,13 @@ import kotlin.time.Duration
  *
  * Failure classes, kept apart because callers act on them differently:
  * a transport failure (the process would not start or connect, died
- * under a call, or answered a stale handle) is a
- * [WhisperEngineUnavailableException], after which every handle is gone;
- * an engine failure with the process alive is a RuntimeException carrying
- * the engine's error text, as the in-process binding threw. Everything
- * read back from the engine process is bounded before use.
+ * under a call, answered a stale handle, or sent a reply this process
+ * refuses) is a [WhisperEngineUnavailableException], after which every
+ * handle is gone, and a [WhisperEngineTimeoutException] when the call's
+ * own deadline ended the process; an engine failure with the process
+ * alive is a RuntimeException carrying the engine's error text, as the
+ * in-process binding threw. Everything read back from the engine
+ * process is bounded before use.
  *
  * Must be attached to the application context before any engine call;
  * unattached, the engine reads as unsupported. Every transaction blocks the
@@ -265,6 +274,69 @@ object WhisperEngineClient {
     }
 
     /**
+     * [transcribe] for a whole recording ([pcm16], 16 kHz mono PCM16), under
+     * [longFormDeadline]. A region the system cannot provide is a
+     * [WhisperMemoryException].
+     */
+    internal fun transcribeLong(
+        handle: Long,
+        pcm16: ByteArray,
+        threads: Int,
+        language: String?,
+        callId: Long,
+        cpuMask: Long,
+        nice: Int,
+    ): WhisperLongFormResult {
+        check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) { "the audio transport needs API 27" }
+        val samples = pcm16.size / 2
+        require(samples in 1..WhisperLongForm.MAX_CALL_SAMPLES) { "long-form audio of $samples samples" }
+        val region = try {
+            SharedMemory.create("whisper-long-pcm", audioRegionBytes(samples))
+        } catch (e: ErrnoException) {
+            throw WhisperMemoryException("no ${audioRegionBytes(samples)} byte region for long-form audio", e)
+        }
+        try {
+            val mapped = try {
+                region.mapReadWrite()
+            } catch (e: ErrnoException) {
+                throw WhisperMemoryException("the long-form audio region could not be mapped", e)
+            }
+            try {
+                writePcm16AsFloats(pcm16, mapped.order(ByteOrder.nativeOrder()).asFloatBuffer())
+            } finally {
+                SharedMemory.unmap(mapped)
+            }
+            if (!region.setProtect(OsConstants.PROT_READ)) {
+                Log.w(TAG, "could not make the long-form audio region read-only before sending it")
+            }
+            return transact(
+                TRANSACTION_TRANSCRIBE_LONG, "long-form transcription",
+                deadlineBound = longFormDeadline(samples),
+                write = { data ->
+                    data.writeLong(handle)
+                    region.writeToParcel(data, 0)
+                    data.writeInt(samples)
+                    data.writeInt(threads)
+                    data.writeString(language)
+                    data.writeLong(callId)
+                    data.writeLong(cpuMask)
+                    data.writeInt(nice)
+                },
+            ) { reply ->
+                when (val status = reply.readInt()) {
+                    STATUS_OK -> readLongFormReply(
+                        reply.readBoundedBytes(WhisperLongForm.MAX_REPLY_BYTES),
+                        samples * 1000L / WhisperLongForm.SAMPLE_RATE,
+                    )
+                    else -> throw exceptionForStatus("long-form transcription", status, reply.readBoundedMessage())
+                }
+            }
+        } finally {
+            region.close()
+        }
+    }
+
+    /**
      * Requests the abort of one call. Never binds and never throws: an
      * engine that is gone has nothing left to cancel, and this runs from
      * cancellation paths that must stay safe.
@@ -349,12 +421,13 @@ object WhisperEngineClient {
      * process surfaces as [WhisperEngineUnavailableException] and drops
      * the binding, so the next binding call gets a fresh process, and so
      * does a reply whose header is not the no-exception marker
-     * ([replyHeaderViolation]).
+     * ([replyHeaderViolation]) or that [read] refuses ([ReplyRefusedException]).
      */
     private inline fun <T> transact(
         code: Int,
         operation: String,
         bindIfNeeded: Boolean = true,
+        deadlineBound: Duration = transactionDeadline(code),
         write: (Parcel) -> Unit,
         read: (Parcel) -> T,
     ): T {
@@ -363,7 +436,7 @@ object WhisperEngineClient {
         check(Looper.myLooper() != Looper.getMainLooper()) { "engine calls must not run on the main thread" }
         val live = connected(bindIfNeeded)
             ?: throw WhisperEngineUnavailableException("no engine process is bound for $operation")
-        val deadline = transactionDeadline(code).let { bound ->
+        val deadline = deadlineBound.let { bound ->
             transactionDeadlineCapForTests?.let { cap -> minOf(bound, cap) } ?: bound
         }
         val data = Parcel.obtain()
@@ -392,8 +465,13 @@ object WhisperEngineClient {
         // so the invariant is on the engine side: it notes no app op
         // before it writes its header (WhisperEngineService.onTransact).
         val policy = StrictMode.getThreadPolicy()
+        // This transaction's own: a deadline another call on the same process missed is not this one's.
+        val timedOut = AtomicBoolean(false)
         val expiry = watchdog.schedule(
-            { onDeadline(live, operation, deadline) },
+            {
+                timedOut.set(true)
+                onDeadline(live, operation, deadline)
+            },
             deadline.inWholeMilliseconds, TimeUnit.MILLISECONDS,
         )
         try {
@@ -404,9 +482,9 @@ object WhisperEngineClient {
                 live.binder.transact(code, data, reply, 0)
             } catch (e: DeadObjectException) {
                 onDied(live.serviceConnection)
-                throw WhisperEngineUnavailableException(live.expired ?: "engine process died during $operation", e)
+                throw engineLostException(live.expired ?: "engine process died during $operation", timedOut.get(), e)
             } catch (e: RemoteException) {
-                throw WhisperEngineUnavailableException("engine transaction for $operation failed: ${e.message}", e)
+                throw engineLostException("engine transaction for $operation failed: ${e.message}", timedOut.get(), e)
             }
             check(handled) { "engine did not recognize the $operation transaction" }
             return readPastReplyHeader(operation, reply.readInt(), expire = { message -> expire(live, message) }) {
