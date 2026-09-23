@@ -458,7 +458,9 @@ The replacement is whisper.cpp (MIT), compiled from source:
   armv8.2-a with dotprod and fp16 (ggml selects CPU features at compile
   time, with no runtime dispatch), so a tiny baseline-architecture
   probe, `libwhispercpu.so`, checks the hwcaps first, and no engine code
-  is mapped until it passes.
+  is mapped until it passes. `CpuFloorProbeSentinelTest` (app unit
+  tests) holds each engine's probe to the hwcaps its compile floor
+  implies (`whisper_cpu.c` states the mapping and its sources).
 - `:whisper` holds the Kotlin bindings: a seven-function expect/actual
   surface whose iOS actuals are unsupported stubs, keeping commonMain
   compiling for the unmaintained iOS targets. Engine strings cross JNI
@@ -730,19 +732,40 @@ The replacement is whisper.cpp (MIT), compiled from source:
   code re-checks the build before honouring any flag, because debug and
   release installs share an application id.
 
-Model weights are never checked in. `WhisperModelCatalog` (util) pins
-six models (small, base and tiny, each as the multilingual and the
-English-only conversion) from
-the whisper.cpp author's Hugging Face conversions, each with an
-immutable-commit URL, exact byte size, and SHA-256; the catalog KDoc
-records the three-source re-pin procedure. Verification is layered,
-each layer defensible alone: the commit-pinned URL (a retargeted branch
-or re-uploaded file cannot swap bytes), the download-time streaming
-digest gate in `ModelFileInstaller` (fail closed, mid-stream size
-abort; interrupted transfers keep a resumable partial, completed-but-
-wrong bytes delete it), and a load-time re-hash in
-`WhisperModelProvider` that quarantines a mismatch before the native
+Model weights are never checked in. `ModelCatalog` (util) is every
+pinned model: `WhisperModelCatalog` pins six speech models (small, base
+and tiny, each as the multilingual and the English-only conversion)
+from the whisper.cpp author's Hugging Face conversions, and
+`LlmModelCatalog` pins the Notebook's two text models, unsloth's GGUF
+quantizations of Qwen3 1.7B and Qwen3.5 0.8B. Each entry has an
+immutable-commit URL, exact byte size, SHA-256, and an MIT or
+Apache-2.0 license, the only two a test allows; the whisper catalog
+KDoc records the three-source re-pin procedure. Verification is
+layered, each layer defensible alone: the commit-pinned URL (a
+retargeted branch or re-uploaded file cannot swap bytes), the
+download-time streaming digest gate in `ModelFileInstaller` (fail
+closed, mid-stream size abort; interrupted transfers keep a resumable
+partial, completed-but-wrong bytes delete it), and a load-time re-hash
+in `WhisperModelProvider` that quarantines a mismatch before the native
 parser ever sees the file.
+
+The installer retries a dropped or stalled transfer, or an HTTP 408,
+425, 429 or 5xx, inside one install, resuming where the partial file
+ends, until five attempts in a row each add less than 1 MiB. Other
+failures end it at once, among them a failed write, too little free
+space for the remaining bytes and a rejected certificate; a server that
+keeps ignoring resumes ends it after three restarts. The partial's name
+carries the pin, and staging files other than the current pins'
+partials and quarantined files are deleted at startup. Speech and text
+models download in separate lanes, one download per role at a time: a
+new request replaces the pending download of its own role only, and the
+dictation screens follow the speech lane's status. A download job's
+time limit scales with the file's size (`DownloadJobLiveness.timeoutFor`).
+The startup sweep deletes every model directory that is not an
+installed catalog model, a text model's included, but resets dictation
+only when the selected speech model is not installed.
+The model picker, dictation's installed check and the sweep's restore
+see speech models only.
 
 Naming: `CactusSTTMode` and `CactusModelPathProvider` keep their
 upstream names. The enum's entry names are persisted inside the
@@ -751,8 +774,9 @@ migration), and both types are referenced across upstream-owned files
 where a rename would cost churn in every future merge. Migration of
 existing installs rides the incompatible-model sweep in
 `CommonAppDelegate`: previous-engine model directories are deleted, the
-user's local mode is stashed, and `SttModelUpdatePrompt` restores it
-once a catalog model is downloaded.
+user's local mode is stashed when the selected model is not installed,
+and `SttModelUpdatePrompt` restores it once a catalog model is
+downloaded.
 
 ## Notebook
 
@@ -786,7 +810,14 @@ ends the engine process. Constraints the code relies on:
 - A conversation is rendered by llama.cpp's built-in formatter for the
   template family it detects on the model's template text (a substring
   match, not an execution of the Jinja; `llm_jni.cpp` cites the source),
-  with a model detected as no family refused. The
+  with a model detected as no family refused. Which models render
+  faithfully is the catalog's business: `LlmModelCatalog` records each
+  model's chat format and its reasoning suppression suffix, which the
+  caller appends after the render, and `LlmCatalogModelsDeviceTest`
+  checks on a device that each catalog model renders a short
+  conversation in that format and, with the suffix, answers a note
+  prompt without reasoning tags. The Qwen3.5 file's embedded template
+  trims message contents, so a caller must trim them before the render. The
   formatter renders roles and contents verbatim and the tokenizer parses
   special-token text anywhere in the prompt, so the roles are limited to
   system, user and assistant, and a content carrying a template marker
@@ -812,7 +843,21 @@ ends the engine process. Constraints the code relies on:
   under it and leaves no earlier thread held to that mask, and that one
   whose mask the kernel refuses starts no workers of its own. Not pinned
   by a test: an access to a freed pool, and the calling thread's nice value
-  being restored.
+  being restored. `textGenerationThreadCount`
+  (dictation's rule over the CPUs the text engine process may run on) is
+  the count the speed calibration below was measured at.
+- `recommendedTextModel` (`ModelManager.getRecommendedTextModel`) walks `LlmModelCatalog` from the largest model down
+  to the first whose RAM floor the phone meets and whose note from a
+  one-minute recording is estimated within 45 seconds, else offers the
+  smallest; nothing is
+  recommended where the engine cannot run. The text engine has no probe of
+  its own: `LlmSpeedCalibration` scales reference times measured on the
+  speech engine's reference phone by the speech probe's score, with the
+  speech estimate's background margin, and states the calibration
+  procedure. The speech engine process, which parses model files, thereby
+  steers the text recommendation too, within the probe's accepted range.
+  Host tests pin the walk, the scaling, and the text times' match to the
+  current speech reference.
 
 Storage is a directory of encrypted files under `files/notebook`. Each write
 draws a fresh AES-256 data key, seals the file with it in software
@@ -1309,10 +1354,10 @@ What the recipe has to supply (field names as in the fdroiddata format):
   `androidApp/version.properties` exists.
 - The build subdirectory is `androidApp`; the unsigned release APK is the
   output F-Droid signs.
-- Anti-features: the on-device dictation models are runtime downloads from
-  Hugging Face (`WhisperModelCatalog`), which is expected to draw the
-  NonFreeNet anti-feature flag; that documents but does not block
-  inclusion.
+- Anti-features: the on-device dictation models and the Notebook's text
+  models are runtime downloads from Hugging Face (`ModelCatalog`), which
+  is expected to draw the NonFreeNet anti-feature flag; that documents
+  but does not block inclusion.
 
 ## Branding assets
 

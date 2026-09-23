@@ -1,5 +1,11 @@
 package coredevices.util.models
 
+import com.anopticlabs.gravel.models.LlmModel
+import com.anopticlabs.gravel.models.ModelCatalog
+import com.anopticlabs.gravel.models.PinnedModel
+import com.anopticlabs.gravel.models.isTextEngineSupported
+import com.anopticlabs.gravel.models.recommendedTextModel
+
 import coredevices.util.Platform
 import coredevices.util.transcription.CactusModelPathProvider
 import coredevices.util.transcription.DeviceSpeedEstimator
@@ -11,8 +17,8 @@ import kotlinx.coroutines.flow.StateFlow
 
 /**
  * UI-facing surface over the whisper model catalog and the provider that
- * installs from it. The Cactus-era language-model surface is gone with the
- * engine: only STT models exist in this fork.
+ * installs from it. The Notebook's text models are not listed here; they
+ * are resolved by id through the provider.
  */
 class ModelManager(
     private val platform: Platform,
@@ -86,6 +92,13 @@ class ModelManager(
         score = speedScore.value,
     )
 
+    /** [recommendedTextModel] for this device; call [ensureSpeedMeasured] first where the probe is affordable. */
+    fun getRecommendedTextModel(): LlmModel? = recommendedTextModel(
+        engineSupported = isTextEngineSupported(),
+        totalRamBytes = platform.totalRamBytes(),
+        score = speedScore.value,
+    )
+
     companion object {
         private const val MIB = 1024L * 1024L
 
@@ -97,10 +110,10 @@ class ModelManager(
          * size is rounded to the nearest MiB for the download job's traffic
          * estimate.
          */
-        internal fun modelInfoFor(model: WhisperModel, estimatedWindowSeconds: Double? = null): ModelInfo = ModelInfo(
+        internal fun modelInfoFor(model: PinnedModel, estimatedWindowSeconds: Double? = null): ModelInfo = ModelInfo(
             slug = model.id,
             sizeInMB = mebibytes(model.sizeBytes),
-            url = WhisperModelCatalog.urlFor(model),
+            url = ModelCatalog.urlFor(model),
             estimatedWindowSeconds = estimatedWindowSeconds,
         )
 
@@ -114,9 +127,10 @@ class ModelManager(
             provider?.getDownloadedModels()?.filter { provider.isModelDownloaded(it) } ?: emptyList()
 
         /**
-         * The whole catalog plus any downloaded directory outside the
-         * catalog (stale previous-engine leftovers), so those stay visible
-         * for deletion. Static and provider-parameterized for host tests.
+         * The whole speech catalog plus any downloaded directory outside
+         * every catalog (stale previous-engine leftovers), so those stay
+         * visible for deletion; installed text models are not listed here.
+         * Static and provider-parameterized for host tests.
          */
         internal fun availableSTTModels(
             provider: CactusModelPathProvider?,
@@ -126,7 +140,7 @@ class ModelManager(
                 modelInfoFor(model, WhisperSpeedCalibration.estimateWindowSeconds(model.id, score))
             }
             val stale = provider?.getDownloadedModels()
-                ?.filter { WhisperModelCatalog.byId(it) == null }
+                ?.filter { ModelCatalog.byId(it) == null }
                 ?.map { slug -> ModelInfo(slug = slug, sizeInMB = mebibytes(provider.getModelSizeBytes(slug))) }
                 ?: emptyList()
             return catalog + stale

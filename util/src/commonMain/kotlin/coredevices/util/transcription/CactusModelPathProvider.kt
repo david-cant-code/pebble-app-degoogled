@@ -1,7 +1,7 @@
 package coredevices.util.transcription
 
 /**
- * Path/lifecycle surface for the on-device speech models. The interface
+ * Path/lifecycle surface for the on-device models. The interface
  * keeps its upstream name (and the legacy [getSTTModelPath]/[getLMModelPath]
  * pair) to bound merge cost even though the engine behind it is now
  * whisper; [getModelPath] is the fork extension the multi-model catalog
@@ -36,6 +36,9 @@ interface CactusModelPathProvider {
     fun isModelDownloaded(modelName: String): Boolean
     fun getDownloadedModels(): List<String>
     fun getIncompatibleModels(): List<String>
+
+    /** Deletes download leftovers of models no catalog lists; a no-op without a staging area. */
+    fun pruneOrphanedStaging() {}
     fun deleteModel(modelName: String)
     fun getModelSizeBytes(modelName: String): Long
     fun initTelemetry()

@@ -1,5 +1,8 @@
 package coredevices.util.models
 
+import com.anopticlabs.gravel.models.ModelRole
+import com.anopticlabs.gravel.models.PinnedModel
+
 /**
  * Whisper size tiers in the catalog, largest first. Each tier is one
  * architecture, so the multilingual and English-only entries of a tier
@@ -35,22 +38,26 @@ enum class WhisperTier {
  * @param commit the immutable commit of that repository the URL resolves.
  */
 data class WhisperModel(
-    val id: String,
+    override val id: String,
     val tier: WhisperTier,
-    val displayName: String,
-    val fileName: String,
-    val sha256: String,
-    val sizeBytes: Long,
-    val minRamBytes: Long,
+    override val displayName: String,
+    override val fileName: String,
+    override val sha256: String,
+    override val sizeBytes: Long,
+    override val minRamBytes: Long,
     val multilingual: Boolean,
-    val repo: String = WhisperModelCatalog.HF_REPO,
-    val commit: String = WhisperModelCatalog.HF_REPO_COMMIT,
-)
+    override val repo: String = WhisperModelCatalog.HF_REPO,
+    override val commit: String = WhisperModelCatalog.HF_REPO_COMMIT,
+    override val license: String = "MIT",
+) : PinnedModel {
+    override val role: ModelRole get() = ModelRole.Speech
+}
 
 /**
  * Hardcoded catalog and integrity pins for the on-device whisper models.
- * Single source of truth: the settings UI lists it, the installer
- * downloads from it, and the incompatible-model sweep is defined by it.
+ * Single source of truth for speech models: the settings UI lists it,
+ * and the installer and the incompatible-model sweep read it through
+ * `ModelCatalog` together with the text models.
  *
  * Every entry is served from one immutable commit of the
  * huggingface.co/ggerganov/whisper.cpp repository (the whisper.cpp
@@ -177,9 +184,6 @@ object WhisperModelCatalog {
     val ids: Set<String> = MODELS.map { it.id }.toSet()
 
     fun byId(id: String): WhisperModel? = MODELS.firstOrNull { it.id == id }
-
-    fun urlFor(model: WhisperModel): String =
-        "https://huggingface.co/${model.repo}/resolve/${model.commit}/${model.fileName}"
 
     /**
      * The entry one tier cheaper than [model] with the same language

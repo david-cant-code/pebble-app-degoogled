@@ -32,12 +32,16 @@ class SttModelMigrationTest {
         val failDeleteOf: Set<String> = emptySet(),
     ) : CactusModelPathProvider {
         val deleted = mutableListOf<String>()
+        val calls = mutableListOf<String>()
+        override fun pruneOrphanedStaging() {
+            calls += "prune"
+        }
         override suspend fun getSTTModelPath(): String = error("unused in these tests")
         override suspend fun getLMModelPath(): String = error("unused in these tests")
         override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = error("unused in these tests")
         override fun isModelDownloaded(modelName: String): Boolean = modelName in installed
         override fun getDownloadedModels(): List<String> = downloaded
-        override fun getIncompatibleModels(): List<String> = incompatible
+        override fun getIncompatibleModels(): List<String> = incompatible.also { calls += "incompatible" }
         override fun deleteModel(modelName: String) {
             if (modelName in failDeleteOf) throw RuntimeException("delete failed (test)")
             deleted.add(modelName)
@@ -164,5 +168,76 @@ class SttModelMigrationTest {
         assertEquals(0, notifications)
         assertFalse(settings.hasKey(STT_MODE_BEFORE_UPDATE_KEY))
         assertTrue(provider.deleted.isEmpty())
+    }
+
+    @Test
+    fun aStaleTextModelDirectoryLeavesDictationAlone() {
+        val provider = FakeProvider(incompatible = listOf("qwen3-1_7b-q4_k_m"), installed = setOf("whisper-base-en"))
+        val holder = holderWith(CactusSTTMode.LocalFirst, "whisper-base-en")
+        run(provider, holder)
+
+        assertEquals(listOf("qwen3-1_7b-q4_k_m"), provider.deleted)
+        assertEquals(CactusSTTMode.LocalFirst, holder.config.value.sttConfig.mode)
+        assertEquals("whisper-base-en", holder.config.value.sttConfig.modelName)
+        assertFalse(settings.hasKey(STT_MODE_BEFORE_UPDATE_KEY))
+        assertEquals(0, notifications)
+    }
+
+    @Test
+    fun aTornUnselectedSpeechModelLeavesDictationAlone() {
+        val provider = FakeProvider(incompatible = listOf("whisper-small-en"), installed = setOf("whisper-base-en"))
+        val holder = holderWith(CactusSTTMode.LocalOnly, "whisper-base-en")
+        run(provider, holder)
+
+        assertEquals(listOf("whisper-small-en"), provider.deleted)
+        assertEquals(CactusSTTMode.LocalOnly, holder.config.value.sttConfig.mode)
+        assertEquals("whisper-base-en", holder.config.value.sttConfig.modelName)
+        assertEquals(0, notifications)
+    }
+
+    @Test
+    fun aTornSelectedSpeechModelResetsDictation() {
+        val provider = FakeProvider(incompatible = listOf("whisper-base-en"), installed = setOf("whisper-small-en"))
+        val holder = holderWith(CactusSTTMode.LocalOnly, "whisper-base-en")
+        run(provider, holder)
+
+        assertEquals(CactusSTTMode.LocalOnly.id, settings.getInt(STT_MODE_BEFORE_UPDATE_KEY, -1))
+        assertEquals(CactusSTTMode.RemoteOnly, holder.config.value.sttConfig.mode)
+        assertNull(holder.config.value.sttConfig.modelName)
+        assertEquals(1, notifications)
+    }
+
+    @Test
+    fun aSweepWithNothingToResetIsNotAnnounced() {
+        val provider = FakeProvider(incompatible = listOf("qwen3-1_7b-q4_k_m"))
+        val holder = holderWith(CactusSTTMode.RemoteOnly, null)
+        run(provider, holder)
+
+        assertEquals(listOf("qwen3-1_7b-q4_k_m"), provider.deleted)
+        assertEquals(0, notifications)
+        assertFalse(settings.hasKey(STT_MODE_BEFORE_UPDATE_KEY))
+    }
+
+    @Test
+    fun aSweepThatResetsNothingLetsAPendingRestoreComplete() {
+        settings.putInt(STT_MODE_BEFORE_UPDATE_KEY, CactusSTTMode.LocalFirst.id)
+        val provider = FakeProvider(
+            incompatible = listOf("qwen3-1_7b-q4_k_m"),
+            downloaded = listOf("whisper-base-en"),
+            installed = setOf("whisper-base-en"),
+        )
+        val holder = holderWith(CactusSTTMode.RemoteOnly, null)
+        run(provider, holder)
+
+        assertFalse(settings.hasKey(STT_MODE_BEFORE_UPDATE_KEY))
+        assertEquals(CactusSTTMode.LocalFirst, holder.config.value.sttConfig.mode)
+        assertEquals("whisper-base-en", holder.config.value.sttConfig.modelName)
+    }
+
+    @Test
+    fun stagingLeftoversArePrunedBeforeTheSweep() {
+        val provider = FakeProvider()
+        run(provider, holderWith(CactusSTTMode.RemoteOnly, null))
+        assertEquals(listOf("prune", "incompatible"), provider.calls)
     }
 }

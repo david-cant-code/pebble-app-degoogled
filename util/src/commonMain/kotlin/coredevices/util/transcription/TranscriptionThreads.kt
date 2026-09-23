@@ -40,8 +40,8 @@ internal fun engineThreadCount(allowedCpus: Int?, possibleCpus: Int): Int =
  * configuration on every core set tried (all cores, the OEM foreground
  * set, the little-core background set). [allowedCpuIds] is the affinity
  * mask and must be non-empty: an unreadable mask is the caller's case,
- * and the Android `transcriptionThreadCount` falls back to the
- * possible-CPU count for it before coming here. [maxFreqKHzByCpu] maps
+ * and [threadCountFor] falls back to the possible-CPU count for it
+ * before coming here. [maxFreqKHzByCpu] maps
  * CPU id to its maximum frequency; cores without a reading are treated
  * as their own lowest tier. Falls back to [engineThreadCount] over the
  * allowed count when the topology is unknown.
@@ -56,9 +56,17 @@ internal fun tieredThreadCount(allowedCpuIds: List<Int>, maxFreqKHzByCpu: Map<In
     return count.coerceIn(1, MAX_ENGINE_THREADS)
 }
 
+/** Every Android engine's platform count; an unreadable mask (null or empty) falls back to [possibleCpus]. */
+internal fun threadCountFor(allowedCpuIds: List<Int>?, maxFreqKHzByCpu: Map<Int, Long>, possibleCpus: Int): Int =
+    if (allowedCpuIds.isNullOrEmpty()) {
+        engineThreadCount(allowedCpus = null, possibleCpus = possibleCpus)
+    } else {
+        tieredThreadCount(allowedCpuIds, maxFreqKHzByCpu)
+    }
+
 /**
  * The count the engine actually runs with: [measured] from
- * [tieredThreadCount], unless the debug single-thread override is set
+ * [threadCountFor], unless the debug single-thread override is set
  * and this is a debug build. The build check is repeated here rather
  * than trusted from the settings UI, so a stored override can never act
  * in a release install that inherited the debug build's settings.

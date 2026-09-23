@@ -1,5 +1,7 @@
 package coredevices.util.models
 
+import com.anopticlabs.gravel.models.ModelCatalog
+
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -66,7 +68,7 @@ class WhisperModelCatalogTest {
             assertEquals(
                 "https://huggingface.co/ggerganov/whisper.cpp/resolve/" +
                     "5359861c739e955e79d9a303bcbc70fb988958b1/${model.fileName}",
-                WhisperModelCatalog.urlFor(model),
+                ModelCatalog.urlFor(model),
             )
         }
     }

@@ -932,31 +932,6 @@ full-window session costs a full-window decode, and a truncated session
 transcribes as the fragment that was actually captured. Recorded here so
 short or slow dictation results are attributed correctly during testing.
 
-## A stale model directory resets local dictation for one launch
-
-**Status: accepted; no catalog change that reaches it is planned.**
-
-The model directory is swept at every launch, and any directory the
-sweep cannot match to an installed catalog model is treated as a
-leftover of the previous speech engine: the directory is deleted, the
-selected model is cleared, and a local mode is stashed and replaced by
-cloud-only until the next launch, when the sweep finds the stash and a
-model it knows, restores the mode, and selects the first installed
-model the directory listing returns, which may not be the one selected
-before. With a self-hosted server configured, dictation for that launch
-goes to it; without one, dictation fails until the next launch. Three
-states reach it: a downgrade to 0.1.6 or earlier from an install
-holding a tiny model, whose catalog lacks the name (the tiny model has
-to be downloaded again); a later version that drops or re-pins a
-catalog entry while the selected model stays valid; and an install from
-an unreleased build holding a directory this catalog no longer names. A
-model file that fails its load-time hash check is not one of them: the
-installer deletes its directory as it quarantines the file. Installs
-holding only catalog models in their pinned shape are unaffected.
-Closing this means resetting the mode only when the selected model
-itself is gone and keeping the selected model on restore, each with a
-migration test; deferred because no such catalog change is planned.
-
 ## A superseded decode can hold the engine into the next session
 
 **Status: open; bounded by the engine's unwind bound.**
@@ -985,10 +960,10 @@ and starts a second decode during the unwind.
 
 The speed nudge and the engine update prompt wait for their download by
 taking the first status after the current one that is not Downloading,
-and the status names no download. When a download of another model is
-already running, scheduling the prompt's own cancels that job, whose
-Idle then settles the prompt's wait before its own download has
-reported anything: the prompt shows "Download failed" while the
+and the status names no download. When a download of another speech
+model is already running, scheduling the prompt's own cancels that
+job, whose Idle then settles the prompt's wait before its own download
+has reported anything: the prompt shows "Download failed" while the
 download runs. A retry attaches to the running download without
 starting it again; dismissing the prompt instead leaves the model to
 finish downloading unselected. Closing this means settling on a
@@ -1195,3 +1170,16 @@ the encryption is aimed at still cannot, because the key never leaves the
 Keystore. Gating the key on an unlocked device would break the background
 uses above and is not planned.
 
+
+## The Notebook's text models are community quantizations
+
+**Status: accepted.**
+
+Both text models in `LlmModelCatalog` are unsloth's GGUF quantizations
+rather than files from the model's publisher: Qwen publishes no GGUF of
+Qwen3.5 0.8B and only an 8-bit one of Qwen3 1.7B. The pins hold each
+file to the bytes vetted on 2026-09-22, but whether those bytes are a
+faithful quantization of Qwen's weights rests on unsloth. ggml-org, the
+llama.cpp project's organization, publishes a Q4_K_M of Qwen3 1.7B that
+could replace the first entry after a quality check on the Notebook's
+prompts; it publishes no Q5_K_M of Qwen3.5 0.8B.

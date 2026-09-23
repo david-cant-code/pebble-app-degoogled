@@ -1,6 +1,10 @@
 package coredevices.util.models
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -60,5 +64,21 @@ class DownloadJobLivenessTest {
                 nowMillis = 50_000L,
             )
         )
+    }
+
+    @Test
+    fun smallDownloadsGetTheFortyFiveMinuteFloor() {
+        assertEquals(45.minutes, DownloadJobLiveness.timeoutFor(147_964_211L))
+        assertEquals(45.minutes, DownloadJobLiveness.timeoutFor(0L))
+    }
+
+    @Test
+    fun largerDownloadsGetTheTransferAt128KibPerSecond() {
+        assertEquals(8448.seconds, DownloadJobLiveness.timeoutFor(1_107_409_472L))
+    }
+
+    @Test
+    fun theTimeoutIsCappedAtFiveHours() {
+        assertEquals(5.hours, DownloadJobLiveness.timeoutFor(10_000_000_000L))
     }
 }

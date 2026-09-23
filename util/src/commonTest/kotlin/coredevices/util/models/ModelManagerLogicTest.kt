@@ -88,6 +88,13 @@ class ModelManagerLogicTest {
         assertEquals(1, available.count { it.slug == "whisper-base-en" })
     }
 
+    @Test
+    fun anInstalledTextModelIsNotAStaleSpeechRow() {
+        val provider = FakeProvider(downloaded = listOf("qwen3-1_7b-q4_k_m", "whisper-base-en"))
+        val available = ModelManager.availableSTTModels(provider)
+        assertEquals(WhisperModelCatalog.MODELS.map { it.id }, available.map { it.slug })
+    }
+
     private val eightGiB = 8L * 1024 * 1024 * 1024
     private val twoGiB = 2L * 1024 * 1024 * 1024
 

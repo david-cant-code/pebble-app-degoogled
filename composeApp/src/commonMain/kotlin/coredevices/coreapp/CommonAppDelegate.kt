@@ -50,16 +50,18 @@ private val sttMigrationLogger = Logger.withTag("SttModelMigration")
 /**
  * Startup pass over the on-device STT models; every install runs it on
  * every launch, and it is the only path that migrates a previous-engine
- * install. When stale installs exist (previous-engine directories, torn
- * catalog installs), the user's local mode is stashed under
- * [STT_MODE_BEFORE_UPDATE_KEY], config falls back to RemoteOnly with no
- * model, the stale directories are deleted, and [notifyUpgrade] fires once
- * per catalog generation (deduped via [STT_UPDATE_NOTIFIED_VERSION_KEY])
- * to point at the re-download. The stash is only resolved once a usable
- * catalog model is actually installed, so SttModelUpdatePrompt keeps
- * offering the download across launches until then; a user who picked a
- * local mode themselves in the meantime keeps their choice and the stash
- * is dropped as stale.
+ * install. It first prunes download leftovers of models no catalog
+ * lists, then deletes stale installs (previous-engine directories, torn
+ * catalog installs). When the selected speech model is not installed,
+ * the user's local mode is stashed under [STT_MODE_BEFORE_UPDATE_KEY],
+ * config falls back to RemoteOnly with no model, and [notifyUpgrade]
+ * fires once per catalog generation (deduped via
+ * [STT_UPDATE_NOTIFIED_VERSION_KEY]) to point at the re-download; a stale
+ * directory of another model, a text model's included, leaves dictation
+ * alone. The stash is only resolved once a usable catalog model is
+ * actually installed, so SttModelUpdatePrompt keeps offering the download
+ * across launches until then; a user who picked a local mode themselves
+ * in the meantime keeps their choice and the stash is dropped as stale.
  *
  * Static with its dependencies handed in so the state machine stays under
  * host tests: it is destructive (deletes model directories) and runs
@@ -72,10 +74,18 @@ internal fun runSttModelMigration(
     coreConfigHolder: CoreConfigHolder,
     notifyUpgrade: () -> Unit,
 ) {
+    modelProvider.pruneOrphanedStaging()
     val incompatible = modelProvider.getIncompatibleModels()
+    val sttConfig = coreConfigHolder.config.value.sttConfig
+    val selected = sttConfig.modelName
+    val resetsSelection = incompatible.isNotEmpty() &&
+        (selected == null || !modelProvider.isModelDownloaded(selected)) &&
+        (sttConfig.mode.usesLocalCactus() || selected != null)
     if (incompatible.isNotEmpty()) {
         sttMigrationLogger.d { "Incompatible models found: $incompatible" }
-        val currentMode = coreConfigHolder.config.value.sttConfig.mode
+    }
+    if (resetsSelection) {
+        val currentMode = sttConfig.mode
         if (currentMode != CactusSTTMode.RemoteOnly && !settings.hasKey(STT_MODE_BEFORE_UPDATE_KEY)) {
             settings.putInt(STT_MODE_BEFORE_UPDATE_KEY, currentMode.id)
         }
@@ -88,17 +98,19 @@ internal fun runSttModelMigration(
                 )
             )
         )
-        // Everything incompatible is deleted outright: an in-flight
-        // catalog re-download is unaffected because its resumable
-        // partial lives in the installer's staging dir, which is
-        // never reported as a model.
-        incompatible.forEach {
-            try {
-                modelProvider.deleteModel(it)
-            } catch (e: Exception) {
-                sttMigrationLogger.w(e) { "Failed to delete incompatible model $it" }
-            }
+    }
+    // Everything incompatible is deleted outright, after the config no
+    // longer names it: an in-flight catalog re-download is unaffected
+    // because its resumable partial lives in the installer's staging dir,
+    // which is never reported as a model.
+    incompatible.forEach {
+        try {
+            modelProvider.deleteModel(it)
+        } catch (e: Exception) {
+            sttMigrationLogger.w(e) { "Failed to delete incompatible model $it" }
         }
+    }
+    if (resetsSelection) {
         if (settings.getStringOrNull(STT_UPDATE_NOTIFIED_VERSION_KEY) != WhisperModelCatalog.GENERATION) {
             settings.putString(STT_UPDATE_NOTIFIED_VERSION_KEY, WhisperModelCatalog.GENERATION)
             notifyUpgrade()
