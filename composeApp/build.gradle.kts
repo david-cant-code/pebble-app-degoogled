@@ -167,7 +167,8 @@ kotlin {
             }
         }
         androidMain.dependencies {
-            // Gravel: the Application class installs the UDP socket filter at process start.
+            // Gravel: the enforcement binding reads the UDP socket filter's install result; the app
+            // does not install the filter at present.
             implementation(project(":socketfilter"))
             implementation(compose.preview)
             implementation(compose.uiTooling)
