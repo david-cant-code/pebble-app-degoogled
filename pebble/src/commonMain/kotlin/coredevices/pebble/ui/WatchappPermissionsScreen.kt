@@ -358,12 +358,14 @@ fun WatchappPermissionControls(uuid: Uuid, modifier: Modifier = Modifier) {
         // Counts as on until the stored grant arrives, so the notice does not flash.
         val networkGranted by libPebble.watchappPermissionGranted(uuid, LockerAppPermissionType.Network)
             .collectAsState(true)
+        // Shown for every app with Network off: the locker entry does not record whether the app
+        // has PebbleKit JS, so the wording is conditional.
         if (!shouldRunPkjs(hasPkjs = true, networkGranted, networkDenyEnforced)) {
             Text(
-                "Gravel could not turn on its network block on this device. While internet " +
-                    "access is off, it does not run an app's code inside Gravel.",
+                "If this app runs code inside Gravel, it doesn't run while internet access " +
+                    "is off, so features that depend on it won't work.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp),
             )
         }

@@ -306,18 +306,36 @@ stubbed (layer 2), but a hostile bundle that recovers a fresh `WebSocket`
 constructor could open a WebSocket. The exposure is narrow: it needs a
 `PROXY_OVERRIDE`-less WebView and a deliberately hostile watchapp. It is
 not limited to WebSocket; WebRTC over TCP is reachable the same way, since
-the UDP filter covers only UDP (see the WebRTC header entry below).
+the UDP filter, where installed, covers only UDP (see the WebRTC header
+entry below).
 `WebViewJsRunner.applyNetworkProxy` logs a
 warning when the feature is unavailable. This entry leaves the file if
 minSdk/WebView baseline guarantees `PROXY_OVERRIDE`, or if a WebView-level
 WebSocket intercept becomes available.
 
+## The UDP filter is off
+
+**Status: temporary; the filter returns once Gravel can tell where it stops
+name lookups.**
+
+On LineageOS and systems built on it, the platform's DNS client creates an
+IPv6 UDP socket before it hands a lookup to the system resolver, and when
+that fails, the lookup runs inside the app over UDP instead (LineageOS
+`lineage-23.0`, `android_system_netd`, `client/NetdClient.cpp`,
+`dns_open_proxy`; `android16-release`, bionic `libc/dns/net/getaddrinfo.c`,
+`android_getaddrinfofornetcontext`). Gravel 0.3.1's filter refused both, so
+name lookups in Gravel failed there and the app closed when it made a web
+request. Gravel does not install the filter on any device at present. While
+it is off, Gravel does not run a watchapp's phone-side script while that
+watchapp's internet access is off, and the entries in this file that
+describe the filter or sessions with Network off do not apply.
+
 ## No UDP for web content inside Gravel
 
 **Status: deliberate.**
 
-Gravel installs a filter at process start that refuses the creation of UDP
-sockets in its own process, for as long as it runs. On devices where the
+When installed at process start, Gravel's filter refuses the creation of
+UDP sockets in its own process, for as long as it runs. On devices where the
 filter installs, web content inside Gravel (PebbleKit JS with internet
 access on, configuration pages, other in-app web pages) therefore has no
 UDP, which WebRTC over UDP, WebTransport and HTTP/3 need. This holds
@@ -336,9 +354,9 @@ not run that check.
 
 **Status: accepted.**
 
-The filter is installed in `MainApplication.attachBaseContext`, ahead of
-the app's content providers, library initializers and `onCreate` (platform
-source cited there). A socket
+When installed, the filter goes in at `MainApplication.attachBaseContext`,
+ahead of the app's content providers, library initializers and `onCreate`
+(android16-release, `ActivityThread.handleBindApplication`). A socket
 opened earlier than that by platform code would be outside the filter; none
 is known. The speech engine's isolated process gets no filter. A process
 that Android starts for a full backup or restore uses the base
@@ -350,10 +368,9 @@ so neither the filter nor the rest of Gravel's startup runs in it.
 
 **Status: accepted; no affected device is known.**
 
-If the platform does not let Gravel install the filter, Gravel logs the
-result at startup and does not run a watchapp's phone-side script while
-that watchapp's internet access is off. The watchapp's permission controls
-say so.
+If the platform does not let Gravel install the filter, Gravel does not run
+a watchapp's phone-side script while that watchapp's internet access is
+off. The watchapp's permission controls say so.
 
 ## The UDP filter is untested on Android versions before 17
 

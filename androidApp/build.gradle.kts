@@ -424,8 +424,8 @@ abstract class VerifyApkContents : DefaultTask() {
                         val named = dexTypes.filter { (_, needle) -> bytes.indexOfSequence(needle) >= 0 }.map { it.first }
                         if (named.isNotEmpty()) {
                             report.appendLine(
-                                "${apk.name} ${dex.name} names $named, but the UDP socket filter " +
-                                    "(:socketfilter) refuses UDP sockets in this process",
+                                "${apk.name} ${dex.name} names $named, which the UDP socket filter " +
+                                    "(:socketfilter) refuses when installed",
                             )
                         }
                     }

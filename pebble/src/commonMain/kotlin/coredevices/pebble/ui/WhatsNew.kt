@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
  * users on update. The popup auto-shows once per user per bump (`WhatsNewDialog` in
  * composeApp) and can be reopened any time from Settings > About.
  */
-const val WHATS_NEW_VERSION = 8
+const val WHATS_NEW_VERSION = 9
 
 /** A single announced change: a short heading and a sentence or two of body. */
 data class WhatsNewEntry(val title: String, val body: String)
@@ -32,6 +32,15 @@ data class WhatsNewEntry(val title: String, val body: String)
  * changelog (that lives in git history and the repo docs).
  */
 val whatsNewEntries: List<WhatsNewEntry> = listOf(
+    WhatsNewEntry(
+        title = "The UDP block is off for now",
+        body = "Gravel 0.3.1 closed right after opening on LineageOS and systems built on " +
+            "it, because its new UDP block also stopped the phone's name lookups there. " +
+            "This version turns the UDP block off on every phone until Gravel can tell " +
+            "where it stops name lookups. While it is off, a watchface or app with " +
+            "internet access turned off does not run its code inside Gravel at all, and " +
+            "web pages inside Gravel have HTTP/3 and WebRTC over UDP again.",
+    ),
     WhatsNewEntry(
         title = "Internet access off covers more than web requests",
         body = "With internet access turned off for a watchface or app, Gravel already " +
