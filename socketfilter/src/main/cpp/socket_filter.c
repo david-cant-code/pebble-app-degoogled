@@ -1,6 +1,7 @@
 // Installs a process-wide seccomp filter that makes socket(AF_INET or AF_INET6, SOCK_DGRAM)
-// fail with EACCES, and lets every other system call through. One-way for the life of the
-// process. The Kotlin side (UdpSocketFilter) decodes the packed results.
+// fail with EPROTONOSUPPORT, and lets every other call of this library's architecture through.
+// One-way for the life of the process. The Kotlin side (UdpSocketFilter) decodes the packed
+// results.
 
 #include <elf.h>
 #include <errno.h>
@@ -40,7 +41,11 @@
 #error "socket_filter.c assumes a little-endian seccomp_data layout"
 #endif
 
-#define RET_REFUSE (SECCOMP_RET_ERRNO | (EACCES & SECCOMP_RET_DATA))
+// Never EACCES or EPERM: libcore raises a failed name lookup as a SecurityException when errno
+// holds either (android16-release, libcore, Inet6AddressImpl.lookupHostByName). Mirrored in
+// SelfTestReport.datagramRefused.
+#define REFUSAL_ERRNO EPROTONOSUPPORT
+#define RET_REFUSE (SECCOMP_RET_ERRNO | (REFUSAL_ERRNO & SECCOMP_RET_DATA))
 #define ARG_LOW(n) (offsetof(struct seccomp_data, args) + (n) * sizeof(uint64_t))
 // The kernel's SOCK_TYPE_MASK: the type without SOCK_NONBLOCK and SOCK_CLOEXEC.
 #define SOCKET_TYPE_MASK 0xf
@@ -125,7 +130,7 @@ static bool exe_machine_matches(const char *path) {
 
 #ifndef NDEBUG
 // Debug builds only: lets a test make the probe child die of SIGSYS (1) or exit with
-// probe_test_exit_code (2) in place of the real calls, or make a post-check that saw EACCES
+// probe_test_exit_code (2) in place of the real calls, or make a post-check that saw the refusal
 // report probe_test_exit_code in its place (3).
 static int probe_test_mode = 0;
 static int probe_test_exit_code = 0;
@@ -217,9 +222,9 @@ static jlong install_locked(const char *exe_path) {
     int error = fd >= 0 ? 0 : errno;
     if (fd >= 0) close(fd);
 #ifndef NDEBUG
-    if (probe_test_mode == 3 && error == EACCES) error = probe_test_exit_code;
+    if (probe_test_mode == 3 && error == REFUSAL_ERRNO) error = probe_test_exit_code;
 #endif
-    if (error != EACCES) return pack(KIND_REFUSED, STAGE_POST_CHECK, error);
+    if (error != REFUSAL_ERRNO) return pack(KIND_REFUSED, STAGE_POST_CHECK, error);
     return pack(KIND_INSTALLED, 0, 0);
 }
 

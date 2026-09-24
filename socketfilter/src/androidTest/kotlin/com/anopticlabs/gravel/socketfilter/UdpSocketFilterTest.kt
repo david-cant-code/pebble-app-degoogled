@@ -1,6 +1,8 @@
 package com.anopticlabs.gravel.socketfilter
 
 import android.os.Build
+import android.system.ErrnoException
+import android.system.Os
 import android.system.OsConstants
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assume.assumeTrue
@@ -11,6 +13,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
+import java.net.UnknownHostException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -88,6 +91,9 @@ class UdpSocketFilterTest {
                 }
             }
         }
+        val inProcess = lookupFailureWithoutResolverProxy("in-process.example.com")
+        assertTrue(inProcess is UnknownHostException, "an in-process lookup failed with $inProcess")
+        assertEquals(OsConstants.EPROTONOSUPPORT, errnoCause(inProcess), "an in-process lookup did not meet the filter")
         if (lookupBefore == "resolved") {
             assertEquals(lookupBefore, lookupOutcome("example.org"), "a name lookup failed under the filter")
         } else {
@@ -181,6 +187,22 @@ class UdpSocketFilterTest {
     private fun lookupOutcome(host: String): String =
         runCatching { InetAddress.getByName(host) }.fold({ "resolved" }, { it.javaClass.name })
 
+    // ANDROID_DNS_MODE=local makes the netd client decline the resolver proxy (android16-release,
+    // netd, client/NetdClient.cpp, dns_open_proxy), so bionic's own resolver runs in this process.
+    // Changes the process environment: keep other name lookups out of this test while it runs.
+    private fun lookupFailureWithoutResolverProxy(host: String): Throwable? {
+        val previous = Os.getenv(DNS_MODE)
+        Os.setenv(DNS_MODE, "local", true)
+        return try {
+            runCatching { InetAddress.getByName(host) }.exceptionOrNull()
+        } finally {
+            if (previous == null) Os.unsetenv(DNS_MODE) else Os.setenv(DNS_MODE, previous, true)
+        }
+    }
+
+    private fun errnoCause(failure: Throwable?): Int? =
+        generateSequence(failure) { it.cause }.filterIsInstance<ErrnoException>().firstOrNull()?.errno
+
     // Per-thread filter counts, where the kernel reports them (Seccomp_filters in the task status).
     private fun seccompFilterCounts(): Map<String, Int> =
         File("/proc/self/task").listFiles().orEmpty().mapNotNull { task ->
@@ -230,5 +252,6 @@ class UdpSocketFilterTest {
         const val AF_NETLINK = 16L
         const val AF_BLUETOOTH = 31L
         const val EM_X86_64: Byte = 62
+        const val DNS_MODE = "ANDROID_DNS_MODE"
     }
 }

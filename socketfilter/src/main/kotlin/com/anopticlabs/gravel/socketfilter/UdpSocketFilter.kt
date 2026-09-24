@@ -27,7 +27,8 @@ enum class UnsupportedReason { LibraryMissing, ArchitectureMismatch, KernelLacks
 
 /** Socket creation outcomes from one thread: 0 for created, otherwise the errno. */
 data class SelfTestReport(val datagram: List<Int>, val others: List<Int>) {
-    val datagramRefused: Boolean get() = datagram.all { it == OsConstants.EACCES }
+    // Mirrors REFUSAL_ERRNO in socket_filter.c.
+    val datagramRefused: Boolean get() = datagram.all { it == OsConstants.EPROTONOSUPPORT }
     val othersCreated: Boolean get() = others.all { it == 0 }
 }
 
