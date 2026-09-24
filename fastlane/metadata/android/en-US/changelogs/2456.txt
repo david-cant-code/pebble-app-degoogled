@@ -1,0 +1,1 @@
+Fixes Gravel closing right after opening on LineageOS-based phones. For now, a watchface or watchapp with internet access off does not run its code inside Gravel; an update that brings this back is in progress.
