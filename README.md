@@ -63,7 +63,14 @@ De-google work is completed, all telemetry is removed. What remains is polish an
     stays on.
   - The code third-party watchapps run inside Gravel gets no internet or
     location access unless granted (deny by default, per-app controls,
-    revocation applies to running apps).
+    revocation applies to running apps). On phones where Gravel's UDP
+    filter can't be turned on, such as LineageOS and CalyxOS, that code
+    keeps running by default with internet access off if Android System
+    WebView is version 152 or newer, and its WebRTC connections over UDP
+    then depend on a single layer, in that WebView, instead of two; a switch
+    under Watch App Permissions stops that code from running. With an
+    older WebView, as on Android 9 and older, that code does not run (see
+    `KNOWN_ISSUES.md`).
   - The app's other exported Android interfaces are authorization-gated or
     removed.
   - Plain-HTTP (cleartext) traffic is blocked app-wide.
@@ -206,7 +213,7 @@ Kermit (logging).
 | `pebble` | Watch features and screens above the library layer |
 | `util` | Shared utilities (logging, IO, theme) |
 | `whisper`, `whisper-native` | The speech engine: Kotlin bindings, and the NDK/CMake build of the pinned whisper.cpp submodule |
-| `socketfilter` | A process-wide filter that refuses the creation of UDP sockets, built from its C source with the NDK; not installed where the platform's name lookups need UDP (see `KNOWN_ISSUES.md`) |
+| `socketfilter` | A process-wide filter that refuses the creation of UDP sockets, built from its C source with the NDK; not installed, for example, where the platform's name lookups need UDP, before Android 10, or on a device that is not ARM (see `KNOWN_ISSUES.md`) |
 | `resampler` | Audio resampling |
 | `blobannotations`, `blobdbgen` | KSP annotations and code generator for BlobDB records |
 | `libindex`, `index-ai`, `mcp` | Ring and Index AI libraries, compiled because the watch UI depends on them, with their runtime disabled |

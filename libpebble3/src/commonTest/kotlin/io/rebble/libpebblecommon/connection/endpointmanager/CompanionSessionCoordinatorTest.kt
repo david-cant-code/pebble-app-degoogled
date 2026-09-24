@@ -1,5 +1,7 @@
 package io.rebble.libpebblecommon.connection.endpointmanager
 
+import io.rebble.libpebblecommon.LibPebbleConfig
+import io.rebble.libpebblecommon.WatchConfig
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
@@ -238,5 +240,59 @@ class CompanionSessionCoordinatorTest {
         grant.value = true
         runCurrent()
         assertEquals(2, requests.size, "a cancelled watcher requested a restart")
+    }
+
+    @Test
+    fun theDeniedSessionSwitchWatcherRequestsARestartOnEachFlipOnly() = runTest {
+        val config = MutableStateFlow(LibPebbleConfig(watchConfig = WatchConfig(deniedPkjsWithoutPrimaryLayer = true)))
+        fun write(change: (WatchConfig) -> WatchConfig) {
+            config.value = config.value.copy(watchConfig = change(config.value.watchConfig))
+        }
+        val requests = mutableListOf<Pair<Uuid, Long>>()
+        val watcher = launchDeniedPkjsSwitchWatcher(
+            config = config,
+            builtWith = true,
+            app = appA,
+            sessionGeneration = 5L,
+            requestRestart = { uuid, generation -> requests += uuid to generation },
+        )
+        runCurrent()
+        assertEquals(emptyList(), requests, "the value the session started with requested a restart")
+
+        write { it.copy(classicPebbleKitEnabled = !it.classicPebbleKitEnabled) }
+        runCurrent()
+        assertEquals(emptyList(), requests, "an unrelated config write requested a restart")
+
+        write { it.copy(deniedPkjsWithoutPrimaryLayer = false) }
+        runCurrent()
+        assertEquals(listOf(appA to 5L), requests, "turning the switch off did not request a restart")
+
+        write { it.copy(deniedPkjsWithoutPrimaryLayer = true) }
+        runCurrent()
+        assertEquals(listOf(appA to 5L, appA to 5L), requests, "turning the switch on did not request a restart")
+
+        watcher.cancel()
+        write { it.copy(deniedPkjsWithoutPrimaryLayer = false) }
+        runCurrent()
+        assertEquals(2, requests.size, "a cancelled watcher requested a restart")
+    }
+
+    // The switch flipped between the manager's snapshot and the watcher's first collection.
+    @Test
+    fun theDeniedSessionSwitchWatcherComparesItsFirstValueWithTheSnapshot() = runTest {
+        for (builtWith in listOf(true, false)) {
+            val config = MutableStateFlow(LibPebbleConfig(watchConfig = WatchConfig(deniedPkjsWithoutPrimaryLayer = !builtWith)))
+            val requests = mutableListOf<Pair<Uuid, Long>>()
+            val watcher = launchDeniedPkjsSwitchWatcher(
+                config = config,
+                builtWith = builtWith,
+                app = appA,
+                sessionGeneration = 7L,
+                requestRestart = { uuid, generation -> requests += uuid to generation },
+            )
+            runCurrent()
+            assertEquals(listOf(appA to 7L), requests, "a flip away from builtWith=$builtWith before the first collection")
+            watcher.cancel()
+        }
     }
 }

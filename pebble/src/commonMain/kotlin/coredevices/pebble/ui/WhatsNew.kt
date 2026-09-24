@@ -39,8 +39,13 @@ val whatsNewEntries: List<WhatsNewEntry> = listOf(
             "only where they can. Where it is on, web pages inside Gravel again have no " +
             "HTTP/3 or WebRTC over UDP. On LineageOS, systems built on it, and CalyxOS, " +
             "name lookups need a UDP socket, and on Android 9 and older Gravel cannot run " +
-            "the check, so the block stays off there, and a watchface or app with " +
-            "internet access turned off does not run its code inside Gravel.",
+            "the check, so the block stays off there. On those phones, with Android System " +
+            "WebView 152 or newer, a new switch in Settings > Apps > Watch App Permissions, on " +
+            "by default, lets watchfaces and apps with internet access turned off still run " +
+            "their code inside Gravel. Their real-time connections (the kind video calls use) " +
+            "then depend on a single layer, in that WebView, instead of two; turn the switch " +
+            "off to stop that code from running. With an older WebView, as on Android 9 and " +
+            "older, that code does not run, as before.",
     ),
     WhatsNewEntry(
         title = "The UDP block is off for now",

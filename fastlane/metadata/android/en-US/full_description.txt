@@ -3,7 +3,7 @@ Gravel is a de-Googled, hardened fork of the Pebble mobile app by Core Devices, 
 The watch features are here: pairing, notifications and replies, calendar, music, health, weather, watchfaces and apps, firmware updates, and voice dictation. What is gone: Play services, Firebase, telemetry, analytics and crash reporting. The battery analytics page depended on that telemetry and has no data here, and the Pebble Index 01 ring and Index AI features do not work for now.
 
 Hardening:
-- Code that watchapps run inside Gravel gets no internet or location access until you grant it, per app, so some watchfaces and apps need a grant before they work fully
+- Code that watchapps run inside Gravel gets no internet or location access until you grant it, per app, so some watchfaces and apps need a grant before they work fully. On phones where Gravel's UDP filter can't be turned on, such as LineageOS and CalyxOS, real-time connections from that code (the kind video calls use) depend on a single layer, in an up-to-date Android System WebView, instead of two, unless you turn that code off under Watch App Permissions; with an older WebView, as on Android 9 and older, that code does not run
 - Classic PebbleKit, which broadcasts watch data to apps on your phone, is off by default; turn it on under Watch App Permissions if a companion app stops receiving watch data
 - The speech engine runs in an isolated Android process
 - Other exported Android interfaces are authorization-gated or removed, and plain-HTTP traffic is blocked
@@ -12,7 +12,7 @@ Hardening:
 
 Dictation runs on the phone with whisper.cpp, built from source; the speech model is an optional, integrity-pinned download. You can also send dictation to your own transcription server over https. Weather locations can also be entered by latitude and longitude.
 
-Gravel contacts the Core Devices and Rebble web services, Algolia when you search the app store, GitHub for firmware, and the model host when you download a speech model, as well as an app store source or transcription server you add yourself and any host a watchapp you grant internet access connects to.
+Gravel contacts the Core Devices and Rebble web services, Algolia when you search the app store, GitHub for firmware, and the model host when you download a speech model, as well as an app store source or transcription server you add yourself and any host a watchapp you grant internet access connects to. On LineageOS and CalyxOS, a real-time connection from a watchapp without that grant depends on one layer instead of two.
 
 Background location is used so location-based watchapps and weather work while the app is closed.
 

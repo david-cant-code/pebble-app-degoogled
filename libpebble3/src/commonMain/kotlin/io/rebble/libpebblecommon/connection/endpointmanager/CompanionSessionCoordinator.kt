@@ -1,6 +1,7 @@
 package io.rebble.libpebblecommon.connection.endpointmanager
 
 import co.touchlab.kermit.Logger
+import io.rebble.libpebblecommon.LibPebbleConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
@@ -123,9 +124,9 @@ internal class CompanionSessionCoordinator(
 }
 
 /**
- * Emits once each time the upstream grant differs from the value before it, starting from
- * [builtWith], the grant the session was built with. Repeated equal values are ignored: the
- * resolved grant flow re-emits on unrelated permission-table and config writes.
+ * Emits once each time the upstream value differs from the one before it, starting from
+ * [builtWith], the value the session was built with. Repeated equal values are ignored: the
+ * resolved grant flow and the config re-emit on unrelated writes.
  */
 internal fun Flow<Boolean>.grantChanges(builtWith: Boolean): Flow<Unit> = flow {
     var previous = builtWith
@@ -154,4 +155,24 @@ internal fun CoroutineScope.launchNetworkGrantWatcher(
     }
 }
 
+/**
+ * Requests a restart of [app]'s session [sessionGeneration] on each flip of
+ * WatchConfig.deniedPkjsWithoutPrimaryLayer, starting from [builtWith], the manager's snapshot of
+ * it; the runner reads the switch again as it starts (the gap: KNOWN_ISSUES.md, "A toggle flipped
+ * off and on across a session's start leaves it inert").
+ */
+internal fun CoroutineScope.launchDeniedPkjsSwitchWatcher(
+    config: Flow<LibPebbleConfig>,
+    builtWith: Boolean,
+    app: Uuid,
+    sessionGeneration: Long,
+    requestRestart: (app: Uuid, generation: Long) -> Unit,
+): Job = launch {
+    config.map { it.watchConfig.deniedPkjsWithoutPrimaryLayer }.grantChanges(builtWith).collect {
+        switchWatcherLogger.d { "Switch for Network-denied sessions changed mid-session; requesting restart of $app" }
+        requestRestart(app, sessionGeneration)
+    }
+}
+
 private val watcherLogger = Logger.withTag("NetworkGrantWatcher")
+private val switchWatcherLogger = Logger.withTag("DeniedPkjsSwitchWatcher")

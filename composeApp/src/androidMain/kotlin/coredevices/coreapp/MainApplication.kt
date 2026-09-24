@@ -25,6 +25,8 @@ import coil3.gif.GifDecoder
 import coil3.memory.MemoryCache
 import coil3.request.crossfade
 import coil3.svg.SvgDecoder
+import com.anopticlabs.gravel.pkjs.recordUdpFilterInstall
+import com.anopticlabs.gravel.pkjs.webViewMajorVersion
 import com.anopticlabs.gravel.socketfilter.InstallResult
 import com.anopticlabs.gravel.socketfilter.UdpSocketFilter
 import coredevices.ExperimentalDevices
@@ -96,6 +98,8 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         }
         initLogging()
         logUdpFilterResult()
+        // Gravel: kept across process starts; see udpFilterEnforcement.
+        recordUdpFilterInstall(udpFilterResult, noBackupFilesDir)
         // Fork: installs upgraded from pre-strip builds still hold the
         // Firebase SDKs' persisted refresh token and Firestore cache, and the
         // strip removed every code path that could clear them; see
@@ -130,7 +134,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     // that bug reports carry.
     private fun logUdpFilterResult() {
         val line = "UDP socket filter: $udpFilterResult abis=${Build.SUPPORTED_ABIS.joinToString()} " +
-            "sdk=${Build.VERSION.SDK_INT} kernel=${System.getProperty("os.version")}"
+            "sdk=${Build.VERSION.SDK_INT} kernel=${System.getProperty("os.version")} webview=${webViewMajorVersion()}"
         if (udpFilterResult == InstallResult.Installed) logger.i { line } else logger.w { line }
     }
 

@@ -4,9 +4,9 @@ import CoreAppVersion
 import PlatformContext
 import PlatformShareLauncher
 import android.content.Context
-import com.anopticlabs.gravel.pkjs.FixedNetworkDenyEnforcement
 import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
-import com.anopticlabs.gravel.socketfilter.InstallResult
+import com.anopticlabs.gravel.pkjs.udpFilterEnforcement
+import com.anopticlabs.gravel.pkjs.webViewMajorVersion
 import com.anopticlabs.gravel.socketfilter.UdpSocketFilter
 import coredevices.analytics.createAndroidAnalytics
 import coredevices.coreapp.PebbleBackgroundManager
@@ -48,10 +48,10 @@ import kotlin.time.Duration
 import kotlin.time.toJavaDuration
 
 val androidDefaultModule = module {
-    // Gravel: what libpebble3 and the permission screen learn about the UDP socket filter that
-    // MainApplication installs. The result is fixed once the process has started.
+    // Gravel: what libpebble3 and the UI learn about the UDP socket filter that MainApplication
+    // installs.
     single<NetworkDenyEnforcement> {
-        FixedNetworkDenyEnforcement(UdpSocketFilter.lastResult == InstallResult.Installed)
+        udpFilterEnforcement(UdpSocketFilter.lastResult, androidContext().noBackupFilesDir, ::webViewMajorVersion)
     }
     // Fork: Sign in with Google needs Play services; see NoOpGoogleAuthUtil.
     single<GoogleAuthUtil> { NoOpGoogleAuthUtil }

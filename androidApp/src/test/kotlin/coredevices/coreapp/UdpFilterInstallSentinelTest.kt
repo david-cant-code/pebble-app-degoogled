@@ -34,21 +34,39 @@ class UdpFilterInstallSentinelTest {
         )
     }
 
-    // Both files are upstream-owned, and both lookups of the binding fall back silently
-    // (getOrNull), to no PebbleKit JS for any Network-denied app.
+    // UdpFilterInstalledTest checks on a device that the record is this process start's.
+    @Test
+    fun onCreateRecordsTheInstall() {
+        val body = assertNotNull(
+            Regex("""override fun onCreate\(\) \{\n(.*?)\n    \}""", RegexOption.DOT_MATCHES_ALL).find(source)?.groupValues?.get(1),
+            "MainApplication no longer overrides onCreate",
+        )
+        assertTrue(
+            Regex("""(?m)^ {8}recordUdpFilterInstall\(\s*udpFilterResult\s*,\s*noBackupFilesDir\s*\)\s*$""").containsMatchIn(body),
+            "MainApplication.onCreate no longer records the filter's install",
+        )
+    }
+
+    // All three files are upstream-owned. watchModule and LibPebble3.create fall back silently to
+    // UnreportedNetworkDenyEnforcement: no PebbleKit JS for any Network-denied app.
     @Test
     fun theInstallResultReachesLibPebble() {
         val appModule = TrackedTree.file("composeApp/src/androidMain/kotlin/coredevices/coreapp/di/androidDefaultModule.kt").readText()
         assertTrue(
             Regex(
-                """single<NetworkDenyEnforcement>\s*\{\s*FixedNetworkDenyEnforcement\(\s*UdpSocketFilter\s*\.\s*lastResult\s*==\s*InstallResult\s*\.\s*Installed\s*\)\s*\}""",
+                """single<NetworkDenyEnforcement>\s*\{\s*udpFilterEnforcement\(\s*UdpSocketFilter\s*\.\s*lastResult\s*,\s*androidContext\(\)\s*\.\s*noBackupFilesDir\s*,\s*::\s*webViewMajorVersion\s*,?\s*\)\s*\}""",
             ).containsMatchIn(appModule),
             "androidDefaultModule no longer binds NetworkDenyEnforcement from the filter's install result",
         )
         val watchModule = TrackedTree.file("pebble/src/commonMain/kotlin/coredevices/pebble/watchModule.kt").readText()
         assertTrue(
-            Regex("""networkDenyEnforcement\s*=\s*getOrNull\(\)""").containsMatchIn(watchModule),
-            "watchModule no longer hands the app's NetworkDenyEnforcement to LibPebble3",
+            Regex("""networkDenyEnforcement\s*=\s*getOrNull\(\)\s*\?:\s*UnreportedNetworkDenyEnforcement\s*,""").containsMatchIn(watchModule),
+            "watchModule no longer hands the app's NetworkDenyEnforcement, or the fail-closed fallback, to LibPebble3",
+        )
+        val libPebble = TrackedTree.file("libpebble3/src/commonMain/kotlin/io/rebble/libpebblecommon/connection/LibPebble.kt").readText()
+        assertTrue(
+            Regex("""networkDenyEnforcement:\s*NetworkDenyEnforcement\s*=\s*UnreportedNetworkDenyEnforcement\s*,""").containsMatchIn(libPebble),
+            "LibPebble3.create no longer defaults to the fail-closed enforcement",
         )
     }
 

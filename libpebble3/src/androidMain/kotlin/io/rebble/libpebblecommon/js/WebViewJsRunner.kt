@@ -470,10 +470,11 @@ class WebViewJsRunner(
         val uuid = Uuid.parse(appInfo.uuid)
         networkAllowed = watchappPermissions.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network)
         denyConstruction = !networkAllowed
-        // CompanionAppLifecycleManager decides the same from an earlier read of the grant; this
-        // is the read the session is built from.
-        if (!shouldRunPkjs(hasPkjs = true, networkAllowed, networkDenyEnforcement.primaryLayerActive)) {
-            logger.w { "Not loading ${appInfo.longName} (${appInfo.uuid}): Network is denied and the primary deny layer is not active" }
+        // CompanionAppLifecycleManager decides the same from earlier reads of the grant and the
+        // switch; these are the reads the session is built from.
+        val switchOn = libPebble.config.value.watchConfig.deniedPkjsWithoutPrimaryLayer
+        if (!shouldRunPkjs(hasPkjs = true, networkAllowed, networkDenyEnforcement, switchOn)) {
+            logger.w { "Not loading ${appInfo.longName} (${appInfo.uuid}): Network is denied, the primary deny layer is not active and the switch is off or does not apply" }
             return
         }
         // Below the gate's return, so a session refused there installs no override

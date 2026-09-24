@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
@@ -52,6 +54,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.pkjs.DeniedPkjsNotice
+import com.anopticlabs.gravel.pkjs.deniedPkjsNotice
+import com.anopticlabs.gravel.pkjs.networkDenyEnforcement
+import com.anopticlabs.gravel.ui.KnownIssuesLink
+import coredevices.util.KnownIssue
 import com.russhwolf.settings.Settings
 import com.russhwolf.settings.set
 import coreapp.composeapp.generated.resources.Res
@@ -74,6 +81,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.ui.tooling.preview.Preview
+import org.koin.compose.getKoin
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.dsl.module
@@ -373,6 +381,8 @@ fun OnboardingScreen(
 @Composable
 private fun WatchappPrivacyStage(onDone: () -> Unit) {
     val libPebble: LibPebble = koinInject()
+    val koin = getKoin()
+    val networkDenyEnforcement = remember { koin.networkDenyEnforcement() }
     var allowInternet by remember { mutableStateOf(false) }
     var allowLocation by remember { mutableStateOf(false) }
     var showConfirm by remember { mutableStateOf(false) }
@@ -455,12 +465,22 @@ private fun WatchappPrivacyStage(onDone: () -> Unit) {
             onDismissRequest = { showConfirm = false },
             title = { Text("Confirm your choice") },
             text = {
-                Text(
-                    "By default, watchfaces and apps will have:\n\n" +
-                        "Internet: ${allowedBlocked(allowInternet)}\n" +
-                        "Location: ${allowedBlocked(allowLocation)}\n\n" +
-                        "You can change this any time in Settings.",
-                )
+                // Gravel: the app page's notice for code that runs with internet access off.
+                val oneLayerNote = deniedPkjsNotice(
+                    networkGranted = allowInternet,
+                    networkDenyEnforcement,
+                    libPebble.config.value.watchConfig.deniedPkjsWithoutPrimaryLayer,
+                ) == DeniedPkjsNotice.RunsWithoutPrimaryLayer
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        "By default, watchfaces and apps will have:\n\n" +
+                            "Internet: ${if (oneLayerNote) "Blocked (see below)" else allowedBlocked(allowInternet)}\n" +
+                            "Location: ${allowedBlocked(allowLocation)}\n\n" +
+                            (if (oneLayerNote) ONE_LAYER_NOTE + "\n\n" else "") +
+                            "You can change this any time in Settings.",
+                    )
+                    if (oneLayerNote) KnownIssuesLink(KnownIssue.REAL_TIME_CONNECTIONS_ON_ONE_LAYER)
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -487,6 +507,12 @@ private fun WatchappPrivacyStage(onDone: () -> Unit) {
 private fun onOff(value: Boolean): String = if (value) "on" else "off"
 
 private fun allowedBlocked(value: Boolean): String = if (value) "Allowed" else "Blocked"
+
+private const val ONE_LAYER_NOTE = "Gravel blocks internet access for watchfaces and apps with " +
+    "several layers. One of them isn't active on this phone, so real-time connections (the " +
+    "kind video calls use) depend on a single layer, in an up-to-date Android System WebView, " +
+    "instead of two. A switch in Settings > Apps > Watch App Permissions stops the code of " +
+    "watchfaces and apps with internet access off from running instead."
 
 @Composable
 private fun DeviceChoiceCard(

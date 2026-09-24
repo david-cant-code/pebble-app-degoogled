@@ -1,17 +1,18 @@
 package com.anopticlabs.gravel.pkjs
 
 import coredevices.coreapp.di.androidDefaultModule
-import org.koin.dsl.koinApplication
+import org.koin.core.annotation.KoinInternalApi
 import kotlin.test.Test
-import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class NetworkDenyEnforcementBindingTest {
-    // Both consumers look the binding up with getOrNull(), so a missing definition raises no
-    // error: every Network-denied app just loses its PebbleKit JS side.
+    // Every consumer looks the binding up with getOrNull(), so a missing definition raises no
+    // error: every Network-denied app just loses its PebbleKit JS side. The definition reads an
+    // Android Context, which the host JVM cannot provide; UdpFilterEnforcementTest covers what
+    // it computes.
+    @OptIn(KoinInternalApi::class)
     @Test
     fun theAppModuleBindsTheEnforcement() {
-        val koin = koinApplication { modules(androidDefaultModule) }.koin
-        // No install has run on the host JVM, so there is no result and the layer is inactive.
-        assertFalse(koin.get<NetworkDenyEnforcement>().primaryLayerActive)
+        assertTrue(androidDefaultModule.mappings.values.any { it.beanDefinition.primaryType == NetworkDenyEnforcement::class })
     }
 }

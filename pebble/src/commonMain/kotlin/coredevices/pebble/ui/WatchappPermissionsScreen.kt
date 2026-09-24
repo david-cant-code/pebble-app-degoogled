@@ -35,8 +35,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
-import com.anopticlabs.gravel.pkjs.shouldRunPkjs
+import com.anopticlabs.gravel.pkjs.DeniedPkjsNotice
+import com.anopticlabs.gravel.pkjs.deniedPkjsNotice
+import com.anopticlabs.gravel.pkjs.deniedPkjsSwitchApplies
+import com.anopticlabs.gravel.pkjs.networkDenyEnforcement
+import com.anopticlabs.gravel.ui.KnownIssuesLink
+import coredevices.util.KnownIssue
 import coredevices.pebble.rememberLibPebble
 import coredevices.ui.M3Dialog
 import io.rebble.libpebblecommon.WatchConfig
@@ -60,7 +64,8 @@ import org.koin.compose.getKoin
  * with no explicit choice inherits) and a list of installed apps; the per-app tri-state
  * controls themselves live on each app's page (and are shared via
  * [WatchappPermissionControls]).
- * Fork: it also holds the classic PebbleKit and PebbleKit 2 toggles.
+ * Fork: it also holds the classic PebbleKit and PebbleKit 2 toggles, and, where it applies, the
+ * switch for Network-denied apps' code (WatchConfig.deniedPkjsWithoutPrimaryLayer).
  */
 @Composable
 fun WatchappPermissionsScreen(nav: NavBarNav, topBarParams: TopBarParams) {
@@ -73,6 +78,8 @@ fun WatchappPermissionsScreen(nav: NavBarNav, topBarParams: TopBarParams) {
     val libPebble = rememberLibPebble()
     val config by libPebble.config.collectAsState()
     val watchConfig = config.watchConfig
+    val koin = getKoin()
+    val networkDenyEnforcement = remember { koin.networkDenyEnforcement() }
 
     // From the config at the tap: two switches tapped within one frame would otherwise each
     // write back the other's old value from the composition's snapshot.
@@ -136,6 +143,31 @@ fun WatchappPermissionsScreen(nav: NavBarNav, topBarParams: TopBarParams) {
                         updateWatchConfig { it.copy(watchappDefaultLocationAllowed = allowed) }
                     },
                 )
+                if (networkDenyEnforcement.deniedPkjsSwitchApplies) {
+                    Spacer(Modifier.height(16.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Apps with internet access off",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    DescribedToggle(
+                        label = "Run app code with internet access off",
+                        description = "Gravel blocks internet access for watchfaces and apps with several " +
+                            "layers. One of them isn't active on this phone, so real-time connections " +
+                            "(the kind video calls use) depend on a single layer, in an up-to-date Android " +
+                            "System WebView, instead of two. With this on, apps whose internet access is " +
+                            "off still run their code inside Gravel under the remaining layers. With it " +
+                            "off, that code doesn't run, and features that depend on it won't work. On by " +
+                            "default.",
+                        checked = watchConfig.deniedPkjsWithoutPrimaryLayer,
+                        onCheckedChange = { on ->
+                            updateWatchConfig { it.copy(deniedPkjsWithoutPrimaryLayer = on) }
+                        },
+                    )
+                    KnownIssuesLink(KnownIssue.REAL_TIME_CONNECTIONS_ON_ONE_LAYER)
+                }
                 Spacer(Modifier.height(16.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(8.dp))
@@ -352,21 +384,36 @@ fun WatchappPermissionControls(uuid: Uuid, modifier: Modifier = Modifier) {
             label = "Internet access",
             libPebble = libPebble,
         )
-        val networkDenyEnforced = remember {
-            koin.getOrNull<NetworkDenyEnforcement>()?.primaryLayerActive == true
-        }
+        val networkDenyEnforcement = remember { koin.networkDenyEnforcement() }
         // Counts as on until the stored grant arrives, so the notice does not flash.
         val networkGranted by libPebble.watchappPermissionGranted(uuid, LockerAppPermissionType.Network)
             .collectAsState(true)
-        // Shown for every app with Network off: the locker entry does not record whether the app
-        // has PebbleKit JS, so the wording is conditional.
-        if (!shouldRunPkjs(hasPkjs = true, networkGranted, networkDenyEnforced)) {
+        val config by libPebble.config.collectAsState()
+        // The locker entry does not record whether the app has PebbleKit JS, so the doesn't-run
+        // wording is conditional.
+        val notice = deniedPkjsNotice(networkGranted, networkDenyEnforcement, config.watchConfig.deniedPkjsWithoutPrimaryLayer)
+        if (notice != null) {
+            val doesNotRun = "If this app runs code inside Gravel, it doesn't run while internet " +
+                "access is off, so features that depend on it won't work."
+            val switchPointer = " Settings > Apps > Watch App Permissions has a switch for this."
             Text(
-                "If this app runs code inside Gravel, it doesn't run while internet access " +
-                    "is off, so features that depend on it won't work.",
+                when (notice) {
+                    DeniedPkjsNotice.RunsWithoutPrimaryLayer ->
+                        "Gravel blocks this app's internet access with several layers. One of them " +
+                            "isn't active on this phone, so real-time connections (the kind video " +
+                            "calls use) depend on a single layer, in an up-to-date Android System " +
+                            "WebView, instead of two. Gravel can't double-check that layer." +
+                            switchPointer
+                    DeniedPkjsNotice.DoesNotRunSwitchOff -> doesNotRun + switchPointer
+                    DeniedPkjsNotice.DoesNotRun -> doesNotRun
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp),
+            )
+            KnownIssuesLink(
+                if (notice == DeniedPkjsNotice.DoesNotRun) KnownIssue.UDP_FILTER_REFUSED
+                else KnownIssue.REAL_TIME_CONNECTIONS_ON_ONE_LAYER,
             )
         }
         Spacer(Modifier.height(12.dp))

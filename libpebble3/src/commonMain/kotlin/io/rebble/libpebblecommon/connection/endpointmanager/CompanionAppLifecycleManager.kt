@@ -2,6 +2,7 @@ package io.rebble.libpebblecommon.connection.endpointmanager
 
 import co.touchlab.kermit.Logger
 import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
+import com.anopticlabs.gravel.pkjs.deniedPkjsSwitchApplies
 import com.anopticlabs.gravel.pkjs.shouldRunPkjs
 import io.rebble.libpebblecommon.LibPebbleConfigFlow
 import io.rebble.libpebblecommon.connection.CompanionApp
@@ -149,7 +150,7 @@ class CompanionAppLifecycleManager(
                 }
             }
 
-            // Read here, for both watchers below (see CompanionSessionCoordinator.currentGeneration).
+            // Read here, for the watchers below (see CompanionSessionCoordinator.currentGeneration).
             val sessionGeneration = sessionCoordinator.currentGeneration
 
             // Fork: a PebbleKit toggle flipped while this app runs restarts its session. On
@@ -178,6 +179,17 @@ class CompanionAppLifecycleManager(
                     requestRestart = sessionCoordinator::requestRestart,
                 )
             }
+            // Gravel: where the switch applies, it decides whether a Network-denied session gets
+            // its PebbleKit JS side, so a flip restarts the session.
+            if (pbw.hasPKJS && !networkGranted && networkDenyEnforcement.deniedPkjsSwitchApplies) {
+                activeAppScope.launchDeniedPkjsSwitchWatcher(
+                    config = libPebbleConfigFlow.flow,
+                    builtWith = watchConfig.deniedPkjsWithoutPrimaryLayer,
+                    app = lockerEntry.id,
+                    sessionGeneration = sessionGeneration,
+                    requestRestart = sessionCoordinator::requestRestart,
+                )
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -194,9 +206,9 @@ class CompanionAppLifecycleManager(
         networkGranted: Boolean,
     ): List<CompanionApp> {
         return buildList {
-            val runPkjs = shouldRunPkjs(pbw.hasPKJS, networkGranted, networkDenyEnforcement.primaryLayerActive)
+            val runPkjs = shouldRunPkjs(pbw.hasPKJS, networkGranted, networkDenyEnforcement, watchConfig.deniedPkjsWithoutPrimaryLayer)
             if (pbw.hasPKJS && !runPkjs) {
-                logger.w { "Not running PebbleKit JS for ${lockerEntry.id}: Network is denied and the primary deny layer is absent" }
+                logger.w { "Not running PebbleKit JS for ${lockerEntry.id}: Network is denied, the primary deny layer is absent and the switch is off or does not apply" }
             }
             val pkjsApp = if (runPkjs) {
                 val jsPath = lockerPBWCache.getPKJSFileForApp(lockerEntry.id, lockerEntry.version)
