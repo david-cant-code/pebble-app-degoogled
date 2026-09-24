@@ -38,6 +38,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
@@ -577,7 +578,7 @@ enum class NumberWatchPref(
         description = "Notifications time out (disappear) after this period (unless Quiet Time is enabled)",
         defaultValue = 3.minutes.inWholeMilliseconds,
         type = WatchPrefType.TypeUInt32,
-        min = 0,
+        min = 15.seconds.inWholeMilliseconds.toInt(),
         max = 10.minutes.inWholeMilliseconds.toInt(),
         unit = "ms",
     ),
