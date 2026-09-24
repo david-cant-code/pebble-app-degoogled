@@ -246,14 +246,17 @@ internet, and the location capability description states the real "may send
 it to outside servers" flow. A one-time "What's New" dialog announces the
 deny-by-default change to existing users (`WhatsNewDialog`).
 
-**UDP socket filter.** Under the three layers above can sit a
-process-wide one: `:socketfilter` provides a seccomp filter that refuses
-the creation of `AF_INET` and `AF_INET6` datagram sockets in the app's
-process for as long as it runs, whatever a watchapp's grant says (costs
-and limits in `KNOWN_ISSUES.md`). The app does not install it at present,
-because it stops name lookups on LineageOS-based systems (`KNOWN_ISSUES.md`,
-"The UDP filter is off"), so the layer reports "not active" and no
-Network-denied session starts.
+**UDP socket filter.** Under the three layers above sits a process-wide
+one where the platform allows it: `:socketfilter` installs a seccomp
+filter in `MainApplication.attachBaseContext` that refuses the creation of
+`AF_INET` and `AF_INET6` datagram sockets in the app's process for as long
+as it runs, whatever a watchapp's grant says (costs and limits in
+`KNOWN_ISSUES.md`). The install first attaches the filter to a thread of
+its own and checks from there that the platform's DNS client still
+reaches the system resolver (`resolver_check` in `socket_filter.c`); where
+it does not, as on LineageOS and CalyxOS (`KNOWN_ISSUES.md`, "The UDP
+filter is off on LineageOS and CalyxOS"), the filter is not installed,
+the layer reports "not active" and no Network-denied session starts.
 libpebble3 does not depend on the module: the app reports the install
 result through `NetworkDenyEnforcement`, a `LibPebble3.create` parameter
 whose default is "not active". When it is not active,

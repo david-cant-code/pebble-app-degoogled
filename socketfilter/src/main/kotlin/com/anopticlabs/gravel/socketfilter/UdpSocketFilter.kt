@@ -23,7 +23,17 @@ sealed interface InstallResult {
 
 enum class RefusalStage { ProbeSignaled, ProbeFailed, NoNewPrivs, SeccompCall, ThreadSync, PostCheck }
 
-enum class UnsupportedReason { LibraryMissing, ArchitectureMismatch, KernelLacksFilterMode }
+enum class UnsupportedReason {
+    LibraryMissing,
+    ArchitectureMismatch,
+    KernelLacksFilterMode,
+
+    /** With the filter on, the platform's DNS client did not reach the system resolver; detail is its errno. */
+    ResolverUnreachable,
+
+    /** The resolver check gave no answer; detail is an errno, such as ENOSYS before Android 10 or ETIMEDOUT past its wait. */
+    ResolverUncheckable,
+}
 
 /** Socket creation outcomes from one thread: 0 for created, otherwise the errno. */
 data class SelfTestReport(val datagram: List<Int>, val others: List<Int>) {
@@ -49,7 +59,11 @@ object UdpSocketFilter {
     var lastResult: InstallResult? = null
         private set
 
-    /** Idempotent and safe from any thread; a second program is never stacked. */
+    /**
+     * Idempotent and safe from any thread; a second program is never stacked. Installs only where
+     * the platform's DNS client, tried first on a thread that carries the filter alone, still
+     * reaches the system resolver.
+     */
     fun install(): InstallResult = install(SELF_EXE)
 
     // The path and the ABI list are parameters so a test can present another architecture.
@@ -123,6 +137,8 @@ object UdpSocketFilter {
     private val UNSUPPORTED_REASONS = mapOf(
         1 to UnsupportedReason.ArchitectureMismatch,
         2 to UnsupportedReason.KernelLacksFilterMode,
+        3 to UnsupportedReason.ResolverUnreachable,
+        4 to UnsupportedReason.ResolverUncheckable,
     )
 
     private external fun nativeInstall(exePath: String): Long

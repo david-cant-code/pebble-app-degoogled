@@ -206,7 +206,7 @@ Kermit (logging).
 | `pebble` | Watch features and screens above the library layer |
 | `util` | Shared utilities (logging, IO, theme) |
 | `whisper`, `whisper-native` | The speech engine: Kotlin bindings, and the NDK/CMake build of the pinned whisper.cpp submodule |
-| `socketfilter` | A process-wide filter that refuses the creation of UDP sockets, built from its C source with the NDK; not installed at present (see `KNOWN_ISSUES.md`) |
+| `socketfilter` | A process-wide filter that refuses the creation of UDP sockets, built from its C source with the NDK; not installed where the platform's name lookups need UDP (see `KNOWN_ISSUES.md`) |
 | `resampler` | Audio resampling |
 | `blobannotations`, `blobdbgen` | KSP annotations and code generator for BlobDB records |
 | `libindex`, `index-ai`, `mcp` | Ring and Index AI libraries, compiled because the watch UI depends on them, with their runtime disabled |

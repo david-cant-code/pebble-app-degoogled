@@ -6,18 +6,32 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * Source sentinels for the UDP socket filter, which the app does not install at present
- * (KNOWN_ISSUES.md, "The UDP filter is off"). These match text only; UdpFilterNotInstalledTest is
- * the run-time check.
+ * Source sentinels for the UDP socket filter. The install call is in `MainApplication`, an
+ * upstream-owned file a sync merge could resolve to upstream's text; that check matches text only,
+ * and UdpFilterInstalledTest is the run-time check.
  */
 class UdpFilterInstallSentinelTest {
 
+    private val source by lazy {
+        TrackedTree.file("composeApp/src/androidMain/kotlin/coredevices/coreapp/MainApplication.kt").readText()
+    }
+
     @Test
-    fun noAppSourceInstallsTheFilter() {
-        val callers = TrackedTree.files
-            .filter { it.endsWith(".kt") && !it.startsWith("socketfilter/") && !Regex("""/src/\w*[Tt]est/""").containsMatchIn(it) }
-            .filter { "UdpSocketFilter.install(" in TrackedTree.file(it).readText() }
-        assertTrue(callers.isEmpty(), "the UDP socket filter is installed from $callers")
+    fun attachBaseContextInstallsTheFilterBeforeAnythingElse() {
+        val body = assertNotNull(
+            Regex("""override fun attachBaseContext\(base: Context\) \{\n(.*?)\n    \}""", RegexOption.DOT_MATCHES_ALL)
+                .find(source)?.groupValues?.get(1),
+            "MainApplication no longer overrides attachBaseContext",
+        )
+        val statements = body.lines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("//") }
+        assertTrue(
+            statements == listOf(
+                "super.attachBaseContext(base)",
+                "if (runningInIsolatedProcess()) return",
+                "udpFilterResult = UdpSocketFilter.install()",
+            ),
+            "attachBaseContext must hold the super call, the isolated-process check and the install, in that order: $statements",
+        )
     }
 
     // Both files are upstream-owned, and both lookups of the binding fall back silently
@@ -61,12 +75,23 @@ class UdpFilterInstallSentinelTest {
         }
     }
 
-    // The probe stands in for the install only while both make the same seccomp call.
+    // The probe stands in for the process's seccomp calls only while it makes every form of them,
+    // and every call but the install's must attach to the calling thread alone (flags 0, no TSYNC).
     @Test
-    fun theProbeAndTheInstallPassTheSameFlags() {
+    fun theProbeCoversEveryFilterCallAndOnlyTheInstallSyncsThreads() {
         val filterSource = TrackedTree.file("socketfilter/src/main/cpp/socket_filter.c").readText()
-        val flags = Regex("""(?<!static long )\bset_filter\(([^)]*)\)""").findAll(filterSource).map { it.groupValues[1].trim() }.toList()
-        assertEquals(2, flags.size, "expected the probe's and the install's set_filter calls: $flags")
-        assertEquals(1, flags.distinct().size, "the probe and the install pass different flags: $flags")
+        val callFlags = Regex("""(?<!static long )\bset_filter\(([^)]*)\)""")
+        fun bodyOf(function: String): String = assertNotNull(
+            Regex("""\b$function\([^)]*\) \{\n(.*?)\n\}""", RegexOption.DOT_MATCHES_ALL).find(filterSource)?.groupValues?.get(1),
+            "socket_filter.c no longer defines $function",
+        )
+        fun flagsIn(text: String) = callFlags.findAll(text).map { it.groupValues[1].trim() }.toList()
+        val probe = bodyOf("probe")
+        val install = bodyOf("set_filter_synced")
+        val check = flagsIn(bodyOf("check_resolver_on_this_thread"))
+        assertEquals(listOf("0"), check, "the resolver check's set_filter flags")
+        assertEquals((flagsIn(install) + check).toSet(), flagsIn(probe).toSet(), "the probe's flags against the install's and the check's")
+        val elsewhere = flagsIn(filterSource.replace(probe, "").replace(install, ""))
+        assertTrue(elsewhere.isNotEmpty() && elsewhere.all { it == "0" }, "set_filter calls outside the probe and the install: $elsewhere")
     }
 }

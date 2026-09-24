@@ -313,22 +313,27 @@ warning when the feature is unavailable. This entry leaves the file if
 minSdk/WebView baseline guarantees `PROXY_OVERRIDE`, or if a WebView-level
 WebSocket intercept becomes available.
 
-## The UDP filter is off
+## The UDP filter is off on LineageOS and CalyxOS
 
-**Status: temporary; the filter returns once Gravel can tell where it stops
-name lookups.**
+**Status: accepted; the platform's name lookups there need to create a UDP
+socket in the app's process.**
 
 On LineageOS and systems built on it, the platform's DNS client creates an
 IPv6 UDP socket before it hands a lookup to the system resolver, and when
 that fails, the lookup runs inside the app over UDP instead (LineageOS
 `lineage-23.0`, `android_system_netd`, `client/NetdClient.cpp`,
 `dns_open_proxy`; `android16-release`, bionic `libc/dns/net/getaddrinfo.c`,
-`android_getaddrinfofornetcontext`). Gravel 0.3.1's filter refused both, so
-name lookups in Gravel failed there and the app closed when it made a web
-request. Gravel does not install the filter on any device at present. While
-it is off, Gravel does not run a watchapp's phone-side script while that
-watchapp's internet access is off, and the entries in this file that
-describe the filter or sessions with Network off do not apply.
+`android_getaddrinfofornetcontext`). CalyxOS's DNS client does the same
+(CalyxOS `platform_system_netd`, `android17`, `client/NetdClient.cpp`,
+`dns_open_proxy`). With the filter installed, name lookups in Gravel fail
+there; Gravel 0.3.1, which installed it without a check, closed on those
+systems when it made a web request. Gravel now installs the filter only
+where a check made on a thread that carries it shows the platform's DNS
+client still reaching the system resolver, which it does not where the
+client makes that test socket.
+Where the filter is not installed, Gravel does not run a watchapp's
+phone-side script while that watchapp's internet access is off, and the
+entries in this file that describe the filter do not apply.
 
 ## No UDP for web content inside Gravel
 
@@ -366,22 +371,29 @@ so neither the filter nor the rest of Gravel's startup runs in it.
 
 ## If Android refuses the UDP filter
 
-**Status: accepted; no affected device is known.**
+**Status: accepted.**
 
 If the platform does not let Gravel install the filter, Gravel does not run
 a watchapp's phone-side script while that watchapp's internet access is
-off. The watchapp's permission controls say so.
+off. The watchapp's permission controls say so. The check before the
+install runs at each start of Gravel's process, and its answer holds until
+the next one: when the platform's DNS client cannot reach the system
+resolver at that moment for any reason, Gravel's own network access being
+blocked for example, or the check takes longer than a second, the filter
+stays off for that process.
 
 ## The UDP filter is untested on Android versions before 17
 
 **Status: accepted.**
 
-The filter has been run on hardware on Android 17. On older versions, down
-to Android 8, it has not been tested. If the platform there refuses the
-install, Gravel behaves as described under "If Android refuses the UDP
-filter". On a device that is not ARM, such as an x86 device that runs ARM
-code under translation, Gravel does not install the filter and behaves the
-same way.
+The filter has been run on hardware on Android 17. On Android 10 to 16 it
+has not been tested installed; on LineageOS 22.2, Android 15, the check
+before the install declines it. Before Android 10 Gravel does not install
+it, because that check calls `android_res_nsend`, which Android 10 added
+(NDK `android/multinetwork.h`). If the platform refuses the install,
+Gravel behaves as described under "If Android refuses the UDP filter". On
+a device that is not ARM, such as an x86 device that runs ARM code under
+translation, Gravel does not install the filter and behaves the same way.
 
 ## A watchapp whose WebView renderer exits stays stopped until relaunched
 

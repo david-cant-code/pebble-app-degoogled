@@ -22,6 +22,14 @@ android {
             // ABI it has no syscall constants for.
             abiFilters += setOf("armeabi-v7a", "arm64-v8a")
         }
+        externalNativeBuild {
+            cmake {
+                // android_res_nsend is API 29 and minSdk is lower: the NDK's weak API references,
+                // under which a call outside __builtin_available fails the build (NDK 28,
+                // build/cmake/flags.cmake).
+                arguments += "-DANDROID_WEAK_API_DEFS=ON"
+            }
+        }
     }
 
     externalNativeBuild {
