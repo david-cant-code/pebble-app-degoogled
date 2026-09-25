@@ -184,6 +184,30 @@ class GeolocationInterfaceTest {
     }
 
     @Test
+    fun endingTheWatchesStopsEveryStreamAndLaterWatches() = runTest {
+        val f = fixture(this, locationDefault = true)
+        f.geo.watchPosition(id = 7.0, interval = 1000.0, highAccuracy = 0.0)
+        f.geo.watchPosition(id = 9.0, interval = 1000.0, highAccuracy = 0.0)
+        runCurrent()
+        assertEquals(2, f.systemGeolocation.activeWatchers)
+
+        f.geo.endWatches()
+        runCurrent()
+        assertEquals(0, f.systemGeolocation.activeWatchers)
+        f.geo.watchPosition(id = 8.0, interval = 1000.0, highAccuracy = 0.0)
+        f.resolver.setWatchappPermission(uuid, LockerAppPermissionType.Location, PermissionSetting.Deny)
+        runCurrent()
+        f.resolver.setWatchappPermission(uuid, LockerAppPermissionType.Location, PermissionSetting.Allow)
+        f.systemGeolocation.positions.emit(position(5.0))
+        runCurrent()
+        assertEquals(0, f.systemGeolocation.activeWatchers)
+        assertEquals(emptyList(), f.runner.evals)
+        f.geo.clearWatch(7)
+        f.geo.clearWatch(8)
+        f.geo.clearWatch(9)
+    }
+
+    @Test
     fun reusingAWatchIdCancelsThePreviousRegistration() = runTest {
         val f = fixture(this, locationDefault = true)
         f.geo.watchPosition(id = 7.0, interval = 1000.0, highAccuracy = 0.0)

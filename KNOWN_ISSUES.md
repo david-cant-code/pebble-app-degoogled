@@ -422,20 +422,29 @@ translation, Gravel does not install the filter and behaves the same way.
 Gravel keeps running when a PebbleKit JS session's WebView renderer exits,
 and does not restart that session on its own; opening the app on the watch
 again starts a new one. With Network on, `localStorage` values the script
-set by property assignment rather than by `setItem` are lost in that case;
-with Network off, every change is written through as it happens, so none
-are.
+set by property assignment rather than by `setItem` are lost in that case,
+and also when the session stops or is ended while its page is too busy to
+save them; with Network off, every change is written through as it
+happens, so none are.
 
 ## Changing the Network permission restarts the watchapp's phone-side script
 
-**Status: deliberate.**
+**Status: deliberate; the cases with no restart are accepted and fail closed.**
 
 A change to a watchapp's Network permission, in either direction, stops its
-PebbleKit JS session and starts a new one. So does a flip of the switch for
-running these scripts without the UDP filter ("If Android refuses the UDP
-filter"), for a watchapp whose Network permission is off. Whether a
-connection opened before either change is cut in the moment before that
-restart completes has not been measured.
+PebbleKit JS session and starts a new one, except in the cases below. So
+does a flip of the switch for running these scripts without the UDP filter
+("If Android refuses the UDP filter"), for a watchapp whose Network
+permission is off. Whether a connection opened before either of those
+changes is cut in the moment before the restart completes has not been
+measured. Turning Network off also ends a script that started with it on,
+without waiting for the restart.
+
+Some Network permission changes are not followed by a restart: a script can
+be ended with no new one started, or a script whose permission is on can be
+started as if it were off. It stays that way until it is rebuilt, for
+example at the next app switch, a reconnection of the watch, or a change
+that turns its Network permission on or off.
 
 ## The WebRTC response-header layer needs WebView 152 or newer
 

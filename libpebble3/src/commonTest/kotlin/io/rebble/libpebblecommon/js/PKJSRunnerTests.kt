@@ -112,6 +112,8 @@ abstract class PKJSRunnerTests(
         appMessages: FakeAppMessages = FakeAppMessages(),
         networkGranted: Boolean = networkGrantedByDefault,
         urlOpenRequests: Channel<String> = Channel(Channel.UNLIMITED),
+        // When given, decides the Network grant, and networkGranted is unused.
+        watchappPermissions: WatchappPermissionResolver = permissionResolver(networkGranted),
     ): JsRunner {
         val libPebble = FakeLibPebble()
         val watch = fakeWatch(connected = true) as ConnectedPebbleDevice
@@ -128,7 +130,7 @@ abstract class PKJSRunnerTests(
             ),
             urlOpenRequests,
             logMessageChannel,
-            permissionResolver(networkGranted),
+            watchappPermissions,
         )
     }
 

@@ -7,11 +7,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.rebble.libpebblecommon.js.PKJSRunnerTests
 import io.rebble.libpebblecommon.js.WebViewJsRunner
 import io.rebble.libpebblecommon.js.createJsRunner
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.GlobalScope
+import io.rebble.libpebblecommon.js.stopWithinTimeout
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assume.assumeTrue
@@ -77,13 +75,6 @@ class DeniedSessionWebRtcTest : PKJSRunnerTests(::createJsRunner, networkGranted
             if (rendererGone) null else throw e
         }
 
-    // stop() runs its teardown NonCancellable, so a timeout around it could not fire.
-    @OptIn(DelicateCoroutinesApi::class)
-    private suspend fun stopWithinTimeout(runner: WebViewJsRunner) {
-        val stopJob = GlobalScope.launch { runner.stop() }
-        withTimeout(10.seconds) { stopJob.join() }
-    }
-
     @Test
     fun aDeniedSessionGathersNoCandidate() = runBlocking {
         val runner = startedRunner(networkGranted = false)
@@ -95,7 +86,7 @@ class DeniedSessionWebRtcTest : PKJSRunnerTests(::createJsRunner, networkGranted
             delay(100)
             seen = runner.evalUnlessGone("window.rtcCandidates")
         }
-        stopWithinTimeout(runner)
+        runner.stopWithinTimeout()
     }
 
     // The control: without it a WebView that gathers nothing at all would pass the denied case.

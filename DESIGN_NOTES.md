@@ -216,12 +216,21 @@ response header, both below, are two more:
    `PROXY_OVERRIDE` feature; the degraded case is in `KNOWN_ISSUES.md`.
 
 A change of the app's Network grant while it is running, in either
-direction, also restarts its PKJS session (`launchNetworkGrantWatcher`;
+direction, also restarts its PKJS session once the grant watcher sees it
+(`launchNetworkGrantWatcher`, counting from the lifecycle's own grant
+read, which decides whether the session gets a PebbleKit JS side;
 `CompanionAppLifecycleManager` funnels the restart through the same
-serially processed stream as watch-side app switches). What a session
-sets up for the grant is fixed when it starts, and an app that fetches
-only at launch never touches the network again after its first attempt
-fails.
+serially processed stream as watch-side app switches). What a session sets
+up for the grant is fixed when it starts, and an app that fetches only at
+launch never touches the network again after its first attempt fails. The
+runner also ends a session built as granted once its live collector sees
+the grant denied (`endGrantedSessionOnDenial`), after running the
+`localStorage` save that `stop()` runs, which gives up after three seconds
+so a page that keeps its main thread busy cannot hold off the end. That
+also covers a denial the grant watcher never sees as a change from the
+value it started from. A session built as denied whose grant turns allowed
+without the watcher seeing a change keeps the denied construction until it
+is rebuilt (`KNOWN_ISSUES.md`).
 
 The phone-side interceptor path (`PrivatePKJSInterface.onIntercepted`,
 which the weather interceptors use to fetch on the app's behalf) is gated
@@ -276,17 +285,19 @@ layer is not active,
 session for an app whose Network grant is denied only where the switch
 applies and `WatchConfig.deniedPkjsWithoutPrimaryLayer` is on
 (`shouldRunPkjs`; a switch in Watch App Permissions, on by default, shown
-only where it applies). The grant watcher restarts the session once the
-grant changes, and `launchDeniedPkjsSwitchWatcher` restarts it once the
-switch changes. `WebViewJsRunner.start` makes the same check on the grant
-and the switch it reads itself, and loads nothing when it fails.
+only where it applies). The grant watcher restarts the session once it
+sees the grant change (above), and `launchDeniedPkjsSwitchWatcher`
+restarts it once the switch changes. `WebViewJsRunner.start` makes the
+same check on the grant and the switch it reads itself, and loads nothing
+when it fails.
 
 **Denied-session page.** A session that starts with the Network grant
 denied is built differently from a granted one (`denyConstruction`, fixed
-in `WebViewJsRunner.start`; the grant watcher above is what lets it be
-fixed). Its top document is a host page served by the runner's own
-interceptor at `https://pkjs.gravel.invalid/host.html`, the only URL that
-interceptor serves while the grant stays denied (`planPkjsRequest`), and
+in `WebViewJsRunner.start`; the grant watcher and the runner's end of a
+granted session, above, are what let it be fixed). Its top document is a
+host page served by the runner's own interceptor at
+`https://pkjs.gravel.invalid/host.html`, the only URL that interceptor
+serves while the grant stays denied (`planPkjsRequest`), and
 that response and every 403 of
 the session carry a `Connection-Allowlist` header with an empty allowlist
 and WebRTC blocked (source cited at the constant in `PkjsRequestPlan.kt`;
@@ -316,7 +327,10 @@ settings page each handle `onRenderProcessGone`; left unhandled, a WebView
 renderer's exit ends the app process (source cited at `WebViewJsRunner`'s
 override). The runner does not restart a PebbleKit JS session whose
 renderer exits (`KNOWN_ISSUES.md`), `PebbleWebview` shows a message in
-place of the page, and the settings page closes with a message.
+place of the page, and the settings page closes with a message. A
+session ended this way, by the document-commit guard, or by
+`endGrantedSessionOnDenial` also stops its location watches
+(`GeolocationInterface.endWatches`).
 
 **Dependency.** `androidx.webkit` (1.16.0) is added for `ProxyController`,
 and the runner also logs its multi-process query at session start: current

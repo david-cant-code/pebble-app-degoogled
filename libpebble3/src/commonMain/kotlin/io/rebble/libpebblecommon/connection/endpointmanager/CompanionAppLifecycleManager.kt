@@ -165,8 +165,9 @@ class CompanionAppLifecycleManager(
                 requestRestart = sessionCoordinator::requestRestart,
             )
 
-            // Gravel: the session is rebuilt on any change of the app's Network grant, because
-            // what a PebbleKit JS session sets up for the grant is fixed when it starts. The
+            // Gravel: the session is rebuilt on each change of the app's Network grant from the
+            // read above, because what a PebbleKit JS session sets up for the grant is fixed when
+            // it starts (a denial the watcher does not see is covered in WebViewJsRunner). The
             // watcher ends with activeAppScope, and a fresh session's watcher starts with no
             // history, so a restart cannot retrigger itself.
             if (pbw.hasPKJS) {

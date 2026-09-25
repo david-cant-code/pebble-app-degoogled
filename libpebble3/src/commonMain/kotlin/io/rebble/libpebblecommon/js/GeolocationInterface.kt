@@ -10,7 +10,9 @@ import io.rebble.libpebblecommon.util.SystemGeolocation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import org.koin.core.component.inject
@@ -28,6 +30,7 @@ abstract class GeolocationInterface(
     private var requestIDs = (1..Int.MAX_VALUE).iterator()
     private var watchIDs = (1..Int.MAX_VALUE).iterator()
     private val watchJobs = mutableMapOf<Int, Job>()
+    private val watchesEnded = MutableStateFlow(false)
 
     private fun getNextRequestID(): Int {
         return if (requestIDs.hasNext()) {
@@ -119,17 +122,21 @@ abstract class GeolocationInterface(
             // override or global default) and restarts it if the grant returns.
             // Denial is reported to the JS callback each time it takes effect; the
             // watch itself stays registered until the app clears it, matching
-            // geolocation-spec behaviour for a watch awaiting permission.
-            watchappPermissions.watchappPermissionGranted(
-                Uuid.parse(jsRunner.appInfo.uuid),
-                LockerAppPermissionType.Location,
-            )
+            // geolocation-spec behaviour for a watch awaiting permission. After
+            // endWatches none of this happens: no stream and no callback.
+            combine(
+                watchappPermissions.watchappPermissionGranted(
+                    Uuid.parse(jsRunner.appInfo.uuid),
+                    LockerAppPermissionType.Location,
+                ),
+                watchesEnded,
+            ) { granted, ended -> if (ended) null else granted }
                 .distinctUntilChanged()
                 .collectLatest { granted ->
-                    if (!granted) {
-                        triggerPositionResultWatch(id.toInt(), GeolocationPositionResult.Error("Location permission not granted"))
-                    } else {
-                        systemGeolocation.watchPosition(interval.coerceAtLeast(200.0).milliseconds, highAccuracyBool).collect { result ->
+                    when (granted) {
+                        null -> Unit
+                        false -> triggerPositionResultWatch(id.toInt(), GeolocationPositionResult.Error("Location permission not granted"))
+                        true -> systemGeolocation.watchPosition(interval.coerceAtLeast(200.0).milliseconds, highAccuracyBool).collect { result ->
                             triggerPositionResultWatch(id.toInt(), result)
                         }
                     }
@@ -159,6 +166,14 @@ abstract class GeolocationInterface(
     open fun clearWatch(id: Int) {
         logger.d { "clearWatch()" }
         watchJobs.remove(id)?.cancel("Watch cleared")
+    }
+
+    /**
+     * Gravel: stops the location stream of every watch, including one registered later, and
+     * reports nothing more to them; for a session whose page is gone. Callable from any thread.
+     */
+    fun endWatches() {
+        watchesEnded.value = true
     }
 
     companion object {

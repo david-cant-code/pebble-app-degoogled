@@ -83,6 +83,14 @@ fun createJsRunner(
     )
 }
 
+// stop() runs its teardown NonCancellable, which a timeout cannot interrupt, so only the join
+// is timed.
+@OptIn(DelicateCoroutinesApi::class)
+suspend fun JsRunner.stopWithinTimeout() {
+    val stopJob = GlobalScope.launch { stop() }
+    withTimeout(10.seconds) { stopJob.join() }
+}
+
 abstract class PKJSRunnerSharedTestsAndroid(networkGranted: Boolean): PKJSRunnerTests(::createJsRunner, networkGranted) {
     @Test
     override fun testJSExecution() {
@@ -126,7 +134,6 @@ class PKJSRunnerTestsAndroid: PKJSRunnerSharedTestsAndroid(networkGranted = true
     // chrome://crash is the platform's documented way to end the renderer in a test
     // (android16-release, WebViewClient.java, onRenderProcessGone). Reaching the assertions at
     // all shows the process outlived the exit.
-    @OptIn(DelicateCoroutinesApi::class)
     private fun rendererExitCase(networkGranted: Boolean) = runBlocking {
         val uuid = Uuid.random()
         val runner = makeRunner("", uuid, networkGranted = networkGranted) as WebViewJsRunner
@@ -146,9 +153,7 @@ class PKJSRunnerTestsAndroid: PKJSRunnerSharedTestsAndroid(networkGranted = true
         }
         assertFalse(runner.readyState.value)
         runner.eval("window.test = true;")
-        // stop() runs its teardown NonCancellable, so a timeout around it could not fire.
-        val stopJob = GlobalScope.launch { runner.stop() }
-        withTimeout(10.seconds) { stopJob.join() }
+        runner.stopWithinTimeout()
 
         val second = makeRunner("", uuid, networkGranted = networkGranted)
         second.start()
