@@ -2,7 +2,6 @@ package io.rebble.libpebblecommon.connection.endpointmanager
 
 import co.touchlab.kermit.Logger
 import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
-import com.anopticlabs.gravel.pkjs.deniedPkjsSwitchApplies
 import com.anopticlabs.gravel.pkjs.shouldRunPkjs
 import io.rebble.libpebblecommon.LibPebbleConfigFlow
 import io.rebble.libpebblecommon.connection.CompanionApp
@@ -180,12 +179,13 @@ class CompanionAppLifecycleManager(
                     requestRestart = sessionCoordinator::requestRestart,
                 )
             }
-            // Gravel: where the switch applies, it decides whether a Network-denied session gets
-            // its PebbleKit JS side, so a flip restarts the session.
-            if (pbw.hasPKJS && !networkGranted && networkDenyEnforcement.deniedPkjsSwitchApplies) {
+            // Gravel: a Network-denied session restarts once the switch, or whether it applies,
+            // gives another answer than this build to whether it gets its PebbleKit JS side.
+            if (pbw.hasPKJS && !networkGranted) {
                 activeAppScope.launchDeniedPkjsSwitchWatcher(
                     config = libPebbleConfigFlow.flow,
-                    builtWith = watchConfig.deniedPkjsWithoutPrimaryLayer,
+                    enforcement = networkDenyEnforcement,
+                    builtWith = pkjsRunning,
                     app = lockerEntry.id,
                     sessionGeneration = sessionGeneration,
                     requestRestart = sessionCoordinator::requestRestart,

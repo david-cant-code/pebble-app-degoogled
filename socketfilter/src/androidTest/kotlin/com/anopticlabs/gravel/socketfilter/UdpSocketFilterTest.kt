@@ -82,9 +82,14 @@ class UdpSocketFilterTest {
         )
         ProbeTestHooks.setProbeBehavior(0, 0)
         awaitThreadGone(RESOLVER_CHECK_THREAD)
-        // The platform's DNS client, not a test mode, declines here (dns_open_proxy honors it).
+        // The platform's DNS client, not a test mode, declines here (dns_open_proxy honors it);
+        // before Android 10 the check has no android_res_nsend to call.
         assertEquals(
-            InstallResult.Unsupported(UnsupportedReason.ResolverUnreachable, OsConstants.ENOSYS),
+            if (Build.VERSION.SDK_INT < 29) {
+                InstallResult.Unsupported(UnsupportedReason.ResolverUncheckable, OsConstants.ENOSYS)
+            } else {
+                InstallResult.Unsupported(UnsupportedReason.ResolverUnreachable, OsConstants.ENOSYS)
+            },
             withResolverProxyOff { UdpSocketFilter.install() },
         )
         awaitThreadGone(RESOLVER_CHECK_THREAD)

@@ -29,6 +29,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.io.files.Path
 import kotlinx.serialization.json.Json
 import org.junit.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.Uuid
@@ -130,6 +131,42 @@ class PKJSRunnerTestsAndroid: PKJSRunnerSharedTestsAndroid(networkGranted = true
 
     @Test
     fun rendererExitLeavesAStoppableSessionWithNetworkDenied() = rendererExitCase(networkGranted = false)
+
+    // With Network on, setItem reaches the native store before the renderer exits: a renderer exit,
+    // which skips stop()'s save, keeps the value for the next session.
+    @Test
+    fun setItemWritesThroughBeforeARendererExit() = runBlocking {
+        val uuid = Uuid.random()
+        val runner = makeRunner("", uuid, networkGranted = true) as WebViewJsRunner
+        try {
+            runner.start()
+            withTimeout(5.seconds) { runner.readyState.first { it } }
+            withTimeout(5.seconds) {
+                while (runner.evalWithResult("window.__localStorageShimmed === true;") != "true") delay(20)
+            }
+            runner.evalWithResult("localStorage.setItem('writtenThrough', 'yes');")
+            assertEquals("true", runner.evalWithResult("localStorage.getItem('setItem') === null;"), "the shim stored an item named setItem")
+
+            runner.loadUrlForTest("chrome://crash")
+            withTimeout(10.seconds) {
+                while (!runner.rendererGone) delay(20)
+            }
+        } finally {
+            runner.stopWithinTimeout()
+        }
+
+        val second = makeRunner("", uuid, networkGranted = true)
+        try {
+            second.start()
+            withTimeout(5.seconds) { second.readyState.first { it } }
+            withTimeout(5.seconds) {
+                while (second.evalWithResult("window.__localStorageShimmed === true;") != "true") delay(20)
+            }
+            assertEquals("\"yes\"", second.evalWithResult("localStorage.getItem('writtenThrough');"))
+        } finally {
+            second.stopWithinTimeout()
+        }
+    }
 
     // chrome://crash is the platform's documented way to end the renderer in a test
     // (android16-release, WebViewClient.java, onRenderProcessGone). Reaching the assertions at

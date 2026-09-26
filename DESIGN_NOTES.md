@@ -286,10 +286,12 @@ session for an app whose Network grant is denied only where the switch
 applies and `WatchConfig.deniedPkjsWithoutPrimaryLayer` is on
 (`shouldRunPkjs`; a switch in Watch App Permissions, on by default, shown
 only where it applies). The grant watcher restarts the session once it
-sees the grant change (above), and `launchDeniedPkjsSwitchWatcher`
-restarts it once the switch changes. `WebViewJsRunner.start` makes the
-same check on the grant and the switch it reads itself, and loads nothing
-when it fails.
+sees the grant change (above). For a Network-denied session,
+`launchDeniedPkjsSwitchWatcher` restarts it once its first read, or a
+config change, answers differently from the build whether it would get its
+PebbleKit JS side; a change in whether the switch applies, such as a
+WebView update, is read only then (`KNOWN_ISSUES.md`). `WebViewJsRunner.start` makes the same check on the
+grant and the switch it reads itself, and loads nothing when it fails.
 
 **Denied-session page.** A session that starts with the Network grant
 denied is built differently from a granted one (`denyConstruction`, fixed

@@ -416,7 +416,7 @@ class WebViewJsRunner(
 
     private fun restoreLocalStorage() {
         runBlocking(Dispatchers.Main) {
-            webView?.evaluateJavascript("""
+            webView?.takeIf { !ending }?.evaluateJavascript("""
                 (function() {
                     window.localStorage.clear();
                     const localStorageData = JSON.parse(window._localStorage.restoreState());
@@ -661,8 +661,12 @@ class WebViewJsRunner(
             } catch (e: Exception) {
                 logger.e(e) { "Error during WebView teardown; destroying anyway" }
             } finally {
-                // destroy() must always run, even if the pre-destroy teardown fails
+                // destroy() must always run, even if the pre-destroy teardown fails. The field is
+                // cleared in the same main-thread task, so no main-thread task runs between the two.
                 webView?.destroy()
+                synchronized(initializedLock) {
+                    webView = null
+                }
                 // Clear any black-hole proxy this app set, so the process-global
                 // override never outlives the session and starves a later WebView
                 // (config page or the next app). Deliberately the LAST teardown step,
@@ -674,9 +678,6 @@ class WebViewJsRunner(
                 runCatching { applyNetworkProxy(allowed = true) }
                     .onFailure { logger.w(it) { "Failed to clear network proxy on stop" } }
             }
-        }
-        synchronized(initializedLock) {
-            webView = null
         }
     }
 
@@ -733,45 +734,51 @@ class WebViewJsRunner(
     }
 
     override suspend fun loadAppJs(jsUrl: String) {
-        webView?.let { webView ->
-            if (!denyConstruction) restoreLocalStorage()
+        // The session ends on the main thread, so each main-thread block here and in
+        // restoreLocalStorage reads the view again and returns once the session has ended or is ending.
+        if (webView == null) {
+            logger.w { "Not loading the app script: the session has ended" }
+            return
+        }
+        if (!denyConstruction) restoreLocalStorage()
 
-            if (jsUrl.isBlank() || !jsUrl.endsWith(".js")) {
-                logger.e { "loadUrl passed to loadAppJs empty or invalid" }
-                return
-            }
+        if (jsUrl.isBlank() || !jsUrl.endsWith(".js")) {
+            logger.e { "loadUrl passed to loadAppJs empty or invalid" }
+            return
+        }
 
-            if (denyConstruction) {
-                withContext(Dispatchers.Main) {
-                    evaluateInPage(LOAD_APP_SCRIPT_IN_FRAME)
-                    webView.evaluateJavascript("document.title = ${Json.encodeToString("PKJS: ${appInfo.longName}")};", null)
-                }
-                return
-            }
-
-            val urlAsUri = Uri.fromFile(File(jsUrl)).toString()
-
+        if (denyConstruction) {
             withContext(Dispatchers.Main) {
-                webView.evaluateJavascript(
-                        """
-                            (() => {
-                                const signalLoaded = () => {
-                                    _Pebble.signalAppScriptLoadedByBootstrap();
-                                }
-                                const head = document.getElementsByTagName("head")[0];
-                                const script = document.createElement("script");
-                                script.type = "text/javascript";
-                                script.onreadystatechange = signalLoaded;
-                                script.onload = signalLoaded;
-                                script.charset = "utf-8";
-                                script.src = ${Json.encodeToString(urlAsUri)};
-                                head.appendChild(script);
-                            })();
-                            """.trimIndent()
-                ) { value -> logger.d { "added app script tag" } }
-                webView.evaluateJavascript("document.title = ${Json.encodeToString("PKJS: ${appInfo.longName}")};", null)
+                val view = webView?.takeIf { !ending } ?: return@withContext
+                evaluateInPage(LOAD_APP_SCRIPT_IN_FRAME)
+                view.evaluateJavascript("document.title = ${Json.encodeToString("PKJS: ${appInfo.longName}")};", null)
             }
-        } ?: logger.w { "Not loading the app script: the session has ended" }
+            return
+        }
+
+        val urlAsUri = Uri.fromFile(File(jsUrl)).toString()
+
+        withContext(Dispatchers.Main) {
+            val view = webView?.takeIf { !ending } ?: return@withContext
+            view.evaluateJavascript(
+                    """
+                        (() => {
+                            const signalLoaded = () => {
+                                _Pebble.signalAppScriptLoadedByBootstrap();
+                            }
+                            const head = document.getElementsByTagName("head")[0];
+                            const script = document.createElement("script");
+                            script.type = "text/javascript";
+                            script.onreadystatechange = signalLoaded;
+                            script.onload = signalLoaded;
+                            script.charset = "utf-8";
+                            script.src = ${Json.encodeToString(urlAsUri)};
+                            head.appendChild(script);
+                        })();
+                        """.trimIndent()
+            ) { value -> logger.d { "added app script tag" } }
+            view.evaluateJavascript("document.title = ${Json.encodeToString("PKJS: ${appInfo.longName}")};", null)
+        }
     }
 
     override suspend fun signalInterceptResponse(callbackId: String, result: InterceptResponse) {

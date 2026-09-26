@@ -432,19 +432,27 @@ happens, so none are.
 **Status: deliberate; the cases with no restart are accepted and fail closed.**
 
 A change to a watchapp's Network permission, in either direction, stops its
-PebbleKit JS session and starts a new one, except in the cases below. So
-does a flip of the switch for running these scripts without the UDP filter
-("If Android refuses the UDP filter"), for a watchapp whose Network
-permission is off. Whether a connection opened before either of those
-changes is cut in the moment before the restart completes has not been
-measured. Turning Network off also ends a script that started with it on,
-without waiting for the restart.
+PebbleKit JS session and starts a new one, except as follows. Where a
+script with Network off does not run ("If Android refuses the UDP filter"),
+turning Network off stops the script and starts none. For a watchapp whose
+Network permission is off, a flip of the switch for running these scripts
+without the UDP filter restarts the session when the flip changes whether
+the script runs. Whether a connection opened before any of these changes is
+cut in the moment before the restart completes has not been measured.
+Turning Network off also ends a script that started with it on, without
+waiting for the restart; until it ends, where the UDP filter is not
+installed, Gravel has no layer against its WebRTC over UDP.
 
-Some Network permission changes are not followed by a restart: a script can
-be ended with no new one started, or a script whose permission is on can be
-started as if it were off. It stays that way until it is rebuilt, for
-example at the next app switch, a reconnection of the watch, or a change
-that turns its Network permission on or off.
+Some changes are not followed by a restart and leave the session failed
+closed, for example a script ended with no new one started, a script whose
+permission is on started as if it were off, or a session with no script
+running. It stays that way until it is rebuilt, for example at the next app
+switch, a reconnection of the watch, or a change that turns its Network
+permission on or off. Where an update of Android System WebView to version
+152 or newer makes the switch apply while Gravel runs, a watchapp with
+Network off whose session started before the update keeps its script off,
+while the switch already shows, until the session is rebuilt as above or,
+for example, the switch is turned off and on again.
 
 ## The WebRTC response-header layer needs WebView 152 or newer
 
