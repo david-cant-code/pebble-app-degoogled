@@ -64,7 +64,7 @@ import org.koin.compose.getKoin
  * with no explicit choice inherits) and a list of installed apps; the per-app tri-state
  * controls themselves live on each app's page (and are shared via
  * [WatchappPermissionControls]).
- * Fork: it also holds the classic PebbleKit and PebbleKit 2 toggles, and, where it applies, the
+ * It also holds the classic PebbleKit and PebbleKit 2 toggles, and, where it applies, the
  * switch for Network-denied apps' code (WatchConfig.deniedPkjsWithoutPrimaryLayer).
  */
 @Composable

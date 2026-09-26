@@ -46,8 +46,8 @@ private const val PROBE = """
 
 // Instrumentation runs in the app's own process, where MainApplication installed the filter; why
 // that reaches the WebView's own sockets is in KNOWN_ISSUES.md, "No UDP for web content inside
-// Gravel". An equivalent offer without the filter gathers candidates (DeniedSessionWebRtcTest,
-// granted case).
+// Gravel". The same offer in a Network-on session in the libpebble3 test process, which has no
+// filter, gathers a candidate of some transport (DeniedSessionWebRtcTest, granted case).
 class UdpFilterWebRtcTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private val rendererGone = CompletableDeferred<Unit>()
@@ -101,7 +101,8 @@ class UdpFilterWebRtcTest {
             }
             assertEquals("\"none\"", webView.eval("window.probe.error"), webView.eval("JSON.stringify(window.probe)"))
             assertNotEquals("\"new\"", webView.eval("window.probe.gathering"), "gathering never started")
-            // Far past the time an offer without the filter takes to gather its first UDP candidate.
+            // At least as long as DeniedSessionWebRtcTest's unfiltered control waits for its first
+            // candidate.
             delay(10.seconds)
             val probe = webView.eval("JSON.stringify(window.probe)")
             assertEquals("0", webView.eval("window.probe.udp"), "UDP candidates gathered with the filter installed: $probe")

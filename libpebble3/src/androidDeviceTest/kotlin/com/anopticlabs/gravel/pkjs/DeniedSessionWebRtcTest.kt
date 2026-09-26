@@ -90,6 +90,7 @@ class DeniedSessionWebRtcTest : PKJSRunnerTests(::createJsRunner, networkGranted
     fun aGrantedSessionGathersACandidate() = runBlocking {
         val runner = startedRunner(networkGranted = true)
         runner.evalWithResult(PROBE)
+        // UdpFilterWebRtcTest waits at least this long for UDP candidates under the filter.
         withTimeout(10.seconds) {
             while ((runner.evalWithResult("window.rtcCandidates") as String).toInt() == 0) delay(100)
         }

@@ -106,7 +106,6 @@ static jlong pack(int kind, int sub, int detail) {
 // ENOSYS: no seccomp system call. EINVAL: the kernel did not take this call; a build without
 // filter mode answers that way, and it is one of several paths that do (linux v6.1,
 // kernel/seccomp.c, seccomp_set_mode_filter). The packed reason stands for any of them.
-// probe() and install_locked() pass the same flags and program.
 static jlong seccomp_error(int error) {
     if (error == ENOSYS || error == EINVAL) {
         return pack(KIND_UNSUPPORTED, REASON_KERNEL_LACKS_FILTER_MODE, error);
@@ -114,6 +113,7 @@ static jlong seccomp_error(int error) {
     return pack(KIND_REFUSED, STAGE_SECCOMP_CALL, error);
 }
 
+// probe()'s child tries every flags value passed here first (UdpFilterInstallSentinelTest).
 static long set_filter(unsigned int flags) {
     struct sock_fprog program = {.len = FILTER_PROGRAM_LENGTH, .filter = filter_program};
     return syscall(__NR_seccomp, SECCOMP_SET_MODE_FILTER, flags, &program);
@@ -215,14 +215,16 @@ static bool probe(jlong *failure) {
 
 // A DNS header that claims one question and carries none. The resolver rejects it as unparseable
 // before it sends anything upstream (android16-release, DnsResolver, DnsProxyListener.cpp,
-// ResNSendHandler::run).
+// ResNSendHandler::run, parseQuery; bionic, libc/dns/nameser/ns_parse.c, ns_initparse).
 static const uint8_t unparseable_query[12] = {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0};
 
 // Attaches the filter to the calling thread alone, then hands the query to the platform's DNS
 // client, which opens the resolver proxy with the same dns_open_proxy that getaddrinfo uses
-// (android16-release, netd, client/NetdClient.cpp, resNetworkSend, netdClientInitDnsOpenProxy;
-// bionic, libc/dns/net/getaddrinfo.c, android_getaddrinfo_proxy). outcome[0..1] is {0, 0} when
-// the client reached the resolver, otherwise {reason, errno}.
+// (android16-release, frameworks/base, native/android/net.c, android_res_nsend; netd,
+// client/NetdClient.cpp, resNetworkSend, netdClientInitDnsOpenProxy; bionic,
+// libc/bionic/NetdClient.cpp, netdClientInitImpl; bionic, libc/dns/net/getaddrinfo.c,
+// android_getaddrinfo_proxy). outcome[0..1] is {0, 0} when the client reached the resolver,
+// otherwise {reason, errno}.
 static void check_resolver_on_this_thread(int outcome[3]) {
     outcome[0] = REASON_RESOLVER_UNCHECKABLE;
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 || set_filter(0) != 0) {

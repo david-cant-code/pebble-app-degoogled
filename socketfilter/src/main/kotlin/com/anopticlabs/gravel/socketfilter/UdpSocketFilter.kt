@@ -17,7 +17,11 @@ sealed interface InstallResult {
      */
     data class Refused(val stage: RefusalStage, val detail: Int) : InstallResult
 
-    /** This environment cannot carry the filter. */
+    /**
+     * Not installed. For [UnsupportedReason.ResolverUnreachable] and
+     * [UnsupportedReason.ResolverUncheckable] it reports this call's resolver check, which another
+     * call can answer differently; for the other reasons, this environment cannot carry the filter.
+     */
     data class Unsupported(val reason: UnsupportedReason, val detail: Int) : InstallResult
 }
 
@@ -60,7 +64,8 @@ object UdpSocketFilter {
         private set
 
     /**
-     * Idempotent and safe from any thread; a second program is never stacked. Installs only where
+     * Returns AlreadyInstalled once the program is attached; until then each call tries again. Safe
+     * from any thread; a second program is never stacked. Installs only where
      * the platform's DNS client, tried first on a thread that carries the filter alone, still
      * reaches the system resolver.
      */

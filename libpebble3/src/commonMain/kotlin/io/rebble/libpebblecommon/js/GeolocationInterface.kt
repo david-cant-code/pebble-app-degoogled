@@ -122,7 +122,7 @@ abstract class GeolocationInterface(
             // override or global default) and restarts it if the grant returns.
             // Denial is reported to the JS callback each time it takes effect; the
             // watch itself stays registered until the app clears it, matching
-            // geolocation-spec behaviour for a watch awaiting permission. After
+            // geolocation-spec behavior for a watch awaiting permission. After
             // endWatches none of this happens: no stream and no callback.
             combine(
                 watchappPermissions.watchappPermissionGranted(
