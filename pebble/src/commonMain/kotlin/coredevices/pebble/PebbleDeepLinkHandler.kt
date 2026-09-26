@@ -7,7 +7,6 @@ import coredevices.database.AppstoreSourceDao
 import coredevices.libindex.device.IndexPlatformBluetoothAssociations
 import coredevices.libindex.device.REQUEST_URI_HOST
 import coredevices.pebble.account.PebbleAccount
-import coredevices.pebble.firmware.FirmwareUpdateUiTracker
 import coredevices.pebble.services.REBBLE_FEED_URL
 import coredevices.pebble.ui.NavBarRoute
 import coredevices.pebble.ui.PebbleNavBarRoutes
@@ -15,7 +14,6 @@ import io.rebble.libpebblecommon.connection.AppContext
 import io.rebble.libpebblecommon.connection.ConnectedPebble
 import io.rebble.libpebblecommon.connection.ConnectedPebbleDevice
 import io.rebble.libpebblecommon.connection.LibPebble
-import io.rebble.libpebblecommon.connection.PebbleIdentifier
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -68,7 +66,6 @@ class RealPebbleDeepLinkHandler(
     private val analytics: CoreAnalytics,
     private val context: AppContext,
     private val appstoreSourceDao: AppstoreSourceDao,
-    private val firmwareUpdateUiTracker: FirmwareUpdateUiTracker,
 ) : PebbleDeepLinkHandler {
     private val logger = Logger.withTag("PebbleDeepLinkHandler")
     private val _initialLockerSync = MutableStateFlow(false)
@@ -110,7 +107,7 @@ class RealPebbleDeepLinkHandler(
                     ADD_STORE_FEED_HOST -> handleAddStoreFeed(uri)
                     NAVBAR_URL -> handleNavbar(uri.path)
                     REGISTER_INDEX_COMPANION_HOST -> handleRegisterIndexCompanion()
-                    SHOW_WATCHES_HOST -> handleShowWatches(uri.path)
+                    SHOW_WATCHES_HOST -> handleShowWatches()
 //                    UPDATE_WATCH_NOW_HOST -> handleShowWatches(uri.path)
                     else -> false
                 }
@@ -329,10 +326,7 @@ class RealPebbleDeepLinkHandler(
         return true
     }
 
-    private fun handleShowWatches(path: String?): Boolean {
-        if (path != null) {
-            firmwareUpdateUiTracker.updateWatchNow(libPebble, path.removePrefix("/").removeSuffix("/"))
-        }
+    private fun handleShowWatches(): Boolean {
         val route = PebbleNavBarRoutes.WatchesRoute
         _navigateToPebbleDeepLink.value = PebbleDeepLink(route)
         return true
@@ -389,8 +383,6 @@ class RealPebbleDeepLinkHandler(
         private const val GITHUB_OAUTH_CALLBACK_PATH: String = "githubAuth"
         private val TOKEN_REGEX = Regex("access_token=(.*)&t=")
         private val logger = Logger.withTag("PebbleDeepLinkHandler")
-
-        fun updateNowUri(identifier: PebbleIdentifier): Uri = Uri.parse("pebble://${SHOW_WATCHES_HOST}/${identifier.asString}")
 
         /** `pebble://add-store-feed/{name}/{url}`, both segments percent-encoded. */
         internal fun parseAddStoreFeedFrom(uri: Uri): PebbleNavBarRoutes.AppstoreSettingsRoute? {
