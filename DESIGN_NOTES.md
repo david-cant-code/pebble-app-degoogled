@@ -805,6 +805,12 @@ hold its rules.
   them in a public repository after 60 days without repository activity
   (GitHub docs, "Events that trigger workflows"). A disabled or skipped
   run raises no failure; the list's `checkedAt` shows its age.
+- The update notification's tap opens the build picker only when its
+  intent carries this process's `FirmwareNotificationToken` and names a
+  connected Core watch (`firmwarePickerRouteForNotification`, called from
+  `MainActivity.handleIntent`). Any app can send the activity the
+  `pebble://show-watches` link the notification also carries, so that
+  link opens only the Devices tab.
 
 ## F-Droid
 

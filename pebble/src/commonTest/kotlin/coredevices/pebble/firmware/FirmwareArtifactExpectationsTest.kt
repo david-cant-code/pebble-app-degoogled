@@ -29,20 +29,22 @@ class FirmwareArtifactExpectationsTest {
     @Test
     fun oldestEntryIsEvictedPastTheCap() = runTest {
         val registry = FirmwareArtifactExpectations()
-        repeat(17) { i -> registry.record("https://example.com/$i.pbz", expected("v$i")) }
+        val cap = FirmwareArtifactExpectations.MAX_ENTRIES
+        repeat(cap + 1) { i -> registry.record("https://example.com/$i.pbz", expected("v$i")) }
         assertNull(registry.lookup("https://example.com/0.pbz"))
         assertEquals(expected("v1"), registry.lookup("https://example.com/1.pbz"))
-        assertEquals(expected("v16"), registry.lookup("https://example.com/16.pbz"))
+        assertEquals(expected("v$cap"), registry.lookup("https://example.com/$cap.pbz"))
     }
 
     @Test
     fun reRecordingRefreshesEvictionOrder() = runTest {
         val registry = FirmwareArtifactExpectations()
-        repeat(16) { i -> registry.record("https://example.com/$i.pbz", expected("v$i")) }
+        val cap = FirmwareArtifactExpectations.MAX_ENTRIES
+        repeat(cap) { i -> registry.record("https://example.com/$i.pbz", expected("v$i")) }
         // Re-record the oldest, then push one more: entry 1 (now oldest) goes,
         // entry 0 stays.
         registry.record("https://example.com/0.pbz", expected("v0new"))
-        registry.record("https://example.com/16.pbz", expected("v16"))
+        registry.record("https://example.com/$cap.pbz", expected("v$cap"))
         assertEquals(expected("v0new"), registry.lookup("https://example.com/0.pbz"))
         assertNull(registry.lookup("https://example.com/1.pbz"))
     }

@@ -164,8 +164,8 @@ class VerifiedFirmwareInstaller(
         try {
             state.value = ForkFirmwareInstallState.Downloading(progress = null)
             // Fail closed rather than fall back to the unverified upstream
-            // download: expectations share the process lifetime of the
-            // FoundUpdate itself, so a miss here is a bug, not bad luck.
+            // download: a miss means no expectation was recorded in this
+            // process or it was evicted (FirmwareArtifactExpectations).
             val expected = expectations.lookup(update.url)
                 ?: throw InstallFailure("no integrity data recorded for this download")
             if (!update.url.startsWith("https://")) {

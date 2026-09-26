@@ -103,6 +103,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.ViewModel
 import co.touchlab.kermit.Logger
 import coredevices.whisper.isWhisperSupported
+import com.anopticlabs.gravel.firmware.FirmwarePickerRoute
 import com.russhwolf.settings.Settings
 import com.russhwolf.settings.set
 import coredevices.CoreBackgroundSync
@@ -584,6 +585,14 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     action = { uriHandler.openUri("https://ndocs.repebble.com/pebbleos-changelog") },
                     actionIcon = Icons.AutoMirrored.Default.Launch,
                 ),
+                navBarNav?.let { nav ->
+                    basicSettingsActionItem(
+                        title = "Choose a PebbleOS build",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.About,
+                        action = { nav.navigateTo(FirmwarePickerRoute()) },
+                    )
+                },
                 // Fork: external browser, keeping the Intercom-backed help centre out
                 // of the app's own network traffic.
                 basicSettingsActionItem(

@@ -138,6 +138,8 @@ import coredevices.libindex.ui.components.PressPatternDot
 import coredevices.pebble.PebbleDeepLinkHandler
 import coredevices.pebble.PebbleFeatures
 import coredevices.pebble.account.PebbleAccount
+import com.anopticlabs.gravel.firmware.FirmwarePickerRoute
+import com.anopticlabs.gravel.firmware.firmwarePickerServes
 import coredevices.pebble.firmware.FirmwareUpdateUiTracker
 import coredevices.pebble.firmware.VerifiedFirmwareInstaller
 import coredevices.pebble.firmware.isCoreDevice
@@ -2047,6 +2049,8 @@ fun WatchDetails(
     val uriHandler = LocalUriHandler.current
 
     if (firmwareUpdateAvailable is FirmwareUpdateCheckResult.FoundUpdate && firmwareUpdater != null && !firmwareUpdateInProgress) {
+        // Gravel: Core watches choose a build in the picker; legacy watches install the check's offer.
+        val opensPicker = watch.firmwarePickerServes()
         var showFirmwareUpdateConfirmDialog by remember { mutableStateOf(false) }
         if (showFirmwareUpdateConfirmDialog) {
             AlertDialog(
@@ -2075,8 +2079,12 @@ fun WatchDetails(
         PebbleElevatedButton(
             text = "Update PebbleOS to ${firmwareUpdateAvailable.version.stringVersion}",
             onClick = {
-                logger.d { "Starting firmware update from watches screen" }
-                showFirmwareUpdateConfirmDialog = true
+                if (opensPicker) {
+                    navBarNav.navigateTo(FirmwarePickerRoute(watch.identifier.asString))
+                } else {
+                    logger.d { "Starting firmware update from watches screen" }
+                    showFirmwareUpdateConfirmDialog = true
+                }
             },
             enabled = bluetoothState.enabled(),
             icon = Icons.Default.SystemUpdateAlt,

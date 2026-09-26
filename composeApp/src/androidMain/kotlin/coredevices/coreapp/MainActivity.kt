@@ -10,6 +10,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.lifecycleScope
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.firmware.firmwarePickerRouteForNotification
+import com.anopticlabs.gravel.firmware.firmwarePickerServes
 import com.eygraber.uri.toKmpUriOrNull
 import coredevices.ExperimentalDevices
 import coredevices.coreapp.ui.App
@@ -18,6 +20,7 @@ import coredevices.pebble.PebbleAndroidDelegate
 import coredevices.pebble.PebbleAppDelegate
 import coredevices.pebble.PebbleDeepLinkHandler
 import coredevices.util.OAuthRedirectHandler
+import io.rebble.libpebblecommon.connection.LibPebble
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
@@ -34,6 +37,7 @@ class MainActivity : ComponentActivity() {
     private val oAuthRedirectHandler: OAuthRedirectHandler by inject()
     private val experimentalDevices: ExperimentalDevices by inject()
     private val pebbleBackgroundManager: PebbleBackgroundManager by inject()
+    private val libPebble: LibPebble by inject()
 
     companion object {
         private val logger = Logger.withTag(MainActivity::class.simpleName!!)
@@ -68,6 +72,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent) {
+        firmwarePickerRouteForNotification(
+            readExtra = intent::getStringExtra,
+            launchedFromHistory = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0,
+            isConnectedCoreWatch = { id ->
+                libPebble.watches.value.any { it.identifier.asString == id && it.firmwarePickerServes() }
+            },
+        )?.let { route ->
+            coreDeepLinkHandler.navigateTo(route)
+            setIntent(null)
+            return
+        }
         val uri = intent.data?.toKmpUriOrNull()
         if (!oAuthRedirectHandler.handleOAuthRedirect(uri)) {
             logger.d { "handleIntent uri = $uri" }

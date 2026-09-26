@@ -86,8 +86,14 @@ De-google work is completed, all telemetry is removed. What remains is polish an
   is newer than the watch's firmware and has a build for its board with a
   GitHub-declared digest: a daily job copies the changelog's version
   numbers to this repository's `firmware-list` branch, and update checks
-  read that copy from GitHub. Legacy Pebble watches
-  keep using the Rebble cohorts endpoint. Gravel builds ship no Memfault
+  read that copy from GitHub. A build picker for Core watches (Settings >
+  About > Choose a PebbleOS build, also opened by the Devices tab's update
+  button and, for a connected watch, the update notification) lists up to
+  five builds for the watch's board with a GitHub-declared digest, newer
+  than its firmware (any build in recovery), including the one an update
+  check would offer from the same data; it marks which are on the
+  changelog and links to it. Legacy Pebble watches keep using the Rebble
+  cohorts endpoint and install its offer from the Devices tab. Gravel builds ship no Memfault
   token and make no Memfault requests; upstream's optional `memfaultToken`
   Gradle property would route Core watch update checks through
   `api.memfault.com`, periodically sending the watch serial number (or a

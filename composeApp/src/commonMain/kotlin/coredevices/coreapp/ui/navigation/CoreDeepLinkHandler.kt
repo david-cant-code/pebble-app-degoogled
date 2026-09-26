@@ -22,6 +22,9 @@ class CoreDeepLinkHandler {
         return _navigateToDeepLink.tryEmit(NavUri(uri.toString()))
     }
 
+    /** Only for routes Gravel builds itself, never from intent data another app controls. */
+    fun navigateTo(route: CoreRoute): Boolean = _navigateToDeepLink.tryEmit(route)
+
     fun clearPendingDeepLink() {
         _navigateToDeepLink.resetReplayCache()
     }

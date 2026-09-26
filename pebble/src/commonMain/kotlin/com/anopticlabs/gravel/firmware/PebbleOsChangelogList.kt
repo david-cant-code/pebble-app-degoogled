@@ -122,6 +122,10 @@ internal fun parsePebbleOsChangelogList(text: String): PebbleOsChangelogList? {
     return PebbleOsChangelogList(checkedAt, versions)
 }
 
+/** The version of a release tagged `v` plus a version in the list's form, or null for any other tag. */
+internal fun listedFormVersion(tag: String): ReleaseTagVersion? =
+    if (tag.startsWith("v") && LISTED_VERSION.matches(tag.substring(1))) ReleaseTagVersion.from(tag) else null
+
 private fun JsonObject.stringField(key: String): String? =
     (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
 

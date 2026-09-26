@@ -21,12 +21,6 @@ data class ReleaseTagVersion(
     val componentCount: Int,
     val raw: String,
 ) : Comparable<ReleaseTagVersion> {
-    /**
-     * The manufacturing line uses four-component tags (v4.9.142.x today);
-     * its post-branch commits are factory-test work only.
-     */
-    val isFactoryLine: Boolean get() = componentCount >= 4
-
     /** Suffixes are ignored: main-line release tags carry none, and recovery
      * suffixes on watch-reported versions are handled via isRecovery flags. */
     override fun compareTo(other: ReleaseTagVersion): Int = compareValuesBy(

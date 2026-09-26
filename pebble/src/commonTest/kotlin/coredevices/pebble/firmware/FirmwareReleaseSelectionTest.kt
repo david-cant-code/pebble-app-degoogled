@@ -23,7 +23,6 @@ class FirmwareReleaseSelectionTest {
         assertEquals(0, v.patch)
         assertEquals(0, v.fourth)
         assertEquals(3, v.componentCount)
-        assertEquals(false, v.isFactoryLine)
     }
 
     @Test
@@ -31,7 +30,6 @@ class FirmwareReleaseSelectionTest {
         val v = ReleaseTagVersion.from("v4.9.142.3")!!
         assertEquals(listOf(4, 9, 142, 3), listOf(v.major, v.minor, v.patch, v.fourth))
         assertEquals(4, v.componentCount)
-        assertTrue(v.isFactoryLine)
     }
 
     @Test

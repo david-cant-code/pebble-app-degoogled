@@ -2,7 +2,11 @@ package coredevices.pebble.firmware
 
 import co.touchlab.kermit.Logger
 import com.anopticlabs.gravel.firmware.ChangelogListResult
+import com.anopticlabs.gravel.firmware.ChangelogListing
+import com.anopticlabs.gravel.firmware.FirmwareBuildChoice
+import com.anopticlabs.gravel.firmware.FirmwareBuildChoicesResult
 import com.anopticlabs.gravel.firmware.PebbleOsChangelogListSource
+import com.anopticlabs.gravel.firmware.listedFormVersion
 import io.ktor.client.HttpClient
 import io.ktor.client.call.NoTransformationFoundException
 import io.ktor.client.call.body
@@ -51,44 +55,120 @@ class GithubReleases(
             ChangelogListResult.RateLimited -> return FirmwareUpdateCheckResult.UpdateCheckFailed(RATE_LIMITED_FAILURE)
             ChangelogListResult.Unreadable -> return FirmwareUpdateCheckResult.UpdateCheckFailed(LIST_FAILURE)
         }
-        val page = when (val fetched = fetch<List<GithubReleaseDto>>(RELEASES_URL, perPage = PAGE_SIZE)) {
+        val releases = when (val fetched = fetchReleases(listed)) {
             is Fetched.Success -> fetched.value
             Fetched.NotFound -> return FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)
             is Fetched.Failure -> return FirmwareUpdateCheckResult.UpdateCheckFailed(fetched.message)
         }
-        // The one release looked up outside the page. The page and this
-        // lookup are requested whatever the watch runs, before anything about
-        // the watch is read.
-        val highestTag = "v${listed.max().raw}"
-        val lookedUp = if (page.any { it.tagName == highestTag }) null else {
-            when (val fetched = fetch<GithubReleaseDto>("$RELEASES_URL/tags/$highestTag")) {
-                is Fetched.Success -> fetched.value.takeIf { it.tagName == highestTag }
-                Fetched.NotFound -> null
-                is Fetched.Failure -> return FirmwareUpdateCheckResult.UpdateCheckFailed(fetched.message)
-            }
-        }
-        val runningRaw = watch.runningFwVersion.stringVersion
-        val running = ReleaseTagVersion.from(runningRaw)
-        val isRecovery = watch.runningFwVersion.isRecovery
-        if (running == null && !isRecovery) {
-            // Fail closed: with an incomparable running version any offer
-            // could be a downgrade or a same-version loop. Recovery is exempt
-            // because it always gets an offer regardless of comparison.
-            logger.e { "Cannot parse running firmware version '$runningRaw'" }
-            return FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)
-        }
-        // Strictly newer only: equality must never re-offer (see ReleaseTagVersion).
-        val newer = (if (isRecovery) listed else listed.filter { it > checkNotNull(running) }).sortedDescending()
+        val isNewer = newerThanRunning(watch) ?: return FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)
+        val newer = listed.filter(isNewer).sortedDescending()
         if (newer.isEmpty()) {
             return FirmwareUpdateCheckResult.FoundNoUpdate
         }
-        val build = findListedBuild(newer, page, highestTag, lookedUp, watch.platform.revision)
+        val build = findListedBuild(newer, releases, watch.platform.revision)
             ?: return FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)
+        return foundUpdateFor(build) ?: FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)
+    }
+
+    /**
+     * The builds the picker lists: releases tagged in the list's form with a
+     * verifiable asset for the watch's board and newer than the running
+     * version (any version in recovery), highest first. The build
+     * [getLatestFirmware] offers is always among them; the newest others fill
+     * up to [MAX_CHOICES]. With a readable list it makes the same requests as
+     * [getLatestFirmware]; with an unreadable one it still reads the release
+     * page and leaves the builds unlabeled.
+     */
+    suspend fun getBuildChoices(watch: WatchInfo): FirmwareBuildChoicesResult {
+        val list = when (val result = changelogList.fetch()) {
+            is ChangelogListResult.Success -> result.list
+            ChangelogListResult.RateLimited -> return FirmwareBuildChoicesResult.Failed(RATE_LIMITED_FAILURE)
+            ChangelogListResult.Unreadable -> null
+        }
+        val releases = when (val fetched = fetchReleases(list?.versions)) {
+            is Fetched.Success -> fetched.value
+            Fetched.NotFound -> return FirmwareBuildChoicesResult.Failed(GENERIC_FAILURE)
+            is Fetched.Failure -> return FirmwareBuildChoicesResult.Failed(fetched.message)
+        }
+        val isNewer = newerThanRunning(watch)
+            ?: return FirmwareBuildChoicesResult.Failed(GENERIC_FAILURE, retryable = false)
+        val revision = watch.platform.revision
+        val recommendedTag = list?.versions?.filter(isNewer)?.sortedDescending()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { findListedBuild(it, releases, revision)?.tag }
+        val candidates = (releases.page + listOfNotNull(releases.lookedUp)).mapNotNull { release ->
+            val version = listedFormVersion(release.tagName)?.takeIf(isNewer) ?: return@mapNotNull null
+            release.verifiedBuildFor(revision)?.let { version to it }
+        }
+        val (recommended, others) = candidates.partition { (_, build) -> build.tag == recommendedTag }
+        val builds = (recommended + others.sortedByDescending { it.first })
+            .take(MAX_CHOICES)
+            .sortedByDescending { it.first }
+            .mapNotNull { (version, build) ->
+                val update = foundUpdateFor(build) ?: return@mapNotNull null
+                val listing = when {
+                    list == null -> ChangelogListing.Unknown
+                    list.versions.any { it.compareTo(version) == 0 } -> ChangelogListing.Listed
+                    else -> ChangelogListing.NotListed
+                }
+                FirmwareBuildChoice(update, listing, isRecommended = build.tag == recommendedTag)
+            }
+        return FirmwareBuildChoicesResult.Success(builds, list?.checkedAt)
+    }
+
+    /**
+     * The release page, and the highest listed version's release when it is
+     * off the page. Requested whatever the watch runs, before anything about
+     * the watch is read.
+     */
+    private suspend fun fetchReleases(listed: List<ReleaseTagVersion>?): Fetched<Releases> {
+        val page = when (val fetched = fetch<List<GithubReleaseDto>>(RELEASES_URL, perPage = PAGE_SIZE)) {
+            is Fetched.Success -> fetched.value
+            Fetched.NotFound -> return Fetched.Failure(GENERIC_FAILURE)
+            is Fetched.Failure -> return fetched
+        }
+        val highestTag = listed?.let { "v${it.max().raw}" }
+        val lookedUp = if (highestTag == null || page.any { it.tagName == highestTag }) null else {
+            when (val fetched = fetch<GithubReleaseDto>("$RELEASES_URL/tags/$highestTag")) {
+                is Fetched.Success -> fetched.value.takeIf { it.tagName == highestTag }
+                Fetched.NotFound -> null
+                is Fetched.Failure -> return fetched
+            }
+        }
+        return Fetched.Success(Releases(page, highestTag, lookedUp))
+    }
+
+    private class Releases(
+        val page: List<GithubReleaseDto>,
+        val highestListedTag: String?,
+        val lookedUp: GithubReleaseDto?,
+    )
+
+    /**
+     * Which versions are newer than the watch's firmware, or null when its
+     * version cannot be compared. Fail closed: with an incomparable running
+     * version any offer could be a downgrade or a same-version loop.
+     * Recovery is exempt because it always gets an offer regardless of
+     * comparison.
+     */
+    private fun newerThanRunning(watch: WatchInfo): ((ReleaseTagVersion) -> Boolean)? {
+        if (watch.runningFwVersion.isRecovery) return { true }
+        val runningRaw = watch.runningFwVersion.stringVersion
+        val running = ReleaseTagVersion.from(runningRaw) ?: run {
+            logger.e { "Cannot parse running firmware version '$runningRaw'" }
+            return null
+        }
+        // Strictly newer only: equality must never re-offer (see ReleaseTagVersion).
+        return { it > running }
+    }
+
+    /** Records the build's expectation for the installer; null when its tag yields no display version. */
+    private suspend fun foundUpdateFor(build: VerifiedBuild): FirmwareUpdateCheckResult.FoundUpdate? {
         val displayVersion = FirmwareVersion.from(
             tag = build.tag,
             isRecovery = false,
             gitHash = "",
-            // Display payload only. The offer decision above compares tags;
+            // Display payload only. The offer decision compares tags;
             // feeding publishedAt into a FirmwareVersion comparison would
             // re-offer equal versions on its timestamp tiebreak.
             timestamp = build.publishedAt,
@@ -97,7 +177,7 @@ class GithubReleases(
         )
         if (displayVersion == null) {
             logger.e { "Couldn't build display version from '${build.tag}'" }
-            return FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)
+            return null
         }
         expectations.record(
             build.assetUrl,
@@ -110,7 +190,7 @@ class GithubReleases(
         return FirmwareUpdateCheckResult.FoundUpdate(
             version = displayVersion,
             url = build.assetUrl,
-            // Release bodies are empty upstream; the dialog and notification
+            // Release bodies are empty upstream; the picker and notification
             // already carry the version string.
             notes = "",
         )
@@ -119,23 +199,22 @@ class GithubReleases(
     /**
      * The first of [newer] (highest first) whose release has a verifiable
      * asset for [revision], or null. A release matches only by its exact tag
-     * `v<version>`. Outside [page] only the highest listed version's release
-     * ([lookedUp]) is known; any other version missing from the page ends the
+     * `v<version>`. Outside the page only the highest listed version's
+     * release is known; any other version missing from the page ends the
      * walk, so a lower version is not offered over one that was not examined.
      */
     private fun findListedBuild(
         newer: List<ReleaseTagVersion>,
-        page: List<GithubReleaseDto>,
-        highestTag: String,
-        lookedUp: GithubReleaseDto?,
+        releases: Releases,
         revision: String,
     ): VerifiedBuild? {
         for (version in newer) {
             val tag = "v${version.raw}"
-            val release = page.firstOrNull { it.tagName == tag } ?: if (tag == highestTag) lookedUp else {
-                logger.w { "PebbleOS release $tag is not on the first page of releases" }
-                return null
-            }
+            val release = releases.page.firstOrNull { it.tagName == tag }
+                ?: if (tag == releases.highestListedTag) releases.lookedUp else {
+                    logger.w { "PebbleOS release $tag is not on the first page of releases" }
+                    return null
+                }
             release?.verifiedBuildFor(revision)?.let { return it }
         }
         logger.w { "No listed PebbleOS release newer than the running one has a verifiable asset for '$revision'" }
@@ -207,6 +286,7 @@ class GithubReleases(
 
         // The first page of GitHub's release list, both tag lines mixed.
         private const val PAGE_SIZE = 20
+        private const val MAX_CHOICES = 5
         internal const val GITHUB_API_VERSION = "2022-11-28"
         private const val GENERIC_FAILURE = "Failed to check for PebbleOS update"
         private const val RATE_LIMITED_FAILURE = "PebbleOS update check is rate limited, try again later"

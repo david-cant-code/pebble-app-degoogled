@@ -24,7 +24,8 @@ data class ExpectedFirmwareArtifact(
  * the installer refuses any download it has no expectation for (fail closed).
  * This state is process-lifetime by design, the same lifetime as the
  * update-check cache and the availableUpdates flows a FoundUpdate lives in,
- * so a lookup miss is a bug or a process restart, never a legitimate state.
+ * so a lookup miss is a bug, a process restart, or an entry evicted past the
+ * cap.
  */
 class FirmwareArtifactExpectations {
     private val mutex = Mutex()
@@ -33,7 +34,8 @@ class FirmwareArtifactExpectations {
     suspend fun record(url: String, expected: ExpectedFirmwareArtifact) {
         mutex.withLock {
             // Re-insert so eviction order follows recording order; the cap is
-            // hygiene only, a few watches need one live entry each.
+            // hygiene only, a few watches need up to six live entries each (the
+            // check's offer and the build picker's list).
             entries.remove(url)
             entries[url] = expected
             while (entries.size > MAX_ENTRIES) {
@@ -46,7 +48,7 @@ class FirmwareArtifactExpectations {
         mutex.withLock { entries[url] }
 
     companion object {
-        private const val MAX_ENTRIES = 16
+        internal const val MAX_ENTRIES = 64
     }
 }
 
