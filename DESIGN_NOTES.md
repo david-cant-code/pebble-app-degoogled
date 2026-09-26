@@ -787,6 +787,25 @@ the phone's IP reach Algolia's servers, which keep request logs of their
 own. The app listing (the fastlane description and the F-Droid recipe's
 NonFreeNet note) names Algolia for that reason.
 
+## PebbleOS changelog list
+
+Core publishes PebbleOS builds as GitHub releases
+(https://github.com/coredevices/PebbleOS/releases) and announces releases
+on its public changelog (https://ndocs.repebble.com/pebbleos-changelog).
+The "PebbleOS changelog list" workflow copies the changelog's version
+numbers once a day into `pebbleos-changelog.json` on the `firmware-list`
+branch; the workflow file and `.github/changelog/pebbleos_changelog.py`
+hold its rules.
+
+- Repository rulesets restrict creating, updating and deleting tags and
+  every branch other than `firmware-list` to the admin role, and block
+  force pushes to and deletion of `firmware-list` for everyone but that
+  role.
+- GitHub runs scheduled workflows from the default branch and disables
+  them in a public repository after 60 days without repository activity
+  (GitHub docs, "Events that trigger workflows"). A disabled or skipped
+  run raises no failure; the list's `checkedAt` shows its age.
+
 ## F-Droid
 
 The fork is in F-Droid's main repository, as `com.anopticlabs.gravel`.

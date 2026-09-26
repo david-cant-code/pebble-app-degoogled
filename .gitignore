@@ -19,3 +19,5 @@ iosApp/iosApp/GoogleService-Info.plist
 # CMake external-native-build config dirs (cactus-native); generated per
 # machine and full of absolute paths, never committed.
 **/.cxx/
+# Bytecode from running the changelog parser tests locally.
+__pycache__/
