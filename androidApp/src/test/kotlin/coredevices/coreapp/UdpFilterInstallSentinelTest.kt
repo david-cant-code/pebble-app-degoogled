@@ -6,35 +6,67 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * Source sentinels for the UDP socket filter, which the app does not install at present
- * (KNOWN_ISSUES.md, "The UDP filter is off"). These match text only; UdpFilterNotInstalledTest is
- * the run-time check.
+ * Source sentinels for the UDP socket filter. The install call is in `MainApplication`, an
+ * upstream-owned file a sync merge could resolve to upstream's text; that check matches text only,
+ * and UdpFilterInstalledTest is the run-time check.
  */
 class UdpFilterInstallSentinelTest {
 
-    @Test
-    fun noAppSourceInstallsTheFilter() {
-        val callers = TrackedTree.files
-            .filter { it.endsWith(".kt") && !it.startsWith("socketfilter/") && !Regex("""/src/\w*[Tt]est/""").containsMatchIn(it) }
-            .filter { "UdpSocketFilter.install(" in TrackedTree.file(it).readText() }
-        assertTrue(callers.isEmpty(), "the UDP socket filter is installed from $callers")
+    private val source by lazy {
+        TrackedTree.file("composeApp/src/androidMain/kotlin/coredevices/coreapp/MainApplication.kt").readText()
     }
 
-    // Both files are upstream-owned, and both lookups of the binding fall back silently
-    // (getOrNull), to no PebbleKit JS for any Network-denied app.
+    @Test
+    fun attachBaseContextInstallsTheFilterBeforeAnythingElse() {
+        val body = assertNotNull(
+            Regex("""override fun attachBaseContext\(base: Context\) \{\n(.*?)\n    \}""", RegexOption.DOT_MATCHES_ALL)
+                .find(source)?.groupValues?.get(1),
+            "MainApplication no longer overrides attachBaseContext",
+        )
+        val statements = body.lines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("//") }
+        assertTrue(
+            statements == listOf(
+                "super.attachBaseContext(base)",
+                "if (runningInIsolatedProcess()) return",
+                "udpFilterResult = UdpSocketFilter.install()",
+            ),
+            "attachBaseContext must hold the super call, the isolated-process check and the install, in that order: $statements",
+        )
+    }
+
+    // UdpFilterInstalledTest checks on a device that the record is this process start's.
+    @Test
+    fun onCreateRecordsTheInstall() {
+        val body = assertNotNull(
+            Regex("""override fun onCreate\(\) \{\n(.*?)\n    \}""", RegexOption.DOT_MATCHES_ALL).find(source)?.groupValues?.get(1),
+            "MainApplication no longer overrides onCreate",
+        )
+        assertTrue(
+            Regex("""(?m)^ {8}recordUdpFilterInstall\(\s*udpFilterResult\s*,\s*noBackupFilesDir\s*\)\s*$""").containsMatchIn(body),
+            "MainApplication.onCreate no longer records the filter's install",
+        )
+    }
+
+    // All three files are upstream-owned. watchModule and LibPebble3.create fall back silently to
+    // UnreportedNetworkDenyEnforcement: no PebbleKit JS for any Network-denied app.
     @Test
     fun theInstallResultReachesLibPebble() {
         val appModule = TrackedTree.file("composeApp/src/androidMain/kotlin/coredevices/coreapp/di/androidDefaultModule.kt").readText()
         assertTrue(
             Regex(
-                """single<NetworkDenyEnforcement>\s*\{\s*FixedNetworkDenyEnforcement\(\s*UdpSocketFilter\s*\.\s*lastResult\s*==\s*InstallResult\s*\.\s*Installed\s*\)\s*\}""",
+                """single<NetworkDenyEnforcement>\s*\{\s*udpFilterEnforcement\(\s*UdpSocketFilter\s*\.\s*lastResult\s*,\s*androidContext\(\)\s*\.\s*noBackupFilesDir\s*,\s*::\s*webViewMajorVersion\s*,?\s*\)\s*\}""",
             ).containsMatchIn(appModule),
             "androidDefaultModule no longer binds NetworkDenyEnforcement from the filter's install result",
         )
         val watchModule = TrackedTree.file("pebble/src/commonMain/kotlin/coredevices/pebble/watchModule.kt").readText()
         assertTrue(
-            Regex("""networkDenyEnforcement\s*=\s*getOrNull\(\)""").containsMatchIn(watchModule),
-            "watchModule no longer hands the app's NetworkDenyEnforcement to LibPebble3",
+            Regex("""networkDenyEnforcement\s*=\s*getOrNull\(\)\s*\?:\s*UnreportedNetworkDenyEnforcement\s*,""").containsMatchIn(watchModule),
+            "watchModule no longer hands the app's NetworkDenyEnforcement, or the fail-closed fallback, to LibPebble3",
+        )
+        val libPebble = TrackedTree.file("libpebble3/src/commonMain/kotlin/io/rebble/libpebblecommon/connection/LibPebble.kt").readText()
+        assertTrue(
+            Regex("""networkDenyEnforcement:\s*NetworkDenyEnforcement\s*=\s*UnreportedNetworkDenyEnforcement\s*,""").containsMatchIn(libPebble),
+            "LibPebble3.create no longer defaults to the fail-closed enforcement",
         )
     }
 
@@ -61,12 +93,23 @@ class UdpFilterInstallSentinelTest {
         }
     }
 
-    // The probe stands in for the install only while both make the same seccomp call.
+    // The probe stands in for the process's seccomp calls only while it makes every form of them,
+    // and every call but the install's must attach to the calling thread alone (flags 0, no TSYNC).
     @Test
-    fun theProbeAndTheInstallPassTheSameFlags() {
+    fun theProbeCoversEveryFilterCallAndOnlyTheInstallSyncsThreads() {
         val filterSource = TrackedTree.file("socketfilter/src/main/cpp/socket_filter.c").readText()
-        val flags = Regex("""(?<!static long )\bset_filter\(([^)]*)\)""").findAll(filterSource).map { it.groupValues[1].trim() }.toList()
-        assertEquals(2, flags.size, "expected the probe's and the install's set_filter calls: $flags")
-        assertEquals(1, flags.distinct().size, "the probe and the install pass different flags: $flags")
+        val callFlags = Regex("""(?<!static long )\bset_filter\(([^)]*)\)""")
+        fun bodyOf(function: String): String = assertNotNull(
+            Regex("""\b$function\([^)]*\) \{\n(.*?)\n\}""", RegexOption.DOT_MATCHES_ALL).find(filterSource)?.groupValues?.get(1),
+            "socket_filter.c no longer defines $function",
+        )
+        fun flagsIn(text: String) = callFlags.findAll(text).map { it.groupValues[1].trim() }.toList()
+        val probe = bodyOf("probe")
+        val install = bodyOf("set_filter_synced")
+        val check = flagsIn(bodyOf("check_resolver_on_this_thread"))
+        assertEquals(listOf("0"), check, "the resolver check's set_filter flags")
+        assertEquals((flagsIn(install) + check).toSet(), flagsIn(probe).toSet(), "the probe's flags against the install's and the check's")
+        val elsewhere = flagsIn(filterSource.replace(probe, "").replace(install, ""))
+        assertTrue(elsewhere.isNotEmpty() && elsewhere.all { it == "0" }, "set_filter calls outside the probe and the install: $elsewhere")
     }
 }

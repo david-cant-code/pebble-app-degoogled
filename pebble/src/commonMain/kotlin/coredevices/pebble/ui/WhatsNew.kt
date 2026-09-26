@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
  * users on update. The popup auto-shows once per user per bump (`WhatsNewDialog` in
  * composeApp) and can be reopened any time from Settings > About.
  */
-const val WHATS_NEW_VERSION = 9
+const val WHATS_NEW_VERSION = 10
 
 /** A single announced change: a short heading and a sentence or two of body. */
 data class WhatsNewEntry(val title: String, val body: String)
@@ -32,6 +32,21 @@ data class WhatsNewEntry(val title: String, val body: String)
  * changelog (that lives in git history and the repo docs).
  */
 val whatsNewEntries: List<WhatsNewEntry> = listOf(
+    WhatsNewEntry(
+        title = "The UDP block is back where name lookups allow it",
+        body = "Each time it starts, Gravel now checks whether the phone's name lookups can " +
+            "still reach the system resolver with the UDP block on, and turns the block on " +
+            "only where they can. Where it is on, web pages inside Gravel again have no " +
+            "HTTP/3 or WebRTC over UDP. On LineageOS, systems built on it, and CalyxOS, " +
+            "name lookups need a UDP socket, and on Android 9 and older Gravel cannot run " +
+            "the check, so the block stays off there. On those phones, with Android System " +
+            "WebView 152 or newer, a new switch in Settings > Apps > Watch App Permissions, on " +
+            "by default, lets watchfaces and apps with internet access turned off still run " +
+            "their code inside Gravel. Their real-time connections (the kind video calls use) " +
+            "then depend on a single layer, in that WebView, instead of two; turn the switch " +
+            "off to stop that code from running. With an older WebView, that code does not " +
+            "run, as before.",
+    ),
     WhatsNewEntry(
         title = "The UDP block is off for now",
         body = "Gravel 0.3.1 closed right after opening on LineageOS and systems built on " +

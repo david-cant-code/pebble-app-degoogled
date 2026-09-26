@@ -4,7 +4,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.paging.PagingSource
 import co.touchlab.kermit.Logger
-import com.anopticlabs.gravel.pkjs.FixedNetworkDenyEnforcement
+import com.anopticlabs.gravel.pkjs.UnreportedNetworkDenyEnforcement
 import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
 import io.rebble.libpebblecommon.ErrorTracker
 import io.rebble.libpebblecommon.Housekeeping
@@ -528,7 +528,7 @@ class LibPebble3(
             transcriptionProvider: TranscriptionProvider,
             injectedPKJSHttpInterceptors: InjectedPKJSHttpInterceptors = InjectedPKJSHttpInterceptors(emptyList()),
             // Gravel: an embedder that reports nothing gets no PebbleKit JS for network-denied apps.
-            networkDenyEnforcement: NetworkDenyEnforcement = FixedNetworkDenyEnforcement(primaryLayerActive = false),
+            networkDenyEnforcement: NetworkDenyEnforcement = UnreportedNetworkDenyEnforcement,
         ): LibPebble {
             koin = initKoin(defaultConfig, webServices, appContext, tokenProvider, proxyTokenProvider, transcriptionProvider, injectedPKJSHttpInterceptors, networkDenyEnforcement)
             // Reads the persisted config (not defaultConfig), but must still precede anything that

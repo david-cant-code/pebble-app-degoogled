@@ -26,6 +26,20 @@ class UdpSocketFilterHostTest {
         assertEquals(mismatch, UdpSocketFilter.lastResult)
     }
 
+    // pack() in socket_filter.c: kind << 40 | reason << 32 | detail.
+    @Test
+    fun theResolverCheckReasonsDecode() {
+        fun unsupported(reason: Long, detail: Int) = (3L shl 40) or (reason shl 32) or detail.toLong()
+        assertEquals(
+            InstallResult.Unsupported(UnsupportedReason.ResolverUnreachable, 111),
+            UdpSocketFilter.decode(unsupported(3, 111)),
+        )
+        assertEquals(
+            InstallResult.Unsupported(UnsupportedReason.ResolverUncheckable, 110),
+            UdpSocketFilter.decode(unsupported(4, 110)),
+        )
+    }
+
     @Test
     fun anArmDeviceWithoutTheLibraryReportsItMissing() {
         assertEquals(

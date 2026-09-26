@@ -630,8 +630,8 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     action = { nav.navigateTo(PebbleNavBarRoutes.AppstoreSettingsRoute()) },
                 ) },
                 // Fork: entry point to the watchapp/watchface phone-side permission
-                // controls (internet + location, global defaults and per-app) and the
-                // PebbleKit companion toggles.
+                // controls (internet + location, global defaults and per-app), the
+                // PebbleKit companion toggles and the switch for Network-denied code.
                 navBarNav?.let { nav -> basicSettingsActionItem(
                     title = "Watch App Permissions",
                     description = "Control internet, location and companion app access for watchfaces and apps",

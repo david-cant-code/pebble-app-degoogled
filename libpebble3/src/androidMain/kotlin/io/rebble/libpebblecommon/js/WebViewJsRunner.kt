@@ -104,7 +104,8 @@ class WebViewJsRunner(
 
     // Fixed in start() from the same grant read that seeds networkAllowed, and never changed:
     // a denied session runs the watchapp's script in a sandboxed frame under the host page
-    // (DESIGN_NOTES.md, watchapp network gate). A grant change restarts the session.
+    // (DESIGN_NOTES.md, watchapp network gate). A grant change the lifecycle sees restarts the
+    // session, and endGrantedSessionOnDenial ends one built as granted once its grant is denied.
     @Volatile
     internal var denyConstruction: Boolean = false
         private set
@@ -117,6 +118,7 @@ class WebViewJsRunner(
         const val STARTUP_URL = "file:///android_asset/webview_startup.html"
         private val PAGE_LOAD_TIMEOUT = 15.seconds
         private val FRAME_EVAL_TIMEOUT = 10.seconds
+        private val PERSIST_TIMEOUT = 3.seconds
         private const val DENY_VIEW_WIDTH_PX = 320
         private const val DENY_VIEW_HEIGHT_PX = 240
         private const val DENY_HOST_PAGE_ASSET = "webview_deny_host.html"
@@ -155,8 +157,11 @@ class WebViewJsRunner(
 
     private val frameEvalResults = ConcurrentHashMap<String, CompletableDeferred<String>>()
 
-    // Main thread only. The stop() persist wait, parked so a renderer exit can release it.
+    // Main thread only. The persist wait, parked so a renderer exit can release it.
     private var persistWait: CancellableContinuation<Unit>? = null
+
+    // Main thread only. Set once endGrantedSessionOnDenial starts, while its save still holds the view.
+    private var ending = false
 
     // The live-toggle collector launched in start(), kept so stop() can cancel it (see there).
     private var networkPermissionCollector: Job? = null
@@ -262,6 +267,7 @@ class WebViewJsRunner(
     // Main thread only. The dead state: not ready, no WebView, until the lifecycle stops the session.
     private fun endSession(view: WebView) {
         _readyState.value = false
+        geolocationInterface.endWatches()
         releasePersistWait()
         view.destroy()
         synchronized(initializedLock) {
@@ -410,7 +416,7 @@ class WebViewJsRunner(
 
     private fun restoreLocalStorage() {
         runBlocking(Dispatchers.Main) {
-            webView?.evaluateJavascript("""
+            webView?.takeIf { !ending }?.evaluateJavascript("""
                 (function() {
                     window.localStorage.clear();
                     const localStorageData = JSON.parse(window._localStorage.restoreState());
@@ -470,10 +476,11 @@ class WebViewJsRunner(
         val uuid = Uuid.parse(appInfo.uuid)
         networkAllowed = watchappPermissions.isWatchappPermissionGranted(uuid, LockerAppPermissionType.Network)
         denyConstruction = !networkAllowed
-        // CompanionAppLifecycleManager decides the same from an earlier read of the grant; this
-        // is the read the session is built from.
-        if (!shouldRunPkjs(hasPkjs = true, networkAllowed, networkDenyEnforcement.primaryLayerActive)) {
-            logger.w { "Not loading ${appInfo.longName} (${appInfo.uuid}): Network is denied and the primary deny layer is not active" }
+        // CompanionAppLifecycleManager decides the same from earlier reads of the grant and the
+        // switch; these are the reads the session is built from.
+        val switchOn = libPebble.config.value.watchConfig.deniedPkjsWithoutPrimaryLayer
+        if (!shouldRunPkjs(hasPkjs = true, networkAllowed, networkDenyEnforcement, switchOn)) {
+            logger.w { "Not loading ${appInfo.longName} (${appInfo.uuid}): Network is denied, the primary deny layer is not active and the switch is off or does not apply" }
             return
         }
         // Below the gate's return, so a session refused there installs no override
@@ -500,8 +507,7 @@ class WebViewJsRunner(
             }
         }
         // Track live toggles: a change in the resolved grant (per-app override or the
-        // global default) re-caches the value and re-applies/clears the proxy while the
-        // app keeps running.
+        // global default) re-caches the value and re-applies/clears the proxy.
         networkPermissionCollector = scope.launch {
             watchappPermissions.watchappPermissionGranted(uuid, LockerAppPermissionType.Network)
                 .collect { allowed ->
@@ -510,12 +516,15 @@ class WebViewJsRunner(
                     }
                     networkAllowed = allowed
                     applyNetworkProxy(allowed)
+                    if (!allowed && !denyConstruction) endGrantedSessionOnDenial()
                 }
         }
 
         loadApp(jsPath.toString())
         scope.launch {
-            if (withTimeoutOrNull(PAGE_LOAD_TIMEOUT) { pageLoaded.await() } == null) {
+            if (withTimeoutOrNull(PAGE_LOAD_TIMEOUT) { pageLoaded.await() } == null &&
+                synchronized(initializedLock) { webView != null }
+            ) {
                 logger.e {
                     "Startup page never loaded (provider=${webViewProvider()}): PKJS for " +
                             "${appInfo.longName} will never become ready"
@@ -577,30 +586,38 @@ class WebViewJsRunner(
         }
 
     // Called on the main thread. With no WebView left nothing would resume the wait, so it is
-    // skipped; onRenderProcessGone also releases a wait that is already parked.
+    // skipped; onRenderProcessGone also releases a wait that is already parked. Bounded, because
+    // a page can keep its main thread busy for as long as it likes. The script clears only the
+    // page's storage, so the native store changes only in saveState's single call.
     private suspend fun persistLocalStorage() {
         val view = webView
         if (rendererGone || view == null) {
             logger.d { "Skipping persistLocalStorage: no usable WebView" }
             return
         }
-        suspendCancellableCoroutine { cont ->
-            persistWait = cont
-            view.evaluateJavascript("""
-                (function() {
-                    const data = {};
-                    for (let i = 0; i < window.localStorage.length; i++) {
-                        const key = window.localStorage.key(i);
-                        const value = window.localStorage.getItem(key);
-                        data[key] = value;
-                    }
-                    window.localStorage.clear();
-                    window._localStorage.saveState(JSON.stringify(data));
-                })();
-                    """.trimIndent()
-            ) {
-                releasePersistWait()
+        val saved = withTimeoutOrNull(PERSIST_TIMEOUT) {
+            suspendCancellableCoroutine { cont ->
+                persistWait = cont
+                view.evaluateJavascript("""
+                    (function() {
+                        const data = {};
+                        for (let i = 0; i < window.localStorage.length; i++) {
+                            const key = window.localStorage.key(i);
+                            const value = window.localStorage.getItem(key);
+                            data[key] = value;
+                        }
+                        Storage.prototype.clear.call(window.localStorage);
+                        window._localStorage.saveState(JSON.stringify(data));
+                    })();
+                        """.trimIndent()
+                ) {
+                    releasePersistWait()
+                }
             }
+        }
+        if (saved == null) {
+            persistWait = null
+            logger.w { "localStorage save for ${appInfo.uuid} did not finish within $PERSIST_TIMEOUT" }
         }
     }
 
@@ -644,8 +661,12 @@ class WebViewJsRunner(
             } catch (e: Exception) {
                 logger.e(e) { "Error during WebView teardown; destroying anyway" }
             } finally {
-                // destroy() must always run, even if the pre-destroy teardown fails
+                // destroy() must always run, even if the pre-destroy teardown fails. The field is
+                // cleared in the same main-thread task, so no main-thread task runs between the two.
                 webView?.destroy()
+                synchronized(initializedLock) {
+                    webView = null
+                }
                 // Clear any black-hole proxy this app set, so the process-global
                 // override never outlives the session and starves a later WebView
                 // (config page or the next app). Deliberately the LAST teardown step,
@@ -658,13 +679,28 @@ class WebViewJsRunner(
                     .onFailure { logger.w(it) { "Failed to clear network proxy on stop" } }
             }
         }
-        synchronized(initializedLock) {
-            webView = null
+    }
+
+    // A session built as granted has no sandboxed frame and no response header, so a denial ends
+    // it, as a renderer exit does, without waiting for the lifecycle's restart, which does not come
+    // when the lifecycle's grant watcher never sees the grant differ from the value it started
+    // from. The save runs after the collector's proxy call. Must stay NonCancellable: stop()
+    // cancels the collector and then saves too, and a second save would store the localStorage
+    // this one emptied.
+    private suspend fun endGrantedSessionOnDenial() {
+        withContext(NonCancellable + Dispatchers.Main) {
+            if (webView == null) return@withContext
+            logger.w { "Network grant for ${appInfo.longName} (${appInfo.uuid}) denied in a session built as granted; ending the session" }
+            ending = true
+            _readyState.value = false
+            if (restoreCompleted) persistLocalStorage()
+            webView?.let { endSession(it) }
         }
     }
 
     private suspend fun loadApp(url: String) {
-        check(webView != null) { "WebView not initialized" }
+        // endGrantedSessionOnDenial can end the session before this runs.
+        if (webView == null) return
         withContext(Dispatchers.Main) {
             if (denyConstruction) {
                 webView?.loadUrl(DENY_HOST_PAGE_URL)
@@ -698,45 +734,51 @@ class WebViewJsRunner(
     }
 
     override suspend fun loadAppJs(jsUrl: String) {
-        webView?.let { webView ->
-            if (!denyConstruction) restoreLocalStorage()
+        // The session ends on the main thread, so each main-thread block here and in
+        // restoreLocalStorage reads the view again and returns once the session has ended or is ending.
+        if (webView == null) {
+            logger.w { "Not loading the app script: the session has ended" }
+            return
+        }
+        if (!denyConstruction) restoreLocalStorage()
 
-            if (jsUrl.isBlank() || !jsUrl.endsWith(".js")) {
-                logger.e { "loadUrl passed to loadAppJs empty or invalid" }
-                return
-            }
+        if (jsUrl.isBlank() || !jsUrl.endsWith(".js")) {
+            logger.e { "loadUrl passed to loadAppJs empty or invalid" }
+            return
+        }
 
-            if (denyConstruction) {
-                withContext(Dispatchers.Main) {
-                    evaluateInPage(LOAD_APP_SCRIPT_IN_FRAME)
-                    webView.evaluateJavascript("document.title = ${Json.encodeToString("PKJS: ${appInfo.longName}")};", null)
-                }
-                return
-            }
-
-            val urlAsUri = Uri.fromFile(File(jsUrl)).toString()
-
+        if (denyConstruction) {
             withContext(Dispatchers.Main) {
-                webView.evaluateJavascript(
-                        """
-                            (() => {
-                                const signalLoaded = () => {
-                                    _Pebble.signalAppScriptLoadedByBootstrap();
-                                }
-                                const head = document.getElementsByTagName("head")[0];
-                                const script = document.createElement("script");
-                                script.type = "text/javascript";
-                                script.onreadystatechange = signalLoaded;
-                                script.onload = signalLoaded;
-                                script.charset = "utf-8";
-                                script.src = ${Json.encodeToString(urlAsUri)};
-                                head.appendChild(script);
-                            })();
-                            """.trimIndent()
-                ) { value -> logger.d { "added app script tag" } }
-                webView.evaluateJavascript("document.title = ${Json.encodeToString("PKJS: ${appInfo.longName}")};", null)
+                val view = webView?.takeIf { !ending } ?: return@withContext
+                evaluateInPage(LOAD_APP_SCRIPT_IN_FRAME)
+                view.evaluateJavascript("document.title = ${Json.encodeToString("PKJS: ${appInfo.longName}")};", null)
             }
-        } ?: error("WebView not initialized")
+            return
+        }
+
+        val urlAsUri = Uri.fromFile(File(jsUrl)).toString()
+
+        withContext(Dispatchers.Main) {
+            val view = webView?.takeIf { !ending } ?: return@withContext
+            view.evaluateJavascript(
+                    """
+                        (() => {
+                            const signalLoaded = () => {
+                                _Pebble.signalAppScriptLoadedByBootstrap();
+                            }
+                            const head = document.getElementsByTagName("head")[0];
+                            const script = document.createElement("script");
+                            script.type = "text/javascript";
+                            script.onreadystatechange = signalLoaded;
+                            script.onload = signalLoaded;
+                            script.charset = "utf-8";
+                            script.src = ${Json.encodeToString(urlAsUri)};
+                            head.appendChild(script);
+                        })();
+                        """.trimIndent()
+            ) { value -> logger.d { "added app script tag" } }
+            view.evaluateJavascript("document.title = ${Json.encodeToString("PKJS: ${appInfo.longName}")};", null)
+        }
     }
 
     override suspend fun signalInterceptResponse(callbackId: String, result: InterceptResponse) {
@@ -779,10 +821,10 @@ class WebViewJsRunner(
         Handler(Looper.getMainLooper()).post { markReadyUnlessEnded() }
     }
 
-    // Main thread only, where endSession clears the view: a session it has ended is not marked
-    // ready afterwards.
+    // Main thread only, where endSession clears the view and endGrantedSessionOnDenial sets ending:
+    // a session endSession has ended, or endGrantedSessionOnDenial is ending, is not marked ready.
     private fun markReadyUnlessEnded() {
-        if (webView != null) _readyState.value = true
+        if (webView != null && !ending) _readyState.value = true
     }
 
     override suspend fun signalNewAppMessageData(data: String?): Boolean {

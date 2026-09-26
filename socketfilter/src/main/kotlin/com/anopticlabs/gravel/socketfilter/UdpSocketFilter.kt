@@ -17,17 +17,32 @@ sealed interface InstallResult {
      */
     data class Refused(val stage: RefusalStage, val detail: Int) : InstallResult
 
-    /** This environment cannot carry the filter. */
+    /**
+     * Not installed. For [UnsupportedReason.ResolverUnreachable] and
+     * [UnsupportedReason.ResolverUncheckable] it reports this call's resolver check, which another
+     * call can answer differently; for the other reasons, this environment cannot carry the filter.
+     */
     data class Unsupported(val reason: UnsupportedReason, val detail: Int) : InstallResult
 }
 
 enum class RefusalStage { ProbeSignaled, ProbeFailed, NoNewPrivs, SeccompCall, ThreadSync, PostCheck }
 
-enum class UnsupportedReason { LibraryMissing, ArchitectureMismatch, KernelLacksFilterMode }
+enum class UnsupportedReason {
+    LibraryMissing,
+    ArchitectureMismatch,
+    KernelLacksFilterMode,
+
+    /** With the filter on, the platform's DNS client did not reach the system resolver; detail is its errno. */
+    ResolverUnreachable,
+
+    /** The resolver check gave no answer; detail is an errno, such as ENOSYS before Android 10 or ETIMEDOUT past its wait. */
+    ResolverUncheckable,
+}
 
 /** Socket creation outcomes from one thread: 0 for created, otherwise the errno. */
 data class SelfTestReport(val datagram: List<Int>, val others: List<Int>) {
-    val datagramRefused: Boolean get() = datagram.all { it == OsConstants.EACCES }
+    // Mirrors REFUSAL_ERRNO in socket_filter.c.
+    val datagramRefused: Boolean get() = datagram.all { it == OsConstants.EPROTONOSUPPORT }
     val othersCreated: Boolean get() = others.all { it == 0 }
 }
 
@@ -48,7 +63,12 @@ object UdpSocketFilter {
     var lastResult: InstallResult? = null
         private set
 
-    /** Idempotent and safe from any thread; a second program is never stacked. */
+    /**
+     * Returns AlreadyInstalled once the program is attached; until then each call tries again. Safe
+     * from any thread; a second program is never stacked. Installs only where
+     * the platform's DNS client, tried first on a thread that carries the filter alone, still
+     * reaches the system resolver.
+     */
     fun install(): InstallResult = install(SELF_EXE)
 
     // The path and the ABI list are parameters so a test can present another architecture.
@@ -122,6 +142,8 @@ object UdpSocketFilter {
     private val UNSUPPORTED_REASONS = mapOf(
         1 to UnsupportedReason.ArchitectureMismatch,
         2 to UnsupportedReason.KernelLacksFilterMode,
+        3 to UnsupportedReason.ResolverUnreachable,
+        4 to UnsupportedReason.ResolverUncheckable,
     )
 
     private external fun nativeInstall(exePath: String): Long

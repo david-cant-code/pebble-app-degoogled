@@ -7,10 +7,33 @@ package com.anopticlabs.gravel.pkjs
 interface NetworkDenyEnforcement {
     /** Fixed for the life of the process. */
     val primaryLayerActive: Boolean
+
+    /**
+     * Whether, while the primary layer is not active, WatchConfig.deniedPkjsWithoutPrimaryLayer
+     * may let a Network-denied app's PebbleKit JS side run. May change between reads.
+     */
+    val switchMayRunDeniedPkjs: Boolean get() = false
 }
 
-class FixedNetworkDenyEnforcement(override val primaryLayerActive: Boolean) : NetworkDenyEnforcement
+/** What libpebble3 assumes where the embedding app reports nothing: fails closed. */
+object UnreportedNetworkDenyEnforcement : NetworkDenyEnforcement {
+    override val primaryLayerActive = false
+}
 
-/** A Network-denied app's PebbleKit JS side runs only where the primary layer is active. */
-fun shouldRunPkjs(hasPkjs: Boolean, networkGranted: Boolean, primaryLayerActive: Boolean): Boolean =
-    hasPkjs && (networkGranted || primaryLayerActive)
+class FixedNetworkDenyEnforcement(
+    override val primaryLayerActive: Boolean,
+    override val switchMayRunDeniedPkjs: Boolean = false,
+) : NetworkDenyEnforcement
+
+/** Whether WatchConfig.deniedPkjsWithoutPrimaryLayer decides anything in this process. */
+val NetworkDenyEnforcement.deniedPkjsSwitchApplies: Boolean
+    get() = !primaryLayerActive && switchMayRunDeniedPkjs
+
+/** [switchOn] is WatchConfig.deniedPkjsWithoutPrimaryLayer. */
+fun shouldRunPkjs(
+    hasPkjs: Boolean,
+    networkGranted: Boolean,
+    enforcement: NetworkDenyEnforcement,
+    switchOn: Boolean,
+): Boolean = hasPkjs &&
+    (networkGranted || enforcement.primaryLayerActive || (enforcement.deniedPkjsSwitchApplies && switchOn))

@@ -176,10 +176,11 @@ immediately (a watchface can hold a watch for days) and re-granting
 restarts it. Denial is reported to the JS callback as a geolocation
 error in both cases.
 
-**Network enforcement is layered** (per the defense-in-depth rule; on a
-WebView that supports proxy override, with at least one deterministic cover
-for every socket type, and `KNOWN_ISSUES.md` records what a WebView without
-it leaves open). Three layers act on
+**Network enforcement is layered** (per the defense-in-depth rule; where
+the UDP filter below is installed and the WebView supports proxy override,
+with at least one deterministic cover for every socket type;
+`KNOWN_ISSUES.md` records what a WebView without proxy override, and a
+phone where the filter has never installed, leave open). Three layers act on
 the WebView's requests; the UDP socket filter and the denied-session page's
 response header, both below, are two more:
 
@@ -215,12 +216,21 @@ response header, both below, are two more:
    `PROXY_OVERRIDE` feature; the degraded case is in `KNOWN_ISSUES.md`.
 
 A change of the app's Network grant while it is running, in either
-direction, also restarts its PKJS session (`launchNetworkGrantWatcher`;
+direction, also restarts its PKJS session once the grant watcher sees it
+(`launchNetworkGrantWatcher`, counting from the lifecycle's own grant
+read, which decides whether the session gets a PebbleKit JS side;
 `CompanionAppLifecycleManager` funnels the restart through the same
-serially processed stream as watch-side app switches). What a session
-sets up for the grant is fixed when it starts, and an app that fetches
-only at launch never touches the network again after its first attempt
-fails.
+serially processed stream as watch-side app switches). What a session sets
+up for the grant is fixed when it starts, and an app that fetches only at
+launch never touches the network again after its first attempt fails. The
+runner also ends a session built as granted once its live collector sees
+the grant denied (`endGrantedSessionOnDenial`), after running the
+`localStorage` save that `stop()` runs, which gives up after three seconds
+so a page that keeps its main thread busy cannot hold off the end. That
+also covers a denial the grant watcher never sees as a change from the
+value it started from. A session built as denied whose grant turns allowed
+without the watcher seeing a change keeps the denied construction until it
+is rebuilt (`KNOWN_ISSUES.md`).
 
 The phone-side interceptor path (`PrivatePKJSInterface.onIntercepted`,
 which the weather interceptors use to fetch on the app's behalf) is gated
@@ -240,39 +250,64 @@ control.
 **Surfaces.** Settings > Apps > Watch App Permissions
 (`WatchappPermissionsScreen`) holds the global defaults and an app list;
 the per-app tri-state controls live on each app's detail page
-(`WatchappPermissionControls`, reused by the list). Store listings gain an
+(`WatchappPermissionControls`, reused by the list). Where the switch for
+Network-denied sessions (below) applies, the screen holds it too. Where
+the primary layer is not active, an app's per-app controls say, while its
+Network grant is off, what applies to its code (`deniedPkjsNotice`) and link
+to the KNOWN_ISSUES.md entry at the build's release tag, or at master for any
+other build (`knownIssuesUrl`, `KnownIssuesLinksTest`). Store listings gain an
 honest disclosure that code the app runs inside Gravel can reach the
 internet, and the location capability description states the real "may send
 it to outside servers" flow. A one-time "What's New" dialog announces the
 deny-by-default change to existing users (`WhatsNewDialog`).
 
-**UDP socket filter.** Under the three layers above can sit a
-process-wide one: `:socketfilter` provides a seccomp filter that refuses
-the creation of `AF_INET` and `AF_INET6` datagram sockets in the app's
-process for as long as it runs, whatever a watchapp's grant says (costs
-and limits in `KNOWN_ISSUES.md`). The app does not install it at present,
-because it stops name lookups on LineageOS-based systems (`KNOWN_ISSUES.md`,
-"The UDP filter is off"), so the layer reports "not active" and no
-Network-denied session starts.
+**UDP socket filter.** Under the three layers above sits a process-wide
+one where the platform allows it: `:socketfilter` installs a seccomp
+filter in `MainApplication.attachBaseContext` that refuses the creation of
+`AF_INET` and `AF_INET6` datagram sockets in the app's process for as long
+as it runs, whatever a watchapp's grant says (costs and limits in
+`KNOWN_ISSUES.md`). The install first attaches the filter to a thread of
+its own and checks from there that the platform's DNS client still
+reaches the system resolver (`resolver_check` in `socket_filter.c`); where
+it does not, as on LineageOS and CalyxOS (`KNOWN_ISSUES.md`, "The UDP
+filter is off on LineageOS and CalyxOS"), the filter is not installed and
+the layer reports "not active".
 libpebble3 does not depend on the module: the app reports the install
 result through `NetworkDenyEnforcement`, a `LibPebble3.create` parameter
-whose default is "not active". When it is not active,
-`CompanionAppLifecycleManager.createCompanionApps` builds no PebbleKit JS
-session for an app whose Network grant is denied (`shouldRunPkjs`), and the
-grant watcher restarts the session once the grant changes.
-`WebViewJsRunner.start` makes the same check on the grant read its session
-is built from, and loads nothing when it fails.
+whose default is "not active", with the switch below not applying.
+`MainApplication.onCreate` records each install in a marker file in
+`noBackupFilesDir` (`recordUdpFilterInstall`), and the app's binding
+(`udpFilterEnforcement`) lets the switch apply only where the layer is not
+active, no install has been recorded, and the WebView's major version is
+at least `HEADER_MIN_WEBVIEW_MAJOR`, from which the header below is on by
+default. Where the
+layer is not active,
+`CompanionAppLifecycleManager.createCompanionApps` builds a PebbleKit JS
+session for an app whose Network grant is denied only where the switch
+applies and `WatchConfig.deniedPkjsWithoutPrimaryLayer` is on
+(`shouldRunPkjs`; a switch in Watch App Permissions, on by default, shown
+only where it applies). The grant watcher restarts the session once it
+sees the grant change (above). For a Network-denied session,
+`launchDeniedPkjsSwitchWatcher` restarts it once its first read, or a
+config change, answers differently from the build whether it would get its
+PebbleKit JS side; a change in whether the switch applies, such as a
+WebView update, is read only then (`KNOWN_ISSUES.md`). `WebViewJsRunner.start` makes the same check on the
+grant and the switch it reads itself, and loads nothing when it fails.
 
 **Denied-session page.** A session that starts with the Network grant
 denied is built differently from a granted one (`denyConstruction`, fixed
-in `WebViewJsRunner.start`; the grant watcher above is what lets it be
-fixed). Its top document is a host page served by the runner's own
-interceptor at `https://pkjs.gravel.invalid/host.html`, the only URL that
-interceptor serves while the grant stays denied (`planPkjsRequest`), and
+in `WebViewJsRunner.start`; the grant watcher and the runner's end of a
+granted session, above, are what let it be fixed). Its top document is a
+host page served by the runner's own interceptor at
+`https://pkjs.gravel.invalid/host.html`, the only URL that interceptor
+serves while the grant stays denied (`planPkjsRequest`), and
 that response and every 403 of
 the session carry a `Connection-Allowlist` header with an empty allowlist
 and WebRTC blocked (source cited at the constant in `PkjsRequestPlan.kt`;
-WebView version caveat in `KNOWN_ISSUES.md`). The host page holds no
+WebView version caveat in `KNOWN_ISSUES.md`). `DeniedSessionWebRtcTest`
+checks on a device, in a process without the UDP filter and on WebView 152
+or newer, that a WebRTC offer in the frame gathers no candidate (a renderer
+exit counts as refused). The host page holds no
 watchapp script. It creates one `sandbox="allow-scripts"` `srcdoc` frame,
 and `startup.js` and the app's script run there, read as text through
 `_Pebble` bridge methods that take no argument. Native calls reach the
@@ -296,7 +331,10 @@ settings page each handle `onRenderProcessGone`; left unhandled, a WebView
 renderer's exit ends the app process (source cited at `WebViewJsRunner`'s
 override). The runner does not restart a PebbleKit JS session whose
 renderer exits (`KNOWN_ISSUES.md`), `PebbleWebview` shows a message in
-place of the page, and the settings page closes with a message.
+place of the page, and the settings page closes with a message. A
+session ended this way, by the document-commit guard, or by
+`endGrantedSessionOnDenial` also stops its location watches
+(`GeolocationInterface.endWatches`).
 
 **Dependency.** `androidx.webkit` (1.16.0) is added for `ProxyController`,
 and the runner also logs its multi-process query at session start: current

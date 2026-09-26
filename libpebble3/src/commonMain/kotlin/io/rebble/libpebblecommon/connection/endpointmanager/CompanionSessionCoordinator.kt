@@ -1,6 +1,9 @@
 package io.rebble.libpebblecommon.connection.endpointmanager
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
+import com.anopticlabs.gravel.pkjs.shouldRunPkjs
+import io.rebble.libpebblecommon.LibPebbleConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
@@ -123,9 +126,9 @@ internal class CompanionSessionCoordinator(
 }
 
 /**
- * Emits once each time the upstream grant differs from the value before it, starting from
- * [builtWith], the grant the session was built with. Repeated equal values are ignored: the
- * resolved grant flow re-emits on unrelated permission-table and config writes.
+ * Emits once each time the upstream value differs from the one before it, starting from
+ * [builtWith], the value the session was built with. Repeated equal values are ignored: the
+ * resolved grant flow and the config re-emit on unrelated writes.
  */
 internal fun Flow<Boolean>.grantChanges(builtWith: Boolean): Flow<Unit> = flow {
     var previous = builtWith
@@ -154,4 +157,43 @@ internal fun CoroutineScope.launchNetworkGrantWatcher(
     }
 }
 
+/**
+ * Requests a restart of [app]'s Network-denied session [sessionGeneration] each time the answer to
+ * whether such a session gets its PebbleKit JS side differs from the one before, starting from
+ * [builtWith], whether this one got it. The answer is read at the first collection and at each
+ * config change only, so a change in whether the switch applies waits for one of those. A read that
+ * throws counts as "does not get it". The runner reads the switch again as it
+ * starts (the gap: KNOWN_ISSUES.md, "A toggle flipped off and on across a session's start leaves
+ * it inert").
+ */
+internal fun CoroutineScope.launchDeniedPkjsSwitchWatcher(
+    config: Flow<LibPebbleConfig>,
+    enforcement: NetworkDenyEnforcement,
+    builtWith: Boolean,
+    app: Uuid,
+    sessionGeneration: Long,
+    requestRestart: (app: Uuid, generation: Long) -> Unit,
+): Job = launch {
+    config
+        .map {
+            try {
+                shouldRunPkjs(
+                    hasPkjs = true,
+                    networkGranted = false,
+                    enforcement = enforcement,
+                    switchOn = it.watchConfig.deniedPkjsWithoutPrimaryLayer,
+                )
+            } catch (e: RuntimeException) {
+                switchWatcherLogger.w(e) { "Could not read whether $app's Network-denied session runs its PebbleKit JS side" }
+                false
+            }
+        }
+        .grantChanges(builtWith)
+        .collect {
+            switchWatcherLogger.d { "Whether $app's Network-denied session runs its PebbleKit JS side changed; requesting restart" }
+            requestRestart(app, sessionGeneration)
+        }
+}
+
 private val watcherLogger = Logger.withTag("NetworkGrantWatcher")
+private val switchWatcherLogger = Logger.withTag("DeniedPkjsSwitchWatcher")

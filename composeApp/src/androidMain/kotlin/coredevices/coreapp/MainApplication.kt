@@ -25,6 +25,10 @@ import coil3.gif.GifDecoder
 import coil3.memory.MemoryCache
 import coil3.request.crossfade
 import coil3.svg.SvgDecoder
+import com.anopticlabs.gravel.pkjs.recordUdpFilterInstall
+import com.anopticlabs.gravel.pkjs.webViewMajorVersion
+import com.anopticlabs.gravel.socketfilter.InstallResult
+import com.anopticlabs.gravel.socketfilter.UdpSocketFilter
 import coredevices.ExperimentalDevices
 import coredevices.coreapp.di.androidDefaultModule
 import coredevices.coreapp.di.apiModule
@@ -58,6 +62,19 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     private val coreConfigHolder: CoreConfigHolder by inject()
     private val pebbleBackgroundManager: PebbleBackgroundManager by inject()
 
+    // Gravel: set once in attachBaseContext; null in the speech engine's isolated process.
+    private var udpFilterResult: InstallResult? = null
+
+    // Gravel: a socket that exists before the filter is outside it, so nothing may precede this
+    // install in the process: no WebView, no Koin start, no network client. attachBaseContext
+    // runs before every content provider and library initializer (android16-release,
+    // ActivityThread.handleBindApplication). The isolated engine process gets no filter.
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+        if (runningInIsolatedProcess()) return
+        udpFilterResult = UdpSocketFilter.install()
+    }
+
     override fun onCreate() {
         super.onCreate()
         // Fork: the speech engine's isolated process instantiates this class
@@ -80,6 +97,9 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             )
         }
         initLogging()
+        logUdpFilterResult()
+        // Gravel: kept across process starts; see udpFilterEnforcement.
+        recordUdpFilterInstall(udpFilterResult, noBackupFilesDir)
         // Fork: installs upgraded from pre-strip builds still hold the
         // Firebase SDKs' persisted refresh token and Firestore cache, and the
         // strip removed every code path that could clear them; see
@@ -108,6 +128,14 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         scheduleBackgroundJob(AppContext(this), coreConfigHolder.config.value)
         commonAppDelegate.init()
         pebbleBackgroundManager.monitorToStartBackground()
+    }
+
+    // The install runs before logging exists, so its result is written here, into the log
+    // that bug reports carry.
+    private fun logUdpFilterResult() {
+        val line = "UDP socket filter: $udpFilterResult abis=${Build.SUPPORTED_ABIS.joinToString()} " +
+            "sdk=${Build.VERSION.SDK_INT} kernel=${System.getProperty("os.version")} webview=${webViewMajorVersion()}"
+        if (udpFilterResult == InstallResult.Installed) logger.i { line } else logger.w { line }
     }
 
     private fun dumpPreviousExitInfo() {

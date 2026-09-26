@@ -126,6 +126,12 @@ data class WatchConfig(
     val classicPebbleKitEnabled: Boolean = false,
     /** Fork: whether PebbleKit 2 is reachable. On by default: its entry points check the caller. */
     val pebbleKit2Enabled: Boolean = true,
+    /**
+     * Gravel: whether a watchapp whose Network grant is denied still runs its PebbleKit JS where
+     * the primary deny layer is not active, if the embedding app lets this switch apply
+     * ([com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement.switchMayRunDeniedPkjs]).
+     */
+    val deniedPkjsWithoutPrimaryLayer: Boolean = true,
 )
 
 class WatchConfigFlow(val flow: StateFlow<LibPebbleConfig>) {

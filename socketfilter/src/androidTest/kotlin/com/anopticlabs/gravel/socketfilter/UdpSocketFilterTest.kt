@@ -1,6 +1,8 @@
 package com.anopticlabs.gravel.socketfilter
 
 import android.os.Build
+import android.system.ErrnoException
+import android.system.Os
 import android.system.OsConstants
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assume.assumeTrue
@@ -11,6 +13,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
+import java.net.UnknownHostException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -66,13 +69,60 @@ class UdpSocketFilterTest {
             InstallResult.Unsupported(UnsupportedReason.ArchitectureMismatch, 0),
             UdpSocketFilter.install(elfHeaderForAnotherMachine().path),
         )
+        // The IPv6 socket is refused only if the check's thread carries the filter.
+        ProbeTestHooks.setProbeBehavior(4, 0)
+        assertEquals(
+            InstallResult.Unsupported(UnsupportedReason.ResolverUnreachable, OsConstants.ECONNREFUSED),
+            UdpSocketFilter.install(),
+        )
+        ProbeTestHooks.setProbeBehavior(5, 0)
+        assertEquals(
+            InstallResult.Unsupported(UnsupportedReason.ResolverUncheckable, OsConstants.ETIMEDOUT),
+            UdpSocketFilter.install(),
+        )
+        ProbeTestHooks.setProbeBehavior(0, 0)
+        awaitThreadGone(RESOLVER_CHECK_THREAD)
+        // The platform's DNS client, not a test mode, declines here (dns_open_proxy honors it);
+        // before Android 10 the check has no android_res_nsend to call.
+        assertEquals(
+            if (Build.VERSION.SDK_INT < 29) {
+                InstallResult.Unsupported(UnsupportedReason.ResolverUncheckable, OsConstants.ENOSYS)
+            } else {
+                InstallResult.Unsupported(UnsupportedReason.ResolverUnreachable, OsConstants.ENOSYS)
+            },
+            withResolverProxyOff { UdpSocketFilter.install() },
+        )
+        awaitThreadGone(RESOLVER_CHECK_THREAD)
         assertEquals(
             listOf(0, 0, 0, 0),
             assertNotNull(UdpSocketFilter.selfTest()).datagram,
             "a refused install left a filter behind",
         )
 
-        assertEquals(InstallResult.Installed, UdpSocketFilter.install())
+        // What the real check must answer: whether a lookup works from a thread carrying the filter.
+        val lookupUnderFilter = if (lookupBefore == "resolved") lookupOnAFilteredThread("example.net") else null
+        // The check's thread outlives its answer, as it can by chance; the install still goes in.
+        ProbeTestHooks.setProbeBehavior(6, 0)
+        val result = try {
+            UdpSocketFilter.install()
+        } finally {
+            ProbeTestHooks.setProbeBehavior(0, 0)
+        }
+        if (result != InstallResult.Installed) {
+            release.countDown()
+            if (Build.VERSION.SDK_INT < 29) {
+                assertEquals(InstallResult.Unsupported(UnsupportedReason.ResolverUncheckable, OsConstants.ENOSYS), result)
+            } else {
+                assertEquals(UnsupportedReason.ResolverUnreachable, (result as? InstallResult.Unsupported)?.reason, "$result")
+                assertTrue(lookupUnderFilter != "resolved", "the check declined, but a lookup under the filter resolved")
+            }
+            assertEquals(listOf(0, 0, 0, 0), assertNotNull(UdpSocketFilter.selfTest()).datagram)
+            if (lookupBefore == "resolved") assertEquals("resolved", lookupOutcome("example.org"))
+            println("The resolver check declined on this device ($result); the installed-filter checks did not run")
+            return
+        }
+        lookupUnderFilter?.let { assertEquals("resolved", it, "the filter installed, but a lookup under it failed") }
+            ?: println("No name resolution on this device; the check's answer not compared with a lookup")
         assertEquals(InstallResult.Installed, UdpSocketFilter.lastResult)
 
         val after = assertNotNull(UdpSocketFilter.selfTest())
@@ -88,6 +138,9 @@ class UdpSocketFilterTest {
                 }
             }
         }
+        val inProcess = withResolverProxyOff { runCatching { InetAddress.getByName("in-process.example.com") }.exceptionOrNull() }
+        assertTrue(inProcess is UnknownHostException, "an in-process lookup failed with $inProcess")
+        assertEquals(OsConstants.EPROTONOSUPPORT, errnoCause(inProcess), "an in-process lookup did not meet the filter")
         if (lookupBefore == "resolved") {
             assertEquals(lookupBefore, lookupOutcome("example.org"), "a name lookup failed under the filter")
         } else {
@@ -181,6 +234,46 @@ class UdpSocketFilterTest {
     private fun lookupOutcome(host: String): String =
         runCatching { InetAddress.getByName(host) }.fold({ "resolved" }, { it.javaClass.name })
 
+    // ANDROID_DNS_MODE=local makes the netd client decline the resolver proxy (android16-release,
+    // netd, client/NetdClient.cpp, dns_open_proxy), so bionic's own resolver runs in this process.
+    // Changes the process environment: keep other name lookups out of this test while it runs.
+    private fun <T> withResolverProxyOff(block: () -> T): T {
+        val previous = Os.getenv(DNS_MODE)
+        Os.setenv(DNS_MODE, "local", true)
+        return try {
+            block()
+        } finally {
+            if (previous == null) Os.unsetenv(DNS_MODE) else Os.setenv(DNS_MODE, previous, true)
+        }
+    }
+
+    private fun errnoCause(failure: Throwable?): Int? =
+        generateSequence(failure) { it.cause }.filterIsInstance<ErrnoException>().firstOrNull()?.errno
+
+    private fun lookupOnAFilteredThread(host: String): String {
+        var outcome = "not run"
+        thread(name = ORACLE_THREAD) {
+            val error = ProbeTestHooks.attachFilterToThisThread()
+            outcome = if (error == 0) lookupOutcome(host) else "attach failed: $error"
+        }.join(30_000)
+        awaitThreadGone(ORACLE_THREAD)
+        assertTrue(!outcome.startsWith("attach failed"), "the oracle's thread got no filter: $outcome")
+        return outcome
+    }
+
+    // A thread that still carries its own filter fails the install's thread sync (set_filter_synced
+    // in socket_filter.c waits out only the current check's thread).
+    private fun awaitThreadGone(name: String) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        fun alive() = File("/proc/self/task").listFiles().orEmpty().any { task ->
+            runCatching { File(task, "comm").readText().trim() }.getOrNull() == name
+        }
+        while (alive()) {
+            assertTrue(System.nanoTime() < deadline, "thread $name still running")
+            Thread.sleep(20)
+        }
+    }
+
     // Per-thread filter counts, where the kernel reports them (Seccomp_filters in the task status).
     private fun seccompFilterCounts(): Map<String, Int> =
         File("/proc/self/task").listFiles().orEmpty().mapNotNull { task ->
@@ -230,5 +323,8 @@ class UdpSocketFilterTest {
         const val AF_NETLINK = 16L
         const val AF_BLUETOOTH = 31L
         const val EM_X86_64: Byte = 62
+        const val DNS_MODE = "ANDROID_DNS_MODE"
+        const val RESOLVER_CHECK_THREAD = "gravel-dnscheck" // RESOLVER_CHECK_THREAD_NAME in socket_filter.c
+        const val ORACLE_THREAD = "filter-oracle"
     }
 }

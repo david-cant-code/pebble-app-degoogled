@@ -9,16 +9,16 @@ import kotlin.test.assertTrue
  * Source sentinel for Gravel's call sites in the upstream-owned
  * `CompanionAppLifecycleManager`, which no unit test can construct (Room and WebView
  * dependencies): in `handleNewRunningApp` the one-shot read of the Network grant and the
- * PebbleKit toggle and Network grant watcher launches, and in `createCompanionApps` the
- * `shouldRunPkjs` gate and the PebbleKit toggle session gate. A sync merge that resolves any of
- * these to upstream's text removes the call, which the called functions' own tests cannot notice.
+ * PebbleKit toggle, Network grant and denied-session switch watcher launches, and in
+ * `createCompanionApps` the `shouldRunPkjs` gate and the PebbleKit toggle session gate. A sync
+ * merge that resolves any of these to upstream's text removes the call, which the called
+ * functions' own tests cannot notice.
  *
  * The checks match text with line comments removed. Each watcher's arguments are matched inside
  * that watcher's own call or block. Not checked: the session generation the watchers are given,
  * text inside a block comment, which would satisfy a check, and which function the matched text
  * sits in: every check but the watchers' arguments is satisfied by a match anywhere in the file.
- * [knownBadEditsAreNoticed] applies seven known-bad edits to the real source, which trip nine
- * of the seventeen checks.
+ * [knownBadEditsAreNoticed] applies known-bad edits to the real source; not every check has one.
  */
 class CompanionSessionGateSentinelTest {
 
@@ -91,10 +91,40 @@ class CompanionSessionGateSentinelTest {
         check(!code.contains("denyToAllowTransitions"), "upstream sync brought back the one-direction restart")
 
         check(
+            Regex("""val\s+pkjsRunning\s*=\s*newApps\s*\.\s*any\s*\{\s*it\s+is\s+PKJSApp\s*\}""").containsMatchIn(code),
+            "pkjsRunning no longer says whether the session got its PebbleKit JS side",
+        )
+        val switchWatcherBlock = enclosedBy(
+            code,
+            Regex("""if\s*\(\s*pbw\s*\.\s*hasPKJS\s*&&\s*!\s*networkGranted\s*\)\s*\{"""),
+        ).orEmpty()
+        val switchWatcher = enclosedBy(switchWatcherBlock, Regex("""activeAppScope\s*\.\s*launchDeniedPkjsSwitchWatcher\(""")).orEmpty()
+        check(
+            switchWatcher.isNotEmpty() &&
+                Regex("""^activeAppScope\s*\.\s*launchDeniedPkjsSwitchWatcher\(""").containsMatchIn(switchWatcherBlock.trim()),
+            "handleNewRunningApp no longer launches the denied-session switch watcher on the session scope " +
+                "for every Network-denied app with a PebbleKit JS side",
+        )
+        check(
+            Regex("""config\s*=\s*libPebbleConfigFlow\s*\.\s*flow\s*,""").containsMatchIn(switchWatcher),
+            "the switch watcher no longer watches the live config",
+        )
+        check(
+            Regex("""enforcement\s*=\s*networkDenyEnforcement\s*,""").containsMatchIn(switchWatcher),
+            "the switch watcher no longer decides with the enforcement the session was built under",
+        )
+        check(
+            Regex("""builtWith\s*=\s*pkjsRunning\s*,""").containsMatchIn(switchWatcher),
+            "the switch watcher's baseline is no longer whether the session got its PebbleKit JS side",
+        )
+        check(ownApp.containsMatchIn(switchWatcher), "the switch watcher no longer names the session's own app")
+        check(restartCallback.containsMatchIn(switchWatcher), "the switch watcher no longer asks the session coordinator for the restart")
+
+        check(
             Regex(
-                """val\s+runPkjs\s*=\s*shouldRunPkjs\(\s*pbw\s*\.\s*hasPKJS\s*,\s*networkGranted\s*,\s*networkDenyEnforcement\s*\.\s*primaryLayerActive\s*\)""",
+                """val\s+runPkjs\s*=\s*shouldRunPkjs\(\s*pbw\s*\.\s*hasPKJS\s*,\s*networkGranted\s*,\s*networkDenyEnforcement\s*,\s*watchConfig\s*\.\s*deniedPkjsWithoutPrimaryLayer\s*,?\s*\)""",
             ).containsMatchIn(code),
-            "createCompanionApps no longer consults shouldRunPkjs",
+            "createCompanionApps no longer consults shouldRunPkjs with the switch from its config snapshot",
         )
         check(
             Regex("""val\s+pkjsApp\s*=\s*if\s*\(\s*runPkjs\s*\)""").containsMatchIn(code),
@@ -133,36 +163,64 @@ class CompanionSessionGateSentinelTest {
 
     @Test
     fun knownBadEditsAreNoticed() {
-        val edits: Map<String, (String) -> String> = mapOf(
-            "the one-shot read takes the Location grant" to {
+        val edits: Map<String, Pair<String, (String) -> String>> = mapOf(
+            "the one-shot read takes the Location grant" to ("reads the app's Network grant once" to {
                 it.edited(".isWatchappPermissionGranted(lockerEntry.id, LockerAppPermissionType.Network)", ".isWatchappPermissionGranted(lockerEntry.id, LockerAppPermissionType.Location)")
-            },
-            "the grant watcher watches the Location grant" to {
+            }),
+            "the grant watcher watches the Location grant" to ("no longer watches the app's Network grant" to {
                 it.edited(".watchappPermissionGranted(lockerEntry.id, LockerAppPermissionType.Network)", ".watchappPermissionGranted(lockerEntry.id, LockerAppPermissionType.Location)")
-            },
-            "the grant watcher names another app" to {
+            }),
+            "the grant watcher names another app" to ("the grant watcher no longer names the session's own app" to {
                 val call = "activeAppScope.launchNetworkGrantWatcher("
                 it.substringBefore(call) + call + it.substringAfter(call).edited("app = lockerEntry.id,", "app = Uuid.NIL,")
-            },
-            "the two watchers' baselines are swapped" to {
+            }),
+            "the two watchers' baselines are swapped" to ("baseline" to {
                 it.edited(toggleWatcherBaseline, "builtWith = SWAP,")
                     .edited(grantWatcherBaseline, toggleWatcherBaseline)
                     .edited("builtWith = SWAP,", grantWatcherBaseline)
-            },
-            "the PebbleKit JS session is created and not returned" to {
+            }),
+            "the PebbleKit JS session is created and not returned" to ("no longer returns the PebbleKit JS session" to {
                 it.edited("pkjsApp?.let { add(it) }", "// pkjsApp?.let { add(it) }")
-            },
-            "the toggle watcher loses its restart callback" to {
+            }),
+            "the toggle watcher loses its restart callback" to ("the toggle watcher no longer asks the session coordinator" to {
                 it.edited("requestRestart = sessionCoordinator::requestRestart,", "requestRestart = { _, _ -> },")
-            },
-            "the grant watcher launches for every app" to {
+            }),
+            "the grant watcher launches for every app" to ("Network grant watcher on the session scope" to {
                 it.edited("if (pbw.hasPKJS) {", "run {")
-            },
+            }),
+            "the switch watcher launches only for granted sessions" to ("denied-session switch watcher on the session scope" to {
+                it.edited("if (pbw.hasPKJS && !networkGranted) {", "if (pbw.hasPKJS && networkGranted) {")
+            }),
+            "the switch watcher launches only where the switch applies at the build" to ("denied-session switch watcher on the session scope" to {
+                it.edited(
+                    "if (pbw.hasPKJS && !networkGranted) {",
+                    "if (pbw.hasPKJS && !networkGranted && networkDenyEnforcement.deniedPkjsSwitchApplies) {",
+                )
+            }),
+            "the switch watcher launches under a nested applicability guard" to ("denied-session switch watcher on the session scope" to {
+                it.edited(
+                    "if (pbw.hasPKJS && !networkGranted) {\n                activeAppScope.launchDeniedPkjsSwitchWatcher(",
+                    "if (pbw.hasPKJS && !networkGranted) {\n                if (networkDenyEnforcement.deniedPkjsSwitchApplies) activeAppScope.launchDeniedPkjsSwitchWatcher(",
+                )
+            }),
+            "the switch watcher starts from the opposite value" to ("whether the session got its PebbleKit JS side" to {
+                it.edited("builtWith = pkjsRunning,", "builtWith = !pkjsRunning,")
+            }),
+            "the switch watcher starts from the switch snapshot" to ("whether the session got its PebbleKit JS side" to {
+                it.edited("builtWith = pkjsRunning,", "builtWith = watchConfig.deniedPkjsWithoutPrimaryLayer,")
+            }),
+            "the switch watcher decides with a fail-closed stand-in" to ("enforcement the session was built under" to {
+                it.edited("enforcement = networkDenyEnforcement,", "enforcement = UnreportedNetworkDenyEnforcement,")
+            }),
+            "the gate ignores the switch" to ("consults shouldRunPkjs with the switch" to {
+                it.edited("networkDenyEnforcement, watchConfig.deniedPkjsWithoutPrimaryLayer)", "networkDenyEnforcement, true)")
+            }),
         )
-        for ((name, edit) in edits) {
+        for ((name, case) in edits) {
+            val (expected, edit) = case
             val edited = edit(source)
             assertNotEquals(source, edited, name)
-            assertTrue(problems(edited).isNotEmpty(), "went unnoticed: $name")
+            assertTrue(problems(edited).any { expected in it }, "went unnoticed: $name, ${problems(edited)}")
         }
     }
 
@@ -178,7 +236,7 @@ class CompanionSessionGateSentinelTest {
                         "                activeAppScope.launchNetworkGrantWatcher(\n                    grant = grantFlow,",
                 )
             },
-            "a third watcher reuses the restart callback" to {
+            "another watcher reuses the restart callback" to {
                 it.edited(
                     "            if (pbw.hasPKJS) {",
                     "            activeAppScope.launchAnotherWatcher(requestRestart = sessionCoordinator::requestRestart)\n            if (pbw.hasPKJS) {",

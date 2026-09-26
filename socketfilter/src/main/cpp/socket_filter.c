@@ -1,7 +1,10 @@
 // Installs a process-wide seccomp filter that makes socket(AF_INET or AF_INET6, SOCK_DGRAM)
-// fail with EACCES, and lets every other system call through. One-way for the life of the
-// process. The Kotlin side (UdpSocketFilter) decodes the packed results.
+// fail with EPROTONOSUPPORT, and lets every other call of this library's architecture through.
+// One-way for the life of the process. The install goes ahead only where the platform's DNS
+// client, tried on a thread that carries the filter alone, still reaches the system resolver.
+// The Kotlin side (UdpSocketFilter) decodes the packed results.
 
+#include <android/multinetwork.h>
 #include <elf.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -9,6 +12,7 @@
 #include <linux/audit.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -19,6 +23,7 @@
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 // The audit architecture the kernel reports for this ABI and the matching ELF machine. A
@@ -40,7 +45,11 @@
 #error "socket_filter.c assumes a little-endian seccomp_data layout"
 #endif
 
-#define RET_REFUSE (SECCOMP_RET_ERRNO | (EACCES & SECCOMP_RET_DATA))
+// Never EACCES or EPERM: libcore raises a failed name lookup as a SecurityException when errno
+// holds either (android16-release, libcore, Inet6AddressImpl.lookupHostByName). Mirrored in
+// SelfTestReport.datagramRefused.
+#define REFUSAL_ERRNO EPROTONOSUPPORT
+#define RET_REFUSE (SECCOMP_RET_ERRNO | (REFUSAL_ERRNO & SECCOMP_RET_DATA))
 #define ARG_LOW(n) (offsetof(struct seccomp_data, args) + (n) * sizeof(uint64_t))
 // The kernel's SOCK_TYPE_MASK: the type without SOCK_NONBLOCK and SOCK_CLOEXEC.
 #define SOCKET_TYPE_MASK 0xf
@@ -77,7 +86,12 @@ enum {
     STAGE_THREAD_SYNC = 4,
     STAGE_POST_CHECK = 5,
 };
-enum { REASON_ARCHITECTURE_MISMATCH = 1, REASON_KERNEL_LACKS_FILTER_MODE = 2 };
+enum {
+    REASON_ARCHITECTURE_MISMATCH = 1,
+    REASON_KERNEL_LACKS_FILTER_MODE = 2,
+    REASON_RESOLVER_UNREACHABLE = 3,
+    REASON_RESOLVER_UNCHECKABLE = 4,
+};
 
 // The probe child's exit code when PR_SET_NO_NEW_PRIVS failed; above every errno it can report.
 #define PROBE_EXIT_NO_NEW_PRIVS 200
@@ -92,7 +106,6 @@ static jlong pack(int kind, int sub, int detail) {
 // ENOSYS: no seccomp system call. EINVAL: the kernel did not take this call; a build without
 // filter mode answers that way, and it is one of several paths that do (linux v6.1,
 // kernel/seccomp.c, seccomp_set_mode_filter). The packed reason stands for any of them.
-// probe() and install_locked() pass the same flags and program.
 static jlong seccomp_error(int error) {
     if (error == ENOSYS || error == EINVAL) {
         return pack(KIND_UNSUPPORTED, REASON_KERNEL_LACKS_FILTER_MODE, error);
@@ -100,6 +113,7 @@ static jlong seccomp_error(int error) {
     return pack(KIND_REFUSED, STAGE_SECCOMP_CALL, error);
 }
 
+// probe()'s child tries every flags value passed here first (UdpFilterInstallSentinelTest).
 static long set_filter(unsigned int flags) {
     struct sock_fprog program = {.len = FILTER_PROGRAM_LENGTH, .filter = filter_program};
     return syscall(__NR_seccomp, SECCOMP_SET_MODE_FILTER, flags, &program);
@@ -125,8 +139,10 @@ static bool exe_machine_matches(const char *path) {
 
 #ifndef NDEBUG
 // Debug builds only: lets a test make the probe child die of SIGSYS (1) or exit with
-// probe_test_exit_code (2) in place of the real calls, or make a post-check that saw EACCES
-// report probe_test_exit_code in its place (3).
+// probe_test_exit_code (2) in place of the real calls, make a post-check that saw the refusal
+// report probe_test_exit_code in its place (3), make the resolver check first create an IPv6
+// datagram socket the way LineageOS's DNS client does (4), stall it past its timeout (5), or keep
+// its thread alive for a while after it answers (6).
 static int probe_test_mode = 0;
 static int probe_test_exit_code = 0;
 
@@ -146,10 +162,10 @@ static void trap_self(void) {
 }
 #endif
 
-// Makes the install's two calls in a forked child first, so a platform that answers them with
-// a signal ends the child and not the app. The child runs in a copy of a multithreaded process:
-// async-signal-safe calls only. Returns true when the child made both calls and exited 0;
-// otherwise *failure is the result to report.
+// Makes the install's calls, and the resolver check's flags-0 form of the seccomp call, in a
+// forked child first, so a platform that answers them with a signal ends the child and not the
+// app. The child runs in a copy of a multithreaded process: async-signal-safe calls only.
+// Returns true when the child made every call and exited 0; otherwise *failure is the result.
 static bool probe(jlong *failure) {
     pid_t child = fork();
     if (child < 0) {
@@ -170,6 +186,7 @@ static bool probe(jlong *failure) {
         if (probe_test_mode == 2) _exit(probe_test_exit_code);
 #endif
         if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) _exit(PROBE_EXIT_NO_NEW_PRIVS);
+        if (set_filter(0) != 0) _exit(errno);
         if (set_filter(SECCOMP_FILTER_FLAG_TSYNC) != 0) _exit(errno);
         _exit(0);
     }
@@ -193,21 +210,161 @@ static bool probe(jlong *failure) {
     return false;
 }
 
-static jlong install_locked(const char *exe_path) {
+#define RESOLVER_CHECK_TIMEOUT_MS 1000
+#define RESOLVER_CHECK_THREAD_NAME "gravel-dnscheck"
+
+// A DNS header that claims one question and carries none. The resolver rejects it as unparseable
+// before it sends anything upstream (android16-release, DnsResolver, DnsProxyListener.cpp,
+// ResNSendHandler::run, parseQuery; bionic, libc/dns/nameser/ns_parse.c, ns_initparse).
+static const uint8_t unparseable_query[12] = {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+
+// Attaches the filter to the calling thread alone, then hands the query to the platform's DNS
+// client, which opens the resolver proxy with the same dns_open_proxy that getaddrinfo uses
+// (android16-release, frameworks/base, native/android/net.c, android_res_nsend; netd,
+// client/NetdClient.cpp, resNetworkSend, netdClientInitDnsOpenProxy; bionic,
+// libc/bionic/NetdClient.cpp, netdClientInitImpl; bionic, libc/dns/net/getaddrinfo.c,
+// android_getaddrinfo_proxy). outcome[0..1] is {0, 0} when the client reached the resolver,
+// otherwise {reason, errno}.
+static void check_resolver_on_this_thread(int outcome[3]) {
+    outcome[0] = REASON_RESOLVER_UNCHECKABLE;
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 || set_filter(0) != 0) {
+        outcome[1] = errno;
+        return;
+    }
+#ifndef NDEBUG
+    if (probe_test_mode == 4) {
+        int fd = socket(AF_INET6, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+        if (fd < 0) {
+            outcome[0] = REASON_RESOLVER_UNREACHABLE;
+            outcome[1] = ECONNREFUSED;
+            return;
+        }
+        close(fd);
+    }
+    if (probe_test_mode == 5) {
+        struct timespec stall = {.tv_sec = RESOLVER_CHECK_TIMEOUT_MS / 1000 + 1};
+        nanosleep(&stall, NULL);
+    }
+#endif
+    if (__builtin_available(android 29, *)) {
+        int fd = android_res_nsend(NETWORK_UNSPECIFIED, unparseable_query, sizeof(unparseable_query), 0);
+        if (fd < 0) {
+            outcome[0] = REASON_RESOLVER_UNREACHABLE;
+            outcome[1] = -fd;
+            return;
+        }
+        android_res_cancel(fd);
+        outcome[0] = 0;
+        outcome[1] = 0;
+    } else {
+        outcome[1] = ENOSYS;
+    }
+}
+
+static void *resolver_check_thread(void *arg) {
+    int fd = (int)(intptr_t)arg;
+    pthread_setname_np(pthread_self(), RESOLVER_CHECK_THREAD_NAME);
+    int outcome[3];
+    check_resolver_on_this_thread(outcome);
+    outcome[2] = gettid();
+    send(fd, outcome, sizeof(outcome), MSG_NOSIGNAL);
+    close(fd);
+#ifndef NDEBUG
+    if (probe_test_mode == 6) {
+        struct timespec linger = {.tv_nsec = 200 * 1000000L};
+        nanosleep(&linger, NULL);
+    }
+#endif
+    return NULL;
+}
+
+// poll() for one descriptor, with timeout_ms counted across interruptions.
+static int poll_readable(int fd, int timeout_ms) {
+    struct pollfd ready = {.fd = fd, .events = POLLIN};
+    struct timespec start;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    int remaining = timeout_ms;
+    for (;;) {
+        int count = poll(&ready, 1, remaining);
+        if (count >= 0 || errno != EINTR) return count;
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long elapsed = (now.tv_sec - start.tv_sec) * 1000L + (now.tv_nsec - start.tv_nsec) / 1000000L;
+        if (elapsed >= timeout_ms) return 0;
+        remaining = timeout_ms - (int)elapsed;
+    }
+}
+
+// Runs the check on a thread of its own and waits for it. True when it passed, with *check_thread
+// set to that thread's id; otherwise *failure is the result to report.
+static bool resolver_check(jlong *failure, pid_t *check_thread) {
+    int fds[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) != 0) {
+        *failure = pack(KIND_UNSUPPORTED, REASON_RESOLVER_UNCHECKABLE, errno);
+        return false;
+    }
+    pthread_attr_t attributes;
+    pthread_attr_init(&attributes);
+    pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+    pthread_t thread;
+    int error = pthread_create(&thread, &attributes, resolver_check_thread, (void *)(intptr_t)fds[1]);
+    pthread_attr_destroy(&attributes);
+    if (error != 0) {
+        close(fds[0]);
+        close(fds[1]);
+        *failure = pack(KIND_UNSUPPORTED, REASON_RESOLVER_UNCHECKABLE, error);
+        return false;
+    }
+    int outcome[3] = {REASON_RESOLVER_UNCHECKABLE, ETIMEDOUT, 0};
+    int count = poll_readable(fds[0], RESOLVER_CHECK_TIMEOUT_MS);
+    if (count < 0) {
+        outcome[1] = errno;
+    } else if (count > 0) {
+        ssize_t received = recv(fds[0], outcome, sizeof(outcome), MSG_WAITALL);
+        if (received != (ssize_t)sizeof(outcome)) {
+            outcome[0] = REASON_RESOLVER_UNCHECKABLE;
+            outcome[1] = received < 0 ? errno : EPIPE;
+        }
+    }
+    close(fds[0]);
+    if (outcome[0] == 0) {
+        *check_thread = outcome[2];
+        return true;
+    }
+    *failure = pack(KIND_UNSUPPORTED, outcome[0], outcome[1]);
+    return false;
+}
+
+// The process-wide install. A thread that carries a filter of its own makes the sync fail with
+// that thread's id, and a failed sync attaches nothing (linux v6.1, kernel/seccomp.c,
+// seccomp_can_sync_threads, seccomp_set_mode_filter). The check thread carries one until its exit
+// completes, after it has answered, so the sync is retried while it names that thread.
+static long set_filter_synced(pid_t check_thread) {
+    struct timespec pause = {.tv_nsec = 1000000L};
+    long result = set_filter(SECCOMP_FILTER_FLAG_TSYNC);
+    for (int attempt = 0; check_thread != 0 && result == check_thread && attempt < 1000; attempt++) {
+        nanosleep(&pause, NULL);
+        result = set_filter(SECCOMP_FILTER_FLAG_TSYNC);
+    }
+    return result;
+}
+
+// check_resolver is false only in a forked test child, which must stay async-signal-safe.
+static jlong install_locked(const char *exe_path, bool check_resolver) {
     if (installed) return pack(KIND_ALREADY_INSTALLED, 0, 0);
     if (!exe_machine_matches(exe_path)) {
         return pack(KIND_UNSUPPORTED, REASON_ARCHITECTURE_MISMATCH, 0);
     }
     jlong failure = 0;
+    pid_t check_thread = 0;
     if (!probe(&failure)) return failure;
+    if (check_resolver && !resolver_check(&failure, &check_thread)) return failure;
 
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
         return pack(KIND_REFUSED, STAGE_NO_NEW_PRIVS, errno);
     }
-    // With TSYNC a positive return is the id of a thread that could not be synchronized, and
-    // the filter is then attached to no thread (linux v6.1, kernel/seccomp.c,
-    // seccomp_attach_filter).
-    long result = set_filter(SECCOMP_FILTER_FLAG_TSYNC);
+    // A positive result is a thread that could not be synchronized (set_filter_synced).
+    long result = set_filter_synced(check_thread);
     if (result < 0) return seccomp_error(errno);
     if (result > 0) return pack(KIND_REFUSED, STAGE_THREAD_SYNC, (int)result);
     // The program is attached from here on, whatever the check below reports.
@@ -217,9 +374,9 @@ static jlong install_locked(const char *exe_path) {
     int error = fd >= 0 ? 0 : errno;
     if (fd >= 0) close(fd);
 #ifndef NDEBUG
-    if (probe_test_mode == 3 && error == EACCES) error = probe_test_exit_code;
+    if (probe_test_mode == 3 && error == REFUSAL_ERRNO) error = probe_test_exit_code;
 #endif
-    if (error != EACCES) return pack(KIND_REFUSED, STAGE_POST_CHECK, error);
+    if (error != REFUSAL_ERRNO) return pack(KIND_REFUSED, STAGE_POST_CHECK, error);
     return pack(KIND_INSTALLED, 0, 0);
 }
 
@@ -230,7 +387,7 @@ Java_com_anopticlabs_gravel_socketfilter_UdpSocketFilter_nativeInstall(
     const char *path = (*env)->GetStringUTFChars(env, exe_path, NULL);
     if (path == NULL) return pack(KIND_REFUSED, STAGE_PROBE_FAILED, ENOMEM);
     pthread_mutex_lock(&install_lock);
-    jlong result = install_locked(path);
+    jlong result = install_locked(path, true);
     pthread_mutex_unlock(&install_lock);
     (*env)->ReleaseStringUTFChars(env, exe_path, path);
     return result;
@@ -299,6 +456,16 @@ Java_com_anopticlabs_gravel_socketfilter_UdpSocketFilter_nativeConstants(
 }
 
 #ifndef NDEBUG
+// Attaches the filter to the calling thread alone: 0 or the errno.
+JNIEXPORT jint JNICALL
+Java_com_anopticlabs_gravel_socketfilter_ProbeTestHooks_attachFilterToThisThread(
+    JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) return errno;
+    return set_filter(0) == 0 ? 0 : errno;
+}
+
 JNIEXPORT void JNICALL
 Java_com_anopticlabs_gravel_socketfilter_ProbeTestHooks_setProbeBehavior(
     JNIEnv *env, jobject thiz, jint mode, jint exit_code) {
@@ -324,8 +491,8 @@ Java_com_anopticlabs_gravel_socketfilter_ProbeTestHooks_installTwiceInAChild(
         pid_t child = fork();
         if (child == 0) {
             installed = false;
-            results[0] = install_locked(path);
-            results[1] = install_locked(path);
+            results[0] = install_locked(path, false);
+            results[1] = install_locked(path, false);
             _exit(write(fds[1], results, sizeof(results)) == (ssize_t)sizeof(results) ? 0 : 1);
         }
         close(fds[1]);

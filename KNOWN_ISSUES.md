@@ -132,8 +132,7 @@ the real serial, so companions that stored either keep working.
 
 ## A toggle flipped off and on across a session's start leaves it inert
 
-**Status: accepted; the session fails closed, and the second flip has about
-one dispatch to land in.**
+**Status: accepted; the session fails closed.**
 
 Each session class reads its toggle at `start()` and registers nothing
 while it is off, and the mid-session watcher restarts a session when the
@@ -150,6 +149,15 @@ long as no suspending call is added there. Restarting a session on any
 config write during its start, or having sessions report their `start()`
 decision, are possible changes; neither is made for a fail-closed state
 with a window this short.
+
+The switch for running Network-denied scripts without the UDP filter (see
+"If Android refuses the UDP filter") has the same gap for a watchapp whose
+internet access is off: `CompanionAppLifecycleManager` builds the session
+from one read of the switch and `WebViewJsRunner.start` reads it again, so
+a flip that the second read sees, undone before the switch watcher's first
+collection, leaves the watchapp's phone-side script not running until the
+session is rebuilt. That window also spans the start of the watchapp's
+other phone-side parts.
 
 ## The classic receivers deserialize what the sender puts in the extras
 
@@ -313,22 +321,27 @@ warning when the feature is unavailable. This entry leaves the file if
 minSdk/WebView baseline guarantees `PROXY_OVERRIDE`, or if a WebView-level
 WebSocket intercept becomes available.
 
-## The UDP filter is off
+## The UDP filter is off on LineageOS and CalyxOS
 
-**Status: temporary; the filter returns once Gravel can tell where it stops
-name lookups.**
+**Status: accepted; the platform's name lookups there need to create a UDP
+socket in the app's process.**
 
 On LineageOS and systems built on it, the platform's DNS client creates an
 IPv6 UDP socket before it hands a lookup to the system resolver, and when
 that fails, the lookup runs inside the app over UDP instead (LineageOS
 `lineage-23.0`, `android_system_netd`, `client/NetdClient.cpp`,
 `dns_open_proxy`; `android16-release`, bionic `libc/dns/net/getaddrinfo.c`,
-`android_getaddrinfofornetcontext`). Gravel 0.3.1's filter refused both, so
-name lookups in Gravel failed there and the app closed when it made a web
-request. Gravel does not install the filter on any device at present. While
-it is off, Gravel does not run a watchapp's phone-side script while that
-watchapp's internet access is off, and the entries in this file that
-describe the filter or sessions with Network off do not apply.
+`android_getaddrinfofornetcontext`). CalyxOS's DNS client does the same
+(CalyxOS `platform_system_netd`, `android17`, `client/NetdClient.cpp`,
+`dns_open_proxy`). With the filter installed, name lookups in Gravel fail
+there; Gravel 0.3.1, which installed it without a check, closed on those
+systems when it made a web request. Gravel now installs the filter only
+where a check made on a thread that carries it shows the platform's DNS
+client still reaching the system resolver, which it does not where the
+client makes that test socket.
+Where the filter is not installed, the entries in this file that describe
+it do not apply, and "If Android refuses the UDP filter" says whether a
+watchapp with internet access off runs its phone-side script.
 
 ## No UDP for web content inside Gravel
 
@@ -366,22 +379,39 @@ so neither the filter nor the rest of Gravel's startup runs in it.
 
 ## If Android refuses the UDP filter
 
-**Status: accepted; no affected device is known.**
+**Status: accepted.**
 
-If the platform does not let Gravel install the filter, Gravel does not run
-a watchapp's phone-side script while that watchapp's internet access is
-off. The watchapp's permission controls say so.
+If the platform does not let Gravel install the filter, whether a
+watchapp's phone-side script runs while that watchapp's internet access is
+off depends on whether an install of the filter is recorded on that phone,
+and on the phone's Android System WebView. Gravel records each install it
+makes from this version on. Where none is recorded and the WebView is
+version 152 or newer, a switch in Settings > Apps > Watch App Permissions,
+on by default, decides, and the script runs without the filter (see
+"Where the UDP filter has never installed, WebRTC depends on one layer").
+Otherwise the script does not run and the switch is not shown. A phone
+with no record counts as one where the filter has never installed,
+whatever the reason: no install yet, including after an update from a
+version that kept no record, a record that could not be written, or
+cleared app storage. While a watchapp's internet access is off, its
+permission controls say which applies.
+The install, and the check before it, run at each start of Gravel's
+process, and the answer holds until the next one: when the platform's DNS
+client cannot reach the system resolver at that moment for any reason, or
+the check does not answer in time, the filter stays off for that process.
 
 ## The UDP filter is untested on Android versions before 17
 
 **Status: accepted.**
 
-The filter has been run on hardware on Android 17. On older versions, down
-to Android 8, it has not been tested. If the platform there refuses the
-install, Gravel behaves as described under "If Android refuses the UDP
-filter". On a device that is not ARM, such as an x86 device that runs ARM
-code under translation, Gravel does not install the filter and behaves the
-same way.
+The filter has been run on hardware on Android 17. On Android 10 to 16 it
+has not been tested installed; on LineageOS 22.2, Android 15, the check
+before the install declines it. Before Android 10 Gravel does not install
+it, because that check calls `android_res_nsend`, which Android 10 added
+(NDK `android/multinetwork.h`). If the platform refuses the install,
+Gravel behaves as described under "If Android refuses the UDP filter". On
+a device that is not ARM, such as an x86 device that runs ARM code under
+translation, Gravel does not install the filter and behaves the same way.
 
 ## A watchapp whose WebView renderer exits stays stopped until relaunched
 
@@ -390,18 +420,37 @@ same way.
 Gravel keeps running when a PebbleKit JS session's WebView renderer exits,
 and does not restart that session on its own; opening the app on the watch
 again starts a new one. With Network on, `localStorage` values the script
-set by property assignment rather than by `setItem` are lost in that case;
-with Network off, every change is written through as it happens, so none
-are.
+set by property assignment rather than by `setItem` are lost in that case,
+and also when the session stops or is ended while its page is too busy to
+save them; with Network off, every change is written through as it
+happens, so none are.
 
 ## Changing the Network permission restarts the watchapp's phone-side script
 
-**Status: deliberate.**
+**Status: deliberate; the cases with no restart are accepted and fail closed.**
 
 A change to a watchapp's Network permission, in either direction, stops its
-PebbleKit JS session and starts a new one. Whether a connection opened
-while Network was on is cut in the moment before that restart completes has
-not been measured.
+PebbleKit JS session and starts a new one, except as follows. Where a
+script with Network off does not run ("If Android refuses the UDP filter"),
+turning Network off stops the script and starts none. For a watchapp whose
+Network permission is off, a flip of the switch for running these scripts
+without the UDP filter restarts the session when the flip changes whether
+the script runs. Whether a connection opened before any of these changes is
+cut in the moment before the restart completes has not been measured.
+Turning Network off also ends a script that started with it on, without
+waiting for the restart; until it ends, where the UDP filter is not
+installed, Gravel has no layer against its WebRTC over UDP.
+
+Some changes are not followed by a restart and leave the session failed
+closed, for example a script ended with no new one started, a script whose
+permission is on started as if it were off, or a session with no script
+running. It stays that way until it is rebuilt, for example at the next app
+switch, a reconnection of the watch, or a change that turns its Network
+permission on or off. Where an update of Android System WebView to version
+152 or newer makes the switch apply while Gravel runs, a watchapp with
+Network off whose session started before the update keeps its script off,
+while the switch already shows, until the session is rebuilt as above or,
+for example, the switch is turned off and on again.
 
 ## The WebRTC response-header layer needs WebView 152 or newer
 
@@ -409,16 +458,56 @@ not been measured.
 
 With Network off, Gravel serves the watchapp's page with a
 `Connection-Allowlist` header that allows no connections and switches
-WebRTC off for it. Android System WebView honors the header from version
-152, and Gravel cannot read back whether it is honored. Below version 152
-the header does nothing: the UDP filter still stops WebRTC over UDP, WebRTC
-over TCP is outside the filter and is stopped by the black-hole proxy where
-the WebView supports proxy override (Chromium M153, `refs/branch-heads/8010`,
-`services/network/p2p/socket_tcp.cc`, `P2PSocketTcpBase::Init`, which opens
-the socket through the proxy-resolving socket factory), and on a WebView
-without proxy override (see the WebSocket entry above) WebRTC over TCP has
-no deterministic cover.
-The header is never relied on alone.
+WebRTC off for it. WebView builds of Chromium 152 enable the header by
+default (Chromium M152, `refs/branch-heads/7977`,
+`services/network/public/cpp/features.cc`, `kConnectionAllowlists`, which
+`services/network/public/cpp/parsed_headers.cc` requires before it parses
+the header), as do those of 153 (`refs/branch-heads/8010`, the same
+files), and Gravel cannot read back whether it is honored. Where it is
+honored, the browser does not give the watchapp's frame its P2P socket
+interface (same branch, `content/browser/browser_interface_binders.cc`,
+`should_ban_p2p_for_connection_allowlist`). In Chromium M153, a frame that
+asks for an interface it was not given is reported as sending a bad
+message (`refs/branch-heads/8010`,
+`content/browser/renderer_host/render_frame_host_impl.cc`,
+`RenderFrameHostImpl::ReportNoBinderForInterface`). On WebView 153, when a
+watchapp script with internet access off tried to set up a WebRTC
+connection, its frame asked for that interface and the WebView renderer it
+ran in was ended; the script then stayed stopped as described in "A
+watchapp whose WebView renderer exits stays stopped until relaunched".
+Other WebViews in Gravel can share that renderer (android16-release,
+`WebViewClient.java`, `onRenderProcessGone`). Below version 152 the header
+does nothing:
+where installed, the UDP filter still stops WebRTC over UDP, WebRTC over
+TCP is outside the filter and is stopped by the
+black-hole proxy where the WebView supports proxy override (Chromium M153,
+`refs/branch-heads/8010`, `services/network/p2p/socket_tcp.cc`,
+`P2PSocketTcpBase::Init`, which opens the socket through the
+proxy-resolving socket factory), and on a WebView without proxy override
+(see the WebSocket entry above) WebRTC over TCP has no deterministic cover.
+For phones where the UDP filter has never installed, see "If Android
+refuses the UDP filter" and the next entry.
+
+## Where the UDP filter has never installed, WebRTC depends on one layer
+
+**Status: accepted; the switch below turns it off.**
+
+Where the switch in Settings > Apps > Watch App Permissions applies (see
+"If Android refuses the UDP filter"; LineageOS, systems built on it and
+CalyxOS, with a current WebView, are such phones) and is on, which is the
+default, a watchapp with internet access off still runs its phone-side
+script, without the filter. That script's WebRTC over UDP then depends on
+the header above alone. WebTransport is refused by the black-hole proxy
+where the WebView supports proxy override (Chromium M153,
+`refs/branch-heads/8010`, `net/quic/dedicated_web_transport_http3_client.cc`,
+`DedicatedWebTransportHttp3Client::DoCheckProxyComplete`) and by the
+header's empty allowlist (same branch, `services/network/network_context.cc`,
+`NetworkContext::CreateWebTransport` and
+`NetworkContext::RestrictNetworkForIds`). Web requests over HTTP/3 are
+refused like every other web request; other use of UDP by web content has
+not been checked. No watchapp has been checked for WebRTC use. With the
+switch off, these scripts do not run, and the permission controls of a
+watchapp with internet access off say so.
 
 ## With Network off, PebbleKit JS runs without cookies, IndexedDB or the Cache API
 
