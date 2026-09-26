@@ -37,19 +37,15 @@ private const val PROBE = """
 """
 
 /**
- * WebRTC in a Network-denied session with the Connection-Allowlist header as the only layer
- * against UDP: this test process installs no UDP filter. Under the header the browser does not
- * register the frame's P2P socket interface, and a frame that asks for it is reported as sending
- * a bad message (Chromium M153, refs/branch-heads/8010, content/browser/browser_interface_binders.cc,
- * should_ban_p2p_for_connection_allowlist; content/browser/renderer_host/render_frame_host_impl.cc,
- * RenderFrameHostImpl::ReportNoBinderForInterface), so a renderer exit counts as refused.
+ * WebRTC in a Network-denied session, in this test process, which installs no UDP filter: an offer
+ * in the frame gathers no candidate, and a renderer exit counts as refused (KNOWN_ISSUES.md, "The
+ * WebRTC response-header layer needs WebView 152 or newer").
  */
 @MediumTest
 class DeniedSessionWebRtcTest : PKJSRunnerTests(::createJsRunner, networkGrantedByDefault = false) {
-    // Without internet access the platform refuses the sockets itself, and both cases would say
-    // nothing about the header.
+    // Both cases need inet sockets (the test manifest's INTERNET).
     @Before
-    fun requireAWebViewThatHonorsTheHeaderAndInternetAccess() {
+    fun requireAHeaderVersionWebViewAndInternetAccess() {
         val major = webViewMajorVersion()
         assumeTrue("WebView $major predates the header", (major ?: 0) >= HEADER_MIN_WEBVIEW_MAJOR)
         val context = InstrumentationRegistry.getInstrumentation().context

@@ -389,18 +389,16 @@ makes from this version on. Where none is recorded and the WebView is
 version 152 or newer, a switch in Settings > Apps > Watch App Permissions,
 on by default, decides, and the script runs without the filter (see
 "Where the UDP filter has never installed, WebRTC depends on one layer").
-Otherwise the script does not run and the switch is not shown; Android 9
-and older cannot run that WebView (Chromium M153, `refs/branch-heads/8010`,
-`build/config/android/config.gni`, `default_min_sdk_version` 29). A phone with no record counts as one
-where the filter has never installed, whatever the reason: no install yet,
-including after an update from a version that kept no record, a record
-that could not be written, or cleared app storage. The watchapp's
+Otherwise the script does not run and the switch is not shown. A phone
+with no record counts as one where the filter has never installed,
+whatever the reason: no install yet, including after an update from a
+version that kept no record, a record that could not be written, or
+cleared app storage. While a watchapp's internet access is off, its
 permission controls say which applies.
-The check before the install runs at each start of Gravel's process, and
-its answer holds until the next one: when the platform's DNS client cannot
-reach the system resolver at that moment for any reason, Gravel's own
-network access being blocked for example, or the check does not answer in
-time, the filter stays off for that process.
+The install, and the check before it, run at each start of Gravel's
+process, and the answer holds until the next one: when the platform's DNS
+client cannot reach the system resolver at that moment for any reason, or
+the check does not answer in time, the filter stays off for that process.
 
 ## The UDP filter is untested on Android versions before 17
 
@@ -460,16 +458,26 @@ for example, the switch is turned off and on again.
 
 With Network off, Gravel serves the watchapp's page with a
 `Connection-Allowlist` header that allows no connections and switches
-WebRTC off for it. Android System WebView honors the header from version
-152 (Chrome Platform Status, feature 5175745573945344, Connection
-Allowlists, shipped in WebView 152), and Gravel cannot read back whether it
-is honored. Where it is honored, a watchapp script with internet access off
-that sets up a WebRTC connection ends its session's WebView renderer
-(Chromium M153, `refs/branch-heads/8010`,
-`content/browser/browser_interface_binders.cc`,
-`should_ban_p2p_for_connection_allowlist`), and the script then stays
-stopped as described in "A watchapp whose WebView renderer exits stays
-stopped until relaunched". Below version 152 the header does nothing:
+WebRTC off for it. WebView builds of Chromium 152 enable the header by
+default (Chromium M152, `refs/branch-heads/7977`,
+`services/network/public/cpp/features.cc`, `kConnectionAllowlists`, which
+`services/network/public/cpp/parsed_headers.cc` requires before it parses
+the header), as do those of 153 (`refs/branch-heads/8010`, the same
+files), and Gravel cannot read back whether it is honored. Where it is
+honored, the browser does not give the watchapp's frame its P2P socket
+interface (same branch, `content/browser/browser_interface_binders.cc`,
+`should_ban_p2p_for_connection_allowlist`). In Chromium M153, a frame that
+asks for an interface it was not given is reported as sending a bad
+message (`refs/branch-heads/8010`,
+`content/browser/renderer_host/render_frame_host_impl.cc`,
+`RenderFrameHostImpl::ReportNoBinderForInterface`). On WebView 153, when a
+watchapp script with internet access off tried to set up a WebRTC
+connection, its frame asked for that interface and the WebView renderer it
+ran in was ended; the script then stayed stopped as described in "A
+watchapp whose WebView renderer exits stays stopped until relaunched".
+Other WebViews in Gravel can share that renderer (android16-release,
+`WebViewClient.java`, `onRenderProcessGone`). Below version 152 the header
+does nothing:
 where installed, the UDP filter still stops WebRTC over UDP, WebRTC over
 TCP is outside the filter and is stopped by the
 black-hole proxy where the WebView supports proxy override (Chromium M153,
@@ -498,8 +506,8 @@ header's empty allowlist (same branch, `services/network/network_context.cc`,
 `NetworkContext::RestrictNetworkForIds`). Web requests over HTTP/3 are
 refused like every other web request; other use of UDP by web content has
 not been checked. No watchapp has been checked for WebRTC use. With the
-switch off, these scripts do not run, and the watchapp's permission
-controls say so.
+switch off, these scripts do not run, and the permission controls of a
+watchapp with internet access off say so.
 
 ## With Network off, PebbleKit JS runs without cookies, IndexedDB or the Cache API
 

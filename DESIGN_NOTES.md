@@ -251,10 +251,10 @@ control.
 (`WatchappPermissionsScreen`) holds the global defaults and an app list;
 the per-app tri-state controls live on each app's detail page
 (`WatchappPermissionControls`, reused by the list). Where the switch for
-Network-denied sessions (below) applies, the screen holds it too. Wherever
-the primary layer is not active, the per-app controls say whether the
-app's code runs with Network off (`deniedPkjsNotice`) and link to the
-KNOWN_ISSUES.md entry at the build's release tag, or at master for any
+Network-denied sessions (below) applies, the screen holds it too. Where
+the primary layer is not active, an app's per-app controls say, while its
+Network grant is off, what applies to its code (`deniedPkjsNotice`) and link
+to the KNOWN_ISSUES.md entry at the build's release tag, or at master for any
 other build (`knownIssuesUrl`, `KnownIssuesLinksTest`). Store listings gain an
 honest disclosure that code the app runs inside Gravel can reach the
 internet, and the location capability description states the real "may send
@@ -278,8 +278,9 @@ whose default is "not active", with the switch below not applying.
 `MainApplication.onCreate` records each install in a marker file in
 `noBackupFilesDir` (`recordUdpFilterInstall`), and the app's binding
 (`udpFilterEnforcement`) lets the switch apply only where the layer is not
-active, no install has been recorded, and Android System WebView is new
-enough to honor the header below (`HEADER_MIN_WEBVIEW_MAJOR`). Where the
+active, no install has been recorded, and the WebView's major version is
+at least `HEADER_MIN_WEBVIEW_MAJOR`, from which the header below is on by
+default. Where the
 layer is not active,
 `CompanionAppLifecycleManager.createCompanionApps` builds a PebbleKit JS
 session for an app whose Network grant is denied only where the switch
@@ -304,8 +305,9 @@ that response and every 403 of
 the session carry a `Connection-Allowlist` header with an empty allowlist
 and WebRTC blocked (source cited at the constant in `PkjsRequestPlan.kt`;
 WebView version caveat in `KNOWN_ISSUES.md`). `DeniedSessionWebRtcTest`
-checks on a device, with that header as the only layer, that a WebRTC
-offer in the frame gathers no candidate. The host page holds no
+checks on a device, in a process without the UDP filter and on WebView 152
+or newer, that a WebRTC offer in the frame gathers no candidate (a renderer
+exit counts as refused). The host page holds no
 watchapp script. It creates one `sandbox="allow-scripts"` `srcdoc` frame,
 and `startup.js` and the app's script run there, read as text through
 `_Pebble` bridge methods that take no argument. Native calls reach the

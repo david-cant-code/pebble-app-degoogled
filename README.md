@@ -69,8 +69,7 @@ De-google work is completed, all telemetry is removed. What remains is polish an
     WebView is version 152 or newer, and its WebRTC connections over UDP
     then depend on a single layer, in that WebView, instead of two; a switch
     under Watch App Permissions stops that code from running. With an
-    older WebView, as on Android 9 and older, that code does not run (see
-    `KNOWN_ISSUES.md`).
+    older WebView, that code does not run (see `KNOWN_ISSUES.md`).
   - The app's other exported Android interfaces are authorization-gated or
     removed.
   - Plain-HTTP (cleartext) traffic is blocked app-wide.

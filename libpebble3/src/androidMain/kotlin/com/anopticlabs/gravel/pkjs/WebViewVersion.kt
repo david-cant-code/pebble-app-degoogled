@@ -3,9 +3,9 @@ package com.anopticlabs.gravel.pkjs
 import android.webkit.WebView
 
 /**
- * The WebView version from which the denied-session page's Connection-Allowlist header is honored
- * (KNOWN_ISSUES.md, "The WebRTC response-header layer needs WebView 152 or newer"). Below it the
- * switch would leave WebRTC over UDP with no layer at all.
+ * The WebView version from which the denied-session page's Connection-Allowlist header is on
+ * by default (KNOWN_ISSUES.md, "The WebRTC response-header layer needs WebView 152 or newer").
+ * Below it the switch would leave WebRTC over UDP with no layer at all.
  */
 const val HEADER_MIN_WEBVIEW_MAJOR = 152
 

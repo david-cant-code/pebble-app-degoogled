@@ -25,7 +25,8 @@ fun recordUdpFilterInstall(result: InstallResult?, noBackupDir: File) {
 /**
  * What the UDP socket filter's install [result] means for Network-denied sessions. The switch for
  * them applies only where no install is recorded in [noBackupDir] ([recordUdpFilterInstall]) and
- * the WebView's major version, from [webViewMajor] (null when unknown), carries the header layer.
+ * the WebView's major version, from [webViewMajor] (null when unknown), is at least
+ * [HEADER_MIN_WEBVIEW_MAJOR].
  * The version is read at each check, so the runner's check, made after its WebView is created,
  * reads the provider that session loaded (android16-release, WebView.getCurrentWebViewPackage).
  */

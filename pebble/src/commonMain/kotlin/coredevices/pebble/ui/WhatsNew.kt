@@ -44,8 +44,8 @@ val whatsNewEntries: List<WhatsNewEntry> = listOf(
             "by default, lets watchfaces and apps with internet access turned off still run " +
             "their code inside Gravel. Their real-time connections (the kind video calls use) " +
             "then depend on a single layer, in that WebView, instead of two; turn the switch " +
-            "off to stop that code from running. With an older WebView, as on Android 9 and " +
-            "older, that code does not run, as before.",
+            "off to stop that code from running. With an older WebView, that code does not " +
+            "run, as before.",
     ),
     WhatsNewEntry(
         title = "The UDP block is off for now",
