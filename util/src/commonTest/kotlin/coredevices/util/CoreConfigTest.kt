@@ -1,5 +1,6 @@
 package coredevices.util
 
+import com.russhwolf.settings.MapSettings
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -7,6 +8,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class CoreConfigTest {
+    // Same settings as the Json the app gives CoreConfigHolder (watchModule).
     private val json = Json { ignoreUnknownKeys = true }
 
     @Test
@@ -58,6 +60,14 @@ class CoreConfigTest {
             val name = descriptor.getElementName(index)
             assertTrue(printed.contains("$name="), "toString leaves out $name: $printed")
         }
+    }
+
+    @Test
+    fun storedConfigWithTheRemovedEarlyChannelFieldKeepsItsSettings() {
+        // A decode failure would make CoreConfigHolder fall back to the defaults.
+        val stored = MapSettings("coreapp.config" to """{"fetchWeather":false,"firmwareUpdatesEarlyChannel":true}""")
+        val holder = CoreConfigHolder(defaultValue = CoreConfig(), settings = stored, json = json)
+        assertEquals(false, holder.config.value.fetchWeather)
     }
 
     @Test

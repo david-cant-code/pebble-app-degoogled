@@ -1,6 +1,7 @@
 package coredevices.pebble.firmware
 
 import CoreAppVersion
+import com.anopticlabs.gravel.firmware.PebbleOsChangelogListSource
 import coredevices.pebble.account.PebbleAccount
 import coredevices.pebble.services.PebbleAccountProvider
 import coredevices.pebble.services.PebbleHttpClient
@@ -8,12 +9,14 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import io.rebble.libpebblecommon.connection.FakeLibPebble
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.io.IOException
 import kotlinx.serialization.json.Json
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
@@ -86,3 +89,49 @@ fun releaseJson(
 }
 
 fun releaseList(vararg releases: String): String = "[" + releases.joinToString(",") + "]"
+
+const val CHANGELOG_LIST_PATH = "/repos/david-cant-code/pebble-app-degoogled/contents/pebbleos-changelog.json"
+const val RELEASES_PATH = "/repos/coredevices/PebbleOS/releases"
+
+fun changelogListJson(vararg versions: String): String =
+    """{"schema":1,"source":"https://ndocs.repebble.com/pebbleos-changelog",""" +
+        """"checkedAt":"2026-07-30T09:22:00Z","versions":[${versions.joinToString(",") { "\"$it\"" }}]}"""
+
+/**
+ * api.github.com as the Core-watch update checker uses it: the changelog list, the release
+ * page, and per-tag release lookups, which answer 404 for any tag not in [tagBodies].
+ */
+class FakeGithub(
+    var listBody: String,
+    var pageBody: String,
+    var tagBodies: Map<String, String> = emptyMap(),
+    var listStatus: HttpStatusCode = HttpStatusCode.OK,
+    var pageStatus: HttpStatusCode = HttpStatusCode.OK,
+    var tagStatus: HttpStatusCode = HttpStatusCode.OK,
+    var pageFailure: IOException? = null,
+) {
+    val requests = mutableListOf<HttpRequestData>()
+    val paths: List<String> get() = requests.map { it.url.encodedPath }
+
+    val client: HttpClient = HttpClient(MockEngine { request ->
+        requests += request
+        val path = request.url.encodedPath
+        val tag = path.removePrefix("$RELEASES_PATH/tags/")
+        val json = headersOf(HttpHeaders.ContentType, "application/json")
+        when {
+            path == CHANGELOG_LIST_PATH -> respond(
+                listBody, listStatus,
+                headersOf(HttpHeaders.ContentType, "application/vnd.github.raw+json; charset=utf-8"),
+            )
+            path == RELEASES_PATH -> pageFailure?.let { throw it } ?: respond(pageBody, pageStatus, json)
+            tag != path -> tagBodies[tag]?.let { respond(it, tagStatus, json) }
+                ?: respond("""{"message":"Not Found"}""", HttpStatusCode.NotFound, json)
+            else -> error("unexpected request to ${request.url}")
+        }
+    }) {
+        install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+    }
+
+    fun checker(expectations: FirmwareArtifactExpectations = FirmwareArtifactExpectations()): GithubReleases =
+        GithubReleases(client, expectations, PebbleOsChangelogListSource(client))
+}

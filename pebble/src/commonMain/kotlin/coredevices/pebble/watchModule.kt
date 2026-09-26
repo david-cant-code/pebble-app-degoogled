@@ -2,6 +2,7 @@ package coredevices.pebble
 
 import co.touchlab.kermit.Logger
 import com.algolia.client.api.SearchClient
+import com.anopticlabs.gravel.firmware.PebbleOsChangelogListSource
 import com.anopticlabs.gravel.pkjs.UnreportedNetworkDenyEnforcement
 import coredevices.pebble.health.createPlatformHealthManager
 import coredevices.pebble.account.BootConfigProvider
@@ -22,7 +23,6 @@ import coredevices.pebble.firmware.FirmwareArtifactExpectations
 import coredevices.pebble.firmware.FirmwareUpdateCheck
 import coredevices.pebble.firmware.FirmwareUpdateUiTracker
 import coredevices.pebble.firmware.GithubReleases
-import coredevices.pebble.firmware.firmwareUpdateChannel
 import coredevices.pebble.firmware.RealBatteryChargedNotifier
 import coredevices.pebble.firmware.RealFirmwareUpdateUiTracker
 import coredevices.pebble.firmware.VerifiedFirmwareInstaller
@@ -67,7 +67,6 @@ import coredevices.pebble.weather.OpenWeather25Interceptor
 import coredevices.pebble.weather.WeatherFetcher
 import coredevices.pebble.weather.YahooWeatherInterceptor
 import coredevices.util.CommonBuildKonfig
-import coredevices.util.CoreConfigFlow
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.jordond.compass.geocoder.Geocoder
@@ -212,6 +211,7 @@ val watchModule = module {
     // Fork: Core-watch updates come from the public PebbleOS GitHub releases
     // (fork builds ship no Memfault token, and cohorts rejects Core hardware).
     singleOf(::FirmwareArtifactExpectations)
+    singleOf(::PebbleOsChangelogListSource)
     singleOf(::GithubReleases)
     single {
         // Fork: download+verify+sideload pipeline for firmware installs. Reuses
@@ -231,22 +231,7 @@ val watchModule = module {
             },
         )
     }
-    single {
-        // Fork: the channel provider is a live CoreConfig read; the check
-        // reads it exactly once per check so its cache key and the GitHub
-        // release selection always agree.
-        val coreConfig = get<CoreConfigFlow>()
-        FirmwareUpdateCheck(
-            memfault = get(),
-            engDashOta = get(),
-            cohorts = get(),
-            githubReleases = get(),
-            channel = { coreConfig.value.firmwareUpdateChannel() },
-            coreConfig = coreConfig,
-            coreAnalytics = get(),
-            clock = get(),
-        )
-    }
+    singleOf(::FirmwareUpdateCheck)
     factoryOf(::PebbleFeatures)
     factoryOf(::WeatherFetcher)
     factoryOf(::LanguagePackRepository)

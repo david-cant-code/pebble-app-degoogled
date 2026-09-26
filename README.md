@@ -76,14 +76,17 @@ De-google work is completed, all telemetry is removed. What remains is polish an
 - **Firmware updates without device reporting.** Core watch firmware
   updates come from the official
   [PebbleOS GitHub releases](https://github.com/coredevices/PebbleOS/releases):
-  the release list is fetched anonymously with no device data in the
-  request, the firmware asset is picked on the phone, and every download
-  is verified against the GitHub-declared SHA-256 digest and size plus the
-  firmware bundle's own manifest and CRCs before it is handed to the
-  watch. The default channel offers a release line once its first release
-  has been public for a week, and picks up later hotfix patches within
-  that line immediately; a debug-settings toggle ("Early PebbleOS
-  updates") offers the newest release immediately. Legacy Pebble watches
+  update checks query GitHub anonymously, with no device data in the
+  requests and the same requests whatever the watch runs, the firmware
+  asset is picked on the phone, and every download is verified against the
+  GitHub-declared SHA-256 digest and size plus the firmware bundle's own
+  manifest and CRCs before it is handed to the watch. The app offers the
+  newest version named on Core's public
+  [PebbleOS changelog](https://ndocs.repebble.com/pebbleos-changelog) that
+  is newer than the watch's firmware and has a build for its board with a
+  GitHub-declared digest: a daily job copies the changelog's version
+  numbers to this repository's `firmware-list` branch, and update checks
+  read that copy from GitHub. Legacy Pebble watches
   keep using the Rebble cohorts endpoint. Gravel builds ship no Memfault
   token and make no Memfault requests; upstream's optional `memfaultToken`
   Gradle property would route Core watch update checks through

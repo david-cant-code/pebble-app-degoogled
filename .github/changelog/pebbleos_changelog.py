@@ -4,8 +4,8 @@ The workflow fetches the page once with Notion's loadPageChunk call and passes t
 here. The page has EXPECTED_TABLES tables, and each of their rows names one version in a cell whose
 trimmed text is "PebbleOS vX.Y.Z", optionally with "/N" patch suffixes ("v4.19.1/2" is 4.19.1 and
 4.19.2) or a build suffix ("-core59"). Versions with a build suffix are skipped. A response without
-an empty cursor, with another number of tables, or with a row that is missing or lacks exactly one
-such cell is refused.
+an empty cursor, with another number of tables, or with a row that is missing, lacks exactly one
+such cell or names a version part above MAX_VERSION_PART is refused.
 
 `update` keeps the previous list when the fetch or parse fails or when more than MAX_REMOVED
 versions would disappear from it. It then exits 0 with a warning while the last successful update
@@ -28,7 +28,9 @@ MAX_REMOVED = 2
 FAIL_AFTER = timedelta(hours=36)
 
 VERSION_CELL = re.compile(r"PebbleOS\s*v(\d+)\.(\d+)\.(\d+)((?:/\d+)*)(-[A-Za-z0-9]+)?")
-LISTED_VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+LISTED_VERSION = re.compile(r"(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})")
+# The app reads version parts as 32-bit integers.
+MAX_VERSION_PART = 999_999_999
 TIMESTAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 CLOCK_SKEW = timedelta(minutes=10)
@@ -81,10 +83,11 @@ def parse_versions(page):
             match = matches[0]
             if match.group(5):
                 continue
-            major, minor, patch, extra = match.group(1), match.group(2), match.group(3), match.group(4)
-            versions.add(f"{int(major)}.{int(minor)}.{int(patch)}")
-            for more in filter(None, extra.split("/")):
-                versions.add(f"{int(major)}.{int(minor)}.{int(more)}")
+            major, minor = int(match.group(1)), int(match.group(2))
+            patches = [int(match.group(3))] + [int(more) for more in filter(None, match.group(4).split("/"))]
+            if max([major, minor] + patches) > MAX_VERSION_PART:
+                raise ParseError(f"{where} names a version part above {MAX_VERSION_PART}")
+            versions.update(f"{major}.{minor}.{patch}" for patch in patches)
     return sorted(versions, key=_version_key, reverse=True)
 
 

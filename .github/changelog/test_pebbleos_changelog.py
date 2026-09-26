@@ -62,6 +62,12 @@ class ParseVersionsTest(unittest.TestCase):
         page = _page([("x", [["PebbleOS v4.040.01"]], "-")])
         self.assertEqual(pc.parse_versions(page), ["4.40.1"])
 
+    def test_refuses_a_version_part_above_nine_digits(self):
+        self.assertEqual(pc.parse_versions(_page([("x", [["PebbleOS v4.999999999.0"]], "-")])), ["4.999999999.0"])
+        for cell in ("PebbleOS v4.1000000000.0", "PebbleOS v4.1.0/1000000000"):
+            with self.subTest(cell=cell), self.assertRaisesRegex(pc.ParseError, "above"):
+                pc.parse_versions(_page([("x", [[cell]], "-")]))
+
     def test_skips_build_suffixes_and_ignores_notes_that_mention_versions(self):
         page = _page([
             ("x", [["PebbleOS v4.9.71-stop0"]], "-"),
@@ -125,6 +131,7 @@ class CheckListedTest(unittest.TestCase):
 
     def test_accepts_what_update_writes(self):
         pc.check_listed(self._listed())
+        pc.check_listed(self._listed(versions=["4.999999999.0"]))
 
     def test_refuses_other_shapes(self):
         bad = [
@@ -137,6 +144,7 @@ class CheckListedTest(unittest.TestCase):
             self._listed(versions="4.38.1"),
             self._listed(versions=[4, 38, 1]),
             self._listed(versions=["099.0.0"]),
+            self._listed(versions=["4.1000000000.0"]),
             self._listed(versions=["\u0664.\u0663\u0668.\u0661"]),
             self._listed(schema=True),
             self._listed(schema=1.0),
