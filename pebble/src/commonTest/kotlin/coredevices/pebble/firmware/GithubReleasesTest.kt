@@ -263,15 +263,16 @@ class GithubReleasesTest {
     }
 
     @Test
-    fun prereleaseDraftAndUndatedListedReleasesAreSkipped() = runTest {
+    fun prereleaseDraftUndatedAndMisdatedListedReleasesAreSkipped() = runTest {
         val page = releaseList(
             release("v4.40.0", 0, 'a', prerelease = true),
             release("v4.39.0", 0, 'b', draft = true),
+            """{"tag_name":"v4.38.3","prerelease":false,"draft":false,"published_at":"not-a-date","assets":[${normalAsset("asterix", "v4.38.3", digest('e'), 100)}]}""",
             """{"tag_name":"v4.38.2","prerelease":false,"draft":false,"assets":[${normalAsset("asterix", "v4.38.2", digest('c'), 100)}]}""",
             """{"tag_name":"totally-unparseable","prerelease":false,"draft":false,"published_at":"$TEST_NOW","assets":[]}""",
             release("v4.38.1", 2, 'd'),
         )
-        val gh = github(list = changelogListJson("4.40.0", "4.39.0", "4.38.2", "4.38.1"), page = page)
+        val gh = github(list = changelogListJson("4.40.0", "4.39.0", "4.38.3", "4.38.2", "4.38.1"), page = page)
         val update = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(check(gh, "v4.36.0"))
         assertEquals("v4.38.1", update.version.stringVersion)
         assertEquals(listOf(CHANGELOG_LIST_PATH, RELEASES_PATH), gh.paths)

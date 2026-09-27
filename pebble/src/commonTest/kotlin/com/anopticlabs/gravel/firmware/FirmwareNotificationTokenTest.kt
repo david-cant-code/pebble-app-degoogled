@@ -41,6 +41,22 @@ class FirmwareNotificationTokenTest {
     }
 
     @Test
+    fun withoutAnExpectedTokenThePickerOpensForTheProcessToken() {
+        val route = firmwarePickerRouteForNotification(
+            readExtra = { name ->
+                when (name) {
+                    EXTRA_FIRMWARE_PICKER_WATCH -> "watch-1"
+                    EXTRA_FIRMWARE_PICKER_TOKEN -> FirmwareNotificationToken.value
+                    else -> error(name)
+                }
+            },
+            launchedFromHistory = false,
+            isConnectedCoreWatch = { true },
+        )
+        assertEquals(FirmwarePickerRoute("watch-1"), route)
+    }
+
+    @Test
     fun anyOtherTokenIsHandledAsALink() {
         assertNull(route(tokenExtra = null))
         assertNull(route(tokenExtra = ""))
