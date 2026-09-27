@@ -22,6 +22,28 @@ and the watch's own bootloader validation with recovery fallback
 backstops a bad install. This entry leaves the file when a single-slot
 watch runs the end-to-end pass.
 
+## Update checks share GitHub's anonymous hourly limit
+
+**Status: accepted; the limit is GitHub's and counts per public IP address.**
+
+Core watch update checks and the build picker read GitHub anonymously. GitHub
+allows 60 anonymous API requests per hour for each originating IP address
+(GitHub docs, "Rate limits for the REST API"), so every device behind one
+public address shares that budget. A check makes two or three requests, and a
+failed check is not cached, so it is repeated on the next connection. Past the
+limit, checks and the picker report that they are rate limited until GitHub's
+limit resets. This entry leaves the file if checks move to a source without a
+per-address limit.
+
+## A link from another app can start a firmware update check
+
+**Status: deferred; upstream behavior, to be changed on its own branch.**
+
+Upstream's Rebble sign-in link, which any app can open, runs a firmware update
+check when it is handled. Each check spends part of the shared GitHub limit
+(see "Update checks share GitHub's anonymous hourly limit"). The fix is for the
+link to start no check. This entry leaves the file when it no longer does.
+
 ## Classic PebbleKit broadcasts cannot be restricted to authorized callers
 
 **Status: accepted while the classic toggle is on; the surface is off by
@@ -179,7 +201,7 @@ only:
   workers and leaves classic app start dead until the process restarts, a
   crafted STOP does the same for app stop, each classic session's SEND
   holds another, and on Android 8 to 12L that session's ACK and NACK do
-  too. Cancelling a session does not interrupt a read that is not
+  too. Canceling a session does not interrupt a read that is not
   suspending, so a held worker stays held while sessions are rebuilt around
   it, and libpebble's other work on that dispatcher waits behind whatever
   is still held.
@@ -272,7 +294,7 @@ which is exported with no permission as the PebbleKit 2 protocol requires,
 and learn when the connected-watch list or some watch's running app
 changes. Gravel's provider announces those two collection URIs rather than
 the library's per-watch URI, which would carry the watch's real serial to
-every observer (the library and platform behaviour is cited at
+every observer (the library and platform behavior is cited at
 `PebbleKit2Change`). The timing signal is accepted: suppressing it would
 break companions that observe the provider to refresh, and the same timing
 reaches apps through the classic basalt notifier and broadcasts when that
@@ -287,7 +309,7 @@ can be client-side encrypted (`backup_rules.xml` on API 31 and above,
 `requireFlags` in `res/xml-v28/full_backup_content.xml` on API 28 to 30).
 Android 8.x has no client-side backup encryption, and its rule parser has no
 `requireFlags` to express the condition (it rejects the attribute outright),
-so the only policy-compliant behaviour there is no backup at all:
+so the only policy-compliant behavior there is no backup at all:
 `res/xml/full_backup_content.xml` deliberately allowlists a single path that
 never exists, which disables Auto Backup, the O-era device-to-device
 transfer path, and `adb backup` alike on those devices. `BackupRulesTest`
@@ -590,6 +612,17 @@ branch-referenced entries (pin to a commit or drop; release assets have no
 commit-addressed form, so the digest is the whole fix there), so it is
 deferred as its own change. This entry leaves the file when the catalog
 carries verified digests.
+
+## Opening a language pack file installs it without asking
+
+**Status: deferred; upstream behavior, to be changed on its own branch.**
+
+Gravel opens `.pbl` files that other apps hand to it, and upstream's handler
+sends the pack to the connected watch as soon as the file is opened, with no
+confirmation in the app. Firmware files (`.pbz`) ask first. Packs carry no
+digest (see "Language pack downloads are not digest-pinned"). The fix is a
+confirmation step like the firmware one. This entry leaves the file when
+opening a pack asks before installing.
 
 ## Auto-resume of interrupted firmware updates is inert in this fork
 
