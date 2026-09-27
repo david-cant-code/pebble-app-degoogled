@@ -218,7 +218,9 @@ fun WatchOnboardingScreen(
                                 PebbleElevatedButton(
                                     text = "Choose a PebbleOS build",
                                     onClick = {
-                                        coreNav.navigateTo(FirmwarePickerRoute(connectedWatch.identifier.asString))
+                                        coreNav.navigateTo(
+                                            FirmwarePickerRoute(connectedWatch.identifier.asString, fromOnboarding = true),
+                                        )
                                     },
                                     primaryColor = false,
                                 )

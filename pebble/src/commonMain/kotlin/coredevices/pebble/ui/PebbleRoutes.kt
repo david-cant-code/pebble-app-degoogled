@@ -307,7 +307,7 @@ fun NavGraphBuilder.addPebbleRoutes(
     }
     composable<FirmwarePickerRoute> {
         val route: FirmwarePickerRoute = it.toRoute()
-        FirmwarePickerScreen(route.identifier, coreNav)
+        FirmwarePickerScreen(route.identifier, route.fromOnboarding, coreNav)
     }
     composable<PebbleRoutes.WatchappSettingsRoute> {
         val route: PebbleRoutes.WatchappSettingsRoute = it.toRoute()

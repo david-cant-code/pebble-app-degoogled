@@ -40,10 +40,12 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import coreapp.util.generated.resources.Res
 import coreapp.util.generated.resources.back
+import coredevices.pebble.PebbleDeepLinkHandler
 import coredevices.pebble.firmware.GithubReleases
 import coredevices.pebble.firmware.VerifiedFirmwareInstaller
 import coredevices.pebble.firmware.isCoreDevice
 import coredevices.pebble.rememberLibPebble
+import coredevices.pebble.ui.PebbleNavBarRoutes
 import coredevices.pebble.ui.installStateFor
 import coredevices.ui.PebbleElevatedButton
 import io.rebble.libpebblecommon.connection.CommonConnectedDevice
@@ -65,6 +67,8 @@ import kotlin.uuid.Uuid
 data class FirmwarePickerRoute(
     /** Null opens the picker for the first connected Core watch. */
     val identifier: String? = null,
+    /** Install returns to onboarding, which shows the install's progress, instead of the Devices tab. */
+    val fromOnboarding: Boolean = false,
 ) : CoreRoute
 
 /** The picker serves connected Core watches, whose updates Gravel checks against Core's GitHub releases. */
@@ -122,7 +126,7 @@ private val checkedDateFormat = LocalDate.Format {
 }
 
 @Composable
-fun FirmwarePickerScreen(identifier: String?, coreNav: CoreNav) {
+fun FirmwarePickerScreen(identifier: String?, fromOnboarding: Boolean, coreNav: CoreNav) {
     val libPebble = rememberLibPebble()
     val watches by libPebble.watches.collectAsState()
     val watch = watches.firstOrNull {
@@ -153,7 +157,7 @@ fun FirmwarePickerScreen(identifier: String?, coreNav: CoreNav) {
             if (watch == null) {
                 Text("Connect a Core watch to choose a PebbleOS build.")
             } else {
-                BuildChoices(watch, loaded, coreNav)
+                BuildChoices(watch, loaded, fromOnboarding, coreNav)
             }
             TextButton(onClick = { uriHandler.openUri(CHANGELOG_URL) }) {
                 Text("Open Core's PebbleOS changelog")
@@ -168,10 +172,12 @@ fun FirmwarePickerScreen(identifier: String?, coreNav: CoreNav) {
 private fun BuildChoices(
     watch: CommonConnectedDevice,
     loaded: SnapshotStateMap<ChoicesKey, FirmwareBuildChoicesResult>,
+    fromOnboarding: Boolean,
     coreNav: CoreNav,
 ) {
     val githubReleases: GithubReleases = koinInject()
     val installer: VerifiedFirmwareInstaller = koinInject()
+    val deepLinkHandler: PebbleDeepLinkHandler = koinInject()
     val running = watch.watchInfo.runningFwVersion
     val key = ChoicesKey(watch.identifier.asString, running.stringVersion, running.isRecovery)
     var attempt by remember { mutableIntStateOf(0) }
@@ -236,7 +242,12 @@ private fun BuildChoices(
                     text = "Install PebbleOS ${selected.update.version.stringVersion}",
                     onClick = {
                         installer.install(watch, selected.update)
-                        coreNav.goBack()
+                        if (fromOnboarding) {
+                            coreNav.goBack()
+                        } else {
+                            coreNav.goBackToPebble()
+                            deepLinkHandler.navigateToTab(PebbleNavBarRoutes.WatchesRoute)
+                        }
                     },
                     enabled = !installing,
                     primaryColor = true,
