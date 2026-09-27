@@ -361,9 +361,13 @@ fun connectedWatch(): CommonConnectedDevice? {
     val watchesFiltered = remember {
         libPebble.watches.map { it.filterIsInstance<CommonConnectedDevice>() }
     }
-    val watches by watchesFiltered.collectAsState(null)
+    // Gravel: starts from the current watch list, so a screen that re-enters composition
+    // (WatchOnboardingScreen after the build picker) does not see a disconnect for one frame.
+    val watches by watchesFiltered.collectAsState(
+        libPebble.watches.value.filterIsInstance<CommonConnectedDevice>()
+    )
     val lastConnectedWatch = remember(watches) {
-        watches?.firstOrNull()
+        watches.firstOrNull()
     }
     return lastConnectedWatch
 }
