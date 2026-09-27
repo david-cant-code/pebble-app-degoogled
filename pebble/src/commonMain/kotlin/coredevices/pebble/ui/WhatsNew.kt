@@ -35,12 +35,13 @@ val whatsNewEntries: List<WhatsNewEntry> = listOf(
     WhatsNewEntry(
         title = "PebbleOS updates follow Core's changelog",
         body = "For Core watches, Gravel now offers the newest PebbleOS version on Core's public " +
-            "changelog that has a build for the watch, instead of choosing from GitHub releases by " +
-            "their age. To install a different build, tap the update button on the Devices tab or " +
-            "open Settings > About > Choose a PebbleOS build; builds not on the changelog are " +
-            "marked. The update notification no longer has an Update Now button. For a Core watch, " +
-            "tapping it opens that list, or the Devices tab when the watch is not connected or " +
-            "Gravel has restarted since.",
+            "changelog that has a build for the watch, instead of choosing from GitHub releases " +
+            "by their age. To pick another build newer than the watch's firmware, open Settings " +
+            "> About > Choose a PebbleOS build, or tap the update button on the Devices tab when " +
+            "an update is offered; builds not on the changelog are marked. The update " +
+            "notification no longer has an Update Now button. For a Core watch, tapping it opens " +
+            "that list, or the Devices tab when the watch is not connected or Gravel has " +
+            "restarted since.",
     ),
     WhatsNewEntry(
         title = "The UDP block is back where name lookups allow it",
