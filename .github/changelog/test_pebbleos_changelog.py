@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 import pebbleos_changelog as pc
 
@@ -327,6 +328,25 @@ class RunTest(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertIn("::error::", out)
                 self.assertEqual(self._list()["versions"], previous)
+
+    def test_a_list_over_the_apps_limit_keeps_the_previous_one(self):
+        self._write_list("2026-09-26T09:22:00Z", versions=_versions())
+        patches = "/".join(str(n) for n in range(1, 4500))
+        self._write_page(_page(_main_rows() + [("x", [[f"PebbleOS v4.0.0/{patches}"]], "-")]))
+        code, out = self._update()
+        self.assertEqual(code, 0)
+        self.assertIn("::warning::", out)
+        self.assertEqual(self._list()["versions"], _versions())
+
+    def test_publish_refuses_a_list_over_the_apps_limit(self):
+        listed = {"schema": 1, "source": pc.SOURCE, "checkedAt": self.NOW, "versions": _versions()}
+        size = len((json.dumps(listed, indent=2) + "\n").encode("utf-8"))
+        for limit, expected in ((size - 1, 1), (size, 0)):
+            with self.subTest(limit=limit), mock.patch.object(pc, "MAX_LIST_BYTES", limit):
+                self._write_list("2026-09-26T09:22:00Z", versions=_versions(start_minor=39))
+                code, _ = self._publish(listed)
+                self.assertEqual(code, expected)
+        self.assertEqual(os.path.getsize(self.list_path), size)
 
     def test_publish_leaves_a_newer_list_on_the_branch(self):
         for checked_at in ("2026-09-27T09:22:00Z", "2026-09-27T10:00:00Z"):

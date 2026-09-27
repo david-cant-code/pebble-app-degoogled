@@ -7,11 +7,11 @@ trimmed text is "PebbleOS vX.Y.Z", optionally with "/N" patch suffixes ("v4.19.1
 an empty cursor, with another number of tables, or with a row that is missing, lacks exactly one
 such cell or names a version part above MAX_VERSION_PART is refused.
 
-`update` keeps the previous list when the fetch or parse fails or when more than MAX_REMOVED
-versions would disappear from it. It then exits 0 with a warning while the last successful update
-is at most FAIL_AFTER old, and 1 otherwise. `publish` checks the list `update` produced again,
-against the list on the branch and the clock, and writes it. Messages name rows by position, so no
-text from the page reaches the run log.
+`update` keeps the previous list when the fetch or parse fails, when more than MAX_REMOVED versions
+would disappear from it, or when the new list would be over MAX_LIST_BYTES. It then exits 0 with a
+warning while the last successful update is at most FAIL_AFTER old, and 1 otherwise. `publish`
+checks the list `update` produced again, against the list on the branch and the clock, and writes
+it. Messages name rows by position, so no text from the page reaches the run log.
 """
 
 import argparse
@@ -34,6 +34,8 @@ MAX_VERSION_PART = 999_999_999
 TIMESTAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 CLOCK_SKEW = timedelta(minutes=10)
+# The app refuses a list file over this size (MAX_LIST_BYTES in PebbleOsChangelogList.kt).
+MAX_LIST_BYTES = 64 * 1024
 
 
 class ParseError(Exception):
@@ -133,10 +135,19 @@ def _load_list(list_path):
         return None
 
 
+def _list_text(listed):
+    return json.dumps(listed, indent=2) + "\n"
+
+
+def check_size(listed):
+    size = len(_list_text(listed).encode("utf-8"))
+    if size > MAX_LIST_BYTES:
+        raise ParseError(f"the list would be {size} bytes, over {MAX_LIST_BYTES}")
+
+
 def _write_list(list_path, listed):
     with open(list_path, "w", encoding="utf-8") as f:
-        json.dump(listed, f, indent=2)
-        f.write("\n")
+        f.write(_list_text(listed))
 
 
 def run_update(page_path, status, list_path, now, out=sys.stdout):
@@ -148,6 +159,8 @@ def run_update(page_path, status, list_path, now, out=sys.stdout):
             page = json.load(f)
         versions = parse_versions(page)
         removed = check_update(versions, previous)
+        listed = {"schema": SCHEMA, "source": SOURCE, "checkedAt": now, "versions": versions}
+        check_size(listed)
     except (ParseError, ValueError, OSError, AttributeError, TypeError, KeyError, RecursionError, MemoryError) as e:
         last = previous.get("checkedAt") if previous else None
         if last and _timestamp(now) - _timestamp(last) <= FAIL_AFTER:
@@ -158,7 +171,7 @@ def run_update(page_path, status, list_path, now, out=sys.stdout):
 
     if removed:
         print(f"::warning::No longer on the changelog: {', '.join(removed)}", file=out)
-    _write_list(list_path, {"schema": SCHEMA, "source": SOURCE, "checkedAt": now, "versions": versions})
+    _write_list(list_path, listed)
     print(f"{len(versions)} versions, newest {versions[0]}", file=out)
     return 0
 
@@ -168,6 +181,7 @@ def run_publish(listed_json, list_path, now, out=sys.stdout):
     try:
         listed = json.loads(listed_json)
         check_listed(listed)
+        check_size(listed)
         check_update(listed["versions"], previous)
         checked_at = _timestamp(listed["checkedAt"])
         if checked_at > _timestamp(now) + CLOCK_SKEW:
