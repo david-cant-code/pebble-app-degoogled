@@ -142,11 +142,6 @@ private fun fakePebbleModule(appContext: AppContext) = module {
         }
 
         override fun firmwareUpdateIsInProgress(identifier: PebbleIdentifier) {}
-        override fun updateWatchNow(
-            libPebble: LibPebble,
-            identifier: String
-        ) {
-        }
     }
     single { themeProvider } bind ThemeProvider::class
     single { NotificationScreenViewModel() }

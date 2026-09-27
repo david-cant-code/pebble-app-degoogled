@@ -11,6 +11,8 @@ import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
+import com.anopticlabs.gravel.firmware.FirmwarePickerRoute
+import com.anopticlabs.gravel.firmware.FirmwarePickerScreen
 import io.rebble.libpebblecommon.locker.AppType
 import kotlinx.serialization.Serializable
 import kotlin.uuid.Uuid
@@ -302,6 +304,10 @@ fun NavGraphBuilder.addPebbleRoutes(
     composable<PebbleRoutes.FirmwareSideloadRoute> {
         val route: PebbleRoutes.FirmwareSideloadRoute = it.toRoute()
         DebugFirmwareSideload(route.identifier, coreNav)
+    }
+    composable<FirmwarePickerRoute> {
+        val route: FirmwarePickerRoute = it.toRoute()
+        FirmwarePickerScreen(route.identifier, route.fromOnboarding, coreNav)
     }
     composable<PebbleRoutes.WatchappSettingsRoute> {
         val route: PebbleRoutes.WatchappSettingsRoute = it.toRoute()

@@ -1,5 +1,6 @@
 package coredevices.pebble.firmware
 
+import com.anopticlabs.gravel.firmware.PebbleOsChangelogListSource
 import com.russhwolf.settings.MapSettings
 import coredevices.analytics.CoreAnalytics
 import coredevices.pebble.Platform
@@ -14,16 +15,10 @@ import kotlin.time.Instant
 import kotlinx.coroutines.flow.MutableStateFlow
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
-import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpStatusCode
-import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import io.rebble.libpebblecommon.connection.FirmwareUpdateCheckResult
 import io.rebble.libpebblecommon.metadata.WatchHardwarePlatform
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
@@ -83,8 +78,15 @@ class FirmwareUpdateCheckRoutingTest {
     // never opted in.
     private fun forkDefaultConfig() = CoreConfigFlow(MutableStateFlow(CoreConfig()))
 
-    private val githubBody = releaseList(
-        releaseJson("v4.31.0", 10, listOf(normalAsset("asterix", "v4.31.0", "sha256:" + "a".repeat(64), 100))),
+    private fun coreWatchGithub() = FakeGithub(
+        listBody = changelogListJson("4.31.0"),
+        pageBody = releaseList(
+            releaseJson("v4.31.0", 10, listOf(normalAsset("asterix", "v4.31.0", "sha256:" + "a".repeat(64), 100))),
+        ),
+    )
+
+    private fun githubNeverContacted(expectations: FirmwareArtifactExpectations) = GithubReleases(
+        failingClient("GitHub"), expectations, PebbleOsChangelogListSource(failingClient("GitHub")),
     )
 
     @Test
@@ -95,8 +97,7 @@ class FirmwareUpdateCheckRoutingTest {
             engDashOta = engDashNeverContacted(),
             coreConfig = forkDefaultConfig(),
             cohorts = testCohorts(failingClient("Cohorts"), expectations),
-            githubReleases = GithubReleases(jsonRespondingClient(githubBody), expectations, fixedTestClock),
-            channel = { FirmwareUpdateChannel.Soaked },
+            githubReleases = coreWatchGithub().checker(expectations),
             coreAnalytics = analyticsNeverCalled(),
             clock = fixedTestClock,
         )
@@ -116,8 +117,7 @@ class FirmwareUpdateCheckRoutingTest {
             engDashOta = engDashNeverContacted(),
             coreConfig = forkDefaultConfig(),
             cohorts = testCohorts(jsonRespondingClient(cohortsBody()), expectations),
-            githubReleases = GithubReleases(failingClient("GitHub"), expectations, fixedTestClock),
-            channel = { FirmwareUpdateChannel.Soaked },
+            githubReleases = githubNeverContacted(expectations),
             coreAnalytics = analyticsNeverCalled(),
             clock = fixedTestClock,
         )
@@ -129,131 +129,6 @@ class FirmwareUpdateCheckRoutingTest {
         assertContains(update.url, "binaries.rebble.io")
     }
 
-    /** Two main-line releases: v4.31.0 is soaked, v4.32.0 is 2 days old. */
-    private val twoChannelGithubBody = releaseList(
-        releaseJson("v4.32.0", 2, listOf(normalAsset("asterix", "v4.32.0", "sha256:" + "c".repeat(64), 100))),
-        releaseJson("v4.31.0", 10, listOf(normalAsset("asterix", "v4.31.0", "sha256:" + "a".repeat(64), 100))),
-    )
-
-    @Test
-    fun channelFlipInvalidatesTheCacheWithoutForce() = runTest {
-        // Regression: the cache key must include the channel, or flipping the
-        // Early setting keeps serving the other channel's cached result until
-        // the TTL expires (no UI path forces a check).
-        var channel = FirmwareUpdateChannel.Soaked
-        var githubRequests = 0
-        val expectations = FirmwareArtifactExpectations()
-        val client = HttpClient(MockEngine { _ ->
-            githubRequests++
-            respond(twoChannelGithubBody, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
-        }) {
-            install(ContentNegotiation) { json(testJson) }
-        }
-        val check = FirmwareUpdateCheck(
-            memfault = memfaultNeverContacted(),
-            engDashOta = engDashNeverContacted(),
-            coreConfig = forkDefaultConfig(),
-            cohorts = testCohorts(failingClient("Cohorts"), expectations),
-            githubReleases = GithubReleases(client, expectations, fixedTestClock),
-            channel = { channel },
-            coreAnalytics = analyticsNeverCalled(),
-            clock = fixedTestClock,
-        )
-        val watch = testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0")
-
-        val soaked = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(check.checkForUpdates(watch, force = false))
-        assertContains(soaked.url, "v4.31.0")
-        check.checkForUpdates(watch, force = false)
-        assertEquals(1, githubRequests)
-
-        channel = FirmwareUpdateChannel.Early
-        val early = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(check.checkForUpdates(watch, force = false))
-        assertContains(early.url, "v4.32.0")
-        assertEquals(2, githubRequests)
-
-        // Flipping back reuses the still-valid Soaked entry.
-        channel = FirmwareUpdateChannel.Soaked
-        val soakedAgain = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(check.checkForUpdates(watch, force = false))
-        assertContains(soakedAgain.url, "v4.31.0")
-        assertEquals(2, githubRequests)
-    }
-
-    @Test
-    fun midFlightChannelFlipDoesNotPoisonTheOtherChannelsCache() = runTest {
-        // Regression: the channel is read exactly once per check and serves
-        // both the cache key and the release selection. A toggle flip while
-        // the fetch is in flight must not cache the new channel's selection
-        // under the old channel's key (background checks overlap freely with
-        // settings visits).
-        var channel = FirmwareUpdateChannel.Soaked
-        var githubRequests = 0
-        val fetchStarted = CompletableDeferred<Unit>()
-        val releaseFetch = CompletableDeferred<Unit>()
-        val expectations = FirmwareArtifactExpectations()
-        val client = HttpClient(MockEngine { _ ->
-            githubRequests++
-            fetchStarted.complete(Unit)
-            releaseFetch.await()
-            respond(twoChannelGithubBody, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
-        }) {
-            install(ContentNegotiation) { json(testJson) }
-        }
-        val check = FirmwareUpdateCheck(
-            memfault = memfaultNeverContacted(),
-            engDashOta = engDashNeverContacted(),
-            coreConfig = forkDefaultConfig(),
-            cohorts = testCohorts(failingClient("Cohorts"), expectations),
-            githubReleases = GithubReleases(client, expectations, fixedTestClock),
-            channel = { channel },
-            coreAnalytics = analyticsNeverCalled(),
-            clock = fixedTestClock,
-        )
-        val watch = testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0")
-
-        val inFlight = async { check.checkForUpdates(watch, force = false) }
-        fetchStarted.await()
-        channel = FirmwareUpdateChannel.Early // flips while the fetch is in flight
-        releaseFetch.complete(Unit)
-        val first = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(inFlight.await())
-        // The selection must match the channel the check started with.
-        assertContains(first.url, "v4.31.0")
-
-        // And the entry cached for Soaked must be the Soaked result.
-        channel = FirmwareUpdateChannel.Soaked
-        val cached = assertIs<FirmwareUpdateCheckResult.FoundUpdate>(check.checkForUpdates(watch, force = false))
-        assertContains(cached.url, "v4.31.0")
-        assertEquals(1, githubRequests)
-    }
-
-    @Test
-    fun channelFlipDoesNotEvictLegacyWatchCache() = runTest {
-        var channel = FirmwareUpdateChannel.Soaked
-        var cohortsRequests = 0
-        val expectations = FirmwareArtifactExpectations()
-        val client = HttpClient(MockEngine { _ ->
-            cohortsRequests++
-            respond(cohortsBody(), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
-        }) {
-            install(ContentNegotiation) { json(testJson) }
-        }
-        val check = FirmwareUpdateCheck(
-            memfault = memfaultNeverContacted(),
-            engDashOta = engDashNeverContacted(),
-            coreConfig = forkDefaultConfig(),
-            cohorts = testCohorts(client, expectations),
-            githubReleases = GithubReleases(failingClient("GitHub"), expectations, fixedTestClock),
-            channel = { channel },
-            coreAnalytics = analyticsNeverCalled(),
-            clock = fixedTestClock,
-        )
-        val watch = testWatchInfo(WatchHardwarePlatform.PEBBLE_SILK, "v4.0.0")
-
-        assertIs<FirmwareUpdateCheckResult.FoundUpdate>(check.checkForUpdates(watch, force = false))
-        channel = FirmwareUpdateChannel.Early
-        assertIs<FirmwareUpdateCheckResult.FoundUpdate>(check.checkForUpdates(watch, force = false))
-        assertEquals(1, cohortsRequests)
-    }
-
     @Test
     fun versionChangeReplacesTheCachedEntryInsteadOfShadowingIt() = runTest {
         // The running version and recovery flag are inputs to the check, so
@@ -261,21 +136,15 @@ class FirmwareUpdateCheckRoutingTest {
         // refetch, and its entry must replace the old one, so that going back
         // to the earlier version (recovery -> main -> recovery) refetches too
         // rather than finding the earlier answer still cached beside it.
-        var githubRequests = 0
+        val github = coreWatchGithub()
+        val githubChecks = { github.paths.count { it == CHANGELOG_LIST_PATH } }
         val expectations = FirmwareArtifactExpectations()
-        val client = HttpClient(MockEngine { _ ->
-            githubRequests++
-            respond(githubBody, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
-        }) {
-            install(ContentNegotiation) { json(testJson) }
-        }
         val check = FirmwareUpdateCheck(
             memfault = memfaultNeverContacted(),
             engDashOta = engDashNeverContacted(),
             coreConfig = forkDefaultConfig(),
             cohorts = testCohorts(failingClient("Cohorts"), expectations),
-            githubReleases = GithubReleases(client, expectations, fixedTestClock),
-            channel = { FirmwareUpdateChannel.Soaked },
+            githubReleases = github.checker(expectations),
             coreAnalytics = analyticsNeverCalled(),
             clock = fixedTestClock,
         )
@@ -283,20 +152,20 @@ class FirmwareUpdateCheckRoutingTest {
         val onMain = testWatchInfo(WatchHardwarePlatform.CORE_ASTERIX, "v4.30.0")
 
         check.checkForUpdates(onRecovery, force = false)
-        assertEquals(1, githubRequests)
+        assertEquals(1, githubChecks())
 
         // A different running version is a different check, and its entry
         // replaces the recovery one.
         check.checkForUpdates(onMain, force = false)
-        assertEquals(2, githubRequests)
+        assertEquals(2, githubChecks())
         check.checkForUpdates(onMain, force = false)
-        assertEquals(2, githubRequests)
+        assertEquals(2, githubChecks())
 
         // Back on recovery: the earlier entry is gone, so this refetches; a
         // stale entry surviving under its own version would answer here.
         check.checkForUpdates(onRecovery, force = false)
-        assertEquals(3, githubRequests)
+        assertEquals(3, githubChecks())
         check.checkForUpdates(onRecovery, force = false)
-        assertEquals(3, githubRequests)
+        assertEquals(3, githubChecks())
     }
 }

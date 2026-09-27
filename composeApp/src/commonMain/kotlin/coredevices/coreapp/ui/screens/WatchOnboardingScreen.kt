@@ -38,6 +38,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,7 +52,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.firmware.FirmwarePickerRoute
+import com.anopticlabs.gravel.firmware.firmwarePickerServes
 import coredevices.pebble.Platform
+import coredevices.pebble.firmware.ForkFirmwareInstallState
 import coredevices.pebble.firmware.VerifiedFirmwareInstaller
 import coredevices.pebble.services.AppStoreHomeResult
 import coredevices.pebble.services.LanguagePackRepository
@@ -120,8 +124,10 @@ fun WatchOnboardingScreen(
     val pebbleStoreHomes = remember { mutableStateMapOf<AppType, AppStoreHomeResult?>() }
     var showLanguageDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
-    var haveUpdatedFirmware by remember { mutableStateOf(false) }
-    var haveStartedFwupSinceLastConnection by remember { mutableStateOf(false) }
+    // Gravel: saveable so a trip to the build picker does not reset them.
+    var haveUpdatedFirmware by rememberSaveable { mutableStateOf(false) }
+    var haveStartedFwupSinceLastConnection by rememberSaveable { mutableStateOf(false) }
+    var installRanSinceLastConnection by rememberSaveable { mutableStateOf(false) }
     val watchOnboardingFinished: WatchOnboardingFinished = koinInject()
     val snackbarDisplay =
         remember { SnackbarDisplay { scope.launch { snackbarHostState.showSnackbar(message = it) } } }
@@ -169,6 +175,7 @@ fun WatchOnboardingScreen(
 
                     if (connectedWatch == null) {
                         haveStartedFwupSinceLastConnection = false
+                        installRanSinceLastConnection = false
                         if (haveUpdatedFirmware) {
                             SectionText("Waiting for your Pebble to restart..")
                         } else {
@@ -179,9 +186,45 @@ fun WatchOnboardingScreen(
                     }
 
                     if (connectedWatch is ConnectedPebbleDeviceInRecovery) {
-                        val firmwareUpdateAvailable = connectedWatch.firmwareUpdateAvailable.result
-                        if (firmwareUpdateAvailable !is FirmwareUpdateCheckResult.FoundUpdate) {
-                            SectionText("Checking for PebbleOS updates..")
+                        val firmwareUpdateCheck = connectedWatch.firmwareUpdateAvailable
+                        val firmwareUpdateAvailable = firmwareUpdateCheck.result
+                        // Fork: verified install path (sha256 + manifest checks).
+                        val forkInstaller: VerifiedFirmwareInstaller = koinInject()
+                        // Fork: surface download/verify phases and failures, which
+                        // happen before upstream's progress state exists.
+                        val forkInstallState by forkInstaller.installStateFor(connectedWatch)
+                        // Gravel: includes an install started from the build picker.
+                        val installRunning = forkInstallState.isActive ||
+                            connectedWatch.firmwareUpdateState !is FirmwareUpdater.FirmwareUpdateStatus.NotInProgress
+                        // Gravel: a recovery watch still connected after an install ran has not updated,
+                        // whether the install was automatic or picked, and whatever stage failed. The
+                        // second term catches an automatic install that failed before it was seen running.
+                        val installFailed = !installRunning && (installRanSinceLastConnection ||
+                            (haveStartedFwupSinceLastConnection && forkInstallState is ForkFirmwareInstallState.Failed))
+                        val checkFailed = (firmwareUpdateAvailable as? FirmwareUpdateCheckResult.UpdateCheckFailed)
+                            ?.takeUnless { firmwareUpdateCheck.checkingForUpdates }
+                        if (!installRunning && (firmwareUpdateAvailable !is FirmwareUpdateCheckResult.FoundUpdate || installFailed)) {
+                            when {
+                                checkFailed != null -> SectionText(checkFailed.error)
+                                firmwareUpdateAvailable !is FirmwareUpdateCheckResult.FoundUpdate && !installFailed ->
+                                    SectionText("Checking for PebbleOS updates..")
+                            }
+                            if (installFailed) {
+                                forkInstallState.describe()?.let { SectionText(it) }
+                            }
+                            // Gravel: the picker lists builds even when the check cannot offer one.
+                            if ((checkFailed != null || installFailed) && connectedWatch.firmwarePickerServes()) {
+                                Spacer(modifier = Modifier.height(15.dp))
+                                PebbleElevatedButton(
+                                    text = "Choose a PebbleOS build",
+                                    onClick = {
+                                        coreNav.navigateTo(
+                                            FirmwarePickerRoute(connectedWatch.identifier.asString, fromOnboarding = true),
+                                        )
+                                    },
+                                    primaryColor = false,
+                                )
+                            }
 
                             Spacer(modifier = Modifier.height(15.dp))
 
@@ -193,21 +236,24 @@ fun WatchOnboardingScreen(
                             return@Scaffold
                         }
 
-                        // Fork: verified install path (sha256 + manifest checks).
-                        val forkInstaller: VerifiedFirmwareInstaller = koinInject()
-                        LaunchedEffect(haveStartedFwupSinceLastConnection) {
-                            if (!haveStartedFwupSinceLastConnection) {
-                                logger.d { "Starting firmware update from onboarding screen" }
-                                haveStartedFwupSinceLastConnection = true
+                        if (installRunning) {
+                            LaunchedEffect(Unit) {
                                 haveUpdatedFirmware = true
-                                forkInstaller.install(connectedWatch, firmwareUpdateAvailable)
+                                installRanSinceLastConnection = true
+                            }
+                        }
+                        if (firmwareUpdateAvailable is FirmwareUpdateCheckResult.FoundUpdate) {
+                            LaunchedEffect(haveStartedFwupSinceLastConnection) {
+                                if (!haveStartedFwupSinceLastConnection && !installRunning) {
+                                    logger.d { "Starting firmware update from onboarding screen" }
+                                    haveStartedFwupSinceLastConnection = true
+                                    haveUpdatedFirmware = true
+                                    forkInstaller.install(connectedWatch, firmwareUpdateAvailable)
+                                }
                             }
                         }
 
                         SectionText("Updating your watch to the latest version of PebbleOS...")
-                        // Fork: surface download/verify phases and failures, which
-                        // happen before upstream's progress state exists.
-                        val forkInstallState by forkInstaller.installStateFor(connectedWatch)
                         forkInstallState.describe()?.let { SectionText(it) }
                         Spacer(modifier = Modifier.height(15.dp))
                         val progress = (connectedWatch.firmwareUpdateState as? FirmwareUpdater.FirmwareUpdateStatus.InProgress)?.progress?.collectAsState()

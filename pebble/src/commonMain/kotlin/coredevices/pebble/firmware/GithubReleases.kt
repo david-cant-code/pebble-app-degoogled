@@ -1,6 +1,12 @@
 package coredevices.pebble.firmware
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.firmware.ChangelogListResult
+import com.anopticlabs.gravel.firmware.ChangelogListing
+import com.anopticlabs.gravel.firmware.FirmwareBuildChoice
+import com.anopticlabs.gravel.firmware.FirmwareBuildChoicesResult
+import com.anopticlabs.gravel.firmware.PebbleOsChangelogListSource
+import com.anopticlabs.gravel.firmware.listedFormVersion
 import io.ktor.client.HttpClient
 import io.ktor.client.call.NoTransformationFoundException
 import io.ktor.client.call.body
@@ -16,7 +22,6 @@ import io.rebble.libpebblecommon.services.WatchInfo
 import kotlinx.io.IOException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlin.time.Clock
 import kotlin.time.Instant
 
 /**
@@ -25,170 +30,267 @@ import kotlin.time.Instant
  * Core hardware revision, so upstream has no working source for these
  * watches here).
  *
- * Privacy: the request names no hardware, serial, or version; the asset is
- * chosen client-side from the release list. Verification: the API declares a
- * sha256 digest and exact size per asset, which are recorded in
- * [FirmwareArtifactExpectations] for the installer to enforce; a release
- * whose asset lacks a usable digest is treated as having no asset at all.
- * Selection and comparison rules live in FirmwareReleaseSelection.kt.
+ * Offers only versions Core's public changelog names: the highest listed
+ * version newer than the running one whose release has a verifiable asset
+ * for the watch's board. In recovery the highest such version is offered
+ * whatever the running version.
+ *
+ * Privacy: no request carries the watch's serial, hardware revision, or
+ * running version, and which requests are made depends only on the list and
+ * the release page; the asset is chosen client-side. Verification: the API
+ * declares a sha256 digest and exact size per asset, which are recorded in
+ * [FirmwareArtifactExpectations] for the installer to enforce; an asset
+ * without a usable digest and size counts as absent.
  */
 class GithubReleases(
     private val httpClient: HttpClient,
     private val expectations: FirmwareArtifactExpectations,
-    private val clock: Clock,
+    private val changelogList: PebbleOsChangelogListSource,
 ) {
     private val logger = Logger.withTag("GithubReleases")
 
-    // The channel is a parameter, not a constructor dependency, so one check
-    // uses one channel value throughout: the caller keys its result cache on
-    // the same value it passes here, and a mid-check toggle flip cannot make
-    // the selection disagree with the cache key.
-    suspend fun getLatestFirmware(
-        watch: WatchInfo,
-        channel: FirmwareUpdateChannel,
-    ): FirmwareUpdateCheckResult {
-        val runningRaw = watch.runningFwVersion.stringVersion
-        val running = ReleaseTagVersion.from(runningRaw)
-        if (running == null && !watch.runningFwVersion.isRecovery) {
-            // Fail closed: with an incomparable running version any offer
-            // could be a downgrade or a same-version loop. Recovery is exempt
-            // because it always gets an offer regardless of comparison.
-            logger.e { "Cannot parse running firmware version '$runningRaw'" }
-            return FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)
+    suspend fun getLatestFirmware(watch: WatchInfo): FirmwareUpdateCheckResult {
+        val listed = when (val result = changelogList.fetch()) {
+            is ChangelogListResult.Success -> result.list.versions
+            ChangelogListResult.RateLimited -> return FirmwareUpdateCheckResult.UpdateCheckFailed(RATE_LIMITED_FAILURE)
+            ChangelogListResult.Unreadable -> return FirmwareUpdateCheckResult.UpdateCheckFailed(LIST_FAILURE)
         }
-        val releases = when (val fetched = fetchReleases()) {
+        val releases = when (val fetched = fetchReleases(listed)) {
+            is Fetched.Success -> fetched.value
+            Fetched.NotFound -> return FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)
             is Fetched.Failure -> return FirmwareUpdateCheckResult.UpdateCheckFailed(fetched.message)
-            is Fetched.Success -> fetched.releases
         }
-        val revision = watch.platform.revision
-        val candidates = releases.mapNotNull { it.toCandidate(revision) }
-        val selected = selectRelease(candidates.map { it.selectable }, channel, clock.now())
-        if (selected == null) {
-            logger.w { "No selectable PebbleOS release for '$revision' among ${releases.size} releases" }
-            return FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)
-        }
-        // Structural match: distinct releases cannot produce equal
-        // selectables (tags are unique per release), and equality still
-        // holds if selection ever returns a copy instead of the same
-        // instance.
-        val chosen = candidates.first { it.selectable == selected }
-        // Strictly newer only: equality must never re-offer (see
-        // ReleaseTagVersion), and a channel switch back from Early must never
-        // offer a downgrade.
-        if (!watch.runningFwVersion.isRecovery && running != null && chosen.selectable.version <= running) {
+        val isNewer = newerThanRunning(watch) ?: return FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)
+        val newer = listed.filter(isNewer).sortedDescending()
+        if (newer.isEmpty()) {
             return FirmwareUpdateCheckResult.FoundNoUpdate
         }
-        val chosenTag = chosen.selectable.version.raw
+        val build = findListedBuild(newer, releases, watch.platform.revision)
+            ?: return FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)
+        return foundUpdateFor(build) ?: FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)
+    }
+
+    /**
+     * The builds the picker lists: releases tagged in the list's form with a
+     * verifiable asset for the watch's board and newer than the running
+     * version (any version in recovery), highest first. The build
+     * [getLatestFirmware] offers is always among them; the newest others fill
+     * up to [MAX_CHOICES]. With a readable list it makes the same requests as
+     * [getLatestFirmware]; with an unreadable one it still reads the release
+     * page and leaves the builds unlabeled.
+     */
+    suspend fun getBuildChoices(watch: WatchInfo): FirmwareBuildChoicesResult {
+        val list = when (val result = changelogList.fetch()) {
+            is ChangelogListResult.Success -> result.list
+            ChangelogListResult.RateLimited -> return FirmwareBuildChoicesResult.Failed(RATE_LIMITED_FAILURE)
+            ChangelogListResult.Unreadable -> null
+        }
+        val releases = when (val fetched = fetchReleases(list?.versions)) {
+            is Fetched.Success -> fetched.value
+            Fetched.NotFound -> return FirmwareBuildChoicesResult.Failed(GENERIC_FAILURE)
+            is Fetched.Failure -> return FirmwareBuildChoicesResult.Failed(fetched.message)
+        }
+        val isNewer = newerThanRunning(watch)
+            ?: return FirmwareBuildChoicesResult.Failed(GENERIC_FAILURE, retryable = false)
+        val revision = watch.platform.revision
+        val recommendedTag = list?.versions?.filter(isNewer)?.sortedDescending()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { findListedBuild(it, releases, revision)?.tag }
+        val candidates = (releases.page + listOfNotNull(releases.lookedUp)).mapNotNull { release ->
+            val version = listedFormVersion(release.tagName)?.takeIf(isNewer) ?: return@mapNotNull null
+            release.verifiedBuildFor(revision)?.let { version to it }
+        }
+        val (recommended, others) = candidates.partition { (_, build) -> build.tag == recommendedTag }
+        val builds = (recommended + others.sortedByDescending { it.first })
+            .take(MAX_CHOICES)
+            .sortedByDescending { it.first }
+            .mapNotNull { (version, build) ->
+                val update = foundUpdateFor(build) ?: return@mapNotNull null
+                val listing = when {
+                    list == null -> ChangelogListing.Unknown
+                    list.versions.any { it.compareTo(version) == 0 } -> ChangelogListing.Listed
+                    else -> ChangelogListing.NotListed
+                }
+                FirmwareBuildChoice(update, listing, isRecommended = build.tag == recommendedTag)
+            }
+        return FirmwareBuildChoicesResult.Success(builds, list?.checkedAt)
+    }
+
+    /**
+     * The release page, and the highest listed version's release when it is
+     * off the page. Requested whatever the watch runs, before anything about
+     * the watch is read.
+     */
+    private suspend fun fetchReleases(listed: List<ReleaseTagVersion>?): Fetched<Releases> {
+        val page = when (val fetched = fetch<List<GithubReleaseDto>>(RELEASES_URL, perPage = PAGE_SIZE)) {
+            is Fetched.Success -> fetched.value
+            Fetched.NotFound -> return Fetched.Failure(GENERIC_FAILURE)
+            is Fetched.Failure -> return fetched
+        }
+        val highestTag = listed?.let { "v${it.max().raw}" }
+        val lookedUp = if (highestTag == null || page.any { it.tagName == highestTag }) null else {
+            when (val fetched = fetch<GithubReleaseDto>("$RELEASES_URL/tags/$highestTag")) {
+                is Fetched.Success -> fetched.value.takeIf { it.tagName == highestTag }
+                Fetched.NotFound -> null
+                is Fetched.Failure -> return fetched
+            }
+        }
+        return Fetched.Success(Releases(page, highestTag, lookedUp))
+    }
+
+    private class Releases(
+        val page: List<GithubReleaseDto>,
+        val highestListedTag: String?,
+        val lookedUp: GithubReleaseDto?,
+    )
+
+    /**
+     * Which versions are newer than the watch's firmware, or null when its
+     * version cannot be compared. Fail closed: with an incomparable running
+     * version any offer could be a downgrade or a same-version loop.
+     * Recovery is exempt because it always gets an offer regardless of
+     * comparison.
+     */
+    private fun newerThanRunning(watch: WatchInfo): ((ReleaseTagVersion) -> Boolean)? {
+        if (watch.runningFwVersion.isRecovery) return { true }
+        val runningRaw = watch.runningFwVersion.stringVersion
+        val running = ReleaseTagVersion.from(runningRaw) ?: run {
+            logger.e { "Cannot parse running firmware version '$runningRaw'" }
+            return null
+        }
+        // Strictly newer only: equality must never re-offer (see ReleaseTagVersion).
+        return { it > running }
+    }
+
+    /** Records the build's expectation for the installer; null when its tag yields no display version. */
+    private suspend fun foundUpdateFor(build: VerifiedBuild): FirmwareUpdateCheckResult.FoundUpdate? {
         val displayVersion = FirmwareVersion.from(
-            tag = chosenTag,
+            tag = build.tag,
             isRecovery = false,
             gitHash = "",
-            // Display payload only. The offer decision above compares tags;
+            // Display payload only. The offer decision compares tags;
             // feeding publishedAt into a FirmwareVersion comparison would
             // re-offer equal versions on its timestamp tiebreak.
-            timestamp = chosen.selectable.publishedAt,
+            timestamp = build.publishedAt,
             isDualSlot = false, // not used from here
             isSlot0 = false, // not used from here
         )
         if (displayVersion == null) {
-            logger.e { "Couldn't build display version from '$chosenTag'" }
-            return FirmwareUpdateCheckResult.UpdateCheckFailed(GENERIC_FAILURE)
+            logger.e { "Couldn't build display version from '${build.tag}'" }
+            return null
         }
         expectations.record(
-            checkNotNull(chosen.assetUrl),
+            build.assetUrl,
             ExpectedFirmwareArtifact(
-                sha256Hex = checkNotNull(chosen.digestHex),
-                sizeBytes = checkNotNull(chosen.assetSize),
-                versionTag = chosenTag,
+                sha256Hex = build.sha256Hex,
+                sizeBytes = build.assetSize,
+                versionTag = build.tag,
             ),
         )
         return FirmwareUpdateCheckResult.FoundUpdate(
             version = displayVersion,
-            url = checkNotNull(chosen.assetUrl),
-            // Release bodies are empty upstream; the dialog and notification
+            url = build.assetUrl,
+            // Release bodies are empty upstream; the picker and notification
             // already carry the version string.
             notes = "",
         )
     }
 
-    private sealed class Fetched {
-        data class Success(val releases: List<GithubReleaseDto>) : Fetched()
-        data class Failure(val message: String) : Fetched()
+    /**
+     * The first of [newer] (highest first) whose release has a verifiable
+     * asset for [revision], or null. A release matches only by its exact tag
+     * `v<version>`. Outside the page only the highest listed version's
+     * release is known; any other version missing from the page ends the
+     * walk, so a lower version is not offered over one that was not examined.
+     */
+    private fun findListedBuild(
+        newer: List<ReleaseTagVersion>,
+        releases: Releases,
+        revision: String,
+    ): VerifiedBuild? {
+        for (version in newer) {
+            val tag = "v${version.raw}"
+            val release = releases.page.firstOrNull { it.tagName == tag }
+                ?: if (tag == releases.highestListedTag) releases.lookedUp else {
+                    logger.w { "PebbleOS release $tag is not on the first page of releases" }
+                    return null
+                }
+            release?.verifiedBuildFor(revision)?.let { return it }
+        }
+        logger.w { "No listed PebbleOS release newer than the running one has a verifiable asset for '$revision'" }
+        return null
     }
 
-    private suspend fun fetchReleases(): Fetched {
+    private sealed class Fetched<out T> {
+        data class Success<T>(val value: T) : Fetched<T>()
+        data object NotFound : Fetched<Nothing>()
+        data class Failure(val message: String) : Fetched<Nothing>()
+    }
+
+    private suspend inline fun <reified T> fetch(url: String, perPage: Int? = null): Fetched<T> {
         val response = try {
-            httpClient.get(RELEASES_URL) {
-                parameter("per_page", PAGE_SIZE)
+            httpClient.get(url) {
+                perPage?.let { parameter("per_page", it) }
                 header("Accept", "application/vnd.github+json")
                 header("X-GitHub-Api-Version", GITHUB_API_VERSION)
             }
         } catch (e: IOException) {
-            logger.w(e) { "Network error fetching PebbleOS releases" }
+            logger.w(e) { "Network error fetching $url" }
             return Fetched.Failure(GENERIC_FAILURE)
         }
         if (response.status == HttpStatusCode.Forbidden || response.status == HttpStatusCode.TooManyRequests) {
-            // Unauthenticated GitHub quota is per-IP and the in-app check
-            // cache keeps normal usage far below it, so this is transient.
+            // The unauthenticated quota is per IP and per hour (GitHub docs,
+            // "Rate limits for the REST API"), so this is transient.
             logger.w { "PebbleOS release fetch rate limited: ${response.status}" }
             return Fetched.Failure(RATE_LIMITED_FAILURE)
+        }
+        if (response.status == HttpStatusCode.NotFound) {
+            return Fetched.NotFound
         }
         if (!response.status.isSuccess()) {
             logger.w { "PebbleOS release fetch failed: ${response.status}" }
             return Fetched.Failure(GENERIC_FAILURE)
         }
         return try {
-            Fetched.Success(response.body<List<GithubReleaseDto>>())
+            Fetched.Success(response.body<T>())
         } catch (e: NoTransformationFoundException) {
-            logger.w(e) { "Unexpected content fetching PebbleOS releases" }
+            logger.w(e) { "Unexpected content fetching $url" }
             Fetched.Failure(GENERIC_FAILURE)
         } catch (e: ContentConvertException) {
-            logger.w(e) { "Malformed PebbleOS release list" }
+            logger.w(e) { "Malformed PebbleOS release data from $url" }
             Fetched.Failure(GENERIC_FAILURE)
         }
     }
 
-    private fun GithubReleaseDto.toCandidate(revision: String): Candidate? {
+    /** Null unless this release is published and has a verifiable asset for [revision]. */
+    private fun GithubReleaseDto.verifiedBuildFor(revision: String): VerifiedBuild? {
         if (draft || prerelease) return null
-        val version = ReleaseTagVersion.from(tagName)
-        if (version == null) {
-            logger.w { "Skipping unparseable release tag '$tagName'" }
-            return null
-        }
         val published = publishedAt?.let { raw -> runCatching { Instant.parse(raw) }.getOrNull() }
             ?: return null
-        val asset = assets.firstOrNull { it.name == "normal_${revision}_${tagName}.pbz" }
-        val digestHex = normalizeSha256Hex(asset?.digest)
-        // An asset the fork cannot verify is treated as absent, so selection
-        // walks to a release it can verify instead of offering this one.
-        val usable = asset != null && digestHex != null && asset.size > 0
-        return Candidate(
-            selectable = SelectableRelease(version, published, hasAsset = usable),
-            assetUrl = asset?.browserDownloadUrl,
-            assetSize = asset?.size,
-            digestHex = digestHex,
-        )
+        val asset = assets.firstOrNull { it.name == "normal_${revision}_${tagName}.pbz" } ?: return null
+        val digestHex = normalizeSha256Hex(asset.digest) ?: return null
+        if (asset.size <= 0) return null
+        return VerifiedBuild(tagName, published, asset.browserDownloadUrl, asset.size, digestHex)
     }
 
-    // Only carries what selection cannot: the asset coordinates. The tag and
-    // publish date live in the selectable (version.raw is the trimmed tag),
-    // so there is a single source of truth per release.
-    private data class Candidate(
-        val selectable: SelectableRelease,
-        val assetUrl: String?,
-        val assetSize: Long?,
-        val digestHex: String?,
+    private data class VerifiedBuild(
+        val tag: String,
+        val publishedAt: Instant,
+        val assetUrl: String,
+        val assetSize: Long,
+        val sha256Hex: String,
     )
 
     companion object {
         private const val RELEASES_URL = "https://api.github.com/repos/coredevices/PebbleOS/releases"
 
-        // ~20 releases spans several weeks of both tag lines: enough history
-        // for the soak policy and for the asset walk-forward on new hardware.
+        // The first page of GitHub's release list, both tag lines mixed.
         private const val PAGE_SIZE = 20
-        private const val GITHUB_API_VERSION = "2022-11-28"
+        private const val MAX_CHOICES = 5
+        internal const val GITHUB_API_VERSION = "2022-11-28"
         private const val GENERIC_FAILURE = "Failed to check for PebbleOS update"
         private const val RATE_LIMITED_FAILURE = "PebbleOS update check is rate limited, try again later"
+        private const val LIST_FAILURE = "Couldn't read the PebbleOS changelog list"
     }
 }
 

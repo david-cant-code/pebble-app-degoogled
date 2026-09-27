@@ -1,0 +1,115 @@
+name: PebbleOS changelog list
+
+# Once a day, reads Core's public PebbleOS changelog and commits the versions it names to the
+# firmware-list branch. A push that changes the parser or this workflow runs the parser tests only.
+on:
+  schedule:
+    - cron: '22 2 * * *'
+      timezone: America/Los_Angeles
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/changelog/**'
+      - '.github/workflows/pebbleos-changelog.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/changelog
+      - name: Parser tests
+        run: python3 -m unittest discover -s .github/changelog -v
+
+  # Reads the untrusted page. Read-only token, no secrets; its output is the finished list.
+  update:
+    needs: test
+    if: github.event_name != 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      list: ${{ steps.changed.outputs.list }}
+    steps:
+      - name: Check out the parser
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/changelog
+          path: src
+      - name: Check out the list
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: firmware-list
+          path: list
+      - name: Fetch the changelog
+        id: fetch
+        run: |
+          status=$(curl -sS --compressed --max-time 60 --max-filesize 5M -o page.json -w '%{http_code}' \
+            -A 'Gravel-changelog-list (+https://github.com/david-cant-code/pebble-app-degoogled)' \
+            -H 'content-type: application/json' \
+            -X POST 'https://ndocs.repebble.com/api/v3/loadPageChunk' \
+            -d '{"pageId":"25efbb55-ea84-801d-a04b-fcf73c9346e1","limit":100,"cursor":{"stack":[]},"chunkNumber":0,"verticalColumns":false}') || true
+          echo "status=${status:-000}" >> "$GITHUB_OUTPUT"
+      - name: Update the list
+        env:
+          STATUS: ${{ steps.fetch.outputs.status }}
+        run: >-
+          python3 src/.github/changelog/pebbleos_changelog.py update --page page.json --status "$STATUS"
+          --list list/pebbleos-changelog.json --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      - name: Hand on a changed list
+        id: changed
+        run: |
+          if [ -n "$(git -C list status --porcelain -- pebbleos-changelog.json)" ]; then
+            echo "list=$(python3 -c 'import json, sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",", ":")))' list/pebbleos-changelog.json)" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Holds the write token, and never sees the page.
+  publish:
+    needs: update
+    if: needs.update.outputs.list != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: pebbleos-changelog-publish
+      cancel-in-progress: false
+    steps:
+      - name: Check out the parser
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/changelog
+          path: src
+      - name: Check out the list
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: firmware-list
+          path: list
+      - name: Check and write the list
+        env:
+          LIST: ${{ needs.update.outputs.list }}
+        run: >-
+          printf '%s' "$LIST" | python3 src/.github/changelog/pebbleos_changelog.py publish
+          --list list/pebbleos-changelog.json --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      # The only step that gives git the token to push.
+      - name: Push
+        working-directory: list
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          git add pebbleos-changelog.json
+          git diff --cached --quiet && exit 0
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -qm 'Update the PebbleOS changelog list'
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" push origin HEAD:firmware-list
