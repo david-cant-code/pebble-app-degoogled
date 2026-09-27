@@ -203,7 +203,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     }
 
     // Fork: the platform delivers these to every process of the app, the
-    // speech engine's isolated process included, where onCreate returned
+    // engines' isolated processes included, where onCreate returned
     // before the DI graph was built; an injected member resolved there
     // throws, and that process has no file to write anyway.
     override fun onLowMemory() {

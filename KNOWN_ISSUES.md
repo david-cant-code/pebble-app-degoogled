@@ -405,8 +405,8 @@ When installed, the filter goes in at `MainApplication.attachBaseContext`,
 ahead of the app's content providers, library initializers and `onCreate`
 (android16-release, `ActivityThread.handleBindApplication`). A socket
 opened earlier than that by platform code would be outside the filter; none
-is known. The speech engine's isolated process gets no filter. A process
-that Android starts for a full backup or restore uses the base
+is known. The speech and text engines' isolated processes get no filter.
+A process that Android starts for a full backup or restore uses the base
 `Application` class (android16-release,
 `ActivityThread.handleBindApplication`, `LoadedApk.makeApplicationInner`),
 so neither the filter nor the rest of Gravel's startup runs in it.
