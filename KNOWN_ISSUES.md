@@ -44,6 +44,18 @@ check when it is handled. Each check spends part of the shared GitHub limit
 (see "Update checks share GitHub's anonymous hourly limit"). The fix is for the
 link to start no check. This entry leaves the file when it no longer does.
 
+## An oversized changelog list can leave an update check waiting
+
+**Status: deferred; to be fixed on its own branch.**
+
+When GitHub returns a changelog list much larger than the 64 KiB the app
+accepts, a Core watch's update check or the build picker can wait
+indefinitely instead of reporting the list as unreadable. The workflow that
+publishes the list refuses one over 64 KiB. The test that sends an endless list
+(`PebbleOsChangelogListTest.stopsReadingABodyThatNeverEnds`) runs into the same
+wait at random and can fail a CI run. This entry leaves the file when the fix
+lands.
+
 ## Classic PebbleKit broadcasts cannot be restricted to authorized callers
 
 **Status: accepted while the classic toggle is on; the surface is off by
