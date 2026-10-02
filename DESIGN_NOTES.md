@@ -774,6 +774,17 @@ in the app's device suite:
 - A capture's queue entry is written before any processing and
   removed after it, so a capture survives process death; the in-memory
   capture rows are a projection of that entry.
+- The backup (the `backup` package) is one password-sealed archive of the
+  notes under their ids with their folder, name, title, date and time, the
+  folder list, the folder tags, the capture queue with its recordings, the
+  reminders and the event log; parked completions and settings are not in it. The archive is a header of magic, version, key derivation id, salt
+  and nonce prefix, then a record stream sealed in 64 KiB segments with
+  AES-256-GCM. The key comes from PBKDF2-HMAC-SHA256
+  at 600,000 rounds over the NFC-normalized password and the archive's own
+  salt. A record is a
+  type, a length and a JSON body (a capture's body is its entry, then its
+  recording); a closing record carries the count per type and the SHA-256 of
+  every record before it.
 
 ## In-app links and the What's-new popup
 
