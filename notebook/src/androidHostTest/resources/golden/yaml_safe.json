@@ -1,0 +1,42 @@
+[
+  {
+    "in": "plain title",
+    "out": "\"plain title\""
+  },
+  {
+    "in": "has \"quotes\" inside",
+    "out": "\"has \\\"quotes\\\" inside\""
+  },
+  {
+    "in": "back\\slash",
+    "out": "\"back\\\\slash\""
+  },
+  {
+    "in": "both\\and\"quote",
+    "out": "\"both\\\\and\\\"quote\""
+  },
+  {
+    "in": "ctrl\u0000null\u0007bell",
+    "out": "\"ctrlnullbell\""
+  },
+  {
+    "in": "  surrounding spaces  ",
+    "out": "\"surrounding spaces\""
+  },
+  {
+    "in": "tab\theld",
+    "out": "\"tabheld\""
+  },
+  {
+    "in": "line1\nline2",
+    "out": "\"line1line2\""
+  },
+  {
+    "in": "café · façade",
+    "out": "\"café · façade\""
+  },
+  {
+    "in": "",
+    "out": "\"\""
+  }
+]

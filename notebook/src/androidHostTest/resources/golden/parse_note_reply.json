@@ -1,0 +1,129 @@
+[
+  {
+    "in": "{\"category\": \"task\", \"title\": \"Buy milk\", \"tags\": [\"shopping\"], \"content\": \"milk\"}",
+    "parsed": {
+      "category": "task",
+      "title": "Buy milk",
+      "tags": [
+        "shopping"
+      ],
+      "content": "milk"
+    },
+    "fallback": false
+  },
+  {
+    "in": "```json\n{\"category\": \"note\", \"title\": \"X\", \"tags\": [], \"content\": \"c\"}\n```",
+    "parsed": {
+      "category": "note",
+      "title": "X",
+      "tags": [],
+      "content": "c"
+    },
+    "fallback": false
+  },
+  {
+    "in": "<think>let me reason</think>\n{\"category\": \"idea\", \"title\": \"Y\", \"tags\": [\"a\"], \"content\": \"z\"}",
+    "parsed": {
+      "category": "idea",
+      "title": "Y",
+      "tags": [
+        "a"
+      ],
+      "content": "z"
+    },
+    "fallback": false
+  },
+  {
+    "in": "Sure! {\"category\": \"note\", \"title\": \"T\", \"tags\": [], \"content\": \"c\"} hope this helps",
+    "parsed": {
+      "category": "note",
+      "title": "T",
+      "tags": [],
+      "content": "c"
+    },
+    "fallback": false
+  },
+  {
+    "in": "{\"category\": \"note\", \"title\": \"T\", \"tags\": [], \"content\": \"line1\nline2\"}",
+    "parsed": {
+      "category": "note",
+      "title": "T",
+      "tags": [],
+      "content": "line1\nline2"
+    },
+    "fallback": false
+  },
+  {
+    "in": "{\"category\": \"note\", \"title\": \"T\", \"tags\": [], \"content\": \"c\",}",
+    "parsed": {
+      "title": "Voice Note",
+      "tags": [
+        "voice"
+      ]
+    },
+    "fallback": true
+  },
+  {
+    "in": "{'category': 'note', 'title': 'T', 'tags': [], 'content': 'c'}",
+    "parsed": {
+      "title": "Voice Note",
+      "tags": [
+        "voice"
+      ]
+    },
+    "fallback": true
+  },
+  {
+    "in": "I could not produce JSON for that request.",
+    "parsed": {
+      "title": "Voice Note",
+      "tags": [
+        "voice"
+      ]
+    },
+    "fallback": true
+  },
+  {
+    "in": "   ",
+    "parsed": {
+      "title": "Voice Note",
+      "tags": [
+        "voice"
+      ]
+    },
+    "fallback": true
+  },
+  {
+    "in": "<think>r</think> ```json\n{\"category\": \"journal\", \"title\": \"J\", \"tags\": [\"x\"], \"content\": \"today\"}\n``` ok",
+    "parsed": {
+      "category": "journal",
+      "title": "J",
+      "tags": [
+        "x"
+      ],
+      "content": "today"
+    },
+    "fallback": false
+  },
+  {
+    "in": "{\"x\": NaN}",
+    "parsed": {
+      "x": null
+    },
+    "fallback": false
+  },
+  {
+    "in": "{\"x\": Infinity}",
+    "parsed": {
+      "x": null
+    },
+    "fallback": false
+  },
+  {
+    "in": "{\"t\": \"NaN problem\"}",
+    "parsed": {
+      "t": "NaN problem"
+    },
+    "fallback": false
+  }
+]

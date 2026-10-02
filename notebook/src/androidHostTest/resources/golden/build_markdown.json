@@ -1,0 +1,38 @@
+[
+  {
+    "title": "My Note",
+    "tags": [
+      "work",
+      "ideas"
+    ],
+    "content": "Body text here.",
+    "date": "2026-05-31",
+    "out": "---\ntitle: \"My Note\"\ndate: 2026-05-31\ntags: [\"work\", \"ideas\"]\ntype: note\n---\n\nBody text here.\n"
+  },
+  {
+    "title": "Title with \"quotes\"",
+    "tags": [],
+    "content": "no tags",
+    "date": "2026-05-31",
+    "out": "---\ntitle: \"Title with \\\"quotes\\\"\"\ndate: 2026-05-31\ntags: []\ntype: note\n---\n\nno tags\n"
+  },
+  {
+    "title": "Escaped tags",
+    "tags": [
+      "a\"b",
+      "c\\d"
+    ],
+    "content": "x",
+    "date": "2026-05-31",
+    "out": "---\ntitle: \"Escaped tags\"\ndate: 2026-05-31\ntags: [\"a\\\"b\", \"c\\\\d\"]\ntype: note\n---\n\nx\n"
+  },
+  {
+    "title": "Multiline body",
+    "tags": [
+      "t"
+    ],
+    "content": "line1\nline2\n\n## heading",
+    "date": "2026-05-31",
+    "out": "---\ntitle: \"Multiline body\"\ndate: 2026-05-31\ntags: [\"t\"]\ntype: note\n---\n\nline1\nline2\n\n## heading\n"
+  }
+]

@@ -1,0 +1,58 @@
+[
+  {
+    "in": "Hello World",
+    "out": "hello-world"
+  },
+  {
+    "in": "Project Kickoff Meeting Notes Today Tomorrow",
+    "out": "project-kickoff-meeting-notes"
+  },
+  {
+    "in": "Café résumé naïve",
+    "out": "cafe-resume-naive"
+  },
+  {
+    "in": "punctuation!!! and; symbols#",
+    "out": "punctuation-and-symbols"
+  },
+  {
+    "in": "   leading and trailing   ",
+    "out": "leading-and-trailing"
+  },
+  {
+    "in": "ALL CAPS TITLE",
+    "out": "all-caps-title"
+  },
+  {
+    "in": "snake_case-and-dash",
+    "out": "snake_case-and-dash"
+  },
+  {
+    "in": "数字 123 mixed",
+    "out": "123-mixed"
+  },
+  {
+    "in": "a  b   c    d   e",
+    "out": "a-b-c-d"
+  },
+  {
+    "in": "Hello, World! Foo",
+    "out": "hello-world-foo"
+  },
+  {
+    "in": "a\tb\nc",
+    "out": "a-b-c"
+  },
+  {
+    "in": "---",
+    "out": "---"
+  },
+  {
+    "in": "   ",
+    "out": ""
+  },
+  {
+    "in": "",
+    "out": ""
+  }
+]

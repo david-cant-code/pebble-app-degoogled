@@ -726,6 +726,32 @@ existing installs rides the incompatible-model sweep in
 user's local mode is stashed, and `SttModelUpdatePrompt` restores it
 once a catalog model is downloaded.
 
+## Notebook
+
+Gravel's Notebook feature (voice and typed notes, and reminders) lives in the
+`:notebook` module. Pure
+logic goes in `commonMain` on the standard library and kotlinx.serialization;
+`androidMain` holds only what the platform must supply (Unicode NFKD
+decomposition for note filenames).
+
+Constraints the code relies on, each pinned by a test in the module:
+
+- Three front matter readers exist on purpose. `Frontmatter` is strict and
+  line-anchored;
+  `FrontmatterTags` walks the block for the `tags:` field; `BodyTokenizer`
+  has its own lenient strip, which defines the token vocabulary stored notes
+  are indexed under, so changing it means re-indexing every note.
+- Stems are derived from display text and never re-stemmed: the Porter
+  stemmer is not idempotent.
+- Model output is shaped through `NoteSanitizers` from `JsonElement`s, so
+  the type gates run against what the JSON parser actually produced.
+- Folder routing (`routedFolder`) is a deterministic stemmed-overlap score
+  with no model call, and `archive` is never a default destination.
+- Model replies are read by `LlmJson`: strict JSON once the reasoning block
+  and fences are stripped, bare `NaN` and `Infinity` as null, and a reply
+  over 256 KB or not a JSON object is a failed classification (fallback
+  title).
+
 ## In-app links and the What's-new popup
 
 Upstream's Settings > About linked "What's new in the app" to its hosted
