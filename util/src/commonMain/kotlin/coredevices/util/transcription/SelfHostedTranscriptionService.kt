@@ -43,7 +43,8 @@ import kotlin.time.TimeSource
  * with JSON carrying `text`. whisper.cpp's server reads exactly those
  * fields on `/inference`, and OpenAI-style servers on
  * `/v1/audio/transcriptions`. The URL is used as configured, path
- * included. The bearer token, when set, goes in the Authorization header.
+ * included. The bearer token saved for the URL's host and port, when there
+ * is one, goes in the Authorization header.
  *
  * Transport failures surface as [TranscriptionException.TranscriptionNetworkError]
  * (a refused certificate included; [transcribeRecording] differs), non-2xx
@@ -172,7 +173,7 @@ class SelfHostedTranscriptionService(
         val wav = wavOf(buffer.readByteArray(), sampleRate)
         if (!allowedOnCurrentNetwork()) throw TranscriptionException.ServerNotAllowedOnNetwork(MODEL)
         val wifiOnly = !config.serverOnMobileData
-        val reply = post(dictationClients.clientFor(url, wifiOnly), url, wav, config.serverModel, store.token(), languageCode(language), wifiOnly)
+        val reply = post(dictationClients.clientFor(url, wifiOnly), url, wav, config.serverModel, store.tokenFor(serverHostPort(url)), languageCode(language), wifiOnly)
         emit(TranscriptionSessionStatus.Transcription(transcriptOf(reply), MODEL))
     }
 
@@ -192,7 +193,7 @@ class SelfHostedTranscriptionService(
         val language = normalizeSpokenLanguage(config.spokenLanguage)
         val started = clock.markNow()
         val reply = try {
-            post(recordingClients.clientFor(url, wifiOnly), url, wav, config.serverModel, store.token(), language, wifiOnly, "recording.wav")
+            post(recordingClients.clientFor(url, wifiOnly), url, wav, config.serverModel, store.tokenFor(serverHostPort(url)), language, wifiOnly, "recording.wav")
         } catch (e: TranscriptionException.TranscriptionNetworkError) {
             val failure = (e.cause as? ServerUnreachableException)?.failure
             val noAnswer = failure == TransportFailure.TIMED_OUT && started.elapsedNow() >= RECORDING_ANSWER_WAIT

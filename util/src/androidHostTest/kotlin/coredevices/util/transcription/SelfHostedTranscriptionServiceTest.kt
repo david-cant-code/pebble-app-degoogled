@@ -70,7 +70,7 @@ class SelfHostedTranscriptionServiceTest {
         val requests = ArrayList<HttpRequestData>()
         val bodies = ArrayList<String>()
         val cipher = PlainCipher()
-        val store = SelfHostedServerStore(MapSettings(), cipher).also { it.setToken(token) }
+        val store = SelfHostedServerStore(MapSettings(), cipher).also { it.setToken(url?.let(::serverHostPort), token) }
         val config = MutableStateFlow(
             CoreConfig(sttConfig = STTConfig(serverUrl = url, serverModel = model, serverOnMobileData = serverOnMobileData, spokenLanguage = spokenLanguage)),
         )
@@ -106,6 +106,51 @@ class SelfHostedTranscriptionServiceTest {
     }
 
     private fun jsonOk(text: String) = """{"text":"$text"}"""
+
+    /** A dictation reads the address when its session opens and the token when it posts. */
+    @Test
+    fun aSaveDuringADictationSendsTheNewTokenNowhereElse() = runBlocking<Unit> {
+        val h = Harness(token = "tok-123") { respond(jsonOk("words"), headers = headersOf(HttpHeaders.ContentType, "application/json")) }
+        val audio = flow {
+            emit(ByteArray(32_000) { 1 })
+            h.store.setToken("other.example.net:443", "tok-other")
+            h.config.value = h.config.value.let { it.copy(sttConfig = it.sttConfig.copy(serverUrl = "https://other.example.net/inference")) }
+        }
+        h.service.transcribe(audio, sampleRate = 16_000, language = STTLanguage.Automatic)
+            .filterIsInstance<TranscriptionSessionStatus.Transcription>().first()
+        val request = h.requests.single()
+        assertEquals("stt.example.net", request.url.host)
+        assertEquals(null, request.headers[HttpHeaders.Authorization])
+    }
+
+    /** A request carries the token saved for the address it goes to. */
+    @Test
+    fun aRequestCarriesTheTokenOnlyToTheServerItWasSavedFor() = runBlocking<Unit> {
+        val h = Harness(token = "tok-123") { respond(jsonOk("words"), headers = headersOf(HttpHeaders.ContentType, "application/json")) }
+        fun sent() = h.requests.last().let { it.url.host to it.headers[HttpHeaders.Authorization] }
+
+        h.transcribeRecording()
+        assertEquals("stt.example.net" to "Bearer tok-123", sent())
+
+        // Only the address changed.
+        h.config.value = h.config.value.let { it.copy(sttConfig = it.sttConfig.copy(serverUrl = "https://other.example.net/inference")) }
+        h.transcribeRecording()
+        assertEquals("other.example.net" to null, sent())
+        h.transcribe()
+        assertEquals("other.example.net" to null, sent())
+
+        // Only the token changed.
+        h.config.value = h.config.value.let { it.copy(sttConfig = it.sttConfig.copy(serverUrl = "https://stt.example.net/inference")) }
+        h.store.setToken("other.example.net:443", "tok-other")
+        h.transcribeRecording()
+        assertEquals("stt.example.net" to null, sent())
+        h.transcribe()
+        assertEquals("stt.example.net" to null, sent())
+
+        h.config.value = h.config.value.let { it.copy(sttConfig = it.sttConfig.copy(serverUrl = "https://other.example.net:443/v1/audio/transcriptions")) }
+        h.transcribe()
+        assertEquals("other.example.net" to "Bearer tok-other", sent())
+    }
 
     @Test
     fun postsAMultipartWavWithTheFieldsBothServerFamiliesRead() = runBlocking {
@@ -415,7 +460,7 @@ class SelfHostedTranscriptionServiceTest {
         update { copy(serverModel = "n") }
         val modelChanged = h.service.settingsStamp()
         assertNotEquals(pathChanged, modelChanged)
-        h.store.setToken("u")
+        h.store.setToken("stt.example.net:443", "u")
         val tokenChanged = h.service.settingsStamp()
         assertNotEquals(modelChanged, tokenChanged)
         h.store.trust("stt.example.net:443", "AB:CD")

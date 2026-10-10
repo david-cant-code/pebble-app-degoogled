@@ -45,7 +45,9 @@ fun validateServerUrl(raw: String): ServerUrlProblem? {
 fun serverHostPort(raw: String): String? {
     if (validateServerUrl(raw) != null) return null
     val url = Url(raw.trim())
-    return "${url.host.lowercase()}:${url.port}"
+    // ASCII letters only: lowercasing others can give two different names one key.
+    val host = buildString { for (c in url.host) append(if (c in 'A'..'Z') c + 32 else c) }
+    return "$host:${url.port}"
 }
 
 /** The JSON both server families answer with; anything without `text` is a service error. */
@@ -178,24 +180,56 @@ fun formatFingerprint(sha256: ByteArray): String =
 /**
  * What the app remembers about the user's server besides its URL and
  * model: the bearer token, encrypted at rest through the keystore-backed
- * setting, the certificate fingerprint pinned by trust on first use,
- * keyed by `host:port`, and (Gravel) the one `host:port` whose replies
- * announced a separate dictation lane.
+ * setting together with the `host:port` it was saved for (Gravel), the
+ * certificate fingerprint pinned by trust on first use, keyed by
+ * `host:port`, and (Gravel) the one `host:port` whose replies announced a
+ * separate dictation lane.
  */
 class SelfHostedServerStore(private val settings: Settings, cipher: SecretCipher) {
     private companion object {
-        const val TOKEN_KEY = "stt_server_token"
+        const val UNBOUND_TOKEN_KEY = "stt_server_token"
+        const val TOKEN_KEY = "stt_server_token_bound"
         const val PIN_PREFIX = "stt_server_pin_"
         const val LANE_KEY = "stt_server_dictation_lane"
     }
 
-    private val tokenSetting = EncryptedStringSetting(settings, cipher, TOKEN_KEY)
+    private val unboundToken = EncryptedStringSetting(settings, cipher, UNBOUND_TOKEN_KEY)
 
-    fun token(): String? = tokenSetting.get()?.takeIf { it.isNotBlank() }
+    // Gravel: the address, a line break, the token, as one value, so one read gives a token and whose it is.
+    private val boundToken = EncryptedStringSetting(settings, cipher, TOKEN_KEY)
 
-    fun setToken(value: String?) = tokenSetting.set(value?.trim()?.takeIf { it.isNotBlank() })
+    /** Gravel: the token saved for [hostPort]; null for any other address. */
+    fun tokenFor(hostPort: String?): String? {
+        val saved = boundToken.get() ?: return null
+        val at = saved.indexOf('\n')
+        return if (hostPort != null && at > 0 && saved.substring(0, at) == hostPort) saved.substring(at + 1) else null
+    }
 
-    /** Gravel: the token as stored (encrypted), so a token that cannot be decrypted for a moment still reads the same; null without one. */
+    /** Gravel: saves [value] as the token of [hostPort], or removes the saved token without either; a token stored without an address goes too. */
+    fun setToken(hostPort: String?, value: String?) {
+        val token = value?.trim()?.takeIf { it.isNotBlank() }
+        boundToken.set(if (hostPort != null && token != null) "$hostPort\n$token" else null)
+        settings.remove(UNBOUND_TOKEN_KEY)
+    }
+
+    /**
+     * Gravel: a token stored without an address, by a build from before tokens carried one, becomes [hostPort]'s, the
+     * configured server's, in place of a saved one, or is removed without a server. One that cannot be read or stored
+     * for the moment is kept for a later call.
+     */
+    fun adoptUnboundToken(hostPort: String?) {
+        if (!settings.hasKey(UNBOUND_TOKEN_KEY)) return
+        if (hostPort != null) {
+            val token = unboundToken.get()?.trim() ?: return
+            if (token.isNotEmpty()) {
+                boundToken.set("$hostPort\n$token")
+                if (!settings.hasKey(TOKEN_KEY)) return
+            }
+        }
+        settings.remove(UNBOUND_TOKEN_KEY)
+    }
+
+    /** Gravel: the saved token with its address as stored (encrypted), so one that cannot be decrypted for a moment still reads the same; null when none is saved for an address. */
     fun storedToken(): String? = settings.getStringOrNull(TOKEN_KEY)
 
     fun pinnedFingerprint(hostPort: String): String? = settings.getStringOrNull(PIN_PREFIX + hostPort)

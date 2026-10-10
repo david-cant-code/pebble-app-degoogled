@@ -31,6 +31,7 @@ import com.anopticlabs.gravel.socketfilter.InstallResult
 import com.anopticlabs.gravel.socketfilter.UdpSocketFilter
 import coredevices.ExperimentalDevices
 import com.anopticlabs.gravel.network.AndroidUnmeteredWifi
+import com.anopticlabs.gravel.transcription.adoptUnboundServerToken
 import com.anopticlabs.gravel.transcription.settleServerOnMobileData
 import com.anopticlabs.gravel.notebook.notebookModule
 import coredevices.coreapp.di.androidDefaultModule
@@ -110,6 +111,8 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         // Gravel: the self-hosted server's Wi-Fi-only rule; ahead of pebbleAppDelegate.init, which starts libPebble.
         get<AndroidUnmeteredWifi>().start()
         settleServerOnMobileData(coreConfigHolder, get())
+        // Gravel: ahead of the first request, which goes out without a token an earlier build stored until this has run.
+        adoptUnboundServerToken(coreConfigHolder, get())
         // Fork: installs upgraded from pre-strip builds still hold the
         // Firebase SDKs' persisted refresh token and Firestore cache, and the
         // strip removed every code path that could clear them; see

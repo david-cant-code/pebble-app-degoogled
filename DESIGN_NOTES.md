@@ -567,9 +567,15 @@ The replacement is whisper.cpp (MIT), compiled from source:
   and the spoken language when known, answered with JSON `text`; the
   URL is used as entered, path included. The bearer token is a secret
   and goes through the keystore-backed encrypted setting
-  (`SelfHostedServerStore`), and belongs to the host and port it was
-  saved with: a URL edited to another server is tested and saved
-  without it unless a new one is typed. Transport is https only, like
+  (`SelfHostedServerStore`) in one value with the host and port it was
+  saved for, and a dictation, a Notebook request and the dialog's test
+  read it for the address the request goes to (`tokenFor`); a URL edited
+  to another server is tested and saved without it unless a new one is
+  typed. A token an earlier build stored without an address is given
+  the configured server's at app start or when the dialog opens
+  (`adoptUnboundServerToken`), or removed when no valid server is
+  configured; one that cannot be read then stays for the next time.
+  Transport is https only, like
   every other connection in the app; the trust rule
   (`decideServerTrust`) is: a pin for the host and port, once one
   exists, decides alone, and any other certificate is refused as changed
