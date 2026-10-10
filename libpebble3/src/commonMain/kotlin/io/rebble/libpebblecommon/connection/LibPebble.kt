@@ -311,6 +311,14 @@ interface LockerApi {
     fun getAllLockerUuids(): Flow<List<Uuid>>
     fun getLocker(type: AppType, searchQuery: String?, limit: Int): Flow<List<LockerWrapper>>
     fun getLockerApp(id: Uuid): Flow<LockerWrapper?>
+
+    /**
+     * Gravel: stores the PBW at [pbwPath] as a sideloaded app like [sideloadApp], without opening it on a watch,
+     * when it is the app [id].
+     * @return false when the PBW is another app's or could not be read or stored. A store that fails can leave an
+     * entry that was there before without its PBW.
+     */
+    suspend fun sideloadAppWithoutLaunch(pbwPath: Path, id: Uuid): Boolean
     suspend fun setAppOrder(id: Uuid, order: Int)
     suspend fun waitUntilAppSyncedToWatch(id: Uuid, identifier: PebbleIdentifier, timeout: Duration): Boolean
     suspend fun removeApp(id: Uuid): Boolean

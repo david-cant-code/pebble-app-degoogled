@@ -196,6 +196,8 @@ class FakeLibPebble : LibPebble {
         return flow { emit(fakeLockerEntries.first()) }
     }
 
+    override suspend fun sideloadAppWithoutLaunch(pbwPath: Path, id: Uuid): Boolean = true
+
     override suspend fun setAppOrder(id: Uuid, order: Int) {
 
     }

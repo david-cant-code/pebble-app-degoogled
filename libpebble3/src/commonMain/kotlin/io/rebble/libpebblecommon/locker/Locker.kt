@@ -212,6 +212,18 @@ class Locker(
 
     suspend fun getApp(uuid: Uuid): LockerEntry? = lockerEntryDao.getEntry(uuid)
 
+    // Gravel
+    override suspend fun sideloadAppWithoutLaunch(pbwPath: Path, id: Uuid): Boolean =
+        try {
+            val pbwApp = PbwApp(pbwPath)
+            Uuid.parse(pbwApp.info.uuid) == id && sideloadApp(pbwApp = pbwApp, loadOnWatch = false)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.e(e) { "Error while sideloading app without launch" }
+            false
+        }
+
     suspend fun update(locker: LockerModelWrapper) {
         logger.d("update: ${locker.locker.applications.size}")
         val existingApps = lockerEntryDao.getAll().associateBy { it.id }.toMutableMap()
