@@ -1,0 +1,1 @@
+Fixes steps and heart rate not syncing from watches on PebbleOS 4.39.0 and 4.40.0. Steps and heart rate missed before this update are not able to be recovered.

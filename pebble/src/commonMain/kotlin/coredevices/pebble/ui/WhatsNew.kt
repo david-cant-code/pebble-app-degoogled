@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
  * users on update. The popup auto-shows once per user per bump (`WhatsNewDialog` in
  * composeApp) and can be reopened any time from Settings > About.
  */
-const val WHATS_NEW_VERSION = 11
+const val WHATS_NEW_VERSION = 12
 
 /** A single announced change: a short heading and a sentence or two of body. */
 data class WhatsNewEntry(val title: String, val body: String)
@@ -32,6 +32,13 @@ data class WhatsNewEntry(val title: String, val body: String)
  * changelog (that lives in git history and the repo docs).
  */
 val whatsNewEntries: List<WhatsNewEntry> = listOf(
+    WhatsNewEntry(
+        title = "Steps and heart rate sync again",
+        body = "PebbleOS 4.39.0 and 4.40.0 send a watch's steps and heart rate in a newer " +
+            "format that Gravel could not read, so that data stopped arriving from watches " +
+            "on those versions. Gravel reads the newer format now. Steps and heart rate " +
+            "missed before this update are not able to be recovered.",
+    ),
     WhatsNewEntry(
         title = "PebbleOS updates follow Core's changelog",
         body = "For Core watches, Gravel now offers the newest PebbleOS version on Core's public " +
