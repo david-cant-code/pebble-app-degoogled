@@ -793,9 +793,30 @@ what the lane shows. A download job's
 time limit scales with the file's size (`DownloadJobLiveness.timeoutFor`).
 The startup sweep deletes every model directory that is not an
 installed catalog model, a text model's included, but resets dictation
-only when the selected speech model is not installed.
+only when one of them has a name outside the catalogs, as a previous
+engine's installs have, and the selected speech model is not installed.
+A torn catalog install keeps the chosen mode and announces nothing; when
+it is the selected model's, the selection moves as after a delete
+(`WhisperModelCatalog.selectionAmong`). A re-pin that keeps a model's id
+reads as a torn install, so it is deleted without the announcement.
 The model picker, dictation's installed check and the sweep's restore
 see speech models only.
+
+Deleting a speech model in the picker keeps the chosen mode
+(`deleteModelKeepingMode`), where upstream switches to Server Only once
+none is left. Deleting the selected model selects an installed one, the
+recommended ahead of the catalog's order, or clears the selection; in
+the modes that use a model on this phone the picker says which model is
+now used, or that none is installed, naming the mode's other
+destination for watch dictation in a mode that has one
+(`noSpeechModelMessage`: Rebble, signed in or not; the server while a
+valid address is set, "on Wi-Fi" while the server is kept off mobile
+data). `ModelManager.deleteModel` tells
+`WhisperTranscriptionService.modelDeleted`, which frees a loaded copy of
+that model behind a call that is inside the engine; `isLocalAvailable`
+counts a loaded model only while it is still installed. The view
+model's call and that wiring are checked as source text
+(`SpeechModelDeleteSentinelTest`).
 
 Naming: `CactusSTTMode` and `CactusModelPathProvider` keep their
 upstream names. The enum's entry names are persisted inside the
@@ -806,7 +827,10 @@ existing installs rides the incompatible-model sweep in
 `CommonAppDelegate`: previous-engine model directories are deleted, the
 user's local mode is stashed when the selected model is not installed,
 and `SttModelUpdatePrompt` restores it once a catalog model is
-downloaded.
+downloaded, while the mode is still the one the sweep left
+(`sttUpdatePromptApplies`). The sweep's recommendation wiring and the
+dialog's calls to its two host-tested functions are checked as source
+text (`SpeechModelStartupSentinelTest`).
 
 ## Notebook
 

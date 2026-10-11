@@ -100,7 +100,9 @@ val utilModule = module {
             exclusion = get(),
         )
     }
-    single { ModelManager(get(), get(), getOrNull(), get()) }
+    single {
+        ModelManager(get(), get(), getOrNull(), get(), onDeleted = { get<WhisperTranscriptionService>().modelDeleted(it) })
+    }
     single { DictationSpeedTracker(get()) }
     singleOf(::OAuthRedirectHandler)
     singleOf(::WisprFlowAuth)

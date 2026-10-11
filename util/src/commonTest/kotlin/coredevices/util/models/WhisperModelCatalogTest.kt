@@ -137,6 +137,15 @@ class WhisperModelCatalogTest {
     }
 
     @Test
+    fun selectionAmongTakesTheRecommendedModelThenTheCatalogsOrder() {
+        val installed = listOf("whisper-tiny-en", "whisper-base", "not-in-the-catalog")
+        assertEquals("whisper-tiny-en", WhisperModelCatalog.selectionAmong(installed, recommended = "whisper-tiny-en"))
+        assertEquals("whisper-base", WhisperModelCatalog.selectionAmong(installed, recommended = "whisper-small-en"))
+        assertNull(WhisperModelCatalog.selectionAmong(listOf("not-in-the-catalog"), recommended = "whisper-small-en"))
+        assertNull(WhisperModelCatalog.selectionAmong(emptyList(), recommended = "whisper-small-en"))
+    }
+
+    @Test
     fun generationCannotCollideWithLegacyCactusMarkers() {
         // The migration notification dedupes on the stored last-notified
         // value, which on upgraded devices is the Cactus weights tag; a

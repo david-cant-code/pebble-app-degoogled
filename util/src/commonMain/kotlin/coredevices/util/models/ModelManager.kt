@@ -25,6 +25,8 @@ class ModelManager(
     private val modelDownloadManager: ModelDownloadManager,
     private val modelPathProvider: CactusModelPathProvider? = null,
     private val speedEstimator: DeviceSpeedEstimator? = null,
+    // Gravel: called with a model's name after the provider's delete.
+    private val onDeleted: (String) -> Unit = {},
 ) {
     val modelDownloadStatus = modelDownloadManager.downloadStatus
 
@@ -59,6 +61,7 @@ class ModelManager(
 
     fun deleteModel(modelName: String) {
         modelPathProvider?.deleteModel(modelName)
+        onDeleted(modelName)
     }
 
     /**

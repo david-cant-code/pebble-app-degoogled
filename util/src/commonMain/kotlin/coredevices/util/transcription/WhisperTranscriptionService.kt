@@ -796,8 +796,7 @@ class WhisperTranscriptionService internal constructor(
         if (config.mode == CactusSTTMode.RemoteOnly) return
         if (!engine.supported()) return
         // The configured model is the single source of truth; null means no
-        // local model has been chosen yet (fresh install, or the migration
-        // sweep cleared it) and there is nothing to initialize.
+        // local model is chosen and there is nothing to initialize.
         val modelName = config.modelName ?: run {
             logger.d { "No STT model configured, skipping init" }
             return
@@ -930,11 +929,38 @@ class WhisperTranscriptionService internal constructor(
      */
     private fun placementSnapshot(): EngineRuntimeSnapshot = engine.runtimeSnapshot() ?: engineRuntimeSnapshot()
 
-    /** True if the local model is loaded, or downloaded and ready to load, on a supported device. */
-    fun isLocalAvailable(): Boolean = engine.supported() && (modelHandle != 0L || modelExists())
+    /** True if a model still on the phone is loaded, or the chosen one is downloaded and ready to load, on a supported device. */
+    fun isLocalAvailable(): Boolean = engine.supported() && (loadedModelInstalled() || modelExists())
+
+    // Gravel: a deleted model's copy stays loaded while a call is inside the engine (modelDeleted).
+    private fun loadedModelInstalled(): Boolean =
+        modelHandle != 0L && lastInitedModel?.let { modelProvider.isModelDownloaded(it) } == true
 
     /** True when [transcribeLongForm] can run: a local dictation mode and [isLocalAvailable]. Reads the disk. */
     fun isLongFormAvailable(): Boolean = sttConfig.value.mode.usesLocalCactus() && isLocalAvailable()
+
+    /**
+     * Gravel: [modelName] was deleted from the phone: its loaded copy is freed, behind a call that is inside the
+     * engine, unless the model is installed again by then.
+     */
+    fun modelDeleted(modelName: String) {
+        scope.launch(ioDispatcher) {
+            modelMutex.withLock {
+                val handle = modelHandle
+                if (handle == 0L || lastInitedModel != modelName || modelProvider.isModelDownloaded(modelName)) return@withLock
+                modelHandle = 0L
+                lastInitedModel = null
+                // This launch has no handler to fail into.
+                try {
+                    engine.free(handle)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logger.w(e) { "Freeing the deleted STT model '$modelName' failed: ${e.message}" }
+                }
+            }
+        }
+    }
 
     /**
      * Called as a transcription opens (a watch session's `canServeSession`,

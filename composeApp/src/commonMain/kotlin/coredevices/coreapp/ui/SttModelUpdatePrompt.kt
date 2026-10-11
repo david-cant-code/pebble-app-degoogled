@@ -19,6 +19,7 @@ import coredevices.coreapp.STT_UPDATE_NOTIFICATION_ID
 import coredevices.coreapp.util.cancelNotifyLocal
 import coredevices.ui.M3Dialog
 import coredevices.util.CoreConfigHolder
+import coredevices.util.STTConfig
 import coredevices.util.models.CactusSTTMode
 import coredevices.util.models.ModelManager
 import coredevices.util.transcription.CactusModelPathProvider
@@ -28,12 +29,21 @@ import kotlinx.coroutines.IO
 import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 
+/** Whether the dialog still applies: [mode] is the one runSttModelMigration left when it stashed [stashed]. */
+internal fun sttUpdatePromptApplies(stashed: CactusSTTMode?, mode: CactusSTTMode): Boolean =
+    stashed != null && mode == (stashed.takeUnless { it.usesLocalCactus() } ?: CactusSTTMode.RemoteOnly)
+
+internal fun sttConfigAfterUpdateDownload(stt: STTConfig, stashed: CactusSTTMode, slug: String): STTConfig =
+    stt.copy(mode = if (stt.mode == CactusSTTMode.RemoteOnly) stashed else stt.mode, modelName = slug)
+
 /**
  * One-time engine-migration dialog. Shows when the startup sweep has
  * stashed a local STT mode (the previous engine's model was removed) and
  * no catalog model is installed yet; downloads the recommended model and
  * restores the stashed mode on success. Unsupported CPUs never see it:
  * a download the engine cannot use would be 150+ MB of pure waste.
+ * [sttUpdatePromptApplies] keeps it to the mode the sweep left, and the
+ * stashed mode is written over Server Only alone.
  */
 @Composable
 fun SttModelUpdatePrompt() {
@@ -50,9 +60,12 @@ fun SttModelUpdatePrompt() {
     fun anyModelInstalled(): Boolean =
         modelProvider.getDownloadedModels().any { modelProvider.isModelDownloaded(it) }
 
+    fun stashedMode(): CactusSTTMode? =
+        settings.getIntOrNull(STT_MODE_BEFORE_UPDATE_KEY)?.let { CactusSTTMode.fromId(it) }
+
     LaunchedEffect(Unit) {
         val required = isWhisperSupported() &&
-            settings.hasKey(STT_MODE_BEFORE_UPDATE_KEY) &&
+            sttUpdatePromptApplies(stashedMode(), configHolder.config.value.sttConfig.mode) &&
             withContext(Dispatchers.IO) { !anyModelInstalled() }
         if (required) {
             modelManager.ensureSpeedMeasured()
@@ -64,15 +77,12 @@ fun SttModelUpdatePrompt() {
     val download = rememberModelDownloadFlow(
         key = targetModel,
         onInstalled = { slug ->
-            val restored = CactusSTTMode.fromId(
+            val stashed = CactusSTTMode.fromId(
                 settings.getInt(STT_MODE_BEFORE_UPDATE_KEY, CactusSTTMode.RemoteOnly.id)
             )
             configHolder.update(
                 configHolder.config.value.copy(
-                    sttConfig = configHolder.config.value.sttConfig.copy(
-                        mode = restored,
-                        modelName = slug,
-                    )
+                    sttConfig = sttConfigAfterUpdateDownload(configHolder.config.value.sttConfig, stashed, slug)
                 )
             )
             settings.remove(STT_MODE_BEFORE_UPDATE_KEY)

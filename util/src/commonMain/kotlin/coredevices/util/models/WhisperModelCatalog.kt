@@ -85,7 +85,9 @@ data class WhisperModel(
  *  3. Independent bytes: download that URL fresh, `sha256sum` it and
  *     byte-count it locally; this pair goes into the table, with 1 and 2
  *     as cross-checks.
- * When a change invalidates existing installs, also bump [GENERATION].
+ * When a change retires a model's id, also bump [GENERATION]. A re-pin
+ * that keeps an id is not announced: the startup sweep deletes the old
+ * install as a torn one and keeps the speech mode.
  */
 object WhisperModelCatalog {
     /**
@@ -94,7 +96,7 @@ object WhisperModelCatalog {
      * engine swap. The stored last-notified value on migrated devices is a
      * Cactus tag ("v2.0.1") or absent, so any non-colliding value fires
      * the migration notification exactly once; bump this string whenever a
-     * catalog change forces reinstalls.
+     * catalog change retires a model's id.
      */
     const val GENERATION = "whisper-1"
 
@@ -191,6 +193,13 @@ object WhisperModelCatalog {
     val ids: Set<String> = MODELS.map { it.id }.toSet()
 
     fun byId(id: String): WhisperModel? = MODELS.firstOrNull { it.id == id }
+
+    /**
+     * What replaces a selected model that is gone: [recommended] when it
+     * is in [installed], else the first of [MODELS] that is, else none.
+     */
+    fun selectionAmong(installed: Collection<String>, recommended: String): String? =
+        recommended.takeIf { it in installed } ?: MODELS.firstOrNull { it.id in installed }?.id
 
     /**
      * The entry one tier cheaper than [model] with the same language

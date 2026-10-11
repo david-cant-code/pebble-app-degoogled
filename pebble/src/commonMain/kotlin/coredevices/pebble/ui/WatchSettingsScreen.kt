@@ -145,7 +145,6 @@ import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigHolder
 import coredevices.util.Permission
 import coredevices.util.PermissionRequester
-import coredevices.util.STTConfig
 import coredevices.util.granted
 import coredevices.util.WeatherUnit
 import coredevices.util.emailOrNull
@@ -171,7 +170,9 @@ import io.rebble.libpebblecommon.metadata.WatchType
 import io.rebble.libpebblecommon.packets.ProtocolCapsFlag
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -267,6 +268,14 @@ internal fun offlineAccuracyNote(mode: CactusSTTMode, serverConfigured: Boolean,
         else -> "$lead Setting up a Self-hosted Server adds Server (with Local Fallback), which tries the server first and falls back to this phone."
     }
 }
+
+/** Gravel: the config the model prompt saves once its download starts; every other speech setting is kept. */
+internal fun configAfterModelPrompt(current: CoreConfig, mode: CactusSTTMode, modelName: String): CoreConfig =
+    current.copy(sttConfig = current.sttConfig.copy(mode = mode, modelName = modelName))
+
+/** Gravel: what [installed] lists, read again each time [status] emits. */
+internal fun installedModelsFlow(status: Flow<ModelDownloadStatus>, installed: () -> List<String>): Flow<List<String>> =
+    status.map { installed() }
 
 /** Gravel: the explanation under "Use the Server on Mobile Data", or null where the switch is not offered. */
 internal fun serverOnMobileDataNote(mode: CactusSTTMode, phoneHasModel: Boolean): String? {
@@ -464,11 +473,10 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                         logger.e { "Failed to start download for recommended model ${recommendedModelFinal.slug}" }
                     } else {
                         coreConfigHolder.update(
-                            coreConfig.copy(
-                                sttConfig = STTConfig(
-                                    mode = pendingSTTMode,
-                                    modelName = recommendedModelFinal.slug
-                                )
+                            configAfterModelPrompt(
+                                coreConfigHolder.config.value,
+                                pendingSTTMode,
+                                recommendedModelFinal.slug,
                             )
                         )
                     }
@@ -535,20 +543,17 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
             },
         )
     }
-    val hasOfflineModels by produceState(false) {
-        withContext(Dispatchers.Default) {
-            // Installed catalog models only: a stale previous-engine dir on
-            // disk must not make the speech section claim a usable model.
-            value = modelManager.getDownloadedSTTModelSlugs().isNotEmpty()
-        }
-    }
+    // Installed catalog models only: a stale previous-engine dir on
+    // disk must not make the speech section claim a usable model.
+    // Gravel: relies on ModelDownloadService (ModelDownloadManager.android.kt) setting Idle after the install.
+    val installedSpeechModels by remember {
+        installedModelsFlow(modelManager.modelDownloadStatus) { modelManager.getDownloadedSTTModelSlugs() }
+            .flowOn(Dispatchers.Default)
+    }.collectAsState(emptyList())
+    val hasOfflineModels = installedSpeechModels.isNotEmpty()
     val whisperSupported = remember { isWhisperSupported() }
     // Gravel: the dictation router's own test: the selected model installed, on a CPU that runs it.
-    val phoneHasModel by produceState(false, coreConfig.sttConfig.modelName, modelDownloadState) {
-        val selected = coreConfig.sttConfig.modelName
-        value = whisperSupported && selected != null &&
-            withContext(Dispatchers.Default) { selected in modelManager.getDownloadedSTTModelSlugs() }
-    }
+    val phoneHasModel = whisperSupported && coreConfig.sttConfig.modelName?.let { it in installedSpeechModels } == true
     val platformSpeechRecognizer: PlatformSpeechRecognizer = koinInject()
     val platformSttAvailable by produceState(false) {
         value = withContext(Dispatchers.Default) { platformSpeechRecognizer.isAvailable() }
@@ -659,6 +664,8 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
             notebookAutoBackup,
             calendarAccess,
             textModelFacts,
+            hasOfflineModels,
+            phoneHasModel,
         ) {
             listOfNotNull(
                 basicSettingsActionItem(
