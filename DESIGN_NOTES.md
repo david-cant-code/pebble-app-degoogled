@@ -512,9 +512,11 @@ The replacement is whisper.cpp (MIT), compiled from source:
   at most three times in a row without a successful decode in between,
   so a process that keeps dying is not reloaded in a loop; a death
   during a load is that load's failure and is not retried on its own,
-  and every dictation still makes its own load attempt. A dictation
-  inside the process when it dies is lost and reported as the engine
-  unavailable, which the hybrid fallback routes to remote. Handles are
+  and every dictation still makes its own load attempt, except as
+  `KNOWN_ISSUES.md` records ("A dictation that meets an engine restart
+  can fail"). A dictation inside the process when it dies is lost
+  and reported as the engine unavailable, which the hybrid fallback
+  routes to remote. Handles are
   matched to the process that issued them by a per-bind generation from
   the client, so a late report of an earlier death never drops a fresh
   handle. The engine thread count and the placement facts on the

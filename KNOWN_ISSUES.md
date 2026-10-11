@@ -399,6 +399,26 @@ one of the types that `VerifyApkContents` lists, three Java UDP socket
 types and `DatagramPacket`, which opens no socket; an app bundle build does
 not run that check.
 
+## The Dev Connection switch closes the app with the LAN setting on
+
+**Status: deferred; to be fixed on its own branch.**
+
+Where the UDP filter is installed, turning on Dev Connection in a watch's
+menu while "Use LAN developer connection" (Settings > Connectivity) is on
+closes Gravel. The menu lists the phone's network interfaces to show its
+addresses, and `NetworkInterface.getNetworkInterfaces()` returned null in
+Gravel's process, which the menu does not handle. By the platform's source
+that is the filter's effect: Android looks up each interface's index
+through an IPv4 datagram socket, which the filter refuses, and leaves out
+an interface it gets no index for (`android17-release`: bionic
+`libc/bionic/net_if.cpp`, `if_nametoindex`; libcore
+`ojluni/src/main/java/java/net/NetworkInterface.java`, `getAll` and
+`getNetworkInterfaces`). Seen once, on a Pixel running GrapheneOS (Android
+17) with a development build and the filter installed. Not tried: a
+released build (0.3.1 and 0.3.3 have the same menu code and install the
+filter), and a build or phone without the filter. This entry leaves the
+file when the fix lands.
+
 ## The UDP filter starts with the app process, not before it
 
 **Status: accepted.**
@@ -1111,6 +1131,31 @@ one inside the same deadline; closing this means the new session
 joining the superseded decode after its recording ends and before its
 provider call, with a service test that cancels a blocking engine call
 and starts a second decode during the unwind.
+
+## A dictation that meets an engine restart can fail
+
+**Status: open; arises when the engine's process ends as a
+transcription arrives at the engine or waits for it.**
+
+After the speech engine's process ends, the service reloads the model
+on its own, within the limits `DESIGN_NOTES.md` gives ("The whisper
+speech engine"). A dictation decides what to wait for from what is on
+record when it arrives, and does not wait again once it has the
+engine. One that arrives, or is already waiting for the engine, as the
+process ends can therefore reach the engine before the reload has put
+the model back and fail, reported as the engine unavailable or as no
+model installed, or reach it right after the load and decode ahead of
+the warm-up that is meant to come first, with the first decode's
+one-time cost inside its own decode. The failure reaches the watch
+where the phone is the last provider tried for that dictation, as
+under Local Only, and the dictation goes to the next provider where
+one follows the phone, as under Local (with Server Fallback). A
+Notebook transcription makes the same wait: one that meets a restart
+can stop the queue until its next run, or go to the server under Local
+(with Server Fallback). Closing this means tying what a transcription
+waits for to the model it then decodes on, with service tests that end
+the engine process before, during and after that wait; deferred to a
+change of its own.
 
 ## A model prompt's download can settle on another download's status
 
