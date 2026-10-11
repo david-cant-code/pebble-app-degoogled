@@ -193,8 +193,10 @@ fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
     ) {
         Column {
             Text(
-                "Sends dictation audio to your own transcription server over https. Works with " +
-                    "whisper.cpp's server and any OpenAI-compatible server.",
+                "Sends dictation audio to your own transcription server over https, only while " +
+                    "this phone is using Wi-Fi that isn't marked metered unless Use the Server on " +
+                    "Mobile Data is on (it appears with the server modes). Works with whisper.cpp's " +
+                    "server and any OpenAI-compatible server.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(Modifier.height(12.dp))

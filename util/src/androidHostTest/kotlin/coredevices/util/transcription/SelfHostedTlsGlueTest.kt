@@ -10,12 +10,17 @@ import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 import kotlinx.coroutines.runBlocking
 import java.io.File
+import com.anopticlabs.gravel.network.NotOnAllowedNetworkException
+import com.anopticlabs.gravel.network.RouteBoundSocketFactory
+import com.anopticlabs.gravel.network.RouteBoundDns
 import java.io.IOException
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.nio.file.Files
 import java.security.KeyStore
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
+import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSession
@@ -94,6 +99,7 @@ class SelfHostedTlsGlueTest {
     private val certificate get() = material.certificate
     private val issuer get() = material.issuer
     private lateinit var server: HttpsServer
+    private val served = AtomicInteger()
     private val port get() = server.address.port
     private val url get() = "https://127.0.0.1:$port/inference"
 
@@ -121,6 +127,7 @@ class SelfHostedTlsGlueTest {
         server = HttpsServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
             httpsConfigurator = HttpsConfigurator(context)
             createContext("/inference") { exchange ->
+                served.incrementAndGet()
                 exchange.requestBody.use { it.readBytes() }
                 val reply = """{"text":"from the local server"}""".encodeToByteArray()
                 exchange.sendResponseHeaders(200, reply.size.toLong())
@@ -207,5 +214,55 @@ class SelfHostedTlsGlueTest {
             override fun verifyHostname(host: String, session: SSLSession): Boolean = false
         }
         assertTrue(probeServerCertificate("127.0.0.1", port, anchored).platformTrusted)
+    }
+
+    /** A client on [route] dialling [host]; "stt.test" only the bound lookup resolves. */
+    private class Bound(port: Int, pin: String, wifiOnly: Boolean = true, host: String = "stt.test", route: () -> String?) {
+        val attached = AtomicInteger()
+        val lookups = AtomicInteger()
+        val url = "https://$host:$port/inference"
+        private val binding = NetworkBinding(
+            RouteBoundSocketFactory(route) { _, _ -> attached.incrementAndGet() },
+            RouteBoundDns(route) { _, host -> lookups.incrementAndGet(); listOf(InetAddress.getByName(if (host == "stt.test") "127.0.0.1" else host)) },
+        )
+        val client = AndroidSelfHostedClientFactory({ binding }, { HostPlatform }).create("$host:$port", { pin }, wifiOnly)
+
+        suspend fun post(): Int {
+            val parts = formData { append("file", ByteArray(32), Headers.build { append(HttpHeaders.ContentType, "audio/wav") }) }
+            return client.submitFormWithBinaryData(url, parts).status.value
+        }
+    }
+
+    @Test
+    fun aWifiOnlyClientConnectsAndLooksUpThroughItsBindingWithNoIdleConnection() = runBlocking {
+        val bound = Bound(port, sha256Fingerprint(certificate)) { "wifi" }
+        bound.client.use {
+            assertEquals(200, bound.post())
+            assertEquals(200, bound.post())
+        }
+        assertEquals(2, bound.attached.get(), "each request made its own bound connection")
+        assertEquals(2, bound.lookups.get())
+        assertEquals(2, served.get())
+    }
+
+    @Test
+    fun aWifiOnlyClientWithNoRouteNeverReachesTheServer() = runBlocking {
+        val bound = Bound(port, sha256Fingerprint(certificate)) { null }
+        val failure = bound.client.use { assertFailsWith<Exception> { bound.post() } }
+        assertTrue(
+            generateSequence<Throwable>(failure) { it.cause }.take(MAX_CAUSE_DEPTH).any { it is NotOnAllowedNetworkException },
+            "no refusal by the rule in ${failure::class.simpleName}: ${failure.message}",
+        )
+        assertEquals(0, bound.lookups.get())
+        assertEquals(0, bound.attached.get())
+        assertEquals(0, served.get())
+    }
+
+    @Test
+    fun aClientNotHeldToTheRuleTakesNoBinding() = runBlocking {
+        val bound = Bound(port, sha256Fingerprint(certificate), wifiOnly = false, host = "localhost") { null }
+        assertEquals(200, bound.client.use { bound.post() })
+        assertEquals(0, bound.lookups.get())
+        assertEquals(0, bound.attached.get())
     }
 }

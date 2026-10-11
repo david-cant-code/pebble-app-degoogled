@@ -226,6 +226,29 @@ fun Section.navigatesDirectlyTo(): NavBarRoute? = when (this) {
     else -> null
 }
 
+/** Gravel: the explanation under "Use the Server on Mobile Data", or null where the switch is not offered. */
+internal fun serverOnMobileDataNote(mode: CactusSTTMode, phoneHasModel: Boolean): String? {
+    val lead = "When this is off, audio goes to your server only while this phone is using Wi-Fi that isn't marked metered."
+    return when {
+        mode == CactusSTTMode.RemoteOnly -> "$lead Otherwise, watch dictation doesn't work."
+        mode != CactusSTTMode.RemoteFirst && mode != CactusSTTMode.LocalFirst -> null
+        phoneHasModel -> "$lead Otherwise, watch dictation is transcribed on this phone."
+        else -> "$lead Otherwise, watch dictation doesn't work until this phone has a speech model."
+    }
+}
+
+/**
+ * Gravel: Flaky Network Mode is offered in the two modes with a server and a phone fallback, while
+ * the phone has its speech model; without one the mode changes nothing.
+ */
+internal fun showsFlakyNetworkMode(mode: CactusSTTMode, phoneHasModel: Boolean): Boolean =
+    phoneHasModel && (mode == CactusSTTMode.RemoteFirst || mode == CactusSTTMode.LocalFirst)
+
+internal const val FLAKY_NETWORK_MODE_NOTE =
+    "Turn this on if watch dictation fails because of your connection. The watch gives up if the " +
+        "words don't come back within 15 seconds, so with this on, watch dictation is transcribed " +
+        "on this phone instead of your server."
+
 object SettingsIds {
     const val OfflineSpeechRecognition = "OfflineSpeechRecognition"
     const val EnableHealthTracking = "EnableHealthTracking"
@@ -475,6 +498,12 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
         }
     }
     val whisperSupported = remember { isWhisperSupported() }
+    // Gravel: the dictation router's own test: the selected model installed, on a CPU that runs it.
+    val phoneHasModel by produceState(false, coreConfig.sttConfig.modelName, modelDownloadState) {
+        val selected = coreConfig.sttConfig.modelName
+        value = whisperSupported && selected != null &&
+            withContext(Dispatchers.Default) { selected in modelManager.getDownloadedSTTModelSlugs() }
+    }
     val platformSpeechRecognizer: PlatformSpeechRecognizer = koinInject()
     val platformSttAvailable by produceState(false) {
         value = withContext(Dispatchers.Default) { platformSpeechRecognizer.isAvailable() }
@@ -1629,6 +1658,34 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     topLevelType = TopLevelType.Phone,
                     section = Section.Speech,
                     action = { showServerDialog = true },
+                ),
+                basicSettingsToggleItem(
+                    title = "Use the Server on Mobile Data",
+                    description = serverOnMobileDataNote(coreConfig.sttConfig.mode, phoneHasModel),
+                    keywords = "server self-hosted mobile data cellular metered wifi",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Speech,
+                    checked = coreConfig.sttConfig.serverOnMobileData,
+                    onCheckChanged = {
+                        coreConfigHolder.update(
+                            coreConfig.copy(sttConfig = coreConfig.sttConfig.copy(serverOnMobileData = it)),
+                        )
+                    },
+                    show = { serverConfigured && serverOnMobileDataNote(coreConfig.sttConfig.mode, phoneHasModel) != null },
+                ),
+                basicSettingsToggleItem(
+                    title = "Flaky Network Mode",
+                    description = FLAKY_NETWORK_MODE_NOTE,
+                    keywords = "server self-hosted flaky network connection watch dictation phone",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Speech,
+                    checked = coreConfig.sttConfig.flakyNetworkMode,
+                    onCheckChanged = {
+                        coreConfigHolder.update(
+                            coreConfig.copy(sttConfig = coreConfig.sttConfig.copy(flakyNetworkMode = it)),
+                        )
+                    },
+                    show = { serverConfigured && showsFlakyNetworkMode(coreConfig.sttConfig.mode, phoneHasModel) },
                 ),
                 basicSettingsActionItem(
                     title = "Spoken Language",

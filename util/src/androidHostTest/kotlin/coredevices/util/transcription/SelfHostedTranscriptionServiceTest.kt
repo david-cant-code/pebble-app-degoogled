@@ -1,5 +1,6 @@
 package coredevices.util.transcription
 
+import com.anopticlabs.gravel.network.NotOnAllowedNetworkException
 import com.russhwolf.settings.MapSettings
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigFlow
@@ -19,6 +20,7 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import java.io.IOException
@@ -48,18 +50,25 @@ class SelfHostedTranscriptionServiceTest {
         url: String? = "https://stt.example.net/inference",
         model: String? = null,
         token: String? = null,
+        serverOnMobileData: Boolean = false,
+        val wifi: FakeUnmeteredWifi = FakeUnmeteredWifi(),
         handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
     ) {
         val requests = ArrayList<HttpRequestData>()
         val bodies = ArrayList<String>()
         val store = SelfHostedServerStore(MapSettings(), PlainCipher).also { it.setToken(token) }
-        val config = MutableStateFlow(CoreConfig(sttConfig = STTConfig(serverUrl = url, serverModel = model)))
+        val config = MutableStateFlow(
+            CoreConfig(sttConfig = STTConfig(serverUrl = url, serverModel = model, serverOnMobileData = serverOnMobileData)),
+        )
         val hostPorts = ArrayList<String>()
+        val wifiOnlyClients = ArrayList<Boolean>()
         val service = SelfHostedTranscriptionService(
             coreConfigFlow = CoreConfigFlow(config),
             store = store,
-            clientFactory = { hostPort, _ ->
+            unmeteredWifi = wifi,
+            clientFactory = { hostPort, _, wifiOnly ->
                 hostPorts += hostPort
+                wifiOnlyClients += wifiOnly
                 HttpClient(MockEngine { request ->
                     requests += request
                     bodies += request.body.toByteArray().decodeToString()
@@ -178,5 +187,77 @@ class SelfHostedTranscriptionServiceTest {
         assertEquals(200, h.service.testConnection("https://stt.example.net/inference", model = "m", token = "typed"))
         assertEquals(401, h.service.testConnection("https://stt.example.net/inference", model = null, token = null))
         assertTrue(h.bodies.first().contains("name=\"model\"") && h.bodies.first().contains("\r\n\r\nm\r\n"))
+    }
+
+    @Test
+    fun offTheAllowedNetworkNothingIsSentUnlessMobileDataIsAllowed() = runBlocking {
+        val h = Harness(wifi = FakeUnmeteredWifi(usable = false)) { respond(jsonOk("sent"), HttpStatusCode.OK) }
+        assertFalse(h.service.allowedOnCurrentNetwork())
+        assertFailsWith<TranscriptionException.ServerNotAllowedOnNetwork> { h.transcribe() }
+        assertTrue(h.requests.isEmpty())
+
+        h.wifi.usable.value = true
+        assertEquals("sent", h.transcribe().text)
+
+        val allowed = Harness(serverOnMobileData = true, wifi = FakeUnmeteredWifi(usable = false)) {
+            respond(jsonOk("sent"), HttpStatusCode.OK)
+        }
+        assertEquals("sent", allowed.transcribe().text)
+    }
+
+    @Test
+    fun theRuleIsCheckedOnceTheAudioIsCollected() = runBlocking {
+        val h = Harness { respond(jsonOk("sent"), HttpStatusCode.OK) }
+        val audio = flow {
+            emit(ByteArray(16_000) { 1 })
+            h.wifi.usable.value = false
+            emit(ByteArray(16_000) { 1 })
+        }
+        assertFailsWith<TranscriptionException.ServerNotAllowedOnNetwork> {
+            h.service.transcribe(audio, sampleRate = 16_000, language = STTLanguage.Automatic)
+                .filterIsInstance<TranscriptionSessionStatus.Transcription>().first()
+        }
+        assertTrue(h.requests.isEmpty())
+    }
+
+    @Test
+    fun withMobileDataOffDictationUsesAWifiOnlyClient() = runBlocking {
+        val h = Harness { respond(jsonOk("ok"), HttpStatusCode.OK) }
+        h.transcribe()
+        h.config.value = h.config.value.copy(sttConfig = h.config.value.sttConfig.copy(serverOnMobileData = true))
+        h.transcribe()
+        h.service.testConnection("https://stt.example.net/inference", model = null, token = null)
+        assertEquals(listOf(true, false, false), h.wifiOnlyClients, "dictation off, dictation on, then the test")
+    }
+
+    @Test
+    fun aSocketTheRuleRefusesIsReportedAsNotAllowed(): Unit = runBlocking {
+        val direct = Harness { throw NotOnAllowedNetworkException() }
+        assertFailsWith<TranscriptionException.ServerNotAllowedOnNetwork> { direct.transcribe() }
+
+        val wrapped = Harness { throw IOException("connect failed", NotOnAllowedNetworkException()) }
+        assertFailsWith<TranscriptionException.ServerNotAllowedOnNetwork> { wrapped.transcribe() }
+    }
+
+    @Test
+    fun theConnectionTestRunsOffWifiToo() = runBlocking {
+        val h = Harness(wifi = FakeUnmeteredWifi(usable = false)) { respond(jsonOk("ok"), HttpStatusCode.OK) }
+        assertEquals(200, h.service.testConnection("https://stt.example.net/inference", model = null, token = null))
+    }
+
+    @Test
+    fun aFailureOnceTheRuleNoLongerAllowsTheNetworkIsReportedAsNotAllowed(): Unit = runBlocking {
+        val wifi = FakeUnmeteredWifi()
+        val held = Harness(wifi = wifi) { wifi.usable.value = false; throw IOException("connection reset") }
+        assertFailsWith<TranscriptionException.ServerNotAllowedOnNetwork> { held.transcribe() }
+
+        val wifi2 = FakeUnmeteredWifi()
+        val unheld = Harness(serverOnMobileData = true, wifi = wifi2) { wifi2.usable.value = false; throw IOException("connection reset") }
+        assertFailsWith<TranscriptionException.TranscriptionNetworkError> { unheld.transcribe() }
+
+        val test = Harness(wifi = FakeUnmeteredWifi(usable = false)) { throw IOException("connection refused") }
+        assertFailsWith<TranscriptionException.TranscriptionNetworkError> {
+            test.service.testConnection("https://stt.example.net/inference", model = null, token = null)
+        }
     }
 }

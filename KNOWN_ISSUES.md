@@ -847,7 +847,8 @@ a dictation must answer within the watch's deadline. A dictation the
 phone transcribes while a Notebook recording is being transcribed, such
 as a spoken reply to a message, stops that transcription, which then
 starts again from the beginning once the dictation is done; where the
-phone answers first (Local Only, Local (with Server Fallback)) a
+phone answers first (Local Only, Local (with Server Fallback), and
+Server (with Local Fallback) while it keeps dictation on the phone) a
 watch session opening stops it
 already. The recording
 itself is kept; the transcript arrives later, and the stopped work is
@@ -874,7 +875,8 @@ recording, a cancel at the start of a call took about 4 seconds to land,
 about 7 when whisper detected the language, and a slower phone or larger
 model takes longer, possibly past the watch's deadline. In the modes where
 local transcription is only a fallback, no hold on the speech engine is
-raised when the watch session opens, so a local fallback meets this whenever a transcription has
+raised when the watch session opens unless the dictation is to stay on
+the phone, so a local fallback meets this whenever a transcription has
 just started.
 
 ## Local (with Rebble Fallback) raises no dictation hold when a watch session opens
@@ -1192,3 +1194,24 @@ faithful quantization of Qwen's weights rests on unsloth. ggml-org, the
 llama.cpp project's organization, publishes a Q4_K_M of Qwen3 1.7B that
 could replace the first entry after a quality check on the Notebook's
 prompts; it publishes no Q5_K_M of Qwen3.5 0.8B.
+
+## Behind a VPN, the Wi-Fi-only rule sees only what Android shows
+
+**Status: accepted.**
+
+With "Use the Server on Mobile Data" off, Gravel sends audio to a
+self-hosted transcription server only while the phone uses Wi-Fi that
+is not marked metered. On Android 10 and newer a VPN shows which kinds
+of network it runs over, and Gravel sends through it only while that is
+Wi-Fi. On Android 9 a VPN shows that only if its app declares its
+networks; when it does not, Gravel sends while such Wi-Fi is connected.
+On Android 8 Gravel cannot see a VPN at all and goes by the network
+under it. In both cases the route is the VPN app's, so a VPN running
+over mobile data at the same time carries the audio over mobile data.
+When a VPN moves off Wi-Fi during an upload, Gravel stops the upload
+once Android reports the move; what was sent before that went the new
+way. On Android 8 uploads are also not tied to the Wi-Fi itself, so in
+the moment between the Wi-Fi dropping and Android reporting it, an
+upload can start over mobile data. On any version, Gravel does not
+check that the Wi-Fi a VPN runs over is the one not marked metered,
+which matters only while two Wi-Fi networks are connected at once.

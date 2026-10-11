@@ -193,3 +193,8 @@ expect suspend fun probeServerCertificate(host: String, port: Int): ServerCertif
  * effect without a new client.
  */
 expect fun selfHostedHttpClient(hostPort: String, pinnedFingerprint: () -> String?): HttpClient
+
+/** Gravel: builds the server client; [wifiOnly] asks for one held to the Wi-Fi-only rule. */
+fun interface SelfHostedClientFactory {
+    fun create(hostPort: String, pinnedFingerprint: () -> String?, wifiOnly: Boolean): HttpClient
+}

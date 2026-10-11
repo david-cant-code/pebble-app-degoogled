@@ -33,6 +33,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.Duration
@@ -67,15 +68,30 @@ class HybridTranscriptionServiceTest {
     private class Harness(
         mode: CactusSTTMode,
         serverUrl: String? = "https://stt.example.net/inference",
+        wifi: Boolean = true,
+        mobileData: Boolean = false,
+        flaky: Boolean = false,
+        private val modelInstalled: Boolean = true,
         handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
     ) {
         val engine = FakeWhisperEngine()
+        val analytics = EventRecordingAnalytics()
         val requests = ArrayList<HttpRequestData>()
-        val config = MutableStateFlow(CoreConfig(sttConfig = STTConfig(mode = mode, modelName = "model-a", serverUrl = serverUrl)))
+        val config = MutableStateFlow(
+            CoreConfig(
+                sttConfig = STTConfig(
+                    mode = mode,
+                    modelName = "model-a",
+                    serverUrl = serverUrl,
+                    serverOnMobileData = mobileData,
+                    flakyNetworkMode = flaky,
+                ),
+            ),
+        )
         private val configFlow = CoreConfigFlow(config)
         val whisper = WhisperTranscriptionService(
             coreConfigFlow = configFlow,
-            modelProvider = FakeModelProvider(),
+            modelProvider = FakeModelProvider(modelInstalled),
             analytics = NoopAnalytics,
             inferenceBoost = NoOpInferenceBoost(),
             engine = engine.engine,
@@ -85,22 +101,27 @@ class HybridTranscriptionServiceTest {
         private val server = SelfHostedTranscriptionService(
             coreConfigFlow = configFlow,
             store = SelfHostedServerStore(MapSettings(), PlainCipher),
-            clientFactory = { _, _ -> HttpClient(MockEngine { request -> requests += request; handler(request) }) },
+            unmeteredWifi = FakeUnmeteredWifi(wifi),
+            clientFactory = { _, _, _ -> HttpClient(MockEngine { request -> requests += request; handler(request) }) },
         )
         val hybrid = HybridTranscriptionService(
             coreConfigFlow = configFlow,
             whisper = whisper,
             wisprFlow = WisprFlowRESTTranscriptionService(WisprFlowAuth()),
             kirinki = KirinkiTranscriptionService(),
-            analytics = NoopAnalytics,
+            analytics = analytics,
             platform = PlatformSpeechRecognizer(),
             selfHosted = server,
         )
 
         /** The local model comes up only in the modes that use it; the others never wait for it. */
         suspend fun awaitModel() {
-            if (!config.value.sttConfig.mode.usesLocalCactus()) return
+            if (!config.value.sttConfig.mode.usesLocalCactus() || !modelInstalled) return
             withTimeout(60.seconds) { while (!whisper.isModelReady) delay(10) }
+        }
+
+        fun serverFailures() = analytics.events.filter { (name, params) ->
+            name == TRANSCRIPTION_FAILURE_EVENT && params?.get("service") == "server"
         }
 
         suspend fun transcribe(initialTimeout: Duration? = null): TranscriptionSessionStatus.Transcription =
@@ -193,5 +214,130 @@ class HybridTranscriptionServiceTest {
         val withFallback = Harness(CactusSTTMode.RemoteFirst, serverUrl = null) { respond("", HttpStatusCode.OK) }
         withFallback.awaitModel()
         assertTrue(withFallback.hybrid.isAvailable(), "the local model still serves the fallback mode")
+    }
+
+    @Test
+    fun serverOnlyOffWifiRefusesTheSessionAndSendsNothing() = runBlocking(Dispatchers.Default) {
+        val h = Harness(CactusSTTMode.RemoteOnly, wifi = false) { respond(jsonOk("from server"), HttpStatusCode.OK) }
+        assertFalse(h.hybrid.isAvailable())
+        assertFailsWith<TranscriptionException.ServerNotAllowedOnNetwork> { h.transcribe() }
+        assertTrue(h.requests.isEmpty())
+        assertEquals(0, h.engine.realCalls)
+
+        val onWifi = Harness(CactusSTTMode.RemoteOnly) { respond(jsonOk("from server"), HttpStatusCode.OK) }
+        assertTrue(onWifi.hybrid.isAvailable())
+    }
+
+    @Test
+    fun theFallbackModesOffWifiStayOnThePhone() = runBlocking(Dispatchers.Default) {
+        for (mode in listOf(CactusSTTMode.RemoteFirst, CactusSTTMode.LocalFirst)) {
+            val h = Harness(mode, wifi = false) { respond(jsonOk("from server"), HttpStatusCode.OK) }
+            assertTrue(h.hybrid.isAvailable(), "$mode with a model on the phone, before it is loaded")
+            h.awaitModel()
+            assertEquals("hello world", h.transcribe().text, "$mode")
+            assertEquals(CactusSTTMode.LocalOnly, h.hybrid.lastSuccessfulMode, "$mode")
+
+            h.engine.reply = ""
+            assertFailsWith<TranscriptionException.NoSpeechDetected> { h.transcribe() }
+            assertTrue(h.requests.isEmpty(), "$mode sent audio off Wi-Fi")
+            assertTrue(h.serverFailures().isEmpty(), "$mode tried the server: ${h.serverFailures()}")
+        }
+    }
+
+    /** Refused at setup; a session the network turned away from mid-recording ends as a network refusal. */
+    @Test
+    fun theFallbackModesOffWifiWithoutAModelHaveNoPath() = runBlocking(Dispatchers.Default) {
+        val h = Harness(CactusSTTMode.RemoteFirst, wifi = false, modelInstalled = false) {
+            respond(jsonOk("from server"), HttpStatusCode.OK)
+        }
+        assertFalse(h.hybrid.isAvailable())
+        h.hybrid.earlyInit()
+        assertFalse(h.whisper.dictationPriority.isHeld, "nothing on the phone will run")
+        assertFailsWith<TranscriptionException.ServerNotAllowedOnNetwork> { h.transcribe() }
+        assertTrue(h.requests.isEmpty())
+    }
+
+    @Test
+    fun flakyNetworkModeKeepsDictationOnThePhone() = runBlocking(Dispatchers.Default) {
+        for (mode in listOf(CactusSTTMode.RemoteFirst, CactusSTTMode.LocalFirst)) {
+            val h = Harness(mode, flaky = true) { respond(jsonOk("from server"), HttpStatusCode.OK) }
+            h.awaitModel()
+            assertEquals("hello world", h.transcribe().text, "$mode")
+            h.engine.reply = ""
+            assertFailsWith<TranscriptionException.NoSpeechDetected> { h.transcribe() }
+            assertTrue(h.requests.isEmpty(), "$mode sent audio with Flaky Network Mode on")
+        }
+    }
+
+    @Test
+    fun flakyNetworkModeWithoutAModelStillUsesTheServer() = runBlocking(Dispatchers.Default) {
+        val h = Harness(CactusSTTMode.RemoteFirst, flaky = true, modelInstalled = false) {
+            respond(jsonOk("from server"), HttpStatusCode.OK)
+        }
+        assertEquals("from server", h.transcribe().text)
+        assertEquals(1, h.requests.size)
+    }
+
+    @Test
+    fun flakyNetworkModeLeavesServerOnlyAlone() = runBlocking(Dispatchers.Default) {
+        val h = Harness(CactusSTTMode.RemoteOnly, flaky = true) { respond(jsonOk("from server"), HttpStatusCode.OK) }
+        h.awaitModel()
+        assertEquals("from server", h.transcribe().text)
+        assertEquals(0, h.engine.realCalls)
+    }
+
+    /** Where the phone answers first, the dictation's recording already stops a Notebook transcription. */
+    @Test
+    fun serverWithLocalFallbackHoldsTheEngineEarlyOnlyWhenItStaysOnThePhone() = runBlocking(Dispatchers.Default) {
+        val offWifi = Harness(CactusSTTMode.RemoteFirst, wifi = false) { respond(jsonOk("x"), HttpStatusCode.OK) }
+        offWifi.hybrid.earlyInit()
+        assertTrue(offWifi.whisper.dictationPriority.isHeld)
+
+        val flaky = Harness(CactusSTTMode.RemoteFirst, flaky = true) { respond(jsonOk("x"), HttpStatusCode.OK) }
+        flaky.hybrid.earlyInit()
+        assertTrue(flaky.whisper.dictationPriority.isHeld)
+
+        val toTheServer = Harness(CactusSTTMode.RemoteFirst) { respond(jsonOk("x"), HttpStatusCode.OK) }
+        toTheServer.hybrid.earlyInit()
+        assertFalse(toTheServer.whisper.dictationPriority.isHeld)
+    }
+
+    @Test
+    fun withMobileDataAllowedTheServerModesRouteAsBefore() = runBlocking(Dispatchers.Default) {
+        val serverOnly = Harness(CactusSTTMode.RemoteOnly, wifi = false, mobileData = true) {
+            respond(jsonOk("from server"), HttpStatusCode.OK)
+        }
+        assertTrue(serverOnly.hybrid.isAvailable())
+        assertEquals("from server", serverOnly.transcribe().text)
+
+        val serverFirst = Harness(CactusSTTMode.RemoteFirst, wifi = false, mobileData = true) {
+            respond(jsonOk("from server"), HttpStatusCode.OK)
+        }
+        serverFirst.awaitModel()
+        serverFirst.hybrid.earlyInit()
+        assertFalse(serverFirst.whisper.dictationPriority.isHeld)
+        assertEquals("from server", serverFirst.transcribe().text)
+        assertEquals(0, serverFirst.engine.realCalls)
+
+        val localFirst = Harness(CactusSTTMode.LocalFirst, wifi = false, mobileData = true) {
+            respond(jsonOk("from server"), HttpStatusCode.OK)
+        }
+        localFirst.awaitModel()
+        localFirst.engine.reply = ""
+        assertEquals("from server", localFirst.transcribe().text)
+    }
+
+    @Test
+    fun platformOnlyFollowsTheRuleForItsServerPath() = runBlocking(Dispatchers.Default) {
+        val h = Harness(CactusSTTMode.PlatformOnly, wifi = false) { respond(jsonOk("from server"), HttpStatusCode.OK) }
+        assertFalse(h.hybrid.isAvailable())
+    }
+
+    @Test
+    fun withoutAServerTheFallbackModesAreNotKeptOnThePhone() = runBlocking(Dispatchers.Default) {
+        val h = Harness(CactusSTTMode.RemoteFirst, serverUrl = null, wifi = false) { respond(jsonOk("x"), HttpStatusCode.OK) }
+        h.awaitModel()
+        h.hybrid.earlyInit()
+        assertFalse(h.whisper.dictationPriority.isHeld)
     }
 }

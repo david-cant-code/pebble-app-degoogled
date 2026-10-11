@@ -165,6 +165,10 @@ data class STTConfig(
      * model ignore it; OpenAI-style servers require it. Null sends none.
      */
     val serverModel: String? = null,
+    /** Gravel: "Use the Server on Mobile Data"; off holds dictation uploads to the Wi-Fi-only rule. */
+    val serverOnMobileData: Boolean = false,
+    /** Gravel: "Flaky Network Mode"; see HybridTranscriptionService.keepsDictationOnPhone. */
+    val flakyNetworkMode: Boolean = false,
 ) {
     /**
      * The server URL names the user's own infrastructure, and the config
@@ -175,5 +179,6 @@ data class STTConfig(
         "STTConfig(mode=$mode, modelName=$modelName, spokenLanguage=$spokenLanguage, " +
             "debugSingleThread=$debugSingleThread, debugCaptureDump=$debugCaptureDump, " +
             "debugSubstituteAudio=$debugSubstituteAudio, debugSlowDecode=$debugSlowDecode, " +
-            "serverUrl=${if (serverUrl != null) "[set]" else "null"}, serverModel=$serverModel)"
+            "serverUrl=${if (serverUrl != null) "[set]" else "null"}, serverModel=$serverModel, " +
+            "serverOnMobileData=$serverOnMobileData, flakyNetworkMode=$flakyNetworkMode)"
 }

@@ -1,6 +1,8 @@
 package coredevices.util.transcription
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.network.NotOnAllowedNetworkException
+import com.anopticlabs.gravel.network.UnmeteredWifi
 import coredevices.util.AudioEncoding
 import coredevices.util.CoreConfigFlow
 import coredevices.util.writeWavHeader
@@ -48,14 +50,22 @@ import kotlin.time.Duration
  * failures are logged by exception class, and the cause handed to the
  * router is rebuilt without it.
  *
- * The client is built per `host:port` through [clientFactory] (the
- * certificate-pinning client on Android) and rebuilt when the host
- * changes; tests inject a mock engine there.
+ * The client is built per `host:port` and Wi-Fi-only choice through
+ * [clientFactory] (the certificate-pinning client on Android) and rebuilt
+ * when either changes; tests inject a mock engine there.
+ *
+ * Gravel: [transcribe] checks [allowedOnCurrentNetwork] once the audio is
+ * collected and, with mobile data off, sends through a client held to the
+ * Wi-Fi-only rule. A request refused by the rule, or ending in an I/O error
+ * once the rule no longer allows the network, ends in
+ * [TranscriptionException.ServerNotAllowedOnNetwork]. The connection test
+ * is not held to the rule.
  */
 class SelfHostedTranscriptionService(
     private val coreConfigFlow: CoreConfigFlow,
     private val store: SelfHostedServerStore,
-    private val clientFactory: (hostPort: String, pinnedFingerprint: () -> String?) -> HttpClient = ::selfHostedHttpClient,
+    private val unmeteredWifi: UnmeteredWifi,
+    private val clientFactory: SelfHostedClientFactory,
 ) : TranscriptionService {
     companion object {
         private val logger = Logger.withTag("SelfHostedTranscriptionService")
@@ -87,15 +97,18 @@ class SelfHostedTranscriptionService(
 
     override suspend fun isAvailable(): Boolean = configuredUrl() != null
 
-    private val clientMutex = Mutex()
-    private var client: Pair<String, HttpClient>? = null
+    fun allowedOnCurrentNetwork(): Boolean = config.serverOnMobileData || unmeteredWifi.usable.value
 
-    private suspend fun clientFor(url: String): HttpClient {
+    private val clientMutex = Mutex()
+    private var client: Pair<Pair<String, Boolean>, HttpClient>? = null
+
+    private suspend fun clientFor(url: String, wifiOnly: Boolean): HttpClient {
         val hostPort = serverHostPort(url) ?: throw TranscriptionException.TranscriptionServiceUnavailable(MODEL)
+        val key = hostPort to wifiOnly
         return clientMutex.withLock {
-            client?.takeIf { it.first == hostPort }?.second ?: run {
+            client?.takeIf { it.first == key }?.second ?: run {
                 client?.second?.close()
-                clientFactory(hostPort) { store.pinnedFingerprint(hostPort) }.also { client = hostPort to it }
+                clientFactory.create(hostPort, { store.pinnedFingerprint(hostPort) }, wifiOnly).also { client = key to it }
             }
         }
     }
@@ -124,7 +137,9 @@ class SelfHostedTranscriptionService(
         frames.collect { buffer.write(it) }
         if (buffer.size == 0L) throw TranscriptionException.NoSpeechDetected("No audio data received", MODEL)
         val wav = wavOf(buffer.readByteArray(), sampleRate)
-        val reply = post(clientFor(url), url, wav, config.serverModel, store.token(), languageCode(language))
+        if (!allowedOnCurrentNetwork()) throw TranscriptionException.ServerNotAllowedOnNetwork(MODEL)
+        val wifiOnly = !config.serverOnMobileData
+        val reply = post(clientFor(url, wifiOnly), url, wav, config.serverModel, store.token(), languageCode(language), wifiOnly)
         if (!reply.status.isSuccess()) {
             throw TranscriptionException.TranscriptionServiceError("Server returned HTTP ${reply.status.value}", modelUsed = MODEL)
         }
@@ -148,10 +163,10 @@ class SelfHostedTranscriptionService(
      */
     suspend fun testConnection(url: String, model: String?, token: String?): Int {
         val hostPort = serverHostPort(url) ?: throw TranscriptionException.TranscriptionServiceUnavailable(MODEL)
-        val client = clientFactory(hostPort) { store.pinnedFingerprint(hostPort) }
+        val client = clientFactory.create(hostPort, { store.pinnedFingerprint(hostPort) }, wifiOnly = false)
         return try {
             val wav = wavOf(ByteArray(TEST_SAMPLE_RATE * 2), TEST_SAMPLE_RATE)
-            post(client, url, wav, model, token, language = null).status.value
+            post(client, url, wav, model, token, language = null, wifiOnly = false).status.value
         } finally {
             client.close()
         }
@@ -171,6 +186,7 @@ class SelfHostedTranscriptionService(
         model: String?,
         token: String?,
         language: String?,
+        wifiOnly: Boolean,
     ): ServerReply {
         val parts = formData {
             append(
@@ -196,13 +212,17 @@ class SelfHostedTranscriptionService(
             throw e
         } catch (e: TranscriptionException) {
             throw e
-        } catch (e: IOException) {
+        } catch (e: Exception) {
+            val refused = generateSequence<Throwable>(e) { it.cause }.take(MAX_CAUSE_DEPTH).any { it is NotOnAllowedNetworkException }
+            if (refused || (wifiOnly && e is IOException && !allowedOnCurrentNetwork())) {
+                throw TranscriptionException.ServerNotAllowedOnNetwork(MODEL)
+            }
+            logger.w { "Server request failed: ${e::class.simpleName}" }
             // Connection refused, DNS, TLS refusal (an unpinned certificate
             // included), timeouts: the server is unreachable for this call.
-            logger.w { "Server request failed: ${e::class.simpleName}" }
-            throw TranscriptionException.TranscriptionNetworkError(ServerUnreachableException(describeTransportFailure(e)), MODEL)
-        } catch (e: Exception) {
-            logger.w { "Server request failed: ${e::class.simpleName}" }
+            if (e is IOException) {
+                throw TranscriptionException.TranscriptionNetworkError(ServerUnreachableException(describeTransportFailure(e)), MODEL)
+            }
             throw TranscriptionException.TranscriptionServiceError("Server request failed: ${e::class.simpleName}", modelUsed = MODEL)
         }
     }

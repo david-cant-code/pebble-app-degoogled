@@ -603,6 +603,22 @@ The replacement is whisper.cpp (MIT), compiled from source:
   platform's hostname-aware check (the SDK stub of
   `X509TrustManagerExtensions` throws from its constructor); a change to
   it needs a device pass against a self-hosted server.
+- The server's Wi-Fi-only rule, while "Use the Server on Mobile Data"
+  is off: a request may go out while the app's default network is
+  Wi-Fi not marked metered, or a VPN running over such Wi-Fi as far as
+  Android shows (`AndroidUnmeteredWifi`, which cites the platform
+  behavior it relies on; its limits are in `KNOWN_ISSUES.md`).
+  `SelfHostedTranscriptionService` checks the rule once the audio is
+  collected and sends through a client that refuses sockets and name
+  lookups while the rule allows no network, binds them (from Android 9)
+  to the network it allows when each is made, keeps no idle connection,
+  and closes a socket whose network stops being allowed. `HybridTranscriptionService` routes first: Server Only
+  refuses the watch session at setup, and the two fallback modes keep
+  dictation on the phone, as they do with Flaky Network Mode on while the phone
+  has a model. `settleServerOnMobileData` turns the switch on
+  once, at the first start with it, when a server was already set up;
+  its marker is a separate setting, so a rebuilt config cannot
+  re-trigger it.
 - `WhisperTranscriptionService` (util) keeps the Cactus-era service's
   proven shape: config-driven re-initialization, the two-mutex warm-up
   design, the memory guard, and the InferenceBoost foreground-priority
@@ -635,7 +651,8 @@ The replacement is whisper.cpp (MIT), compiled from source:
   back as one packed reply of at most 256 KiB, bounded and parsed in the
   app process (`WhisperLongForm`). Dictation keeps priority: a dictation
   transcribed on the phone, and a transcription opening (`earlyInit`)
-  where the phone answers first (LocalOnly, LocalFirst), raises a
+  where the phone answers first (LocalOnly, LocalFirst, and the fallback
+  modes while they keep dictation on the phone), raises a
   `DictationHold`, which
   stops a long-form call at the engine's next abort poll (the shim cites
   where whisper polls and what runs before the first poll); once the hold

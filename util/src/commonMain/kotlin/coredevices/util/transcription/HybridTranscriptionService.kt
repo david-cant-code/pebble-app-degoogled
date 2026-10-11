@@ -68,20 +68,24 @@ class HybridTranscriptionService(
     override val onInitialized: Channel<Boolean> get() = whisper.onInitialized
 
     override fun earlyInit() {
-        if (sttConfig.mode.usesLocalCactus()) {
-            whisper.earlyInit()
+        val mode = sttConfig.mode
+        if (mode.usesLocalCactus()) {
+            whisper.earlyInit(
+                localFirst = mode.localComesFirst() || (keepsDictationOnPhone() && whisper.isLocalAvailable()),
+            )
         }
     }
 
     override suspend fun isAvailable(): Boolean {
         return when (configuredMode) {
-            CactusSTTMode.RemoteOnly -> serverAvailable() || wisprFlow.isAvailable() || kirinki.isAvailable()
+            CactusSTTMode.RemoteOnly -> serverUsable() || wisprFlow.isAvailable() || kirinki.isAvailable()
             CactusSTTMode.LocalOnly -> whisper.isLocalAvailable()
+            // Gravel: a model on disk counts, loaded or not.
             CactusSTTMode.RemoteFirst, CactusSTTMode.LocalFirst ->
-                serverAvailable() || wisprFlow.isAvailable() || kirinki.isAvailable() || whisper.isModelReady
+                serverUsable() || wisprFlow.isAvailable() || kirinki.isAvailable() || whisper.isLocalAvailable()
             CactusSTTMode.PlatformOnly ->
                 (platform.isAvailable() && platform.isAuthorized()) ||
-                    serverAvailable() || wisprFlow.isAvailable() || kirinki.isAvailable()
+                    serverUsable() || wisprFlow.isAvailable() || kirinki.isAvailable()
             // Rebble modes are dispatched by STTRouter and never reach this service.
             CactusSTTMode.RebbleOnly,
             CactusSTTMode.RebbleFirst,
@@ -90,6 +94,20 @@ class HybridTranscriptionService(
     }
 
     private suspend fun serverAvailable(): Boolean = selfHosted?.isAvailable() == true
+
+    private suspend fun serverUsable(): Boolean = serverAvailable() && selfHosted?.allowedOnCurrentNetwork() == true
+
+    /**
+     * Gravel: the two modes with a server and a phone fallback keep watch dictation on the phone
+     * while the Wi-Fi-only rule refuses the server, or while Flaky Network Mode is on and the phone
+     * has a model (without one, the server is the only way to get words back).
+     */
+    private fun keepsDictationOnPhone(): Boolean {
+        val mode = sttConfig.mode
+        if (mode != CactusSTTMode.RemoteFirst && mode != CactusSTTMode.LocalFirst) return false
+        val server = selfHosted?.takeIf { it.configuredUrl() != null } ?: return false
+        return !server.allowedOnCurrentNetwork() || (sttConfig.flakyNetworkMode && whisper.isLocalAvailable())
+    }
 
     /**
      * Fork: the self-hosted server takes the remote slot whenever one is
@@ -254,6 +272,13 @@ class HybridTranscriptionService(
             )
 
         logger.d { "Using transcription mode ${sttConfig.mode}" }
+        if (keepsDictationOnPhone()) {
+            logger.d { "Keeping this dictation on the phone" }
+            // Only the network rule gets here without a model.
+            if (!whisper.isLocalAvailable()) throw TranscriptionException.ServerNotAllowedOnNetwork(SelfHostedTranscriptionService.MODEL)
+            val text = whisper.transcribeLocal(audio, sampleRate)
+            return RoutedResult(text, CactusSTTMode.LocalOnly, configuredModel)
+        }
         return when (val sttMode = sttConfig.mode) {
             CactusSTTMode.RemoteOnly -> {
                 val result = remote(willFallbackLocal = false)

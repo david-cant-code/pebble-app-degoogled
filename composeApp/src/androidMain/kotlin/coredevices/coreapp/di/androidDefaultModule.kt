@@ -4,6 +4,8 @@ import CoreAppVersion
 import PlatformContext
 import PlatformShareLauncher
 import android.content.Context
+import com.anopticlabs.gravel.network.AndroidUnmeteredWifi
+import com.anopticlabs.gravel.network.UnmeteredWifi
 import com.anopticlabs.gravel.notebook.alarms.ReminderPresence
 import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
 import com.anopticlabs.gravel.pkjs.udpFilterEnforcement
@@ -39,7 +41,9 @@ import coredevices.util.security.KeystoreSecretCipher
 import coredevices.util.security.SecretCipher
 import coredevices.util.models.ModelDownloadManager
 import coredevices.util.transcription.CactusModelPathProvider
+import coredevices.util.transcription.AndroidSelfHostedClientFactory
 import coredevices.util.transcription.InferenceBoost
+import coredevices.util.transcription.SelfHostedClientFactory
 import io.ktor.client.engine.HttpClientEngine
 import kotlinx.coroutines.flow.combine
 import io.ktor.client.engine.okhttp.OkHttp
@@ -78,6 +82,8 @@ val androidDefaultModule = module {
     singleOf(::PlatformContext)
     singleOf(::AndroidPermissionRequester) bind PermissionRequester::class
     singleOf(::AndroidCompanionDevice) bind CompanionDevice::class
+    singleOf(::AndroidUnmeteredWifi) bind UnmeteredWifi::class
+    single<SelfHostedClientFactory> { AndroidSelfHostedClientFactory(get<AndroidUnmeteredWifi>()::binding) }
     // Fork: Play in-app updates removed; see NoOpAppUpdate.
     singleOf(::NoOpAppUpdate) bind AppUpdate::class
     single {

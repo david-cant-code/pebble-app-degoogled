@@ -939,11 +939,10 @@ class WhisperTranscriptionService internal constructor(
     /**
      * Called as a transcription opens (a watch session's `canServeSession`,
      * every `HybridTranscriptionService.transcribe` flow); where local comes
-     * first it also stops a long-form call, during the recording.
+     * first ([localFirst]) it also stops a long-form call, during the recording.
      */
-    fun earlyInit() {
-        val mode = sttConfig.value.mode
-        if (mode == CactusSTTMode.LocalOnly || mode == CactusSTTMode.LocalFirst) dictationHold.raise()
+    fun earlyInit(localFirst: Boolean = sttConfig.value.mode.localComesFirst()) {
+        if (localFirst) dictationHold.raise()
         if (initJob == null || modelHandle == 0L || lastInitedModel != sttConfig.value.modelName) {
             if (initJob?.isActive == true) {
                 logger.d { "Whisper STT model initialization already in progress" }

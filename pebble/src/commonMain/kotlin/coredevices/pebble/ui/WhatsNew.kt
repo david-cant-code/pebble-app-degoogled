@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.rebble.libpebblecommon.voice.PEBBLE_FW_TRANSCRIPTION_TIMEOUT
 
 /**
  * Fork: the current "What's New" changelog revision. Bump this by one, and prepend an
@@ -21,7 +22,7 @@ import androidx.compose.ui.unit.dp
  * users on update. The popup auto-shows once per user per bump (`WhatsNewDialog` in
  * composeApp) and can be reopened any time from Settings > About.
  */
-const val WHATS_NEW_VERSION = 12
+const val WHATS_NEW_VERSION = 13
 
 /** A single announced change: a short heading and a sentence or two of body. */
 data class WhatsNewEntry(val title: String, val body: String)
@@ -32,6 +33,18 @@ data class WhatsNewEntry(val title: String, val body: String)
  * changelog (that lives in git history and the repo docs).
  */
 val whatsNewEntries: List<WhatsNewEntry> = listOf(
+    WhatsNewEntry(
+        title = "Your transcription server and mobile data",
+        body = "Settings > Speech Recognition has two new switches for a self-hosted " +
+            "transcription server. With Use the Server on Mobile Data off, audio goes to your " +
+            "server only while this phone is using Wi-Fi that isn't marked metered. If a server " +
+            "was already set up when you updated, the switch starts on, so nothing changes until " +
+            "you turn it off; otherwise it starts off. Flaky Network Mode, in Server (with Local " +
+            "Fallback) and Local (with Server Fallback) once this phone has a speech model, " +
+            "transcribes watch dictation on this phone instead of your server, for connections " +
+            "that can't get the words back within the watch's " +
+            "${PEBBLE_FW_TRANSCRIPTION_TIMEOUT.inWholeSeconds} seconds.",
+    ),
     WhatsNewEntry(
         title = "Steps and heart rate sync again",
         body = "PebbleOS 4.39.0 and 4.40.0 send a watch's steps and heart rate in a newer " +

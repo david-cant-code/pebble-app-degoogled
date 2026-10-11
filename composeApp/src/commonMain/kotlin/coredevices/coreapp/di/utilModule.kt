@@ -129,7 +129,7 @@ val utilModule = module {
     // Fork: the self-hosted transcription server and what it remembers
     // (encrypted bearer token, pinned certificate).
     single { SelfHostedServerStore(get(), get()) }
-    single { SelfHostedTranscriptionService(get(), get()) }
+    single { SelfHostedTranscriptionService(get(), get(), get(), get()) }
     singleOf(::WisprFlowRESTTranscriptionService)
     singleOf(::KirinkiTranscriptionService)
     // Fork: permanently signed out. UsersDaoImpl's auth-restoration observer

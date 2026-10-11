@@ -183,7 +183,7 @@ class ModelManagementScreenViewModel(
         modelManager.deleteModel(slug)
         refreshDownloadedModels()
         // With no STT models left, local speech recognition can't run, so fall
-        // back to cloud-only and let the user know.
+        // back to Server Only and let the user know.
         if (modelManager.getDownloadedSTTModelSlugs().isEmpty() &&
             coreConfigHolder.config.value.sttConfig.mode.usesLocalCactus()
         ) {
@@ -194,7 +194,7 @@ class ModelManagementScreenViewModel(
                     )
                 )
             )
-            _snackbarMessages.tryEmit("Speech recognition switched to Cloud Only")
+            _snackbarMessages.tryEmit("Speech recognition switched to Server Only")
         }
     }
 

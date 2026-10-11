@@ -148,6 +148,18 @@ POST with `response_format=json` and reads `text` from the reply, which
 is what whisper.cpp's server and OpenAI-compatible servers (Speaches,
 faster-whisper-server, LocalAI and others) expect.
 
+Unless "Use the Server on Mobile Data" is on, audio goes to the server
+only while the phone is using Wi-Fi that is not marked metered, and an
+upload that loses that Wi-Fi stops instead of carrying on over mobile
+data. Off such Wi-Fi, server only refuses watch dictation, and the two
+fallback modes transcribe it on the phone when the phone has a speech
+model. From Android 10, a VPN counts as that Wi-Fi only while Android
+shows it running over Wi-Fi; `KNOWN_ISSUES.md` covers older versions.
+The switch starts on for a server set up before Gravel had it. "Flaky
+Network Mode", offered in the two fallback modes once the phone has a
+speech model, keeps watch dictation on the phone everywhere, for
+connections that cannot return the words within the watch's 15 seconds.
+
 The reference server is whisper.cpp's own, from the same project whose
 engine this app builds. On the machine that will run it:
 

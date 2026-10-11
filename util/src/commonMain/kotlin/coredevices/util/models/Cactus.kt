@@ -39,4 +39,11 @@ enum class CactusSTTMode(val id: Int) {
     fun usesLocalCactus(): Boolean {
         return this in setOf(RemoteFirst, LocalOnly, LocalFirst, RebbleFirst, RebbleFallback)
     }
+
+    /**
+     * Gravel: LocalOnly and LocalFirst, whose watch sessions raise the dictation hold when they open
+     * (`HybridTranscriptionService.earlyInit`); RebbleFallback also tries this phone first and is left
+     * out (`KNOWN_ISSUES.md`).
+     */
+    fun localComesFirst(): Boolean = this == LocalOnly || this == LocalFirst
 }
