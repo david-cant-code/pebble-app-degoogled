@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!--
+            The llama.cpp text engine runs in this isolated process; what the
+            isolation buys is stated on LlmEngineService. LlmEngineManifestTest
+            pins the two attributes that make the containment here, and the
+            app build checks them again in the merged manifest of every
+            variant.
+        -->
+        <service
+            android:name="com.anopticlabs.gravel.llm.LlmEngineService"
+            android:exported="false"
+            android:isolatedProcess="true"
+            android:process=":llm" />
+    </application>
+</manifest>

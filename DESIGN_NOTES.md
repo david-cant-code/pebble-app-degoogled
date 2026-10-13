@@ -735,6 +735,57 @@ logic goes in `commonMain` on the standard library and kotlinx.serialization;
 decomposition for note filenames, the Keystore-backed storage below, the
 alarm stack).
 
+The text model behind the Notebook's titles, tags and reminder messages is
+llama.cpp (MIT), compiled from source like the speech engine and run the
+same way: `:llm-native` builds the pinned submodule at
+`llm-native/src/main/cpp/llama.cpp` into one JNI shim, `libllmjni.so`, with
+the server, tools, examples, web UI and network surfaces off, plus the
+baseline-arch CPU probe `libllmcpu.so` (the same armv8.2 dotprod + fp16
+floor, checked before any engine code is mapped); `:llm` holds the Kotlin
+side. Each engine links its own static copy of ggml behind its own version
+script, so the whisper.cpp and llama.cpp pins move independently and a
+security bump of one never moves the ggml under the other. The engine runs
+in an isolated process of its own, `LlmEngineService` in `:llm` (pinned at
+the source by `LlmEngineManifestTest` and in every merged manifest by
+`VerifyIsolatedServices`), separate from the speech engine's so a
+generation that runs for minutes never sits in front of a watch dictation.
+The app side is `LlmEngineClient`, a hand-written Binder protocol in the
+shape of the speech engine's: the model crosses as a descriptor, the
+prompt and the rendered chat template as bytes, every reply is bounded
+(`LlmEngineLimits`) and every transaction carries a deadline whose expiry
+ends the engine process. Constraints the code relies on:
+
+- A conversation is rendered by llama.cpp's built-in formatter for the
+  template family it detects on the model's template text (a substring
+  match, not an execution of the Jinja; `llm_jni.cpp` cites the source),
+  with a model detected as no family refused. The
+  formatter renders roles and contents verbatim and the tokenizer parses
+  special-token text anywhere in the prompt, so the roles are limited to
+  system, user and assistant, and a content carrying a template marker
+  (`<|`, `|>`) is refused on the app side and one carrying any of the
+  loaded model's special-token texts is refused by the engine. The device
+  suite pins the render for a ChatML model and both refusals.
+- A prompt the context cannot hold is refused with its token count in the
+  stats, never cut; the device suite pins the refusal.
+- Cancellation targets a call by its id, checked inside every decode
+  through the engine's abort callback and between tokens, so a cancel
+  lands during the prompt's prefill as well. A cancel for an id with no
+  call in flight is kept for that id's call, for the 64 most recent such
+  ids, so a cancel that reaches the engine just before its call still
+  stops it. The device suite pins a cancel during the prefill, one between
+  tokens, one before its call, and the bound.
+- Each generation runs on a ggml threadpool with the requested thread
+  count, kept by its model handle until the handle is freed (`llm_jni.cpp`
+  cites why a pool cannot end with its call); the count comes from the
+  caller. The device suite pins that the worker threads a handle's
+  generations start, at two thread counts, are there after the last
+  generation and gone after its free, that a generation asked to run at a
+  nice value or on a CPU mask the kernel accepts gets workers of its own
+  under it and leaves no earlier thread held to that mask, and that one
+  whose mask the kernel refuses starts no workers of its own. Not pinned
+  by a test: an access to a freed pool, and the calling thread's nice value
+  being restored.
+
 Storage is a directory of encrypted files under `files/notebook`. Each write
 draws a fresh AES-256 data key, seals the file with it in software
 (AES-GCM), and seals the data key with one Keystore key (alias
@@ -1137,22 +1188,23 @@ What the tree guarantees, and how it is pinned:
   signature database. `FdroidGuardrailsTest` in `:androidApp`
   replicates the buildserver's source scanner (`FdroidScannerReplica`
   holds the checks, `FdroidScannerReplicaTest` proves each one fires) over
-  the tracked tree, the whisper.cpp submodule included, minus the paths the
-  recipe removes before scanning. Its `recipeRemovedPaths` list is the
+  the tracked tree, the whisper.cpp and llama.cpp submodules included,
+  minus the paths the recipe removes before scanning. Its `recipeRemovedPaths` list is the
   tree's copy of the recipe's `rm:` field. F-Droid's inclusion policy is
   about the tree and about dependency provenance, not about native code as
   such: free-software Maven artifacts from allowed repositories may carry
   compiled native libraries, and the APK does still ship such libraries
   (the Speex codec from `io.github.coredevices.speex`, Apache-2.0 with
   public source; SQLite from `androidx.sqlite:sqlite-bundled`; androidx
-  graphics-path) next to the whisper engine built from source. What the
+  graphics-path) next to the two engines built from source. What the
   fork removed was prebuilt native code with no public source (the Cactus
   engine, the Ring satellite AAR), which the policy does reject.
-- The native toolchain is pinned in `whisper-native/build.gradle.kts` and
-  `socketfilter/build.gradle.kts` (`ndkVersion` 28.2.13676358, that is NDK
-  r28c, and CMake 3.22.1), so a build is the same on every machine and the
-  recipe has exact values to provision. `FdroidGuardrailsTest` fails when
-  the two modules name different values.
+- The native toolchain is pinned in `whisper-native/build.gradle.kts`,
+  `llm-native/build.gradle.kts` and `socketfilter/build.gradle.kts`
+  (`ndkVersion` 28.2.13676358, that is NDK r28c, and CMake 3.22.1), so a
+  build is the same on every machine and the recipe has exact values to
+  provision. `FdroidGuardrailsTest` fails when the modules name different
+  values.
 - `versionName` is `git describe --tags --first-parent HEAD` and
   `versionCode` the commit count, both functions of the built commit
   (`androidApp/build.gradle.kts`), so a tag checkout reports exactly the
@@ -1198,15 +1250,19 @@ What the tree guarantees, and how it is pinned:
 
 What the recipe has to supply (field names as in the fdroiddata format):
 
-- `submodules: yes`: the engine is compiled from the whisper.cpp submodule.
+- `submodules: yes`: the engines are compiled from the whisper.cpp and
+  llama.cpp submodules.
 - `rm:` exactly the directories `FdroidGuardrailsTest.recipeRemovedPaths`
   lists under `whisper-native/src/main/cpp/whisper.cpp/` (bindings,
-  examples, models, samples, tests). They hold language bindings with their
-  own gradle builds and a lockfile-less `package.json`, example apps naming
-  a maven host off the allowlist, binary test-fixture models, and sample
-  audio, none of it part of the fork's build. `rm:`, not `scandelete:`: the
-  scanner counts a `scandelete` entry that removed nothing as an error,
-  while `rm:` tolerates a path that is already gone.
+  examples, models, samples, tests) and under
+  `llm-native/src/main/cpp/llama.cpp/` (examples). They hold language
+  bindings and an example Android app with their own gradle builds and
+  toolchain pins, a lockfile-less `package.json`, example apps naming a
+  maven host off the allowlist, binary test-fixture models, and sample
+  audio, none of it part of the fork's build; the guardrail test requires
+  each entry to remove a scanner hit. `rm:`, not
+  `scandelete:`: the scanner counts a `scandelete` entry that removed
+  nothing as an error, while `rm:` tolerates a path that is already gone.
 - `ndk:` r28c (28.2.13676358) and a `prebuild`/`sudo` step that installs the
   SDK package `cmake;3.22.1`, matching the pins above; the buildserver
   provisions neither by default and a mismatch fails configuration.

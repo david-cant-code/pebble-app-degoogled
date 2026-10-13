@@ -190,8 +190,8 @@ tested and saved without it unless you type one.
 ## Building
 
 - Clone with `--recursive` (or run `git submodule update --init`): the
-  whisper.cpp speech engine is a pinned git submodule, compiled from
-  source by the Android build.
+  whisper.cpp speech engine and the llama.cpp text engine are pinned git
+  submodules, compiled from source by the Android build.
 - Any JDK 17 or newer; Gradle wrapper included. Debug build:
   `./gradlew :androidApp:assembleDebug`
 - No `google-services.json` is needed: the google-services plugin is gone
@@ -222,6 +222,7 @@ Kermit (logging).
 | `util` | Shared utilities (logging, IO, theme) |
 | `whisper`, `whisper-native` | The speech engine: Kotlin bindings, and the NDK/CMake build of the pinned whisper.cpp submodule |
 | `socketfilter` | A process-wide filter that refuses the creation of UDP sockets, built from its C source with the NDK; not installed, for example, where the platform's name lookups need UDP, before Android 10, or on a device that is not ARM (see `KNOWN_ISSUES.md`) |
+| `llm`, `llm-native` | The Notebook's text engine: Kotlin bindings, and the NDK/CMake build of the pinned llama.cpp submodule |
 | `resampler` | Audio resampling |
 | `blobannotations`, `blobdbgen` | KSP annotations and code generator for BlobDB records |
 | `libindex`, `index-ai`, `mcp` | Ring and Index AI libraries, compiled because the watch UI depends on them, with their runtime disabled |
@@ -271,7 +272,8 @@ confused about which app they are running.
 The bundled Inter typeface (version 4.001, copyright 2016 The Inter Project
 Authors) is licensed under the SIL Open Font License 1.1; the notice and
 license text are in [LICENSE-Inter-OFL](LICENSE-Inter-OFL). The whisper.cpp
-speech engine submodule carries its own MIT license file.
+speech engine and llama.cpp text engine submodules each carry their own MIT
+license file.
 
 Development of Gravel uses AI assistance; commits carry `Co-Authored-By`
 trailers accordingly.

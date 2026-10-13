@@ -51,7 +51,7 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   so a change must not add non-free dependencies, dependencies from
   repositories F-Droid does not allow, or prebuilt binaries in the tree.
   `FdroidGuardrailsTest` in `:androidApp` replicates F-Droid's source
-  scanner over the tracked tree, the whisper.cpp submodule included, minus
+  scanner over the tracked tree, the engine submodules included, minus
   the paths the F-Droid recipe removes (dependency lines in every gradle
   file, iOS-only and unplugged modules included; maven URLs; checked-in
   binaries; lockfile-less dependency manifests), and defines the envelope:

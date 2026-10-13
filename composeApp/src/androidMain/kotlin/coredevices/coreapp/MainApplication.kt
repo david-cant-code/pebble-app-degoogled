@@ -43,6 +43,7 @@ import coredevices.pebble.PebbleAppDelegate
 import coredevices.pebble.watchModule
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigHolder
+import com.anopticlabs.gravel.llm.LlmEngineClient
 import coredevices.whisper.WhisperEngineClient
 import coredevices.whisper.runningInIsolatedProcess
 import io.rebble.libpebblecommon.connection.AppContext
@@ -63,13 +64,13 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     private val coreConfigHolder: CoreConfigHolder by inject()
     private val pebbleBackgroundManager: PebbleBackgroundManager by inject()
 
-    // Gravel: set once in attachBaseContext; null in the speech engine's isolated process.
+    // Gravel: set once in attachBaseContext; null in the engines' isolated processes.
     private var udpFilterResult: InstallResult? = null
 
     // Gravel: a socket that exists before the filter is outside it, so nothing may precede this
     // install in the process: no WebView, no Koin start, no network client. attachBaseContext
     // runs before every content provider and library initializer (android16-release,
-    // ActivityThread.handleBindApplication). The isolated engine process gets no filter.
+    // ActivityThread.handleBindApplication). The isolated engine processes get no filter.
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
         if (runningInIsolatedProcess()) return
@@ -78,13 +79,14 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
-        // Fork: the speech engine's isolated process instantiates this class
-        // too, and nothing below may run there; see runningInIsolatedProcess.
+        // Fork: the engines' isolated processes instantiate this class too,
+        // and nothing below may run there; see runningInIsolatedProcess.
         if (runningInIsolatedProcess()) return
-        // Fork: the engine client needs the application context to bind the
-        // engine process; attached before the DI graph exists so no engine
+        // Fork: the engine clients need the application context to bind the
+        // engine processes; attached before the DI graph exists so no engine
         // call can precede it.
         WhisperEngineClient.attach(this)
+        LlmEngineClient.attach(this)
         startKoin {
             modules(
                 module {

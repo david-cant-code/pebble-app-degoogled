@@ -43,6 +43,11 @@ include(":whisper-native")
 include(":socketfilter")
 // Gravel module: the Notebook feature (notes and reminders).
 include(":notebook")
+// Gravel modules: the llama.cpp text engine behind the Notebook, built from
+// source (KMP bindings plus the plain Android library that owns the
+// NDK/CMake build and the pinned engine submodule).
+include(":llm")
+include(":llm-native")
 include(":libindex")
 // :experimental (the Ring/Index feature module) is unplugged from the fork's
 // build: it carries firebase-auth/firestore/storage, the googleServices
