@@ -1165,7 +1165,9 @@ what is authenticated. For the capture queue this has a further cost: the
 blob of a capture queued after a rolled-back queue file has no entry, and
 the sweep for unreferenced blobs deletes it. A rolled-back reminders file
 hands out ids again that the event log still holds occurrences for, so a
-new reminder can inherit an older one's history. A note file put back after its note was deleted is listed again at
+new reminder can inherit an older one's history. The Notebook's own backup
+gives the user a copy to compare against but does not detect the change
+either. A note file put back after its note was deleted is listed again at
 the next start. Closing this needs authenticated state that is not rolled
 back along with the files.
 
@@ -1192,7 +1194,8 @@ Until that succeeds the recordings sit unencrypted in the app's private
 storage, still under Android's file-based encryption and excluded from
 backup with the rest of the Notebook. When the cause is a busy key store
 the window closes at the next run; when the queue file is corrupt it stays
-open until the file is rebuilt, at the next app start. The alternative,
+open until the file is rebuilt, at the next app start, and when the Notebook key is gone until the Notebook starts over, with
+every capture retained meanwhile joining it. The alternative,
 deleting the only copy of a recording because the store failed, was judged
 worse. The store provides the holding area, the retry, and a count of what
 is waiting. The holding area is also the one place where the store
@@ -1286,6 +1289,17 @@ much once the clock is right, and one set aside while it was ahead stays
 that much longer. No screen opens a set-aside file, so what changes is
 how long a copy stays on the phone.
 
+## Automatic Notebook backups are thinned by the phone's clock
+
+**Status: open; skipping the thinning on a run whose clock reads far past
+the last confirmed backup would narrow it.**
+
+Older automatic backups are thinned by their age on the phone's clock. A
+run made while the clock reads ahead thins as if every backup were that
+much older, so it can delete backups the keeping rule would still keep, and
+they stay deleted once the clock is right. What goes is older restore
+points; the newest backup stays.
+
 ## A Notebook capture can be published twice
 
 **Status: open; closing it needs the capture's id stored with what it
@@ -1296,7 +1310,9 @@ or completion claim it produced is stored. The next drain processes
 the capture again in cases such as when the app is ended between the two
 writes or the
 queue file cannot be written at that moment, after a damaged queue file is
-rebuilt while the capture's recording was still there. A note with the same content then
+rebuilt while the capture's recording was still there, and after this
+Notebook restores a backup made while the capture was queued, a restore run
+again after a stopped one included. A note with the same content then
 reuses its file, but a reminder or a claim is stored a
 second time, and a note whose second model reply differs is written beside
 the first. Storing the capture's id with each result, and skipping a
@@ -1328,6 +1344,70 @@ code as Gravel on it, yields the notes; the offline file-system adversary
 the encryption is aimed at still cannot, because the key never leaves the
 Keystore. Gating the key on an unlocked device would break the background
 uses above and is not planned.
+
+## The phone holds the key that opens every automatic backup
+
+**Status: accepted by design.**
+
+Automatic Notebook backups are sealed under a recovery key that Gravel
+keeps, sealed by the Notebook key, so a backup can
+run without the user. Like the Notebook key, that copy needs no user
+authentication, so code running as Gravel, or as root, on the phone can
+open every automatic backup made with that key, in the current folder or an
+earlier one, older ones holding notes since deleted included. Manual
+backups are sealed under a password Gravel does not keep.
+
+## Gravel cannot tell whether the backup folder leaves the phone
+
+**Status: accepted.**
+
+Automatic backups go to the folder the user picks. Gravel cannot see
+whether another app copies that folder off the phone, so backups in a
+folder that stays on the phone are lost with the phone.
+
+## Automatic backup files show when the Notebook changed
+
+**Status: accepted.**
+
+An automatic backup is written about an hour after a change, and its file
+name and time say when. Whoever can list the backup folder, such as the
+app or service that syncs it, can see when the Notebook was changed,
+though not what changed.
+
+## Automatic backups wait for the first unlock after the phone starts
+
+**Status: accepted.**
+
+The Notebook and its backup key are in the app's default storage, which
+Android makes available only after the user unlocks the phone once since
+it started (developer.android.com/training/articles/direct-boot,
+credential encrypted storage). No automatic backup runs before that.
+
+## A force-stopped Gravel gives no backup warning until it is used again
+
+**Status: accepted.**
+
+A force stop removes an app's alarms (android14-release and main,
+`AlarmManagerService`, `ACTION_PACKAGE_RESTARTED` handling), and Android
+keeps a force-stopped app stopped until the user opens or otherwise uses
+it, canceling its pending intents from Android 15
+(developer.android.com/about/versions/15/behavior-changes-all, "Changes to
+package stopped state"). So after a force stop neither the warning about a
+day without a confirmed backup nor a recovery key reminder comes until the
+user opens or otherwise uses Gravel again.
+
+## Without a screen lock, anyone holding the phone can redirect or restore automatic backups
+
+**Status: accepted.**
+
+Setting up automatic backups, making a new recovery key, changing the
+backup folder and restoring the newest automatic backup ask for the phone's
+screen lock, or a biometric the phone accepts for it, first. A phone with no
+screen lock has nothing to ask for, so whoever holds it can send later
+backups to a folder of their choosing under a key they see, as they can
+already read the Notebook on it, and while part of the Notebook cannot be
+read can restore the newest automatic backup, bringing back what was
+deleted since it was made.
 
 
 ## The Notebook's text models are community quantizations

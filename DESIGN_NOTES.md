@@ -926,7 +926,7 @@ level that adds the StrongBox key generation API and the exception that
 sends a generation to the fallback at once; below it the key path throws. The
 directory is excluded from Android backup and device transfer in every rule
 set because the key never leaves the device, so a restored copy could only be
-quarantined. Gaps of
+quarantined; the Notebook's own backup, below, is how data moves. Gaps of
 this design are recorded in `KNOWN_ISSUES.md` (Notebook).
 
 Constraints the code relies on, each pinned by a test in the module or
@@ -996,7 +996,8 @@ in the app's device suite:
   read-modify-write) rethrows both of the latter so nothing is written
   back. Opening never
   creates a key, and sealing creates one only while no file sealed under a
-  key remains in the Notebook root, so a lost key stays reported as
+  key remains in the Notebook root (outside `.staging`, `.quarantine`,
+  `pending_captures` and `backup_staging`), so a lost key stays reported as
   missing instead of a new key turning every old file into corruption.
   Authentic plaintext that fails to parse is the store's
   `PersistedFormatException`, which a strict read throws and a display read
@@ -1047,7 +1048,7 @@ in the app's device suite:
   as an entry alone, until the note is deleted or the index is rebuilt.
 - A note file is written before the index entry that lists it, and deleted
   before its entry is removed. `NoteStore.reconcile`, run under the index
-  lock at each process start, repairs an interrupted create or
+  lock at each process start, repairs an interrupted create, restore or
   rebuild: an index that fails to open or to parse is rebuilt from the note
   files, which are all read before the old index is moved to `.quarantine`,
   and an absent index while note files exist is rebuilt the same way; a
@@ -1083,7 +1084,10 @@ in the app's device suite:
   clock; a time ahead of the clock keeps the file, and a name without a
   time goes by the file's modification time. A copy that a retried replace
   uses again is renamed to the time of that retry, unless that name is
-  taken.
+  taken. `NotebookRecovery.removeStartOverLeftovers` deletes the `start-over-*`
+  folders a Start over left there, and does nothing while a recovery step
+  holds the lock. Not pinned by a test: the
+  module handing the leftover step to the housekeeping (device runs only).
 - The queue store keeps `queue_meta`, the list of `QueuedCapture` entries,
   and one blob per entry at `queue/<id>.bin`; an id is `[A-Za-z0-9_-]`, up
   to 128 characters, and a list with any other id, or a duplicated one, is
@@ -1115,8 +1119,9 @@ in the app's device suite:
   rest, recorded in `KNOWN_ISSUES.md`.
 - The reminder stores keep `reminders` (the active reminders and the next
   id to hand out, taken and advanced under the lock, so a deleted id is
-  not reused in that store; a random store
-  identity, set by the first write, naming that id space), `reminder_events` (one event per occurrence, keyed by the
+  not reused in that store and every restored id ends up below it; a random store
+  identity, set by the first write, naming that id space; and the ids it
+  gave reminders restored from another id space, by origin), `reminder_events` (one event per occurrence, keyed by the
   reminder id and the scheduled fire instant) and `voice_completions`
   (completion claims waiting for the user to pick their reminder, oldest
   first, capped at 50: a save past
@@ -1171,7 +1176,8 @@ in the app's device suite:
   unreadable log arms the re-fire uncounted), and a re-fire is posted for an open
   occurrence that is not missed, or for any occurrence when the log cannot
   be read, and marked delivered only when the user could see it. A re-fire
-  the log holds no snooze awaiting delivery for counts as a snooze to
+  the log holds no snooze awaiting delivery for (after the log was set aside
+  or restored, for one) counts as a snooze to
   that moment, and an occurrence the log does not hold is logged with it;
   it is dropped like any other when its occurrence is resolved or a later
   logged occurrence of its reminder has come due. One sweep alarm,
@@ -1191,7 +1197,8 @@ in the app's device suite:
   reminder that was missed only because the deleted one came due is
   recorded as missed. `rearmAll` re-arms from
   the stores and is idempotent; it runs at app start, at boot, after a
-  package update, when exact alarms are allowed: a future reminder
+  package update, when exact alarms are allowed, after a restore and after
+  a recovery step: a future reminder
   is armed when it still reads as the sweep read it or cannot be read
   again, a past-due one-shot is removed and a recurring one advances
   from now, every fire that passed unlogged is logged at its scheduled time
@@ -1216,14 +1223,238 @@ in the app's device suite:
   notes under their ids with their folder, name, title, date and time, the
   folder list, the folder tags, the capture queue with its recordings, the
   reminders and the event log; parked completions, pending
-  plaintext captures and settings are not in it. The archive is a header of magic, version, key derivation id, salt
+  plaintext captures and settings are not in it. The archive
+  (`ArchiveWriter`, version 1) is a header of magic, version, key derivation id, salt
   and nonce prefix, then a record stream sealed in 64 KiB segments with
-  AES-256-GCM. The key comes from PBKDF2-HMAC-SHA256
+  AES-256-GCM: the STREAM construction with the nonce laid out as in Tink
+  (tink-java main, `subtle/AesGcmHkdfStreaming.paramsForSegment`), the
+  header bound as AAD on each segment. The key comes from PBKDF2-HMAC-SHA256
   at 600,000 rounds over the NFC-normalized password and the archive's own
-  salt. A record is a
+  salt; a password that is not well-formed UTF-16 is refused. An automatic
+  backup's archive (key derivation id 2) takes its key from HKDF-SHA256
+  (RFC 5869) over a recovery key's ASCII characters, the archive's salt and
+  a fixed label instead. A record is a
   type, a length and a JSON body (a capture's body is its entry, then its
   recording); a closing record carries the count per type and the SHA-256 of
   every record before it.
+- An archive is built in and read from a staging file under the Notebook
+  directory (`BackupStaging`), sealed a second time under a random key held
+  only in memory by its `StagedFile`, so a copy of the file, or one a killed
+  process left, does not open even with the password; a write fails once
+  it finds under 64 MiB free, checked when it opens and again each time a
+  MiB or more has gone in since the last check. The first
+  capture-coordinator run of each
+  process, which the app's start requests, deletes what earlier processes
+  left. A backup first runs the store's repair (`NoteStore.reconcile`), then
+  writes the captures, then reads and writes the notes through the index,
+  then the reminders and events, so a capture the drain publishes meanwhile
+  is in the archive as a capture, as the note or reminder it became, or
+  both. Every read that feeds it is strict, so a store that cannot be read
+  this time fails the run, while an indexed note that will not open or
+  parse and is still listed at the end, a note too large for a restore, and
+  a queued capture without a readable recording that is still queued at the
+  end, are left out and counted, as are note files no index read during the
+  run listed. A note file that fails to open during a backup is quarantined
+  by that read. A backup holds one segment and one record at a time besides
+  the lists it reads. A wrong password and damage in the first segment are
+  the same failure.
+- A picked archive is copied into staging only after its header passes the
+  checks that need no key. A restore reads it twice: the first pass
+  authenticates all of it, checks its structure and counts what the
+  per-entry decisions (`RestorePlan`, `ArchiveContents`) would take and
+  skip, writing nothing, which is also the inspection; then the store's
+  repair runs, and the second pass requires the same header and merges
+  record by record, holding at most a batch of 64 notes (or 4 Mi
+  characters of them) and 64 captures (or 32 MiB of recordings) besides the
+  reminder and event lists. The merge is never a replacement and nothing is
+  rolled back. Notes match by id and land under the index lock in batches:
+  identical content is kept, rewritten when its file is missing or does
+  not open; an entry
+  modified later is kept while its file opens with its content; anything
+  else takes the archived content, title, date and time in its own folder
+  under its own name; an id not listed becomes a note in the archived
+  folder under its name or a suffixed one, unless a file the index does not
+  list holds that id, which is left alone. Folders are unioned up to 1,000,
+  a folder's tags are added only when it has none, captures are queued in
+  batches under the queue lock, then the reminder ids are adopted and the
+  event log and the reminders are each appended in one write that skips
+  keys and ids already present, in that order so a re-arm never meets a
+  restored reminder without the occurrences it fired. Archived reminder ids
+  count in the id space the archive's META names, or the one an item names
+  as its origin; adoption gives each accepted item's id the id it has in
+  this store: its own id when the space is this store's and no adoption
+  holds that id, else the id an earlier restore gave that origin, else a
+  new one from the counter past every own id in the archive up to a tenth
+  of the store's ceiling, recorded,
+  while the file keeps a sixteenth of its cap free. A backup reads the
+  event log before the reminders file and writes the origin of every
+  reminder and event under an adopted id. Once the re-arm has pruned, the
+  adoptions of ids no reminder or event uses any more are dropped. Each store stops taking entries where its file
+  would pass the cap its reader enforces, the index measured in the bytes
+  it is sealed as. A storage failure part way leaves each store in a state
+  its readers accept, and running the same archive again converges, except
+  for recordings processed since the archive was made (`KNOWN_ISSUES.md`,
+  a capture published twice). The
+  per-entry decisions skip and count a note
+  whose id, folder or name the store does not spell, whose content is over
+  a bound or whose time lies outside the stored window, with its title and
+  date cleaned and capped; a capture with no recording or one over the blob
+  cap, or with an id, name or time the queue refuses; a reminder or event
+  the validators refuse, which also bound every instant to the stored
+  window and a recurrence interval to a thousand; an archived reminder id
+  over a tenth of the store's ceiling (an archive of this store keeps its
+  ids, so this leaves room for the device's own). What the stores themselves refuse (a full file, an
+  id already present, no free name, an id in this store's own space that
+  an adoption holds or that is over a tenth of the ceiling) is counted by
+  the restore only. A
+  restored event keeps the snooze it carries, also when its reminder is
+  not known here, as after a one-shot's fire. The alarms are re-armed from
+  the stores after the repair and
+  merge, finished or not, and the report counts what the stores hold after
+  that: a restored one-shot already due is logged and shown (in the missed
+  notice once missed) unless it is older than the retention cutoff, and
+  dropped, and
+  restored history past the retention setting is pruned.
+- The publisher copies a finished archive into the document the system
+  save picker created, under the name it has (`BackupPublisher`, generic
+  over the document handle, and `BackupDocuments`, the Storage Access
+  Framework binding; `NotebookBackup.publish` binds it to the archive's own
+  check). The picker creates the file empty the moment the user confirms,
+  so the archive is built before the picker opens and opened before the
+  document is touched. A document the provider reports as holding data, or
+  whose first byte reads, is refused, as is one whose emptiness cannot be
+  read, before any byte is written, so a failed save destroys no earlier
+  file. The archive is then written in place and read back through
+  `NotebookBackup.verify` (the restore's first pass, with the key derived
+  again from the password, which must find the records, hash and item
+  counts the writer wrote); a document written but not verified is removed,
+  whatever failed, as is an empty one that would not open for writing. On a
+  Pixel running GrapheneOS (Android 17) the internal storage provider left
+  the app no access to a document after renaming it, so no rename is used.
+  The host suite pins the sequence on a fake store and the device suite
+  pins the binding against a real cross-process DocumentsProvider.
+- Automatic backups hold the notes and reminders a manual backup holds,
+  without the captures, sealed under a recovery key: 64 characters from
+  `0-9a-z` drawn with `SecureRandom`, shown uppercase in groups of four
+  with `O` as `#` and `0` as `=` (`RecoveryKey`). Setup
+  (`AutoBackupSetup`) explains them, opens the folder picker and keeps a
+  persistable grant on the folder, shows the key,
+  copies it only after a warning,
+  asks for it typed back, and writes a first backup; it stores nothing
+  until that backup is written and checked, and a failed one keeps the key
+  and folder for Try again or another folder. Where the grant on the picked
+  folder could not be kept, Try again opens the picker again. A restore that opened with a
+  recovery key offers it to setup while automatic backups have neither a
+  key nor a folder; a first backup that would store a new or restored key
+  is refused while they are set up, and one storing a replacement key
+  unless they are. On a phone with a screen lock, setup (the restore's
+  offer included), a new key and a folder change start by confirming the
+  lock, or a biometric the phone accepts for it, through Android's own
+  prompt (`rememberScreenLockPrompt`, which needs `USE_BIOMETRIC`), and go
+  no further without that; only the answer to the prompt shown now counts,
+  a cancel ends setup and a prompt that fails says so. A lock that cannot
+  be read counts as one. A new folder uses
+  the stored key, keeps the switch as it was, and starts the record of
+  backups over, leaving the files in the old folder and releasing its
+  grant. A folder setup picked is listed in the no-backup directory until
+  it is kept or let go of, and the next process start lets go of any still
+  listed that is not the stored folder. The key (its 64 ASCII bytes and an
+  8-byte stamp of when setup made or took it) and the
+  state (`AutoBackupStore`) are two sealed files under the Notebook root;
+  setup alone writes the key file. Off keeps the key, the grant and the
+  record.
+- An automatic run (`AutoBackupRunner`, from `AutoBackupWorker` on
+  WorkManager) comes about an hour after the first change to the notes,
+  folders, folder tags, reminders or their history (the stores' revision
+  counters), as unique work kept rather than replaced, so later changes do
+  not move it; a change while that work runs asks the second slot, and a
+  run that saw the stores change asks for one more. The watch starts
+  before the start-up re-arm. A periodic run every 12 hours backs up what
+  a change run missed. A run compares `NotebookBackup.fingerprint` (the
+  index, the note files' sizes and times, folders, tags, reminders and
+  history, but not the next reminder id or the store id) with the newest
+  recorded backup's: when they match it reads that file whole with the key
+  and checks its SHA-256, and a pass confirms the backup. The fingerprint
+  is taken again once the archive is read, and a run that saw it move
+  records none, so the next run writes.
+  Otherwise, or for Back up now, it writes a new archive to a `.part`
+  document through the publisher, which reads it back; the run then
+  renames it to `gravel-notebook-auto-<date>-<time>.gnbk` (with a number
+  added when the folder holds that name), hashes the renamed document
+  against the bytes written, and records it, even when the run is being
+  stopped. Each step that touches the folder is noted in the no-backup
+  directory first. The next run, or setup, removes a document a run ended
+  by its process left under its `.part` name, or one it could not delete,
+  and a run waits until that document is gone; a file that already has its
+  final name is left unrecorded. `BackupGate` keeps one run
+  over the Notebook at a time: a manual backup's build and a manual restore
+  wait for an automatic run, and an automatic run that finds it held is
+  retried. Lost folder access, a missing folder (a folder app that answers
+  but no longer has it), a key that cannot be read and damaged storage are
+  notified at once on the Notebook backups channel; other failures, a folder app
+  that cannot be reached or will not make the file among them, are retried
+  with backoff from 30 minutes and notified after the fourth failed run in
+  a row. A failure the stored count cannot take, the state being unreadable
+  or unwritable, is also notified once the work has made three earlier
+  attempts, and Back up now notifies a failure when the state reads but
+  cannot be written. A
+  backup that left out notes (unreadable, too large to restore, or not
+  listed) is kept and notified, and the next backup without gaps takes the
+  notice down.
+- After a run that wrote or confirmed a backup, the runner reads back the
+  newest earlier one and every other one not read for a week (or stamped
+  later than the clock), by hash, key and counts
+  (`AutoBackupRunner.upkeep`). A file that reads to anything else is
+  flagged damaged, notified once, kept and read again a week later; one the
+  folder app no longer knows and its listing no longer shows (while it
+  shows another recorded file) leaves the record, notified once. A read
+  without an answer is stamped, and one still without an answer a week
+  after the first counts as damaged. Damage and a gone file make the next
+  run write even when nothing changed. Thinning (`backupsToThin`) runs only
+  when the newest earlier backup read back and every read gave an answer:
+  every backup of the last 48 hours stays, then the newest of each day for
+  two weeks, of each week from Monday for three months, and of each month
+  after that, in the phone's zone; the newest undamaged backup, the run's
+  own, damaged ones, one kept before a drop and one whose last read had no
+  answer always stay. Thinned entries leave the record into a deletion
+  list first, and a file is deleted only while its name, and its size
+  where the folder app reports one, are those recorded; a renamed file,
+  or one whose size changed, is let go of, and a failed delete is retried
+  by a later run that thins.
+- The newest recorded backup carries the ids of the upcoming reminders it
+  holds. A backup holding far fewer notes than the one before, or one
+  after which far fewer of the earlier backup's upcoming reminders are
+  upcoming or in the history log (none left, or a quarter gone and at
+  least five), is notified, naming the earlier file; that file is marked
+  to keep for good in the same write that records the new backup. The
+  backup a folder change writes into the stored folder is compared the same
+  way. Damage,
+  gone files and a drop are told before the write that records them, so a
+  failed write tells them again.
+- The key file's stamp is recorded with each backup: a run, and a key
+  check, drop from the record backups sealed with another key, which
+  completes a key change whose process ended between storing the key and
+  the record.
+- `AutoBackupChecks` runs at process start, when the app comes to the
+  front, after a boot, when a reminder goes off, after an automatic run's
+  work and on its own inexact alarm, an hour later when it could not use
+  the state. While automatic backups are on, a check that finds no backup
+  confirmed for 24 hours asks for a run at once and warns an hour later if
+  none came, then once a day while none does, each repeat taking the
+  earlier notice down first. A check
+  that cannot write a stretch's first mark still asks for the run, and
+  warns at each check once the last confirmed backup is 25 hours old. While they are set
+  up, recovery key reminders come 14 days
+  after setup, three months after that and every six months after,
+  counted again from each successful check; each point posts a
+  notification on its own channel, Not now on it brings one more a week
+  later. A notice is
+  posted before the state that records it is written, so a failed write
+  posts it again. The last confirmed backup, the stale marks and the last
+  key check, when stored later than the clock, are moved back to it; the
+  time the key was made is read so and stays stored as setup wrote it. Backup and
+  key notices are marked private, with a public version that has a title
+  only.
 - The capture pipeline (the `pipeline` package) works through the queue
   one capture at a time, one drain at a time (`CaptureDrain`), on the I/O
   dispatcher. Before each capture it reads the queue again and takes the
@@ -1283,7 +1514,8 @@ in the app's device suite:
   refuses: flagged at once). A flagged capture keeps its recording,
   except one whose recording failed to open, which the store has moved to
   quarantine. The flag stores a reason code (`CaptureFailureReason`, a
-  stored format) in the entry; an entry flagged without one reads as having run
+  stored format) in the entry, and in manual backups for a capture whose
+  recording still reads; an entry flagged without one reads as having run
   out of attempts, and one whose recording is gone reads as damaged. A note routed to a
   folder it was not offered, or to an unindexed one, is written in
   `unclassified`, and a note's file name is
@@ -1395,7 +1627,7 @@ in the app's device suite:
   repeat when the engine or the long-form limits change.
 - `CaptureCoordinator` runs the drain on a scope of its own, so no screen's
   lifetime bounds it, one run at a time: at process start, where
-  `NotebookHousekeeping` sweeps stale staging files,
+  `NotebookHousekeeping` sweeps stale staging and backup staging files,
   reconciles the note index, lists a missing Unclassified, rebuilds a
   damaged recordings list, queues recordings held for a later attempt and
   only then sweeps orphan blobs; whenever an
@@ -1423,7 +1655,9 @@ in the app's device suite:
   recorder takes the same service and wake lock under a hold of its own until its recording is queued (`PhoneRecorder` states why),
   and the queue call takes the processing hold before the recorder lets go of
   its own; the notification, when shown, says a note is being recorded while
-  the recorder holds it. `NotebookProcessingServiceTest` pins on a device that the service and the
+  the recorder holds it. Host tests pin the hold rules, the hand-over, the
+  run coalescing, the startup wiring and the housekeeping steps;
+  `NotebookProcessingServiceTest` pins on a device that the service and the
   wake lock follow each hold and its release.
 - The phone recorder (the `sources` package) records the microphone through
   AudioRecord as 16 kHz mono PCM16 held in memory, one recording at a time,

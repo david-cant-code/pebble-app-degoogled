@@ -18,13 +18,14 @@ class NotebookManifestTest {
         val receivers = elements("receiver").associateBy { it.getAttribute("android:name") }
         assertEquals("false", receivers.getValue("com.anopticlabs.gravel.notebook.alarms.ReminderFireReceiver").getAttribute("android:exported"))
         assertEquals("false", receivers.getValue("com.anopticlabs.gravel.notebook.alarms.ReminderActionReceiver").getAttribute("android:exported"))
+        assertEquals("false", receivers.getValue("com.anopticlabs.gravel.notebook.backup.AutoBackupCheckReceiver").getAttribute("android:exported"))
         val rearm = receivers.getValue("com.anopticlabs.gravel.notebook.alarms.NotebookRearmReceiver")
         assertEquals("false", rearm.getAttribute("android:exported"))
         val actions = (0 until rearm.getElementsByTagName("action").length)
             .map { (rearm.getElementsByTagName("action").item(it) as Element).getAttribute("android:name") }
         assertEquals(NotebookRearmReceiver.ACTIONS, actions.toSet())
         assertEquals(3, actions.size)
-        assertEquals(3, receivers.size)
+        assertEquals(4, receivers.size)
     }
 
     @Test
@@ -32,6 +33,7 @@ class NotebookManifestTest {
         val permissions = elements("uses-permission").map { it.getAttribute("android:name") }.toSet()
         assertTrue("android.permission.RECEIVE_BOOT_COMPLETED" in permissions)
         assertTrue("android.permission.SCHEDULE_EXACT_ALARM" in permissions)
+        assertTrue("android.permission.USE_BIOMETRIC" in permissions, "the backup screen-lock prompt")
         assertTrue("android.permission.POST_NOTIFICATIONS" in permissions)
     }
 

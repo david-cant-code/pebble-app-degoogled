@@ -1,6 +1,7 @@
 package com.anopticlabs.gravel.notebook.storage
 
 import android.content.Context
+import com.anopticlabs.gravel.notebook.backup.BackupStaging
 import java.io.File
 
 /** Where the Notebook keeps its files. */
@@ -10,8 +11,8 @@ object NotebookFiles {
 
     fun root(context: Context): File = File(context.filesDir, DIR_NAME)
 
-    /** Top-level entries the key guard leaves out: write staging, set-aside files, unsealed recordings. */
-    val UNSEALED_DIRS = setOf(EncryptedFiles.STAGING_DIR, EncryptedFiles.QUARANTINE_DIR, QueueStore.PENDING_DIR)
+    /** Top-level entries the key guard and Start over leave out: write staging, set-aside files, unsealed recordings, backup staging. */
+    val UNSEALED_DIRS = setOf(EncryptedFiles.STAGING_DIR, EncryptedFiles.QUARANTINE_DIR, QueueStore.PENDING_DIR, BackupStaging.DIR)
 
     /** The codec for files under [root], which makes a key only while [holdsSealedFiles] is false. */
     fun crypto(keystore: NotebookKeystore, root: File): NotebookCrypto = NotebookCrypto(keystore) { !holdsSealedFiles(root) }

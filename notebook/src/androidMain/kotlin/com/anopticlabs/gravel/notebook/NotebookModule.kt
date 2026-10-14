@@ -1,5 +1,6 @@
 package com.anopticlabs.gravel.notebook
 
+import co.touchlab.kermit.Logger
 import com.anopticlabs.gravel.notebook.alarms.AndroidReminderAlarms
 import com.anopticlabs.gravel.notebook.alarms.AndroidReminderNotifier
 import com.anopticlabs.gravel.notebook.alarms.NotebookPreferences
@@ -8,6 +9,28 @@ import com.anopticlabs.gravel.notebook.alarms.ReminderAlarmScheduler
 import com.anopticlabs.gravel.notebook.alarms.ReminderAlarms
 import com.anopticlabs.gravel.notebook.alarms.ReminderNotifier
 import com.anopticlabs.gravel.notebook.alarms.ReminderPresence
+import android.net.Uri
+import com.anopticlabs.gravel.notebook.backup.AndroidAutoBackupNotices
+import com.anopticlabs.gravel.notebook.backup.AndroidCheckAlarm
+import com.anopticlabs.gravel.notebook.backup.AutoBackupChecks
+import com.anopticlabs.gravel.notebook.backup.AutoBackupNotices
+import com.anopticlabs.gravel.notebook.backup.AutoBackupRunNote
+import com.anopticlabs.gravel.notebook.backup.AutoBackupRunner
+import com.anopticlabs.gravel.notebook.backup.AutoBackupScheduler
+import com.anopticlabs.gravel.notebook.backup.AutoBackupSetup
+import com.anopticlabs.gravel.notebook.backup.AutoBackupStore
+import com.anopticlabs.gravel.notebook.backup.AutoBackups
+import com.anopticlabs.gravel.notebook.backup.AutomaticRestore
+import com.anopticlabs.gravel.notebook.backup.BackupDocuments
+import com.anopticlabs.gravel.notebook.backup.BackupFlow
+import com.anopticlabs.gravel.notebook.backup.BackupFolderDocuments
+import com.anopticlabs.gravel.notebook.backup.BackupGate
+import com.anopticlabs.gravel.notebook.backup.PickedFolders
+import com.anopticlabs.gravel.notebook.backup.RecoveryKeyCheck
+import com.anopticlabs.gravel.notebook.backup.WorkAutoBackupScheduler
+import com.anopticlabs.gravel.notebook.backup.BackupStaging
+import com.anopticlabs.gravel.notebook.backup.FileRunRecord
+import com.anopticlabs.gravel.notebook.backup.NotebookBackup
 import com.anopticlabs.gravel.notebook.pipeline.CaptureAudioDecoder
 import com.anopticlabs.gravel.notebook.pipeline.AndroidCaptureKeepAlive
 import com.anopticlabs.gravel.notebook.pipeline.CaptureBackend
@@ -44,17 +67,22 @@ import com.anopticlabs.gravel.notebook.storage.NotebookFiles
 import com.anopticlabs.gravel.notebook.storage.NotebookKeystore
 import com.anopticlabs.gravel.notebook.storage.NoteStore
 import com.anopticlabs.gravel.notebook.storage.NotebookHousekeeping
+import com.anopticlabs.gravel.notebook.storage.NotebookRecovery
 import com.anopticlabs.gravel.notebook.storage.QueueStore
 import com.anopticlabs.gravel.notebook.storage.ReminderEventStore
 import com.anopticlabs.gravel.notebook.storage.ReminderStore
 import com.anopticlabs.gravel.notebook.storage.VoiceCompletionStore
 import com.anopticlabs.gravel.notebook.ui.NotebookLinkToken
+import com.anopticlabs.gravel.notebook.ui.hasScreenLock
 import com.anopticlabs.gravel.notebook.ui.NotebookNavigator
+import com.anopticlabs.gravel.notebook.ui.NotebookStatusReader
+import com.anopticlabs.gravel.notebook.ui.StorageRecoveryRunner
 import org.koin.android.ext.koin.androidContext
+import java.io.File
 import org.koin.dsl.binds
 import org.koin.dsl.module
 
-/** The Notebook's stores, alarm stack, capture pipeline and sources; constructing them touches neither the Keystore nor a file. */
+/** The Notebook's stores, alarm stack, backups, capture pipeline and sources; constructing them touches neither the Keystore nor a file. */
 val notebookModule = module {
     single<Cryptographer> { NotebookFiles.crypto(NotebookKeystore(), NotebookFiles.root(androidContext())) }
     single { NoteStore(NotebookFiles.root(androidContext()), get()) }
@@ -73,8 +101,81 @@ val notebookModule = module {
     single {
         NotebookStartup(
             get(), get(), get(), get(), get(),
-            startCharger = get<LongCaptureCharger>()::start,
+            startBackups = get<AutoBackups<Uri>>()::start, checkBackups = get<AutoBackupChecks>()::request, startCharger = get<LongCaptureCharger>()::start,
             startNetworkWatch = get<ServerNetworkWatch>()::start, startSpeechWatch = get<SpeechSettingWatch>()::start,
+        )
+    }
+    single { BackupStaging(NotebookFiles.root(androidContext())) }
+    single { NotebookBackup(get(), get(), get(), get(), get(), get(), get()) }
+    single { BackupGate() }
+    single {
+        BackupFlow(
+            get<NotebookBackup>(), BackupDocuments(androidContext().contentResolver),
+            runs = FileRunRecord(File(androidContext().noBackupFilesDir, "notebook_backup_run"), { it.toString() }, Uri::parse),
+            requestDrain = { get<CaptureCoordinator>().captureQueued() },
+            gate = get(),
+            canTakeKey = { get<AutoBackupStore>().canAdoptKey() },
+            takeKey = { get<AutoBackupSetup<Uri>>().startWithKey(it) },
+            prepareRestore = { get<NotebookRecovery>().prepare(it) },
+            automaticBackup = {
+                get<AutoBackupStore>().newestRestorable()?.let { (entry, key) -> AutomaticRestore(Uri.parse(entry.uri), entry.name, key.chars, entry.sha256) }
+            },
+            screenLocked = { hasScreenLock(androidContext()) },
+        )
+    }
+    single {
+        NotebookRecovery(
+            NotebookFiles.root(androidContext()), get(), get(), get(), get(), get(),
+            resetKey = { NotebookKeystore().resetKey(it) },
+            keyAbsent = { NotebookKeystore().existingKey() == null },
+            afterReset = { startedOver ->
+                runCatching { get<ReminderAlarms>().rearmAll() }.onFailure { e -> Logger.withTag("NotebookRecovery").w { "re-arm failed: ${e::class.simpleName}" } }
+                get<ReminderRefreshSignal>().emit()
+                if (startedOver) get<AutoBackups<Uri>>().afterFilesSetAside() else get<AutoBackups<Uri>>().refresh()
+                get<CaptureCoordinator>().captureQueued()
+            },
+        )
+    }
+    single {
+        StorageRecoveryRunner(
+            get(),
+            restoreFile = { get<BackupFlow<Uri>>().startRestore(it) },
+            restoreAutomatic = { get<BackupFlow<Uri>>().startAutomaticRestore(it) },
+        )
+    }
+    single { AutoBackupStore(NotebookFiles.root(androidContext()), get()) }
+    single { BackupFolderDocuments(androidContext().contentResolver) }
+    single<AutoBackupScheduler> { WorkAutoBackupScheduler(androidContext()) }
+    single<AutoBackupNotices> { AndroidAutoBackupNotices(androidContext()) { get<NotebookLinkToken>().value } }
+    single {
+        val notes = get<NoteStore>()
+        val reminders = get<ReminderStore>()
+        val events = get<ReminderEventStore>()
+        AutoBackupRunner<Uri>(
+            get(), get(), get<BackupFolderDocuments>(), AutoBackupRunNote(File(androidContext().noBackupFilesDir, "notebook_auto_backup_run")), get(), get(),
+            changeCount = { notes.revision.value + reminders.revision.value + events.revision.value },
+            followUp = { get<AutoBackupScheduler>().afterChange(it) },
+        )
+    }
+    single {
+        AutoBackups<Uri>(
+            get(), get(), get(), get<BackupFolderDocuments>(), get(),
+            changes = listOf(get<NoteStore>().revision, get<ReminderStore>().revision, get<ReminderEventStore>().revision),
+            requestChecks = { get<AutoBackupChecks>().request() },
+        )
+    }
+    single { AutoBackupChecks(get(), get(), get(), AndroidCheckAlarm(androidContext())) }
+    single { RecoveryKeyCheck<Uri>(get(), get(), get(), get()) }
+    single { PickedFolders(File(androidContext().noBackupFilesDir, "notebook_auto_backup_picked")) }
+    single {
+        AutoBackupSetup<Uri>(
+            get(), get(), get<BackupFolderDocuments>(), get(), get(),
+            screenLocked = { hasScreenLock(androidContext()) },
+            setAsideFirst = { get<AutoBackups<Uri>>().setAsideForNewSetup() },
+            refresh = {
+                get<AutoBackups<Uri>>().refresh()
+                get<AutoBackupChecks>().request()
+            },
         )
     }
     single { AppVisibility() }
@@ -116,7 +217,7 @@ val notebookModule = module {
     }
     single { FailedCaptureActions(get(), processing = { get<CaptureDrain>().isProcessing(it) }, requestAgain = { get<CaptureCoordinator>().requestAgain() }) }
     single { LongCaptureCharger(androidContext(), get<CaptureDrain>().passes, get<CaptureDrain>().waitingForPower, controls = { get() }, WorkManagerChargingWork(androidContext())) }
-    single { NotebookHousekeeping(get(), get()) }
+    single { NotebookHousekeeping(get(), get(), get(), removeStartOverLeftovers = { get<NotebookRecovery>().removeStartOverLeftovers() }) }
     single { AndroidCaptureKeepAlive(androidContext()) } binds arrayOf(CaptureKeepAlive::class, RecordingKeepAlive::class)
     single { CaptureCoordinator(drain = get(), housekeeping = get(), rows = get(), keepAlive = get()) }
     single { CaptureIngest(get(), captureQueued = { get<CaptureCoordinator>().captureQueued() }, entryQueued = { get<ProcessingControls>().captureQueued(it) }) }
@@ -124,4 +225,11 @@ val notebookModule = module {
     single { PhoneRecorder(microphone = get(), ingest = get(), keepAlive = get(), text = get(), coordinator = get()) }
     single { TypedNotes(get()) }
     single { NotebookNavigator() }
+    single {
+        NotebookStatusReader(
+            get(), get(), get(),
+            automaticBackupAt = { get<AutoBackupStore>().newestBackupAt(get<BackupFolderDocuments>()::heldFolders) },
+            rules = { get<ProcessingControls>().rules() },
+        )
+    }
 }

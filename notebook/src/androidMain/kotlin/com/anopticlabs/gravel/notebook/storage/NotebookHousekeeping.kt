@@ -1,6 +1,7 @@
 package com.anopticlabs.gravel.notebook.storage
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.notebook.backup.BackupStaging
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -12,19 +13,23 @@ import kotlinx.coroutines.sync.withLock
 class NotebookHousekeeping(
     private val notes: NoteStore,
     private val queue: QueueStore,
+    private val backupStaging: BackupStaging,
+    /** [NotebookRecovery.removeStartOverLeftovers]. */
+    private val removeStartOverLeftovers: suspend () -> Unit,
 ) {
     private val mutex = Mutex()
 
     /**
-     * Queues the recordings kept for a later attempt and
+     * Queues the recordings kept for a later attempt, removes a Start over's leftover folders and
      * sweeps the set-aside files ([EncryptedFiles.sweepQuarantine]). [atStart] adds what only a
-     * process start needs: stale staging files and orphan blobs go, the note
+     * process start needs: stale staging files, backup staging files and orphan blobs go, the note
      * index is reconciled with the note files, a missing Unclassified is listed, and a damaged
      * recordings list is rebuilt from the recordings.
      */
     suspend fun run(atStart: Boolean) = mutex.withLock {
         if (atStart) {
             step("staging sweep") { notes.sweepStaging() }
+            step("backup staging sweep") { backupStaging.sweep() }
             step("note index") {
                 val result = notes.reconcile()
                 if (result != ReconcileResult()) logger.i { "note index: $result" }
@@ -39,6 +44,7 @@ class NotebookHousekeeping(
             }
         }
         if (atStart) step("orphan blob sweep") { queue.sweepOrphanBlobs() }
+        step("start over leftovers") { removeStartOverLeftovers() }
         step("set-aside sweep") { notes.sweepQuarantine() }
     }
 

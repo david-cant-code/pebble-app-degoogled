@@ -3,4 +3,93 @@
     <string name="notebook_processing_channel">Notebook processing</string>
     <string name="notebook_processing_title">Processing Notebook recordings</string>
     <string name="notebook_recording_title">Recording a note</string>
+    <plurals name="notebook_backup_missing_notes">
+        <item quantity="one">%1$d note couldn\'t be read and isn\'t in this backup.</item>
+        <item quantity="other">%1$d notes couldn\'t be read and aren\'t in this backup.</item>
+    </plurals>
+    <plurals name="notebook_backup_too_large_notes">
+        <item quantity="one">%1$d note is too large to restore and isn\'t in this backup.</item>
+        <item quantity="other">%1$d notes are too large to restore and aren\'t in this backup.</item>
+    </plurals>
+    <plurals name="notebook_backup_unlisted_notes">
+        <item quantity="one">%1$d note file the Notebook doesn\'t list isn\'t in this backup.</item>
+        <item quantity="other">%1$d note files the Notebook doesn\'t list aren\'t in this backup.</item>
+    </plurals>
+    <plurals name="notebook_backup_notes">
+        <item quantity="one">%1$d note</item>
+        <item quantity="other">%1$d notes</item>
+    </plurals>
+    <plurals name="notebook_backup_reminders">
+        <item quantity="one">%1$d reminder</item>
+        <item quantity="other">%1$d reminders</item>
+    </plurals>
+    <string name="notebook_auto_channel">Notebook backups</string>
+    <string name="notebook_auto_failed_title">Notebook backup failed</string>
+    <string name="notebook_auto_problem_no_access">Gravel can no longer use your backup folder. Choose it again with Backup Folder in Settings.</string>
+    <string name="notebook_auto_problem_folder_gone">Your backup folder is gone. Choose another with Backup Folder in Settings.</string>
+    <string name="notebook_auto_problem_not_created">Your backup folder wouldn\'t take a new file.</string>
+    <string name="notebook_auto_problem_key_missing">Gravel can\'t read the key it seals backups with.</string>
+    <string name="notebook_auto_problem_damaged">Part of the Notebook\'s storage is damaged, so Gravel can\'t make a backup.</string>
+    <string name="notebook_auto_problem_already_set_up">Automatic backups are already set up.</string>
+    <string name="notebook_auto_problem_not_read">Your Notebook couldn\'t be read for a backup.</string>
+    <string name="notebook_auto_problem_no_space">There isn\'t enough free space on this phone to make a backup.</string>
+    <string name="notebook_auto_problem_not_saved">The backup couldn\'t be saved and checked in your backup folder.</string>
+    <string name="notebook_auto_problem_not_recorded">A backup was saved and checked, but Gravel couldn\'t record it.</string>
+    <string name="notebook_auto_setup_problem_no_access">Gravel couldn\'t keep access to that folder. Pick another folder.</string>
+    <string name="notebook_auto_setup_problem_folder_gone">That folder is no longer there. Pick another folder.</string>
+    <string name="notebook_auto_setup_problem_not_created">That folder wouldn\'t take a new file. Pick another folder.</string>
+    <string name="notebook_auto_gaps_title">Notebook backed up with gaps</string>
+    <string name="notebook_auto_status_off">Off. Your key and folder are kept.</string>
+    <string name="notebook_auto_status_running">Backing up now</string>
+    <string name="notebook_auto_status_last">Last backup %1$s: %2$s, %3$s</string>
+    <string name="notebook_auto_status_checked">checked %1$s</string>
+    <string name="notebook_auto_status_stopped">Backups stopped. %1$s</string>
+    <string name="notebook_auto_status_failed">The last backup failed. %1$s</string>
+    <string name="notebook_auto_status_unreadable">Automatic backup settings couldn\'t be read.</string>
+    <string name="notebook_auto_status_none">No backup yet</string>
+    <string name="notebook_auto_status_stale">No backup confirmed since %1$s</string>
+    <string name="notebook_auto_stale_title">No confirmed Notebook backup for over a day</string>
+    <string name="notebook_auto_stale_body">No backup has been confirmed since %1$s. Tap to see Automatic Backups.</string>
+    <string name="notebook_auto_far_fewer_title">Newest Notebook backup holds far fewer items</string>
+    <plurals name="notebook_auto_fewer_notes">
+        <item quantity="one">It holds %1$d note; the backup before it held %2$d.</item>
+        <item quantity="other">It holds %1$d notes; the backup before it held %2$d.</item>
+    </plurals>
+    <plurals name="notebook_auto_fewer_reminders">
+        <item quantity="one">%1$d upcoming reminder is gone from it without going off.</item>
+        <item quantity="other">%1$d upcoming reminders are gone from it without going off.</item>
+    </plurals>
+    <string name="notebook_auto_far_fewer_restore">If you didn\'t remove them, restore %1$s from your backup folder. Gravel keeps that backup.</string>
+    <plurals name="notebook_auto_damaged_title">
+        <item quantity="one">A Notebook backup failed its check</item>
+        <item quantity="other">Notebook backups failed their check</item>
+    </plurals>
+    <plurals name="notebook_auto_damaged_body">
+        <item quantity="one">%1$d backup in your backup folder couldn\'t be read back as Gravel wrote it. Gravel leaves it there and writes a new backup with the next automatic run.</item>
+        <item quantity="other">%1$d backups in your backup folder couldn\'t be read back as Gravel wrote them. Gravel leaves them there and writes a new backup with the next automatic run.</item>
+    </plurals>
+    <plurals name="notebook_auto_damaged_body_off">
+        <item quantity="one">%1$d backup in your backup folder couldn\'t be read back as Gravel wrote it. Gravel leaves it there. Turn automatic backups on to write a new one.</item>
+        <item quantity="other">%1$d backups in your backup folder couldn\'t be read back as Gravel wrote them. Gravel leaves them there. Turn automatic backups on to write a new one.</item>
+    </plurals>
+    <plurals name="notebook_auto_missing_title">
+        <item quantity="one">A Notebook backup is missing</item>
+        <item quantity="other">Notebook backups are missing</item>
+    </plurals>
+    <plurals name="notebook_auto_missing_body">
+        <item quantity="one">%1$d backup is no longer in your backup folder. Gravel writes a new backup with the next automatic run.</item>
+        <item quantity="other">%1$d backups are no longer in your backup folder. Gravel writes a new backup with the next automatic run.</item>
+    </plurals>
+    <plurals name="notebook_auto_missing_body_off">
+        <item quantity="one">%1$d backup is no longer in your backup folder. Turn automatic backups on to write a new one.</item>
+        <item quantity="other">%1$d backups are no longer in your backup folder. Turn automatic backups on to write a new one.</item>
+    </plurals>
+    <string name="notebook_auto_public_title">Notebook backup</string>
+    <string name="notebook_auto_key_public_title">Recovery key reminder</string>
+    <string name="notebook_auto_key_channel">Recovery key reminders</string>
+    <string name="notebook_auto_key_reminder_title">Check your recovery key</string>
+    <string name="notebook_auto_key_reminder_body">Make sure you still have the key that opens your Notebook backups. Tap to type it.</string>
+    <string name="notebook_auto_key_status_due">Check that you still have your recovery key</string>
+    <string name="notebook_auto_key_status_checked">Last checked %1$s</string>
+    <string name="notebook_auto_key_status_never">Check that you still have it</string>
 </resources>
