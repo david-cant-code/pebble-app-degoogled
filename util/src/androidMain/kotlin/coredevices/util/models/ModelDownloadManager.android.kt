@@ -21,6 +21,7 @@ import com.anopticlabs.gravel.models.ModelCatalog
 import com.anopticlabs.gravel.models.ModelRole
 import com.anopticlabs.gravel.models.ModelStorageException
 import com.anopticlabs.gravel.models.SpeechModelInstalls
+import com.anopticlabs.gravel.models.TextDownloadFollower
 import coredevices.util.transcription.CactusModelPathProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -33,6 +34,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -80,10 +82,15 @@ internal fun jobsReplacedBy(slug: String, pending: List<PendingDownload>): List<
     return lane
 }
 
+/** Gravel: a scheduled job for a catalog model shows as a download whether or not it has run in this process. */
 internal fun laneStatusAtStartup(role: ModelRole, pending: List<PendingDownload>): ModelDownloadStatus =
-    pending.firstOrNull { it.slug != null && !it.stale && laneOf(it.slug) == role }
-        ?.let { ModelDownloadStatus.Downloading(it.slug!!) }
+    pending.firstNotNullOfOrNull { job -> job.slug?.takeIf { ModelCatalog.byId(it)?.role == role } }
+        ?.let { ModelDownloadStatus.Downloading(it) }
         ?: ModelDownloadStatus.Idle
+
+/** Gravel: what a lane shows once its downloads, or with [slug] only that model's, are canceled. */
+internal fun laneStatusAfterCancel(status: ModelDownloadStatus, slug: String? = null): ModelDownloadStatus =
+    if (status is ModelDownloadStatus.Downloading && (slug == null || status.modelSlug == slug)) ModelDownloadStatus.Idle else status
 
 actual class ModelDownloadManager(
     private val context: Context
@@ -106,11 +113,6 @@ actual class ModelDownloadManager(
     fun downloadStatus(role: ModelRole): StateFlow<ModelDownloadStatus> =
         laneStatuses.getValue(role).asStateFlow()
 
-    init {
-        // Evict any abandoned jobs on startup so the guard can't be blocked by them.
-        reconcileStaleJobs()
-    }
-
     private fun pendingServiceJobs() =
         jobScheduler.allPendingJobs.filter { it.service == serviceComponentName }
 
@@ -121,19 +123,6 @@ actual class ModelDownloadManager(
 
     private fun isJobStale(slug: String): Boolean =
         DownloadJobLiveness.isStale(heartbeatStore.lastHeartbeat(slug), System.currentTimeMillis())
-
-    private fun reconcileStaleJobs() {
-        pendingServiceJobs().forEach { job ->
-            val slug = job.extras.getString(ModelDownloadService.KEY_MODEL_SLUG)
-            if (slug == null || isJobStale(slug)) {
-                Logger.withTag("ModelDownloadManager").w {
-                    "Cancelling stale/abandoned download job for $slug (id=${job.id})."
-                }
-                jobScheduler.cancel(job.id)
-                slug?.let { heartbeatStore.clear(it) }
-            }
-        }
-    }
 
     private fun buildNetworkRequest(allowMetered: Boolean): NetworkRequest {
         val builder = NetworkRequest.Builder()
@@ -190,12 +179,14 @@ actual class ModelDownloadManager(
             }
             return true
         }
+        val lane = laneStatuses.getValue(laneOf(modelInfo.slug))
         replaced.forEach { job ->
             Logger.withTag("ModelDownloadManager").w {
                 "Cancelling existing download job for ${job.slug} to download ${modelInfo.slug}."
             }
             jobScheduler.cancel(job.jobId)
             job.slug?.let { heartbeatStore.clear(it) }
+            job.slug?.takeIf { it != modelInfo.slug }?.let { other -> lane.update { laneStatusAfterCancel(it, other) } }
         }
         heartbeatStore.clear(modelInfo.slug)
         val info = buildJobInfo(
@@ -218,6 +209,17 @@ actual class ModelDownloadManager(
             jobScheduler.cancel(job.jobId)
             job.slug?.let { heartbeatStore.clear(it) }
         }
+        // Gravel: cleared here, so a job that was shown and had not started does not stay shown.
+        laneStatuses.getValue(role).update { laneStatusAfterCancel(it) }
+    }
+
+    /** Gravel: cancels the scheduled or running download of [slug], leaving every other job alone. */
+    fun cancelDownloadOf(slug: String) {
+        pendingDownloads().filter { it.slug == slug }.forEach { job ->
+            jobScheduler.cancel(job.jobId)
+            heartbeatStore.clear(slug)
+        }
+        laneStatuses.getValue(laneOf(slug)).update { laneStatusAfterCancel(it, slug) }
     }
 }
 
@@ -251,6 +253,7 @@ class ModelDownloadService : JobService(), KoinComponent {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val modelDownloadManager: ModelDownloadManager by inject()
     private val speechInstalls: SpeechModelInstalls by inject()
+    private val textDownloads: TextDownloadFollower by inject()
     private val heartbeatStore: DownloadHeartbeatStore get() = modelDownloadManager.heartbeatStore
     private val running = RunningDownloads()
 
@@ -311,6 +314,7 @@ class ModelDownloadService : JobService(), KoinComponent {
                 )
                 modelDownloadManager.updateDownloadStatus(modelSlug, ModelDownloadStatus.Idle)
                 speechInstalls.downloaded(modelSlug)
+                textDownloads.finished(modelSlug)
             } catch (e: TimeoutCancellationException) {
                 logger.e(e) { "Timed out downloading model: $modelSlug" }
                 notificationManager.notify(

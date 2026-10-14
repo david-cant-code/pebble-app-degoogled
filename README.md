@@ -141,7 +141,7 @@ no Ring services, no Ring endpoints, rings can never be scanned or paired).
 
 ## Using your own transcription server
 
-Settings > Speech Recognition > Self-hosted Server takes the full URL
+Settings > AI > Speech Recognition > Self-hosted Server takes the full URL
 of a transcription endpoint, an optional model name, and an optional
 bearer token, and then offers three modes in the speech recognition
 dropdown: server only, server with local fallback, and local with server

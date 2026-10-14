@@ -1,15 +1,78 @@
 package com.anopticlabs.gravel.ui
 
 import coredevices.pebble.ui.FLAKY_NETWORK_MODE_NOTE
+import coredevices.pebble.ui.Section
+import coredevices.pebble.ui.offlineAccuracyNote
+import coredevices.pebble.ui.parent
 import coredevices.pebble.ui.serverOnMobileDataNote
 import coredevices.pebble.ui.showsFlakyNetworkMode
+import coredevices.pebble.ui.topLevelSections
 import coredevices.util.models.CactusSTTMode
 import io.rebble.libpebblecommon.voice.PEBBLE_FW_TRANSCRIPTION_TIMEOUT
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SettingsSectionsTest {
+
+    @Test
+    fun speechRecognitionIsListedUnderAiNotAtTheTopLevel() {
+        val shown = topLevelSections(setOf(Section.General, Section.AI, Section.Speech))
+
+        assertEquals(Section.AI, Section.Speech.parent())
+        assertTrue(Section.AI in shown)
+        assertFalse(Section.Speech in shown)
+    }
+
+    @Test
+    fun aiTakesSpeechRecognitionsPlaceInTheList() {
+        val shown = topLevelSections(setOf(Section.Health, Section.AI, Section.Display))
+
+        assertEquals(listOf(Section.Battery, Section.Health, Section.AI, Section.Display), shown)
+    }
+
+    @Test
+    fun aSectionWithNoVisibleItemStaysHidden() {
+        assertFalse(Section.AI in topLevelSections(setOf(Section.Speech)))
+    }
+
+    @Test
+    fun theOfflineNoteShowsUnderLocalOnlyAndLocalWithRebbleFallback() {
+        for (mode in CactusSTTMode.entries) {
+            val note = offlineAccuracyNote(mode, serverConfigured = true, rebbleAvailable = true)
+            val expected = mode == CactusSTTMode.LocalOnly || mode == CactusSTTMode.RebbleFallback
+            assertEquals(expected, note != null, "mode $mode")
+        }
+    }
+
+    @Test
+    fun theOfflineNoteNamesAModeThisPhoneCanPick() {
+        assertTrue(
+            offlineAccuracyNote(CactusSTTMode.LocalOnly, serverConfigured = true, rebbleAvailable = false)!!
+                .contains("Server (with Local Fallback) tries your server first"),
+        )
+        assertTrue(
+            offlineAccuracyNote(CactusSTTMode.LocalOnly, serverConfigured = false, rebbleAvailable = true)!!
+                .contains("Rebble (with Local Fallback)"),
+        )
+        assertTrue(
+            offlineAccuracyNote(CactusSTTMode.RebbleFallback, serverConfigured = true, rebbleAvailable = true)!!
+                .contains("Rebble (with Local Fallback)"),
+        )
+        assertTrue(
+            offlineAccuracyNote(CactusSTTMode.LocalOnly, serverConfigured = false, rebbleAvailable = false)!!
+                .contains("Setting up a Self-hosted Server adds Server (with Local Fallback)"),
+        )
+        assertTrue(
+            offlineAccuracyNote(CactusSTTMode.RebbleFallback, serverConfigured = true, rebbleAvailable = false)!!
+                .contains("Server (with Local Fallback) tries your server first"),
+        )
+        assertTrue(
+            offlineAccuracyNote(CactusSTTMode.RebbleFallback, serverConfigured = false, rebbleAvailable = false)!!
+                .contains("Setting up a Self-hosted Server"),
+        )
+    }
 
     @Test
     fun theMobileDataSwitchShowsInTheServerModesWithWhatHappensOffWifi() {

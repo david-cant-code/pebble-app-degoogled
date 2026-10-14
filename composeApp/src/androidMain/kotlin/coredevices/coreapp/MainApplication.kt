@@ -31,6 +31,7 @@ import com.anopticlabs.gravel.socketfilter.InstallResult
 import com.anopticlabs.gravel.socketfilter.UdpSocketFilter
 import coredevices.ExperimentalDevices
 import com.anopticlabs.gravel.app.notebookEnginesModule
+import com.anopticlabs.gravel.app.textModelsModule
 import com.anopticlabs.gravel.network.AndroidUnmeteredWifi
 import com.anopticlabs.gravel.transcription.adoptUnboundServerToken
 import com.anopticlabs.gravel.transcription.settleServerOnMobileData
@@ -106,6 +107,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
                 watchModule,
                 notebookModule,
                 notebookEnginesModule,
+                textModelsModule,
             )
         }
         // Gravel: registered before any activity starts, so the Notebook's notification gates count every one.

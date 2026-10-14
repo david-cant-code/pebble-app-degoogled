@@ -123,6 +123,14 @@ class ModelFileInstaller(
     internal fun partialFile(model: PinnedModel): File =
         stagingDir.resolve("${model.id}.${model.sha256.take(16)}$PARTIAL_SUFFIX")
 
+    /** Gravel: the bytes kept for [model]'s resume; 0 without any. */
+    fun partialBytes(model: PinnedModel): Long = partialFile(model).length()
+
+    /** Gravel: deletes the bytes kept for [model]'s resume. Callers serialize it with installs of the model. */
+    fun discardPartial(model: PinnedModel) {
+        partialFile(model).delete()
+    }
+
     private fun quarantineFile(model: PinnedModel): File =
         stagingDir.resolve("${model.id}$QUARANTINE_SUFFIX")
 

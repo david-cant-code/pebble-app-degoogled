@@ -307,7 +307,7 @@ fun ModelDownloadPromptDialog(
  * system update, say, or with the phone cooler).
  */
 @Composable
-private fun SpeedTestRow(score: SpeedScore?, measuring: Boolean, onRetest: () -> Unit) {
+private fun SpeedTestRow(score: SpeedScore?, measuring: Boolean, notebookSupported: Boolean, onRetest: () -> Unit) {
     ListItem(
         headlineContent = {
             Text(
@@ -324,6 +324,8 @@ private fun SpeedTestRow(score: SpeedScore?, measuring: Boolean, onRetest: () ->
             val deadline = WhisperSpeedCalibration.MARGINAL_LIMIT_SECONDS.roundToInt()
             Text(
                 when {
+                    // Gravel: the probe waits for a Notebook generation to end.
+                    measuring && notebookSupported -> "This takes about a second, longer while the phone is processing a Notebook recording."
                     measuring -> "This takes about a second."
                     score == null -> "Each model will show how long a $window second dictation would take once the speed test has run."
                     else -> "Each model shows how long a full $window second dictation would take on this phone " +
@@ -357,6 +359,7 @@ fun ModelManagementScreen(
     onCancelDownload: () -> Unit,
     onDeleteModel: (String) -> Unit,
     onSetCurrentSTTModel: (String) -> Unit,
+    notebookSupported: Boolean = false,
 ) {
     LaunchedEffect(Unit) {
         topBarParams.title("Manage Models")
@@ -384,6 +387,7 @@ fun ModelManagementScreen(
                     SpeedTestRow(
                         score = speedScore.value,
                         measuring = measuringSpeed.value,
+                        notebookSupported = notebookSupported,
                         onRetest = onRetestSpeed,
                     )
                 }

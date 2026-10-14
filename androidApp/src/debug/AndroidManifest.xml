@@ -3,7 +3,8 @@
     Fork: debug-only additions. This overlay is merged into debug builds
     only; release builds never see these elements.
 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <application>
         <!--
             Sets the dictation debug hooks from adb (see SttDebugReceiver);
@@ -18,5 +19,10 @@
                 <action android:name="coredevices.coreapp.SET_STT_DEBUG" />
             </intent-filter>
         </receiver>
+        <!-- The Compose UI tests' host activity, which ui-test-manifest exports; the tests start it from inside the app. -->
+        <activity
+            android:name="androidx.activity.ComponentActivity"
+            android:exported="false"
+            tools:replace="android:exported" />
     </application>
 </manifest>

@@ -4,6 +4,7 @@ import co.touchlab.kermit.Logger
 import com.algolia.client.api.SearchClient
 import com.anopticlabs.gravel.firmware.PebbleOsChangelogListSource
 import com.anopticlabs.gravel.pkjs.UnreportedNetworkDenyEnforcement
+import com.anopticlabs.gravel.ui.TextModelsViewModel
 import coredevices.pebble.health.createPlatformHealthManager
 import coredevices.pebble.account.BootConfigProvider
 import coredevices.pebble.account.FirestoreKnownWatchesDao
@@ -301,6 +302,8 @@ val watchModule = module {
         )
     }
     viewModelOf(::ModelManagementScreenViewModel)
+    // Gravel: reached only where the Notebook binds TextModels.
+    viewModelOf(::TextModelsViewModel)
     viewModelOf(::HealthViewModel)
 
     single { SearchClient(appId = "7683OW76EQ", apiKey = "252f4938082b8693a8a9fc0157d1d24f") }

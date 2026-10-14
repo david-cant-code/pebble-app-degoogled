@@ -58,6 +58,11 @@ zxing = "3.5.4"
 compass = "3.2.0"
 health-kmp = "1.4.0"
 documentfile = "1.1.0"
+# Gravel: Compose UI tests (androidTest, debug manifest). Kept equal to the Compose UI version the
+# app resolves (1.11.2, from Compose Multiplatform 1.11.1), which the test APK runs against; newer lines exist.
+compose-ui-test = "1.11.2"
+# Gravel: raises the Espresso that compose-ui-test brings (3.5.0, which fails on Android 17) to the current stable.
+espresso = "3.7.0"
 
 [plugins]
 composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
@@ -80,6 +85,7 @@ androidLint = { id = "com.android.lint", version.ref = "agp" }
 compose-material3 = { module = "org.jetbrains.compose.material3:material3", version = "1.10.0-alpha05" }
 backhandler = { module = "org.jetbrains.compose.ui:ui-backhandler", version.ref = "compose-multiplatform" }
 compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform" }
+compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose-multiplatform" }
 coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutine" }
 coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutine" }
 coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutine" }
@@ -110,6 +116,9 @@ paging-compose = { module = "androidx.paging:paging-compose", version.ref = "pag
 sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
 okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
 kotlinx-io-core = { module = "org.jetbrains.kotlinx:kotlinx-io-core", version.ref = "kotlinx-io" }
+compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4", version.ref = "compose-ui-test" }
+compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest", version.ref = "compose-ui-test" }
+espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "espresso" }
 kotlinx-io-okio = { module = "org.jetbrains.kotlinx:kotlinx-io-okio", version.ref = "kotlinx-io" }
 koin-core = { group = "io.insert-koin", name = "koin-core", version.ref = "koin" }
 koin-android = { group = "io.insert-koin", name = "koin-android", version.ref = "koin" }

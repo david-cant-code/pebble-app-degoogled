@@ -226,6 +226,17 @@ class WhisperModelProvider(
         installer.pruneOrphanedStaging()
     }
 
+    override fun partialDownloadBytes(modelId: String): Long =
+        ModelCatalog.byId(modelId)?.let(installer::partialBytes) ?: 0L
+
+    // Under the model's lock, so it waits for an install of the model to stop writing.
+    override suspend fun discardPartialDownload(modelId: String) {
+        val model = ModelCatalog.byId(modelId) ?: return
+        withContext(Dispatchers.IO) {
+            mutexFor(model.id).withLock { installer.discardPartial(model) }
+        }
+    }
+
     override fun deleteModel(modelName: String) {
         if (!isSafeModelDirName(modelName)) {
             logger.w { "Refusing to delete model with unsafe name '$modelName'" }

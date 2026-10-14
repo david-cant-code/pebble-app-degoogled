@@ -9,6 +9,9 @@ import java.util.zip.ZipFile
 // DESIGN_NOTES.md for the de-Googling seams.
 plugins {
     alias(libs.plugins.android.application)
+    // Gravel: for the instrumented Compose tests; the module's main code has no composables, and the
+    // compiler wants the Compose runtime (already in the app through composeApp) on its classpath too.
+    alias(libs.plugins.composeCompiler)
 }
 
 val properties = Properties().apply {
@@ -152,6 +155,7 @@ dependencies {
     implementation(project(":util"))
     // Gravel: the Notebook's receivers, which the merged manifest declares.
     implementation(project(":notebook"))
+    implementation(libs.compose.runtime)
     // Gravel: the text engine's isolated service, which the merged manifest declares.
     implementation(project(":llm"))
     implementation(libs.androidx.core.ktx)
@@ -194,6 +198,10 @@ dependencies {
     androidTestImplementation(project(":socketfilter"))
     androidTestImplementation(project(":whisper"))
     androidTestImplementation(project(":notebook"))
+    androidTestImplementation(libs.compose.ui)
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(libs.espresso.core)
+    debugImplementation(libs.compose.ui.test.manifest)
     androidTestImplementation(project(":llm"))
     androidTestImplementation(project(":libpebble3"))
     androidTestImplementation(libs.serialization)

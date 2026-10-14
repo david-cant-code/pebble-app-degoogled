@@ -39,6 +39,12 @@ interface CactusModelPathProvider {
 
     /** Deletes download leftovers of models no catalog lists; a no-op without a staging area. */
     fun pruneOrphanedStaging() {}
+
+    /** Gravel: bytes an interrupted download of [modelId] keeps for a resume; 0 without one. */
+    fun partialDownloadBytes(modelId: String): Long = 0L
+
+    /** Gravel: deletes what an interrupted download of [modelId] kept, after any install of it in flight. */
+    suspend fun discardPartialDownload(modelId: String) {}
     fun deleteModel(modelName: String)
     fun getModelSizeBytes(modelName: String): Long
     fun initTelemetry()

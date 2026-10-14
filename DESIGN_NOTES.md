@@ -784,7 +784,12 @@ carries the pin, and staging files other than the current pins'
 partials and quarantined files are deleted at startup. Speech and text
 models download in separate lanes, one download per role at a time: a
 new request replaces the pending download of its own role only, and the
-dictation screens follow the speech lane's status. A download job's
+dictation screens follow the speech lane's status. A download still
+scheduled when a process builds the download manager stays scheduled;
+where its job names a catalog model, its lane starts out showing it as
+downloading, whether or not the job has run there. A cancel, or a request
+that replaces the job with another model's, takes a download it ends off
+what the lane shows. A download job's
 time limit scales with the file's size (`DownloadJobLiveness.timeoutFor`).
 The startup sweep deletes every model directory that is not an
 installed catalog model, a text model's included, but resets dictation
@@ -872,7 +877,8 @@ ends the engine process. Constraints the code relies on:
   (dictation's rule over the CPUs the text engine process may run on) is
   the count the speed calibration below was measured at, and the count
   `TextGenerator` generates at.
-- `recommendedTextModel` (`ModelManager.getRecommendedTextModel`) walks `LlmModelCatalog` from the largest model down
+- `recommendedTextModel` (`ModelManager.getRecommendedTextModel`, marked
+  on Settings > AI > LLM) walks `LlmModelCatalog` from the largest model down
   to the first whose RAM floor the phone meets and whose note from a
   one-minute recording is estimated within 45 seconds, else offers the
   smallest; nothing is
@@ -1585,7 +1591,8 @@ in the app's device suite:
   error started the hold through for its next request, and a server error
   there flags it. Host tests cover the routing, the failure kinds, the
   hold, the fallback mode's tries, reroute and notice, the watches, the
-  startup order and the client's read timeout on fakes or a local server.
+  startup order and the client's read timeout on fakes or a local server; the download job's reports of a finished download are
+  checked as source text.
 - Watch dictation and captures share the server through
   `ServerDictationHold` (`:util`), whose `sendRecording` every server
   request of a capture goes through. `HybridTranscriptionService` reads a
@@ -1631,14 +1638,17 @@ in the app's device suite:
   reconciles the note index, lists a missing Unclassified, rebuilds a
   damaged recordings list, queues recordings held for a later attempt and
   only then sweeps orphan blobs; whenever an
-  activity resumes after none was; and on Resume, Process now, the charging job, the Wi-Fi rule starting to
+  activity resumes after none was; and
+  when a text download finishes, a text model is chosen or an installed one
+  is deleted (Settings > AI below); and on Resume, Process now, the charging job, the Wi-Fi rule starting to
   allow a request while the drain waits for the network, the network
   job, a change of the speech settings in the app's config
   (`SpeechSettingWatch`, on `STTConfig`; a change of the server's token or
   pinned certificate alone starts no run), the download job finishing a
   speech model's download (the same watch, on `SpeechModelInstalls`, which
   the job counts up on its success path). A request during a
-  run is taken by that run, while a capture queued during one, a speech settings change, a finished speech model download, or
+  run is taken by that run, while a capture queued during one, a text model
+  change, a speech settings change, a finished speech model download, or
   one of those processing changes
   makes it go round once more. Each run first queues the recordings kept for
   a later attempt. A capture that failed transiently waits for the next run;
@@ -1681,6 +1691,28 @@ in the app's device suite:
   keeps, never inside a surrogate pair, and a note longer than a restore
   takes (`RestorePlan.MAX_NOTE_CHARS`) is refused, so a typed note fits what
   a backup keeps.
+- Settings > AI takes Speech Recognition's place in the list and opens two
+  pages: Speech Recognition, upstream's category, now kept out of the
+  top-level list (`Section.parent`), and, where the Notebook runs, LLM
+  (`TextModelsScreen`), which reaches the app through `TextModels` (bound
+  by `AndroidTextModels`). LLM lists the catalog's text models with their
+  size, the estimate of the text model's part of a note and the
+  recommendation, refuses a second text download while one is shown as
+  started, and offers no download where the text engine cannot run. A
+  download shows as started when requested, since the job reports itself
+  only when it runs. A text download that finishes with its model
+  installed, unless the user cancelled it, becomes the Notebook's choice;
+  that, a choice and a delete of an installed model make the capture
+  drain run, or go round once more. The download job reports the finish
+  to `AndroidTextModels` on its success path (`TextDownloadFollower`) and
+  waits for that follow-up, in whichever process it runs. Deleting the
+  chosen model clears the
+  choice; deleting a part an interrupted download kept also cancels that
+  model's scheduled download. The device suite's `TextModelsContentTest`
+  pins the page's questions: a download of a model whose memory floor is
+  more than 10% above the phone's memory, and a delete. Among what no test
+  pins: the Settings entries, the view model, the per-model job cancel, and the provider holding
+  the model's install lock while it deletes a part.
 - Captures and typed notes are written with `NoteStore.createListedNote`,
   which puts a note in `unclassified` when its folder is no longer listed,
   the list read under the index lock. `deleteFolder` unlists the folder

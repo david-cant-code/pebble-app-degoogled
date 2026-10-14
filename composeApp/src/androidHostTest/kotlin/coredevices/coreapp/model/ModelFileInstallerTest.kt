@@ -146,6 +146,27 @@ class ModelFileInstallerTest {
         partialFile.writeBytes(bytes)
     }
 
+    @Test
+    fun theBytesKeptForAResumeAreCountedAndCanBeDiscarded() = runTest {
+        val installer = installer { error("no request expected") }
+        assertEquals(0L, installer.partialBytes(model))
+        seedPartial(payload.copyOf(1000))
+        assertEquals(1000L, installer.partialBytes(model))
+        installer.discardPartial(model)
+        assertFalse(partialFile.exists())
+        assertEquals(0L, installer.partialBytes(model))
+    }
+
+    @Test
+    fun aDownloadAfterADiscardStartsFromTheBeginning() = runTest {
+        seedPartial(payload.copyOf(1000))
+        val installer = installer { respond(ByteReadChannel(payload), HttpStatusCode.OK) }
+        installer.discardPartial(model)
+        installer.install(model)
+        assertEquals(listOf<String?>(null), requestedRanges)
+        assertContentEquals(payload, installedFile.readBytes())
+    }
+
     // --- Happy path ---
 
     @Test

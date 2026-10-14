@@ -35,7 +35,7 @@ data class WhatsNewEntry(val title: String, val body: String)
 val whatsNewEntries: List<WhatsNewEntry> = listOf(
     WhatsNewEntry(
         title = "Your transcription server and mobile data",
-        body = "Settings > Speech Recognition has two new switches for a self-hosted " +
+        body = "Settings > AI > Speech Recognition has two new switches for a self-hosted " +
             "transcription server. With Use the Server on Mobile Data off, audio goes to your " +
             "server only while this phone is using Wi-Fi that isn't marked metered. If a server " +
             "was already set up when you updated, the switch starts on, so nothing changes until " +
@@ -122,7 +122,7 @@ val whatsNewEntries: List<WhatsNewEntry> = listOf(
             "each model costs, and offers a smaller one if needed for your device. " +
             "Dictation with Gravel in the background or the screen locked, which used " +
             "to fail on some phones, now works. And you can connect Gravel to your own " +
-            "self-hosted transcription server over https in Settings > Speech " +
+            "self-hosted transcription server over https in Settings > AI > Speech " +
             "Recognition; nothing is sent unless you set one up.",
     ),
     WhatsNewEntry(

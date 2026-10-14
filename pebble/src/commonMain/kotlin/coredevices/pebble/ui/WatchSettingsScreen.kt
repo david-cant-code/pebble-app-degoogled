@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DoNotDisturb
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MusicNote
@@ -104,6 +105,8 @@ import androidx.lifecycle.ViewModel
 import co.touchlab.kermit.Logger
 import coredevices.whisper.isWhisperSupported
 import com.anopticlabs.gravel.firmware.FirmwarePickerRoute
+import com.anopticlabs.gravel.ui.rememberTextModels
+import com.anopticlabs.gravel.ui.textModelsSummary
 import com.russhwolf.settings.Settings
 import com.russhwolf.settings.set
 import coredevices.CoreBackgroundSync
@@ -207,7 +210,8 @@ enum class Section(val title: String, val icon: ImageVector) {
     Battery("Battery (Not available without telemetry)", Icons.Default.BatteryFull),
     Calendar("Calendar", Icons.Default.CalendarMonth),
     Health("Health", Icons.AutoMirrored.Filled.DirectionsRun),
-    Speech("Speech Recognition", Icons.Default.Mic),
+    AI("AI", Icons.Default.AutoAwesome), // Gravel
+    Speech("Speech Recognition", Icons.Default.Mic), // Gravel: opened from AI, see parent()
     Display("Display", Icons.Default.DarkMode), // watch only
     Weather("Weather", Icons.Default.Cloud),
     Notifications("Notifications", Icons.Default.Notifications),
@@ -224,6 +228,33 @@ enum class Section(val title: String, val icon: ImageVector) {
 fun Section.navigatesDirectlyTo(): NavBarRoute? = when (this) {
     Section.Battery -> PebbleNavBarRoutes.BatterySettingsRoute
     else -> null
+}
+
+/** Gravel: the section whose page lists this one; such a section stays out of the top-level list. */
+fun Section.parent(): Section? = when (this) {
+    Section.Speech -> Section.AI
+    else -> null
+}
+
+/** Gravel: the sections the top-level Settings list shows, given the visible items' sections. */
+internal fun topLevelSections(itemSections: Set<Section>): List<Section> =
+    Section.entries.filter { section ->
+        section.parent() == null && (section in itemSections || section.navigatesDirectlyTo() != null)
+    }
+
+/**
+ * Gravel: the Manage Offline Models note under Local Only and Local (with Rebble Fallback), naming a mode with a
+ * fallback that the dropdown offers now, or how to get one (the server modes appear once a self-hosted server is set).
+ */
+internal fun offlineAccuracyNote(mode: CactusSTTMode, serverConfigured: Boolean, rebbleAvailable: Boolean): String? {
+    if (mode != CactusSTTMode.LocalOnly && mode != CactusSTTMode.RebbleFallback) return null
+    val lead = "Offline speech recognition can be less accurate."
+    return when {
+        rebbleAvailable && (mode == CactusSTTMode.RebbleFallback || !serverConfigured) ->
+            "$lead Rebble (with Local Fallback) tries Rebble first and falls back to this phone."
+        serverConfigured -> "$lead Server (with Local Fallback) tries your server first and falls back to this phone."
+        else -> "$lead Setting up a Self-hosted Server adds Server (with Local Fallback), which tries the server first and falls back to this phone."
+    }
 }
 
 /** Gravel: the explanation under "Use the Server on Mobile Data", or null where the switch is not offered. */
@@ -531,6 +562,9 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     val healthSyncTracker: HealthSyncTracker = koinInject()
     val healthPlatformSyncEnabled by healthSyncTracker.enabled.collectAsState()
     val healthIsSyncing by platformHealthSync.syncing.collectAsState()
+    val textModels = rememberTextModels()?.takeIf { it.supported }
+    val textModelFacts = textModels?.facts?.collectAsState()?.value
+    LaunchedEffect(textModels) { textModels?.refresh() }
 
     val rawSettingsItems = remember(
             libPebbleConfig,
@@ -543,6 +577,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
             watchPrefs,
             rebbleVoiceAvailable,
             platformSttAvailable,
+            textModelFacts,
         ) {
             listOfNotNull(
                 basicSettingsActionItem(
@@ -1533,6 +1568,28 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     },
                     isDebugSetting = true,
                 ),
+                navBarNav?.let { nav -> basicSettingsActionItem(
+                    title = "Speech Recognition",
+                    keywords = "whisper stt speech recognition dictation",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.AI,
+                    action = {
+                        nav.navigateTo(
+                            PebbleNavBarRoutes.WatchSettingsCategoryRoute(
+                                section = Section.Speech.name,
+                                topLevelType = TopLevelType.Phone.name,
+                            )
+                        )
+                    },
+                ) },
+                navBarNav?.let { nav -> textModelFacts?.let { facts -> basicSettingsActionItem(
+                    title = "LLM",
+                    description = textModelsSummary(facts),
+                    keywords = "llm text model notebook qwen",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.AI,
+                    action = { nav.navigateTo(PebbleNavBarRoutes.TextModelsRoute) },
+                ) } },
                 basicSettingsDropdownItem(
                     id = OfflineSpeechRecognition,
                     title = "Offline Speech Recognition",
@@ -1630,13 +1687,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                 *forkDictationDebugItems(coreConfig, coreConfigHolder).toTypedArray(),
                 navBarNav?.let { nav -> basicSettingsActionItem(
                     title = "Manage Offline Models",
-                    description = if (coreConfig.sttConfig.mode == CactusSTTMode.LocalOnly ||
-                        coreConfig.sttConfig.mode == CactusSTTMode.RebbleFallback) {
-                        "Note: Offline speech recognition is lower accuracy, consider using" +
-                                "'Fallback only' mode to improve results when online"
-                    } else {
-                        null
-                    },
+                    description = offlineAccuracyNote(coreConfig.sttConfig.mode, serverConfigured, rebbleVoiceAvailable),
                     keywords = "whisper stt speech recognition offline",
                     topLevelType = TopLevelType.Phone,
                     section = Section.Speech,
@@ -2156,9 +2207,7 @@ fun WatchSettingsScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
         }
 
         val sectionsToShowInList = remember(filteredItems) {
-            Section.entries.filter { section ->
-                filteredItems.any { it.section == section } || section.navigatesDirectlyTo() != null
-            }
+            topLevelSections(filteredItems.mapTo(mutableSetOf()) { it.section })
         }
         val groupedItemsToDisplay = remember(filteredItems) {
             filteredItems.groupBy { it.section }.entries.sortedBy { it.key.ordinal }

@@ -13,6 +13,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
 import com.anopticlabs.gravel.firmware.FirmwarePickerRoute
 import com.anopticlabs.gravel.firmware.FirmwarePickerScreen
+import com.anopticlabs.gravel.ui.TextModelsScreen
 import io.rebble.libpebblecommon.locker.AppType
 import kotlinx.serialization.Serializable
 import kotlin.uuid.Uuid
@@ -124,6 +125,10 @@ object PebbleNavBarRoutes {
 
     @Serializable
     data object OfflineModelsRoute : NavBarRoute
+
+    // Gravel: Settings > AI > LLM.
+    @Serializable
+    data object TextModelsRoute : NavBarRoute
 
     @Serializable
     data class WatchSettingsCategoryRoute(val section: String, val topLevelType: String) : NavBarRoute
@@ -271,6 +276,9 @@ fun NavGraphBuilder.addNavBarRoutes(
     }
     composable<PebbleNavBarRoutes.OfflineModelsRoute> {
         ModelManagementScreen(nav, topBarParams)
+    }
+    composable<PebbleNavBarRoutes.TextModelsRoute> {
+        TextModelsScreen(topBarParams)
     }
     composableWithAnimations<PebbleNavBarRoutes.WatchSettingsCategoryRoute>(viewModel) {
         val route: PebbleNavBarRoutes.WatchSettingsCategoryRoute = it.toRoute()

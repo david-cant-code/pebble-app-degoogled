@@ -99,6 +99,13 @@ class ModelManager(
         score = speedScore.value,
     )
 
+    /** Gravel: the phone's total memory as the recommendations read it; 0 when unknown. */
+    fun totalRamBytes(): Long = platform.totalRamBytes()
+
+    /** Gravel: starts [model]'s download on any network, as the speech picker does. */
+    fun downloadTextModel(model: LlmModel): Boolean =
+        modelDownloadManager.downloadSTTModel(modelInfoFor(model), allowMetered = true)
+
     companion object {
         private const val MIB = 1024L * 1024L
 
