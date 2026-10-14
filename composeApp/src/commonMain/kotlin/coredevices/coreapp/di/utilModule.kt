@@ -2,6 +2,7 @@ package coredevices.coreapp.di
 
 import AppUpdateTracker
 import NextBugReportContext
+import com.anopticlabs.gravel.models.InferenceExclusion
 import com.russhwolf.settings.Settings
 import coredevices.CoreBackgroundSync
 import coredevices.EnableExperimentalDevices
@@ -90,10 +91,12 @@ val utilModule = module {
     // The speed probe runs on the thread count a dictation would get at
     // that moment, so its score and the decode it predicts share one
     // threading policy.
+    single { InferenceExclusion() }
     single {
         DeviceSpeedEstimator(
             settings = get(),
             threadCount = { dictationThreadCount(get<CoreConfigHolder>().config.value.sttConfig) },
+            exclusion = get(),
         )
     }
     single { ModelManager(get(), get(), getOrNull(), get()) }

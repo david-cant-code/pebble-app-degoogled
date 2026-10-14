@@ -853,6 +853,12 @@ already. The recording
 itself is kept; the transcript arrives later, and the stopped work is
 done again. Recordings are capped at 5 minutes, so each stop repeats at
 most one recording's transcription; the number of stops is not limited.
+Notebook text generation (a note's title and tags, a reminder's message)
+runs in an engine of its own but gives way the same way: loading the
+model and generating each wait while a dictation holds the speech
+engine, and a dictation arriving mid-call stops the call, which starts
+again. A load of the model that is already under way when a dictation
+arrives runs to its end beside it.
 
 ## A dictation can wait for a Notebook transcription's first seconds
 
@@ -1023,7 +1029,10 @@ of the configured one, so the next load of either re-hashes the file
 whichever job makes it, since a death is the one event a corrupt file
 could have caused; a load that takes the mutex before the death report
 is acted on reads a memo set by a re-hash seconds earlier, so only a
-swap inside that window escapes. Hashing through the
+swap inside that window escapes. The Notebook's text model is hashed and
+opened the same way, and a death of its engine process while the model is
+loaded or loading drops its memo.
+Hashing through the
 descriptor that is sent would tie the hash to the file the engine
 reads, not to its bytes: a rewrite in place after the hash still
 reaches the parser. Closing the window means hashing the bytes as they

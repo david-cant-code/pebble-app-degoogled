@@ -1,6 +1,7 @@
 package coredevices.util.transcription
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.models.InferenceExclusion
 import com.russhwolf.settings.Settings
 import coredevices.util.models.WhisperModelCatalog
 import coredevices.util.models.WhisperTier
@@ -152,6 +153,8 @@ class DeviceSpeedEstimator(
     private val probe: (threads: Int) -> Long = { threads -> whisperBenchmark(threads) },
     private val supported: () -> Boolean = { isWhisperSupported() },
     private val now: () -> Long = { Clock.System.now().toEpochMilliseconds() },
+    // Taken around the probe runs; null in tests that do not care.
+    private val exclusion: InferenceExclusion? = null,
 ) {
     companion object {
         private val logger = Logger.withTag("DeviceSpeedEstimator")
@@ -208,15 +211,8 @@ class DeviceSpeedEstimator(
         // disk, which the debug build's strict mode rejects on the UI
         // thread.
         val measured = withContext(Dispatchers.IO) {
-            val threads = threadCount()
-            // A probe that fails or answers nonsense drops out of the
-            // measurement; the measurement fails only when none is left.
-            val ns = (1..PROBE_RUNS).mapNotNull {
-                runCatching { probe(threads) }
-                    .onFailure { logger.w(it) { "Speed probe failed" } }
-                    .getOrNull()
-                    ?.takeIf { it in PLAUSIBLE_NS }
-            }.minOrNull()
+            // The count is read under the exclusion, at the placement the probe then runs in.
+            val (threads, ns) = exclusion.withLockIfAny { threadCount().let { it to probeRuns(it) } }
             if (ns == null) return@withContext null
             val score = SpeedScore(nsPerBlock = ns, threads = threads, measuredAtEpochMs = now())
             settings.putLong(KEY_NS, score.nsPerBlock)
@@ -229,6 +225,18 @@ class DeviceSpeedEstimator(
         logger.i { "Speed probe: ${measured.nsPerBlock / 1_000_000} ms per block on ${measured.threads} threads" }
         return measured
     }
+
+    // A probe that fails or answers nonsense drops out of the measurement;
+    // the measurement fails only when none is left.
+    private fun probeRuns(threads: Int): Long? = (1..PROBE_RUNS).mapNotNull {
+        runCatching { probe(threads) }
+            .onFailure { logger.w(it) { "Speed probe failed" } }
+            .getOrNull()
+            ?.takeIf { it in PLAUSIBLE_NS }
+    }.minOrNull()
+
+    private suspend fun <T> InferenceExclusion?.withLockIfAny(block: suspend () -> T): T =
+        if (this == null) block() else withLock(block)
 
     /** The cached score, measuring once when there is none; a probe already running serves every waiting caller. */
     suspend fun cachedOrMeasure(): SpeedScore? = cached() ?: measureMutex.withLock { cached() ?: measureLocked() }

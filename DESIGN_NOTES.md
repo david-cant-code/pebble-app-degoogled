@@ -645,6 +645,7 @@ The replacement is whisper.cpp (MIT), compiled from source:
   (`WhisperLongFormDeviceTest`; `KNOWN_ISSUES.md`). A stop nothing asked
   for is refused like a malformed reply, and a call past its transaction
   deadline fails the transcription without a retry.
+  `WhisperLongFormServiceTest` pins the rules against a fake engine.
 - Nothing CI runs reaches `whisper_jni.cpp`: the host suites stop at the
   binding's Kotlin side, so the shim's semantics (cancellation,
   cold-start init) are guarded only by the instrumented
@@ -845,7 +846,8 @@ ends the engine process. Constraints the code relies on:
   by a test: an access to a freed pool, and the calling thread's nice value
   being restored. `textGenerationThreadCount`
   (dictation's rule over the CPUs the text engine process may run on) is
-  the count the speed calibration below was measured at.
+  the count the speed calibration below was measured at, and the count
+  `TextGenerator` generates at.
 - `recommendedTextModel` (`ModelManager.getRecommendedTextModel`) walks `LlmModelCatalog` from the largest model down
   to the first whose RAM floor the phone meets and whose note from a
   one-minute recording is estimated within 45 seconds, else offers the
@@ -858,6 +860,28 @@ ends the engine process. Constraints the code relies on:
   steers the text recommendation too, within the probe's accepted range.
   Host tests pin the walk, the scaling, and the text times' match to the
   current speech reference.
+- `TextGenerator` (`:util`) generates the Notebook's text. It picks the
+  Notebook's chosen text model if installed, else the recommended one if
+  installed, else the largest installed; resolves it through the model
+  provider without downloading, so a missing or failed file means no
+  model rather than a fetch; loads it with an 8192-token context; and
+  frees it five minutes after the end of its last use, or once a use
+  holding the engine ends when its file is deleted. An engine process
+  death while a model is loaded or loading drops the handle and that
+  file's verification memo, so the next load hashes the file again. A load the
+  engine refuses or that runs past its deadline, or a use whose four
+  counted events were all engine losses during a load, marks the model
+  unusable; the mark counts while that model is the pick, until a load
+  succeeds, the model is deleted or the app restarts. A use that gives up
+  on an engine loss with a loss during a generation or a hold wait that
+  ran out among its four leaves the model usable; a generation past its
+  deadline is not retried. Loads and generations give way to dictation
+  as long-form transcription does: each waits while a dictation hold is
+  up, a hold raised mid-call cancels the call and it starts again, a
+  restart does not count against the retries, and a load already under
+  way finishes. The generator and the speech probe each take an
+  `InferenceExclusion`. `TextGeneratorTest` and `DeviceSpeedTest` pin
+  the rest on fakes.
 
 Storage is a directory of encrypted files under `files/notebook`. Each write
 draws a fresh AES-256 data key, seals the file with it in software

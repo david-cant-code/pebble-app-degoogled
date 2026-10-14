@@ -2,6 +2,8 @@ package coredevices.util.transcription
 
 import co.touchlab.kermit.Logger
 import com.anopticlabs.gravel.transcription.DictationHold
+import com.anopticlabs.gravel.transcription.DictationPriority
+import com.anopticlabs.gravel.transcription.LongFormTimeoutException
 import com.anopticlabs.gravel.transcription.awaitPreemptibleEngineWork
 import com.anopticlabs.gravel.whisper.WhisperLongForm
 import com.anopticlabs.gravel.whisper.WhisperLongFormResult
@@ -500,6 +502,9 @@ class WhisperTranscriptionService internal constructor(
 
     private val dictationHold = DictationHold(scope, dictationHoldBound)
 
+    /** The dictation hold as other on-device inference sees it: Notebook text generation gives way to it too. */
+    val dictationPriority: DictationPriority get() = dictationHold
+
     // Long-form calls run one at a time; dictation never takes this.
     private val longFormMutex = Mutex()
 
@@ -928,6 +933,9 @@ class WhisperTranscriptionService internal constructor(
     /** True if the local model is loaded, or downloaded and ready to load, on a supported device. */
     fun isLocalAvailable(): Boolean = engine.supported() && (modelHandle != 0L || modelExists())
 
+    /** True when [transcribeLongForm] can run: a local dictation mode and [isLocalAvailable]. Reads the disk. */
+    fun isLongFormAvailable(): Boolean = sttConfig.value.mode.usesLocalCactus() && isLocalAvailable()
+
     /**
      * Called as a transcription opens (a watch session's `canServeSession`,
      * every `HybridTranscriptionService.transcribe` flow); where local comes
@@ -1290,7 +1298,7 @@ class WhisperTranscriptionService internal constructor(
             modelHandle = 0L
             lastInitedModel = null
             engineUnavailable = true
-            throw TranscriptionException.TranscriptionServiceUnavailable(modelUsed = model)
+            throw LongFormTimeoutException(modelUsed = model)
         } catch (e: WhisperEngineUnavailableException) {
             outcome = "error:${transcriptionFailureReason(e)}"
             // As in runLocalTranscribe: the handle went with its process.
