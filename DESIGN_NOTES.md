@@ -614,7 +614,8 @@ The replacement is whisper.cpp (MIT), compiled from source:
   to the network it allows when each is made, keeps no idle connection,
   and closes a socket whose network stops being allowed. `HybridTranscriptionService` routes first: Server Only
   refuses the watch session at setup, and the two fallback modes keep
-  dictation on the phone, as they do with Flaky Network Mode on while the phone
+  dictation on the phone, as they do with Flaky Network Mode on, or a long
+  capture on a server without a dictation lane (below), while the phone
   has a model. `settleServerOnMobileData` turns the switch on
   once, at the first start with it, when a server was already set up;
   its marker is a separate setting, so a rebuilt config cannot
@@ -1196,6 +1197,27 @@ in the app's device suite:
   type, a length and a JSON body (a capture's body is its entry, then its
   recording); a closing record carries the count per type and the SHA-256 of
   every record before it.
+- Watch dictation and captures share the server through
+  `ServerDictationHold` (`:util`). `HybridTranscriptionService` reads a
+  long capture's request under way as a long recording on the server; in
+  the two fallback modes with a phone model, a dictation made meanwhile
+  stays on the phone alone, the server fallback included. Server Only,
+  and a fallback mode without a phone model, raise the hold as the watch
+  session opens (`earlyInit`); the dictation's `transcribe` replaces those
+  holds with its own and releases it when it ends, so only a session that
+  never reaches `transcribe` keeps one for its full `DICTATION_HOLD`.
+  While a hold is up, captures wait before their request, and a long
+  capture's request under way is canceled and sent again from the start. A server that
+  sends `Gravel-Dictation-Lane: separate` on a successful reply
+  transcribes dictation apart from long audio: `SelfHostedServerStore`
+  keeps the host and port of the last successful reply when that reply
+  carried it, the settings dialog forgets it when it saves another
+  address, and for that server dictation routes as if no capture were on
+  it. Host tests cover the hold, the dictation routing with and without a
+  lane, the header and its memory; among what is not host-tested are the Koin wiring, the
+  dialog's forget on save, a hang-up reaching a real server, the stop
+  racing a request that has just ended, and Local (with Server
+  Fallback)'s check after a timed-out phone attempt.
 
 ## In-app links and the What's-new popup
 

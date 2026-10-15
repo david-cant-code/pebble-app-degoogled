@@ -68,6 +68,12 @@ internal fun effectiveServerToken(typed: String, clearToken: Boolean, saved: Str
     else -> null
 }
 
+/**
+ * Gravel: whether Save writes [next] over the [current] token. An unchanged token is left alone: writing it again
+ * stores a new ciphertext (KeystoreSecretCipher.encrypt takes a fresh IV per write).
+ */
+internal fun writesServerToken(next: String?, current: String?): Boolean = next == null || next != current
+
 /** The token field's label: whether a saved token exists, and whether it applies to the host and port typed. */
 internal fun tokenFieldLabel(typed: String, clearToken: Boolean, hasSaved: Boolean, savedHostPort: String?, hostPort: String?): String = when {
     // Without a server the save keeps no token, so nothing is "saved" to replace.
@@ -175,8 +181,11 @@ fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
                 ),
             ),
         )
-        store.setToken(effectiveServerToken(token, clearToken, store.token(), savedHostPort, cleaned?.let(::serverHostPort)))
+        val currentToken = store.token()
+        val nextToken = effectiveServerToken(token, clearToken, currentToken, savedHostPort, cleaned?.let(::serverHostPort))
+        if (writesServerToken(nextToken, currentToken)) store.setToken(nextToken)
         if (cleaned == null) savedHostPort?.let(store::forget)
+        store.keepDictationLaneOnlyFor(cleaned?.let(::serverHostPort))
         onDismissRequest()
     }
 
@@ -193,7 +202,8 @@ fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
     ) {
         Column {
             Text(
-                "Sends dictation audio to your own transcription server over https, only while " +
+                "Sends dictation audio to your own " +
+                    "transcription server over https, only while " +
                     "this phone is using Wi-Fi that isn't marked metered unless Use the Server on " +
                     "Mobile Data is on (it appears with the server modes). Works with whisper.cpp's " +
                     "server and any OpenAI-compatible server.",

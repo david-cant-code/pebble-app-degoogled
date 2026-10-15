@@ -3,6 +3,7 @@ package coredevices.coreapp.di
 import AppUpdateTracker
 import NextBugReportContext
 import com.anopticlabs.gravel.models.InferenceExclusion
+import com.anopticlabs.gravel.transcription.ServerDictationHold
 import com.russhwolf.settings.Settings
 import coredevices.CoreBackgroundSync
 import coredevices.EnableExperimentalDevices
@@ -124,8 +125,9 @@ val utilModule = module {
     }
     singleOf(::PlatformSpeechRecognizer)
     single {
-        HybridTranscriptionService(get(), get(), get(), get(), get(), get(), selfHosted = get())
+        HybridTranscriptionService(get(), get(), get(), get(), get(), get(), selfHosted = get(), serverDictation = get())
     } bind TranscriptionService::class
+    single { ServerDictationHold() }
     // Fork: the self-hosted transcription server and what it remembers
     // (encrypted bearer token, pinned certificate).
     single { SelfHostedServerStore(get(), get()) }

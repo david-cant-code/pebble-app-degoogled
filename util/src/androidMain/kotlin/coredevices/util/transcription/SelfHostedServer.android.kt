@@ -24,6 +24,7 @@ import javax.net.ssl.SSLSocket
 import javax.net.ssl.TrustManager
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
+import kotlin.time.Duration
 
 /**
  * The platform's own server trust: the system CA store plus the CAs the
@@ -153,6 +154,7 @@ internal fun selfHostedHttpClient(
     pinnedFingerprint: () -> String?,
     platform: PlatformServerTrust,
     binding: NetworkBinding? = null,
+    answerWait: Duration = SelfHostedTranscriptionService.DICTATION_ANSWER_WAIT,
 ): HttpClient {
     val trust = PinningTrustManager(platform, hostPort.substringBeforeLast(':'), pinnedFingerprint)
     val context = SSLContext.getInstance("TLS").apply { init(null, arrayOf<TrustManager>(trust), null) }
@@ -161,10 +163,10 @@ internal fun selfHostedHttpClient(
             config {
                 sslSocketFactory(context.socketFactory, trust)
                 hostnameVerifier(pinAwareHostnameVerifier(platform, pinnedFingerprint))
-                // The dictation deadline is the caller's; these only stop a
-                // dead server from holding the connection open for minutes.
+                // The dictation deadline is the caller's; the read timeout is the
+                // purpose's answer wait (SelfHostedTranscriptionService).
                 connectTimeout(3, TimeUnit.SECONDS)
-                readTimeout(20, TimeUnit.SECONDS)
+                readTimeout(answerWait.inWholeMilliseconds, TimeUnit.MILLISECONDS)
                 writeTimeout(20, TimeUnit.SECONDS)
                 binding?.let {
                     socketFactory(it.socketFactory)
@@ -191,8 +193,8 @@ class AndroidSelfHostedClientFactory internal constructor(
 ) : SelfHostedClientFactory {
     constructor(wifiBinding: () -> NetworkBinding) : this(wifiBinding, ::AndroidServerTrust)
 
-    override fun create(hostPort: String, pinnedFingerprint: () -> String?, wifiOnly: Boolean): HttpClient =
-        selfHostedHttpClient(hostPort, pinnedFingerprint, platform(), if (wifiOnly) wifiBinding() else null)
+    override fun create(hostPort: String, pinnedFingerprint: () -> String?, wifiOnly: Boolean, answerWait: Duration): HttpClient =
+        selfHostedHttpClient(hostPort, pinnedFingerprint, platform(), if (wifiOnly) wifiBinding() else null, answerWait)
 }
 
 /** Accepts every chain and keeps it: for the probe handshake only, which sends nothing. */

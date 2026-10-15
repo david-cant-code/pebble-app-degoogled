@@ -3,6 +3,7 @@ package coredevices.pebble.ui
 import coredevices.util.transcription.ServerUrlProblem
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -63,5 +64,14 @@ class SelfHostedServerDialogTest {
         assertEquals("Bearer token (optional)", tokenFieldLabel("", clearToken = true, hasSaved = true, home, home))
         assertEquals("Bearer token (optional)", tokenFieldLabel("", clearToken = false, hasSaved = true, home, null), "no server keeps no token")
         assertEquals("Bearer token (optional)", tokenFieldLabel("", clearToken = false, hasSaved = true, null, null))
+    }
+
+    @Test
+    fun saveLeavesAnUnchangedTokenAloneAndAlwaysWritesAClear() {
+        assertFalse(writesServerToken("tok", "tok"))
+        assertTrue(writesServerToken("new", "tok"))
+        assertTrue(writesServerToken("tok", null))
+        assertTrue(writesServerToken(null, "tok"))
+        assertTrue(writesServerToken(null, null))
     }
 }

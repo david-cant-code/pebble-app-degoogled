@@ -34,6 +34,8 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * The client and probe as built, against a local TLS server whose
@@ -52,6 +54,7 @@ class SelfHostedTlsGlueTest {
 
     private companion object {
         const val PASSWORD = "changeit"
+        const val SLOW_REPLY_MILLIS = 1_500L
         const val SERVER_NAME = "stt-server-c.test"
 
         private fun keytool(workDir: File, vararg args: String) {
@@ -130,6 +133,17 @@ class SelfHostedTlsGlueTest {
                 served.incrementAndGet()
                 exchange.requestBody.use { it.readBytes() }
                 val reply = """{"text":"from the local server"}""".encodeToByteArray()
+                exchange.sendResponseHeaders(200, reply.size.toLong())
+                exchange.responseBody.use { it.write(reply) }
+            }
+            createContext("/drop") { exchange ->
+                exchange.requestBody.use { it.readBytes() }
+                exchange.close()
+            }
+            createContext("/slow") { exchange ->
+                exchange.requestBody.use { it.readBytes() }
+                Thread.sleep(SLOW_REPLY_MILLIS)
+                val reply = """{"text":"late"}""".encodeToByteArray()
                 exchange.sendResponseHeaders(200, reply.size.toLong())
                 exchange.responseBody.use { it.write(reply) }
             }
@@ -225,7 +239,7 @@ class SelfHostedTlsGlueTest {
             RouteBoundSocketFactory(route) { _, _ -> attached.incrementAndGet() },
             RouteBoundDns(route) { _, host -> lookups.incrementAndGet(); listOf(InetAddress.getByName(if (host == "stt.test") "127.0.0.1" else host)) },
         )
-        val client = AndroidSelfHostedClientFactory({ binding }, { HostPlatform }).create("$host:$port", { pin }, wifiOnly)
+        val client = AndroidSelfHostedClientFactory({ binding }, { HostPlatform }).create("$host:$port", { pin }, wifiOnly, SelfHostedTranscriptionService.DICTATION_ANSWER_WAIT)
 
         suspend fun post(): Int {
             val parts = formData { append("file", ByteArray(32), Headers.build { append(HttpHeaders.ContentType, "audio/wav") }) }
@@ -264,5 +278,40 @@ class SelfHostedTlsGlueTest {
         assertEquals(200, bound.client.use { bound.post() })
         assertEquals(0, bound.lookups.get())
         assertEquals(0, bound.attached.get())
+    }
+
+    @Test
+    fun theAnswerWaitBoundsHowLongTheClientWaitsForTheReply() = runBlocking {
+        val factory = AndroidSelfHostedClientFactory({ error("no binding without the rule") }, { HostPlatform })
+        suspend fun post(answerWait: Duration): Int = factory.create("127.0.0.1:$port", { sha256Fingerprint(certificate) }, false, answerWait).use { client ->
+            val parts = formData { append("file", ByteArray(32), Headers.build { append(HttpHeaders.ContentType, "audio/wav") }) }
+            client.submitFormWithBinaryData("https://127.0.0.1:$port/slow", parts).status.value
+        }
+        val failure = assertFailsWith<Exception> { post((SLOW_REPLY_MILLIS / 4).milliseconds) }
+        assertTrue(
+            generateSequence<Throwable>(failure) { it.cause }.take(MAX_CAUSE_DEPTH).any { it::class.simpleName.orEmpty().contains("Timeout") },
+            "not a timeout: ${failure::class.simpleName}: ${failure.message}",
+        )
+        assertEquals(200, post((SLOW_REPLY_MILLIS * 4).milliseconds))
+    }
+
+    private suspend fun failureOf(client: HttpClient, target: String): Throwable = client.use {
+        val parts = formData { append("file", ByteArray(32), Headers.build { append(HttpHeaders.ContentType, "audio/wav") }) }
+        assertFailsWith<Exception> { it.submitFormWithBinaryData(target, parts) }
+    }
+
+    @Test
+    fun theRealClientsFailuresAreClassedAsTheNotebookReadsThem() = runBlocking {
+        val closed = java.net.ServerSocket(0).use { it.localPort }
+        assertEquals(TransportFailure.NOT_CONNECTED, transportFailure(failureOf(client(pin = null), "https://127.0.0.1:$closed/inference")))
+        val pin = sha256Fingerprint(certificate)
+        assertEquals(TransportFailure.LOST, transportFailure(failureOf(client(pin), "https://127.0.0.1:$port/drop")))
+        assertEquals(TransportFailure.CERTIFICATE, transportFailure(failureOf(client(pin = null), url)))
+        val chainOnly = object : PlatformServerTrust {
+            override val acceptedIssuers: Array<X509Certificate> = emptyArray()
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String, host: String) = Unit
+            override fun verifyHostname(host: String, session: SSLSession): Boolean = false
+        }
+        assertEquals(TransportFailure.CERTIFICATE, transportFailure(failureOf(client(pin = null, platform = chainOnly), url)), "a certificate for another host")
     }
 }

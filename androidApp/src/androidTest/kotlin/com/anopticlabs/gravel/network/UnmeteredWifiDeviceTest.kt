@@ -75,8 +75,8 @@ class UnmeteredWifiDeviceTest {
             // usable turns false on the callback thread before that thread closes the sockets left off the route.
             withTimeoutOrNull(1.seconds) { while (!held.isClosed) delay(20) }
                 ?: fail("a socket made on the Wi-Fi stayed open")
-            assertTrue(refusedByRule(attempt(clients.create("127.0.0.1:9", { null }, wifiOnly = true))))
-            assertFalse(refusedByRule(attempt(clients.create("127.0.0.1:9", { null }, wifiOnly = false))))
+            assertTrue(refusedByRule(attempt(clients.create("127.0.0.1:9", { null }, wifiOnly = true, 20.seconds))))
+            assertFalse(refusedByRule(attempt(clients.create("127.0.0.1:9", { null }, wifiOnly = false, 20.seconds))))
         } finally {
             held.close()
             shell("svc wifi enable")

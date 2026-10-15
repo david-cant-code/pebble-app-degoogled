@@ -1,5 +1,6 @@
 package coredevices.util.transcription
 
+import com.anopticlabs.gravel.transcription.ServerDictationHold
 import com.russhwolf.settings.MapSettings
 import coredevices.api.WisprFlowAuth
 import coredevices.util.CoreConfig
@@ -17,7 +18,10 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.request.HttpRequestData
 import io.ktor.client.request.HttpResponseData
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterIsInstance
@@ -29,6 +33,7 @@ import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
 import org.koin.dsl.module
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -98,11 +103,13 @@ class HybridTranscriptionServiceTest {
             debugBuild = { false },
             clearCaptures = {},
         )
+        val store = SelfHostedServerStore(MapSettings(), PlainCipher)
+        val serverDictation = ServerDictationHold(bound = 30.seconds)
         private val server = SelfHostedTranscriptionService(
             coreConfigFlow = configFlow,
-            store = SelfHostedServerStore(MapSettings(), PlainCipher),
+            store = store,
             unmeteredWifi = FakeUnmeteredWifi(wifi),
-            clientFactory = { _, _, _ -> HttpClient(MockEngine { request -> requests += request; handler(request) }) },
+            clientFactory = { _, _, _, _ -> HttpClient(MockEngine { request -> requests += request; handler(request) }) },
         )
         val hybrid = HybridTranscriptionService(
             coreConfigFlow = configFlow,
@@ -112,7 +119,26 @@ class HybridTranscriptionServiceTest {
             analytics = analytics,
             platform = PlatformSpeechRecognizer(),
             selfHosted = server,
+            serverDictation = serverDictation,
         )
+
+        fun announceLane() = store.rememberDictationLane(checkNotNull(serverHostPort(checkNotNull(config.value.sttConfig.serverUrl))), true)
+
+        /** A long Notebook recording's request that runs until a hold stops it, then answers when sent again. */
+        @Volatile
+        var longRequests = 0
+        val longStopped = CompletableDeferred<Unit>()
+
+        suspend fun longRecording(): String? = serverDictation.sendRecording(long = true, stillWanted = { true }) {
+            if (++longRequests == 1) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    longStopped.complete(Unit)
+                }
+            }
+            "recording words"
+        }
 
         /** The local model comes up only in the modes that use it; the others never wait for it. */
         suspend fun awaitModel() {
@@ -339,5 +365,152 @@ class HybridTranscriptionServiceTest {
         h.awaitModel()
         h.hybrid.earlyInit()
         assertFalse(h.whisper.dictationPriority.isHeld)
+    }
+
+    /** Server Only on a server without a separate dictation lane: the session opening stops a long recording there. */
+    @Test
+    fun aDictationOnlyTheServerCanAnswerHangsUpALongRecordingWhichGoesAgainAfterTheAnswer() = runBlocking(Dispatchers.Default) {
+        lateinit var h: Harness
+        h = Harness(CactusSTTMode.RemoteOnly) {
+            assertEquals(1, h.longRequests, "the recording was sent again before the dictation's answer")
+            respond(jsonOk("from server"), HttpStatusCode.OK)
+        }
+        val long = async { h.longRecording() }
+        withTimeout(5.seconds) { while (h.longRequests == 0) delay(5) }
+        h.hybrid.earlyInit()
+        withTimeout(5.seconds) { h.longStopped.await() }
+        assertEquals("from server", h.transcribe().text)
+        assertEquals("recording words", withTimeout(5.seconds) { long.await() })
+        assertEquals(2, h.longRequests)
+        assertFalse(h.serverDictation.isHeld)
+    }
+
+    @Test
+    fun theFallbackModesWithoutAPhoneModelHangUpLikeServerOnly() = runBlocking(Dispatchers.Default) {
+        for (mode in listOf(CactusSTTMode.RemoteOnly, CactusSTTMode.RemoteFirst, CactusSTTMode.LocalFirst)) {
+            val h = Harness(mode, modelInstalled = false) { respond(jsonOk("x"), HttpStatusCode.OK) }
+            h.hybrid.earlyInit()
+            assertTrue(h.serverDictation.isHeld, "$mode")
+        }
+        for (mode in listOf(CactusSTTMode.RemoteFirst, CactusSTTMode.LocalFirst)) {
+            val h = Harness(mode) { respond(jsonOk("x"), HttpStatusCode.OK) }
+            h.hybrid.earlyInit()
+            assertFalse(h.serverDictation.isHeld, "$mode has the phone to answer")
+        }
+        val offWifi = Harness(CactusSTTMode.RemoteOnly, wifi = false) { respond(jsonOk("x"), HttpStatusCode.OK) }
+        offWifi.hybrid.earlyInit()
+        assertFalse(offWifi.serverDictation.isHeld, "the dictation cannot reach the server")
+        val noServer = Harness(CactusSTTMode.RemoteOnly, serverUrl = null) { respond(jsonOk("x"), HttpStatusCode.OK) }
+        noServer.hybrid.earlyInit()
+        assertFalse(noServer.serverDictation.isHeld)
+        for (mode in listOf(CactusSTTMode.RemoteFirst, CactusSTTMode.LocalFirst)) {
+            val refused = Harness(mode, wifi = false, modelInstalled = false) { respond(jsonOk("x"), HttpStatusCode.OK) }
+            refused.hybrid.earlyInit()
+            assertFalse(refused.serverDictation.isHeld, "$mode off Wi-Fi")
+            val lane = Harness(mode, modelInstalled = false) { respond(jsonOk("x"), HttpStatusCode.OK) }
+            lane.announceLane()
+            lane.hybrid.earlyInit()
+            assertFalse(lane.serverDictation.isHeld, "$mode with a lane")
+        }
+        val flaky = Harness(CactusSTTMode.RemoteFirst, flaky = true, modelInstalled = false) { respond(jsonOk("x"), HttpStatusCode.OK) }
+        flaky.hybrid.earlyInit()
+        assertTrue(flaky.serverDictation.isHeld, "Flaky Network Mode without a model still needs the server")
+        for (model in listOf(true, false)) {
+            val rebble = Harness(CactusSTTMode.RebbleFallback, modelInstalled = model) { respond(jsonOk("x"), HttpStatusCode.OK) }
+            rebble.hybrid.earlyInit()
+            assertFalse(rebble.serverDictation.isHeld)
+        }
+    }
+
+    @Test
+    fun withALongRecordingOnTheServerTheFallbackModesKeepDictationOnThePhoneAlone() = runBlocking(Dispatchers.Default) {
+        for (mode in listOf(CactusSTTMode.RemoteFirst, CactusSTTMode.LocalFirst)) {
+            val h = Harness(mode) { respond(jsonOk("from server"), HttpStatusCode.OK) }
+            h.awaitModel()
+            val long = async { h.longRecording() }
+            withTimeout(5.seconds) { while (h.longRequests == 0) delay(5) }
+            h.hybrid.earlyInit()
+            assertTrue(h.whisper.dictationPriority.isHeld, "$mode")
+            assertEquals("hello world", h.transcribe().text, "$mode")
+            h.engine.reply = ""
+            assertFailsWith<TranscriptionException.NoSpeechDetected>("$mode") { h.transcribe() }
+            assertTrue(h.requests.isEmpty(), "$mode sent the dictation behind the recording")
+            assertEquals(1, h.longRequests, "$mode stopped the recording")
+            long.cancel()
+        }
+    }
+
+    @Test
+    fun aServerWithADictationLaneGetsDictationAsIfNoRecordingWereOnIt() = runBlocking(Dispatchers.Default) {
+        val cases = listOf(CactusSTTMode.RemoteOnly to false, CactusSTTMode.RemoteFirst to true, CactusSTTMode.RemoteFirst to false, CactusSTTMode.LocalFirst to false, CactusSTTMode.LocalFirst to true)
+        for ((mode, model) in cases) {
+            // The request stays open long enough for a hold raised by mistake to stop the recording.
+            val h = Harness(mode, modelInstalled = model) { delay(300); respond(jsonOk("from server"), HttpStatusCode.OK) }
+            h.awaitModel()
+            h.engine.reply = ""
+            h.announceLane()
+            val long = async { h.longRecording() }
+            withTimeout(5.seconds) { while (h.longRequests == 0) delay(5) }
+            h.hybrid.earlyInit()
+            assertFalse(h.serverDictation.isHeld, "$mode")
+            assertEquals("from server", h.transcribe().text, "$mode model=$model")
+            assertEquals(1, h.longRequests, "$mode hung the recording up")
+            assertFalse(h.longStopped.isCompleted, "$mode model=$model stopped the recording")
+            assertTrue(h.serverDictation.longRecordingOnServer)
+            long.cancel()
+        }
+    }
+
+    /** The hold ends with the dictation, whether it failed on the server or never reached it. */
+    @Test
+    fun theRecordingIsSentAgainAsSoonAsTheDictationIsOver() = runBlocking(Dispatchers.Default) {
+        val dictations = listOf<suspend (Harness) -> Unit>(
+            { h -> assertFailsWith<TranscriptionException.TranscriptionServiceError> { h.transcribe() } },
+            { h ->
+                assertFailsWith<TranscriptionException.NoSpeechDetected> {
+                    h.hybrid.transcribe(flowOf(ByteArray(100)), sampleRate = 16_000, language = STTLanguage.Automatic)
+                        .filterIsInstance<TranscriptionSessionStatus.Transcription>().first()
+                }
+            },
+        )
+        for (dictate in dictations) {
+            val h = Harness(CactusSTTMode.RemoteOnly) { respond("", HttpStatusCode.InternalServerError) }
+            val long = async { h.longRecording() }
+            withTimeout(5.seconds) { while (h.longRequests == 0) delay(5) }
+            h.hybrid.earlyInit()
+            withTimeout(5.seconds) { h.longStopped.await() }
+            dictate(h)
+            assertEquals("recording words", withTimeout(5.seconds) { long.await() }, "the hold outlived the dictation")
+        }
+    }
+
+    @Test
+    fun aDictationThatNoLongerNeedsTheServerEndsTheHoldsRaisedAsItsSessionOpened() = runBlocking(Dispatchers.Default) {
+        val h = Harness(CactusSTTMode.RemoteOnly) { respond(jsonOk("from server"), HttpStatusCode.OK) }
+        val long = async { h.longRecording() }
+        withTimeout(5.seconds) { while (h.longRequests == 0) delay(5) }
+        h.hybrid.earlyInit()
+        withTimeout(5.seconds) { h.longStopped.await() }
+        h.announceLane()
+        val dictation = async { h.transcribe() }
+        assertEquals("recording words", withTimeout(5.seconds) { long.await() })
+        assertEquals("from server", dictation.await().text)
+    }
+
+    @Test
+    fun localWithServerFallbackStaysOnThePhoneWhenALongRecordingReachedTheServerDuringTheLocalAttempt() = runBlocking(Dispatchers.Default) {
+        val h = Harness(CactusSTTMode.LocalFirst) { respond(jsonOk("from server"), HttpStatusCode.OK) }
+        h.awaitModel()
+        h.engine.reply = ""
+        val gate = CountDownLatch(1)
+        h.engine.gate = gate
+        val dictation = async { runCatching { h.transcribe() } }
+        withTimeout(5.seconds) { while (!h.engine.inRealTranscribe) delay(5) }
+        val long = async { h.longRecording() }
+        withTimeout(5.seconds) { while (h.longRequests == 0) delay(5) }
+        gate.countDown()
+        assertTrue(dictation.await().exceptionOrNull() is TranscriptionException.NoSpeechDetected)
+        assertTrue(h.requests.isEmpty(), "the dictation went behind the recording")
+        long.cancel()
     }
 }
