@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notebook_processing_channel">Notebook processing</string>
+    <string name="notebook_processing_title">Processing Notebook recordings</string>
+    <string name="notebook_recording_title">Recording a note</string>
+</resources>

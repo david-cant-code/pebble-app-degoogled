@@ -854,6 +854,11 @@ already. The recording
 itself is kept; the transcript arrives later, and the stopped work is
 done again. Recordings are capped at 5 minutes, so each stop repeats at
 most one recording's transcription; the number of stops is not limited.
+The same holds on a transcription server without a separate dictation
+lane in server only, or a fallback mode without a speech model on the
+phone: a watch session opening hangs up on a recording over 30 seconds
+there, which is uploaded and transcribed again from the start once the
+dictation is over.
 Notebook text generation (a note's title and tags, a reminder's message)
 runs in an engine of its own but gives way the same way: loading the
 model and generating each wait while a dictation holds the speech
@@ -897,9 +902,38 @@ A voice reminder's time is read by fixed English rules, not by the text
 model. Some words are still read as a
 time the user did not mean:
 "stop at 7-Eleven" reads as 7:11 PM, and a time stated as a fact, as in "I
-parked at 9", is read as the time to remind. Some words that only sound like a time
+parked at 9", is read as the time to remind. Gravel posts a notice saying
+when a voice reminder is set, where the phone lets its notifications show
+and Android did not refuse the reminder's alarm, so a time read wrong or
+set to the default can be seen there while the notice is up; only the ten
+newest "Reminder set" notices stay. Some words that only sound like a time
 make Gravel ask ("ask Sam when the party is"). A reminder cannot be set to
 repeat by voice.
+
+## A Notebook transcription needs more engine memory than a dictation
+
+**Status: open; the check before a transcription uses an estimate, not the
+engine's own use.**
+
+Each Notebook transcription runs on a second engine state beside the one
+dictation keeps, for the length of the call: whisper.cpp counts that state
+at about 160 MiB with the base model and 230 MiB with the small one, and in
+one measured call per model on the test phone the engine's memory peaked
+123 MiB (base) and 264 MiB (small) above its size with the model loaded. Before it starts, the Notebook
+compares the phone's available memory with a measured estimate of that
+need; when it is short, it frees its text model, and if that is not
+enough the transcription waits for the next capture run. The estimate
+comes from measurements on a single phone, and the available figure does
+not count memory the system could free by ending cached apps, so the check
+can make a transcription wait that would have fit, or let one start that
+the system then ends; an ended engine is retried three times and the
+transcription then fails. On a phone that stays short, every run stops at
+the first capture and the whole queue waits until memory frees or a
+smaller speech model is chosen, except under Local (with Server Fallback)
+with a server set up, which sends such a capture to the server, and for a
+capture Server (with Local Fallback) passed to the phone, which waits
+alone while the rest still go to the server. The text
+model's own step has no such check.
 
 ## A provider that fails before the recording ends is answered only after it
 
@@ -1131,7 +1165,8 @@ what is authenticated. For the capture queue this has a further cost: the
 blob of a capture queued after a rolled-back queue file has no entry, and
 the sweep for unreferenced blobs deletes it. A rolled-back reminders file
 hands out ids again that the event log still holds occurrences for, so a
-new reminder can inherit an older one's history. A note file put back after its note was deleted is listed again. Closing this needs authenticated state that is not rolled
+new reminder can inherit an older one's history. A note file put back after its note was deleted is listed again at
+the next start. Closing this needs authenticated state that is not rolled
 back along with the files.
 
 ## The Notebook directory shows how many notes there are, their sizes and times
@@ -1144,6 +1179,38 @@ the app's files how many notes and queued recordings there are, the size
 of each file, and when each file was last written. Hiding these would need
 padded files and a different layout.
 
+## A Notebook capture the store could not seal waits as plaintext for a later attempt
+
+**Status: accepted.**
+
+When the queue cannot take a just-finished recording, from the phone's
+microphone, whatever the failure, the app
+writes it under the Notebook directory for a later attempt, and each later
+capture run tries again to seal and queue everything waiting there. If that write fails too, the recording is lost. A recording kept this way is dated in the time zone current
+when it is processed, not the one it was recorded in.
+Until that succeeds the recordings sit unencrypted in the app's private
+storage, still under Android's file-based encryption and excluded from
+backup with the rest of the Notebook. When the cause is a busy key store
+the window closes at the next run; when the queue file is corrupt it stays
+open until the file is rebuilt, at the next app start. The alternative,
+deleting the only copy of a recording because the store failed, was judged
+worse. The store provides the holding area, the retry, and a count of what
+is waiting. The holding area is also the one place where the store
+accepts a file it did not seal itself: a recording placed there by whoever
+can write to the app's private storage is queued and transcribed as if
+the user had recorded it, which the sealed files' authentication cannot
+prevent because sealing is exactly what failed.
+
+## A Notebook recording in progress is lost if the app process ends
+
+**Status: accepted; sealing the recording in parts while it records would
+close it.**
+
+A phone recording is held in memory until it stops, so Gravel writes an
+unencrypted copy to storage only in the failure case above. If the app
+process ends before the recording stops, as in a crash, a restart of the
+phone or a flat battery, the recording is lost.
+
 ## A Notebook write just before a power loss can be undone
 
 **Status: open; syncing the directory after each write would close it.**
@@ -1153,6 +1220,87 @@ A sealed Notebook file's move into place after its write is not synced
 after a write, the file can be back at its earlier version after the
 restart, or missing if it was new. How soon is up to the storage and was not
 measured.
+
+## Notebook processing that starts out of sight can wait for the app to open
+
+**Status: accepted; the start rule is Android's.**
+
+The Notebook keeps processing going while no Gravel screen is shown
+through a foreground service, and Android 12 and later let an app start
+one from the background only under an exemption. When processing begins
+with no Gravel screen shown and no exemption applies, the start is refused,
+the system can freeze or end the app partway, and the recording stays
+queued for a later run, such as when Gravel is next opened. Processing
+already under way when the user leaves a Gravel screen asks for the
+service at that moment, a start Android allowed in device testing.
+
+## Notebook long recordings can wait past plug-in while Gravel is not running
+
+**Status: accepted.**
+
+With Long Recordings Wait for Power on (the default), plugging the phone
+in asks for a run through a receiver while Gravel's process is running;
+that run is a start out of sight like the one in the entry above. When
+the process is not running, a scheduled job starts the run, and that job
+waits for Android's idea of charging, not of being plugged in. On
+Android 14 that is the platform's charging broadcast alone, which a
+phone holding its charge below full (an adaptive or 80% charging limit)
+may not send, so the recordings can wait until charging resumes or
+another run starts, such as when Gravel is opened. Android 15 and 16 also count a held charge of
+70% or more as charging when the phone reports an adaptive charging
+mode. Releases before Android 14 were not checked. A run on power that
+leaves a long recording queued, such as after a failed attempt, leaves no
+job behind, and if Gravel's process then ends before a run off power sets
+one, a later plug-in starts nothing.
+After a force stop
+the job is gone too (android16-release `JobSchedulerService` cancels a
+force-stopped app's jobs on `ACTION_PACKAGE_RESTARTED`), so nothing
+starts them until Gravel is opened. The charging sources are cited at
+`WorkManagerChargingWork`.
+
+## Notebook recordings can wait past a network's return while Gravel is not running
+
+**Status: accepted.**
+
+A Notebook recording can wait for a network its server may use, such as
+Wi-Fi with "Use the Server on Mobile Data" off. While Gravel's process
+is running, a run is asked for when that network connects; the watch
+connection service runs while a watch is connected. When the process is
+not running, a scheduled job checks on any connected network, and each
+check that still has to wait puts the next one further off: 15 minutes,
+then 30, then 45, up to 5 hours (androidx.work 2.12.0,
+`WorkSpec.calculateNextRunTime` and `WorkRequest.MAX_BACKOFF_MILLIS`).
+After seven hours of waiting the next check is two hours away, so the
+recording can stay queued that long after the phone is back on Wi-Fi,
+or until another run starts, such as when Gravel is opened.
+
+## Set-aside Notebook files are aged by the phone's clock
+
+**Status: accepted.**
+
+A Notebook file that is set aside is deleted once the time in its name
+is 30 days behind the phone's clock. If the clock jumps 30 days or more
+ahead, the set-aside files are deleted at the next cleanup, however
+recent. A file set aside while the clock was behind goes early by that
+much once the clock is right, and one set aside while it was ahead stays
+that much longer. No screen opens a set-aside file, so what changes is
+how long a copy stays on the phone.
+
+## A Notebook capture can be published twice
+
+**Status: open; closing it needs the capture's id stored with what it
+published.**
+
+A capture leaves the queue in a second write after the note, reminder
+or completion claim it produced is stored. The next drain processes
+the capture again in cases such as when the app is ended between the two
+writes or the
+queue file cannot be written at that moment, after a damaged queue file is
+rebuilt while the capture's recording was still there. A note with the same content then
+reuses its file, but a reminder or a claim is stored a
+second time, and a note whose second model reply differs is written beside
+the first. Storing the capture's id with each result, and skipping a
+capture already published, would close this.
 
 ## A Notebook reminder whose alarm Android refuses can stay silent
 
@@ -1165,7 +1313,7 @@ once Gravel holds its per-app limit (500 by default; android16-release
 the number of reminders below that limit. A reminder whose alarm is
 refused is stored without one.
 A snooze refused this way is kept without its alarm: a swiped
-notification is gone with nothing set. Nothing sets the missing alarms until the next re-arm runs.
+notification is gone with nothing set. Nothing sets the missing alarms until the next re-arm runs, such as when Gravel next starts.
 
 ## The Notebook key is usable while the device is locked
 
@@ -1214,4 +1362,8 @@ way. On Android 8 uploads are also not tied to the Wi-Fi itself, so in
 the moment between the Wi-Fi dropping and Android reporting it, an
 upload can start over mobile data. On any version, Gravel does not
 check that the Wi-Fi a VPN runs over is the one not marked metered,
-which matters only while two Wi-Fi networks are connected at once.
+which matters only while two Wi-Fi networks are connected at once. Server
+(with Local Fallback) counts a long Notebook recording's failed tries to
+reach the server only while the network Android gives Gravel runs over
+something besides the VPN; on Android 9 and older, where a VPN may show
+nothing under it, every failure behind a VPN counts, with no signal too.

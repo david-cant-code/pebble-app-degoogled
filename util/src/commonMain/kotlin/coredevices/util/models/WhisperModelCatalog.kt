@@ -9,8 +9,15 @@ import com.anopticlabs.gravel.models.PinnedModel
  * cost the same to run; [cheaper] walks toward the floor, which is how
  * the speed-based recommendation steps down.
  */
-enum class WhisperTier {
-    Small, Base, Tiny;
+enum class WhisperTier(
+    /**
+     * What one long-form transcription adds to the engine process: whisper.cpp v1.9.3's own
+     * count of the call's state plus a five-minute recording's buffers, with a quarter added.
+     * Measured on device; measure again when the engine or the long-form limits change.
+     */
+    val longFormBytes: Long,
+) {
+    Small(340L shl 20), Base(250L shl 20), Tiny(225L shl 20);
 
     /** The next tier down, or null at the floor. */
     fun cheaper(): WhisperTier? = entries.getOrNull(ordinal + 1)

@@ -30,9 +30,12 @@ import com.anopticlabs.gravel.pkjs.webViewMajorVersion
 import com.anopticlabs.gravel.socketfilter.InstallResult
 import com.anopticlabs.gravel.socketfilter.UdpSocketFilter
 import coredevices.ExperimentalDevices
+import com.anopticlabs.gravel.app.notebookEnginesModule
 import com.anopticlabs.gravel.network.AndroidUnmeteredWifi
 import com.anopticlabs.gravel.transcription.adoptUnboundServerToken
 import com.anopticlabs.gravel.transcription.settleServerOnMobileData
+import com.anopticlabs.gravel.notebook.AppVisibility
+import com.anopticlabs.gravel.notebook.alarms.NotebookStartup
 import com.anopticlabs.gravel.notebook.notebookModule
 import coredevices.coreapp.di.androidDefaultModule
 import coredevices.coreapp.di.apiModule
@@ -102,17 +105,23 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
                 utilModule,
                 watchModule,
                 notebookModule,
+                notebookEnginesModule,
             )
         }
+        // Gravel: registered before any activity starts, so the Notebook's notification gates count every one.
+        registerActivityLifecycleCallbacks(get<AppVisibility>())
         initLogging()
         logUdpFilterResult()
         // Gravel: kept across process starts; see udpFilterEnforcement.
         recordUdpFilterInstall(udpFilterResult, noBackupFilesDir)
-        // Gravel: the self-hosted server's Wi-Fi-only rule; ahead of pebbleAppDelegate.init, which starts libPebble.
+        // Gravel: the self-hosted server's Wi-Fi-only rule; ahead of pebbleAppDelegate.init, which starts libPebble,
+        // and of the Notebook's first run, which may send to the server.
         get<AndroidUnmeteredWifi>().start()
         settleServerOnMobileData(coreConfigHolder, get())
         // Gravel: ahead of the first request, which goes out without a token an earlier build stored until this has run.
         adoptUnboundServerToken(coreConfigHolder, get())
+        // Gravel: a force stop drops the Notebook's alarms; the sweep re-arms them from the stores.
+        get<NotebookStartup>().start()
         // Fork: installs upgraded from pre-strip builds still hold the
         // Firebase SDKs' persisted refresh token and Firestore cache, and the
         // strip removed every code path that could clear them; see

@@ -163,7 +163,7 @@ internal fun selfHostedHttpClient(
             config {
                 sslSocketFactory(context.socketFactory, trust)
                 hostnameVerifier(pinAwareHostnameVerifier(platform, pinnedFingerprint))
-                // The dictation deadline is the caller's; the read timeout is the
+                // A whole request's deadline is the caller's; the read timeout is the
                 // purpose's answer wait (SelfHostedTranscriptionService).
                 connectTimeout(3, TimeUnit.SECONDS)
                 readTimeout(answerWait.inWholeMilliseconds, TimeUnit.MILLISECONDS)

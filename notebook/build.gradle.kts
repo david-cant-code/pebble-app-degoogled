@@ -19,6 +19,10 @@ kotlin {
             jvmTarget.set(JvmTarget.JVM_17)
         }
 
+        androidResources {
+            enable = true
+        }
+
         withHostTestBuilder {}
     }
 
@@ -30,10 +34,12 @@ kotlin {
             implementation(libs.coroutines)
         }
         androidMain.dependencies {
+            implementation(project(":resampler"))
             implementation(project(":util"))
             implementation(libs.androidx.core.ktx)
             implementation(libs.koin.core)
             implementation(libs.koin.android)
+            implementation(libs.androidx.work)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

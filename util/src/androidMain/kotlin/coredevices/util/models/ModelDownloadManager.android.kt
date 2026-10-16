@@ -20,6 +20,7 @@ import co.touchlab.kermit.Logger
 import com.anopticlabs.gravel.models.ModelCatalog
 import com.anopticlabs.gravel.models.ModelRole
 import com.anopticlabs.gravel.models.ModelStorageException
+import com.anopticlabs.gravel.models.SpeechModelInstalls
 import coredevices.util.transcription.CactusModelPathProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -249,6 +250,7 @@ internal class RunningDownloads {
 class ModelDownloadService : JobService(), KoinComponent {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val modelDownloadManager: ModelDownloadManager by inject()
+    private val speechInstalls: SpeechModelInstalls by inject()
     private val heartbeatStore: DownloadHeartbeatStore get() = modelDownloadManager.heartbeatStore
     private val running = RunningDownloads()
 
@@ -308,6 +310,7 @@ class ModelDownloadService : JobService(), KoinComponent {
                         .build()
                 )
                 modelDownloadManager.updateDownloadStatus(modelSlug, ModelDownloadStatus.Idle)
+                speechInstalls.downloaded(modelSlug)
             } catch (e: TimeoutCancellationException) {
                 logger.e(e) { "Timed out downloading model: $modelSlug" }
                 notificationManager.notify(

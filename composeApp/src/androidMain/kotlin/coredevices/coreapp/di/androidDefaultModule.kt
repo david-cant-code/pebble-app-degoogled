@@ -4,6 +4,7 @@ import CoreAppVersion
 import PlatformContext
 import PlatformShareLauncher
 import android.content.Context
+import com.anopticlabs.gravel.models.SpeechModelInstalls
 import com.anopticlabs.gravel.network.AndroidUnmeteredWifi
 import com.anopticlabs.gravel.network.UnmeteredWifi
 import com.anopticlabs.gravel.notebook.alarms.ReminderPresence
@@ -102,6 +103,7 @@ val androidDefaultModule = module {
     }
     single { createAndroidAnalytics(get()) }
     singleOf(::ModelDownloadManager)
+    singleOf(::SpeechModelInstalls)
     // Fork binding: upstream registers its model provider inside the
     // unplugged :experimental module; without this, on-device STT falls
     // back to a provider that throws (utilModule) and dictation dies.

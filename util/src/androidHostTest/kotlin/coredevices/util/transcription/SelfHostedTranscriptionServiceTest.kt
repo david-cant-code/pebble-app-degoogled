@@ -17,21 +17,31 @@ import io.ktor.client.request.HttpResponseData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.test.assertNotEquals
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TestTimeSource
@@ -65,6 +75,7 @@ class SelfHostedTranscriptionServiceTest {
         spokenLanguage: String? = null,
         val wifi: FakeUnmeteredWifi = FakeUnmeteredWifi(),
         val clock: TestTimeSource = TestTimeSource(),
+        recordingLimit: Duration = SelfHostedTranscriptionService.RECORDING_REQUEST_LIMIT,
         handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
     ) {
         val requests = ArrayList<HttpRequestData>()
@@ -96,6 +107,7 @@ class SelfHostedTranscriptionServiceTest {
                 })
             },
             clock = clock,
+            recordingLimit = recordingLimit,
         )
 
         suspend fun transcribeRecording(pcm: ByteArray = ByteArray(64_000) { 1 }) = service.transcribeRecording(pcm, 16_000)
@@ -424,6 +436,65 @@ class SelfHostedTranscriptionServiceTest {
         assertEquals(TransportFailure.TIMED_OUT, (early.cause as ServerUnreachableException).failure)
         waited = 10.minutes
         assertFailsWith<TranscriptionException.TranscriptionServiceError> { h.transcribeRecording() }
+    }
+
+    @Test
+    fun aRecordingStillWaitingForAReplyAtItsLimitIsTheServersError(): Unit = runBlocking {
+        val h = Harness(recordingLimit = 200.milliseconds) { awaitCancellation() }
+        assertFailsWith<TranscriptionException.TranscriptionServiceError> { withTimeout(10.seconds) { h.transcribeRecording() } }
+    }
+
+    @Test
+    fun aRecordingCanceledByItsCallerEndsCanceled(): Unit = runBlocking {
+        val asked = CompletableDeferred<Unit>()
+        val h = Harness {
+            asked.complete(Unit)
+            awaitCancellation()
+        }
+        var failure: Throwable? = null
+        val call = launch {
+            try {
+                h.transcribeRecording()
+            } catch (e: Throwable) {
+                failure = e
+                throw e
+            }
+        }
+        withTimeout(10.seconds) {
+            asked.await()
+            call.cancelAndJoin()
+        }
+        assertIs<CancellationException>(failure)
+    }
+
+    @Test
+    fun aCallerCancelThatComesAsTheLimitRunsOutEndsCanceled(): Unit = runBlocking {
+        val asked = CompletableDeferred<Unit>()
+        val limitRanOut = CountDownLatch(1)
+        val h = Harness(recordingLimit = 1.seconds) {
+            asked.complete(Unit)
+            try {
+                awaitCancellation()
+            } finally {
+                limitRanOut.countDown()
+            }
+        }
+        var failure: Throwable? = null
+        val call = launch {
+            try {
+                h.transcribeRecording()
+            } catch (e: Throwable) {
+                failure = e
+                throw e
+            }
+        }
+        withTimeout(10.seconds) { asked.await() }
+        // The limit's timer runs on DefaultDelay's thread, not runBlocking's (kotlinx.coroutines 1.11.0, jvm EventLoop.kt
+        // BlockingEventLoop, Delay.kt invokeOnTimeout), so blocking here keeps the request from unwinding before the cancel.
+        assertTrue(limitRanOut.await(10, TimeUnit.SECONDS))
+        call.cancel()
+        withTimeout(10.seconds) { call.join() }
+        assertIs<CancellationException>(failure)
     }
 
     @Test

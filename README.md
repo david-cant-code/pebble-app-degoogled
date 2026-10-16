@@ -44,8 +44,9 @@ De-google work is completed, all telemetry is removed. What remains is polish an
   app talks to are fixed in the app, with two exceptions you control: an
   app store source you add yourself is fetched from the host you entered,
   with no account token attached and no store search sent to it, and a
-  transcription server you configure receives your dictation audio
-  (nothing is sent unless you set one up). Problem reports are a manual
+  transcription server you configure receives your dictation audio and,
+  in the server modes, your Notebook recordings (nothing is sent unless
+  you set one up). Problem reports are a manual
   export: Settings > Get Help > Export logs writes a zip (app log, device
   summary, anything you attach) for you to add to an issue yourself, and
   nothing in the app can upload it.
@@ -110,7 +111,8 @@ De-google work is completed, all telemetry is removed. What remains is polish an
   watch's dictation window prompts a switch to a smaller one.
 - **Dictation through your own server.** A phone too slow for the
   watch's window can send dictation audio to a self-hosted transcription
-  server instead, or use one as a fallback; see
+  server instead, or use one as a fallback, and the Notebook's recordings
+  follow the same setting; see
   [Using your own transcription server](#using-your-own-transcription-server).
   Nothing is sent anywhere unless you configure a server.
 - **A watch microphone API for third-party applications** documented and
@@ -159,6 +161,57 @@ The switch starts on for a server set up before Gravel had it. "Flaky
 Network Mode", offered in the two fallback modes once the phone has a
 speech model, keeps watch dictation on the phone everywhere, for
 connections that cannot return the words within the watch's 15 seconds.
+
+Notebook recordings follow the same setting. Server only sends each one
+to the server. Server with local fallback sends each one to the server
+first: a recording of 30 seconds or less goes to the phone when the
+Wi-Fi rule keeps it off the server, the server can't be reached, or the
+server fails it, and a longer one waits while the Wi-Fi rule keeps it
+off the server and goes to the phone after 3 failed tries to reach the
+server, at least 15 minutes apart, or after an error from the server; on
+the phone it waits for the charger when Long Recordings Wait for Power
+is on. Without a speech model on the phone it works like server only.
+Local with server fallback
+sends the ones the phone has too little memory or time for, cannot load
+its model for, or hears no speech in, and all of them while the phone
+has no speech model. A recording is up to 5 minutes, a WAV of up to
+about 9.6 MB in one request, and Gravel waits up to 10 minutes without a
+reply from the server, so a reverse proxy in front of the server needs
+an upload limit and a read timeout to match (nginx's
+`client_max_body_size` defaults to 1 MB and its `proxy_read_timeout` to
+60 seconds); the whole request may take up to 15 minutes. While the
+Wi-Fi rule keeps recordings off the server, or the server's name does
+not resolve, it refuses the connection or
+connecting times out, they wait without counting as failed attempts. Any
+other connection failure, such as one lost partway, counts as a failed
+attempt and is tried again later, up to the Notebook's limit of 10. In
+server with local fallback, every connection failure while the phone is
+on an allowed network is instead one of a longer recording's 3 tries. An
+error from the server, a reply without text, a certificate Gravel does
+not trust, 10 minutes without a reply, or a request not finished in 15
+minutes stops sending recordings until you change the server's URL, model, token or trusted certificate. In server
+with local fallback with a speech model on the phone, recordings go to
+the phone meanwhile. Pausing
+processing, or a short recording interrupting a long one (Interrupt Long
+Recordings), hangs up on a recording the server is working on;
+whisper.cpp's server then stops working on it, while some other servers
+finish it anyway.
+
+Gravel does not send a watch dictation behind a recording over 30
+seconds that is on the server. In the two fallback modes with a speech
+model on the phone, the dictation is transcribed on the phone. In server
+only, or a fallback mode without a speech model, Gravel hangs up on the
+recording as the watch starts the dictation, sends no recording until
+the dictation is over (or, if it never gets that far, for 30 seconds),
+and then sends the recording again from the start, without counting a
+failed attempt. On a server that finishes a request after a hang-up,
+the dictation still waits behind it. A server that transcribes dictation
+apart from long recordings can say so with the header
+`Gravel-Dictation-Lane: separate` on its successful replies, and Gravel
+then sends dictation to it as if no recording were there. Gravel keeps
+that for the host and port of the last successful reply that carried it,
+the settings dialog's connection test included, and forgets it when a
+successful reply comes without it or another address is saved.
 
 The reference server is whisper.cpp's own, from the same project whose
 engine this app builds. On the machine that will run it:

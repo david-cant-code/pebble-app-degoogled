@@ -3,6 +3,11 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Asked for when the user taps record; the Notebook records only after that tap. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <application>
         <!--
             The reminder alarms and notification actions of the Notebook. Both
@@ -25,5 +30,18 @@
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
+        <!--
+            Holds the app in the foreground while Notebook recordings are processed with no
+            activity resumed, and from a recording's start until it is saved. Started only by
+            this app, so unexported; NotebookManifestTest pins it.
+        -->
+        <service
+            android:name="com.anopticlabs.gravel.notebook.pipeline.NotebookProcessingService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Saves a voice note the user is recording and finishes its transcription, on the device or on the user's own server, and its text processing" />
+        </service>
     </application>
 </manifest>

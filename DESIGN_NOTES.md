@@ -645,7 +645,7 @@ The replacement is whisper.cpp (MIT), compiled from source:
   seconds under the default parameters, the bounded configuration
   returns the correct text in under 10 seconds on the slowest catalog
   model.
-- Notebook recordings, capped at 5 minutes, take a
+- Notebook recordings, made in the app and capped at 5 minutes, take a
   second decode path on the same model and handle,
   `whisperTranscribeLongForm`, with the opposite trade: timestamps kept,
   whole 30-second windows, no token cap, and without dictation's extra
@@ -904,7 +904,9 @@ ends the engine process. Constraints the code relies on:
   up, a hold raised mid-call cancels the call and it starts again, a
   restart does not count against the retries, and a load already under
   way finishes. The generator and the speech probe each take an
-  `InferenceExclusion`. `TextGeneratorTest` and `DeviceSpeedTest` pin
+  `InferenceExclusion`, and the app passes the generator the probe's Koin
+  single, so the probe does not time the CPU under a use (that wiring is
+  not pinned by a test). `TextGeneratorTest` and `DeviceSpeedTest` pin
   the rest on fakes.
 
 Storage is a directory of encrypted files under `files/notebook`. Each write
@@ -956,11 +958,19 @@ in the app's device suite:
   "ahead of" earlier in a read time's clause; a correction after one, as
   in "at 3, no, 4"; a time that describes something else, as in "the 5:15
   train" or "the meeting is on Friday"; "early" or "late" naming part of
-  a day or of next week; a stray number, "last" or "end of" beside one), the
+  a day or of next week; a stray number, "last" or "end of" beside one),
+  and when a read time is already past as the capture is processed, the
   reminder is armed at the quick-remind default and the user is asked to
-  check it; with no time words they
+  check it (the
+  notice below); with no time words they
   recognize, or only vague ones, it is armed at that default without
-  asking.
+  asking. A voice reminder, its time read or defaulted, posts one notice
+  of when it is set (where notifications are allowed, and not when
+  Android refuses its alarm): "Reminder set" on its own channel, or
+  the notice asking to check the time in its place. Among the paths that take the notice down are the
+  reminder going off, being completed, marked missed or deleted, a re-arm
+  dropping it or finding it gone; of the
+  "Reminder set" notices, only the newest ten (`MAX_SET_NOTICES`) stay up.
   Recurrence advances in local
   calendar units counted from the rule's anchor, so a 31st clamped to a
   shorter month's last day does not move the occurrences after it. An
@@ -976,7 +986,8 @@ in the app's device suite:
   renaming or moving a file means re-sealing it.
 - A read separates four outcomes: only an authentication failure (in
   either layer) or a malformed envelope is corruption, moved to `.quarantine` (named
-  after the file's path and the time); a Keystore or I/O failure
+  after the file's path and the time, and deleted by the cleanup below
+  once that time is 30 days behind the phone's clock); a Keystore or I/O failure
   that may
   heal is transient and leaves the file in place; a missing key or a failure
   the key store calls permanent is `KeyUnavailableException` and also leaves
@@ -1036,7 +1047,7 @@ in the app's device suite:
   as an entry alone, until the note is deleted or the index is rebuilt.
 - A note file is written before the index entry that lists it, and deleted
   before its entry is removed. `NoteStore.reconcile`, run under the index
-  lock, repairs an interrupted create or
+  lock at each process start, repairs an interrupted create or
   rebuild: an index that fails to open or to parse is rebuilt from the note
   files, which are all read before the old index is moved to `.quarantine`,
   and an absent index while note files exist is rebuilt the same way; a
@@ -1064,7 +1075,15 @@ in the app's device suite:
   from `folders_list` plus any folder that holds an indexed note, so every
   listed note shows under a folder.
 - `EncryptedFiles.sweepStaging` deletes staging files older than two
-  minutes.
+  minutes; `NotebookHousekeeping` calls it at each process start.
+- `NotebookHousekeeping` cleans `.quarantine` on each capture run, which
+  includes a process start and the app coming to the front with no run
+  under way. `EncryptedFiles.sweepQuarantine` deletes a file directly
+  under it once the time in its name is 30 days or more behind the phone's
+  clock; a time ahead of the clock keeps the file, and a name without a
+  time goes by the file's modification time. A copy that a retried replace
+  uses again is renamed to the time of that retry, unless that name is
+  taken.
 - The queue store keeps `queue_meta`, the list of `QueuedCapture` entries,
   and one blob per entry at `queue/<id>.bin`; an id is `[A-Za-z0-9_-]`, up
   to 128 characters, and a list with any other id, or a duplicated one, is
@@ -1087,11 +1106,13 @@ in the app's device suite:
   `pending_captures/<id>~<name>`, one file per id (a recording held in memory
   is written to a partial file first, synced, then renamed, and the directory
   synced; a partial file at least two minutes old is deleted by the next
-  salvage), and `salvagePending` queues each such file, deleting the plaintext only once the queued blob holds its bytes; a
+  salvage), and `salvagePending` queues each such file before every capture
+  run, deleting the plaintext only once the queued blob holds its bytes; a
   file that still fails, is over the cap, or differs from the blob already
   queued under its id is kept and counted, an empty one is deleted, and a
   symlink or a file not named that way is left alone. A file queued this way
-  has no zone of its own.
+  has no zone of its own. This is the Notebook's one window of plaintext at
+  rest, recorded in `KNOWN_ISSUES.md`.
 - The reminder stores keep `reminders` (the active reminders and the next
   id to hand out, taken and advanced under the lock, so a deleted id is
   not reused in that store; a random store
@@ -1169,7 +1190,7 @@ in the app's device suite:
   snooze alarm and runs the sweep; an earlier open time of the same
   reminder that was missed only because the deleted one came due is
   recorded as missed. `rearmAll` re-arms from
-  the stores and is idempotent; it runs at boot, after a
+  the stores and is idempotent; it runs at app start, at boot, after a
   package update, when exact alarms are allowed: a future reminder
   is armed when it still reads as the sweep read it or cannot be read
   again, a past-due one-shot is removed and a recurring one advances
@@ -1203,8 +1224,139 @@ in the app's device suite:
   type, a length and a JSON body (a capture's body is its entry, then its
   recording); a closing record carries the count per type and the SHA-256 of
   every record before it.
+- The capture pipeline (the `pipeline` package) works through the queue
+  one capture at a time, one drain at a time (`CaptureDrain`), on the I/O
+  dispatcher. Before each capture it reads the queue again and takes the
+  first of `processingOrder`: short captures before long ones (long is
+  over 30 seconds or of unknown length), each
+  group oldest first, under the user's pauses and settings
+  (`ProcessingControls`). Pause all holds every capture, Pause long recordings holds the long ones, and a pause stays
+  until Resume, across restarts, in a no-backup file. A pause, and a short
+  capture queued while a long one that may start again is still
+  transcribing (on by default), stops the matching
+  capture through `CaptureDrain.interrupt`, even one picked but not yet
+  started: it stays queued with its attempt given back and starts over
+  from the beginning later; once its outcome is decided it is not
+  stopped. With Long Recordings Wait for Power on (the default), a long
+  capture the phone transcribes starts only while the phone is plugged in
+  or after Process now;
+  one already running finishes when the phone is unplugged. Plugging in
+  asks for a run through a receiver while the process runs, and a
+  WorkManager job with the charging condition is scheduled after a pass
+  when long captures still wait for power; its worker asks to run again
+  while they still do (`LongCaptureCharger`). Before the first capture a
+  drain reads every store file a publish writes, strictly, so one that
+  will not open holds the drain before any engine runs. A capture is
+  decoded through the platform's media extractor and codecs, called from
+  the app process and reading the recording from memory; a recording
+  sampled above 48 kHz or longer than five minutes is refused, never cut,
+  which also bounds what the decode holds in memory. It is downmixed,
+  resampled to 16 kHz by the shared `:resampler`, and transcribed by the
+  long-form path or the server (below); a capture that opens with the
+  trigger word is parked as a completion claim before the text model is
+  loaded. Otherwise the
+  cue detector picks the reminder or the note prompt for the text model.
+  A voice note's body is its full transcript: the note prompt asks the
+  model for the title and tags only, and routing reads the transcript.
+  The time of the recording, not of the processing, dates the
+  note and is the "now" the rules read a reminder's time from. A capture
+  is published by storing what it asked for (a
+  claim, a reminder or a note); during processing it leaves the
+  queue only after that write, or when its recording is gone; the alarm,
+  notifications and
+  refresh after the write are best effort. A capture's attempt is counted
+  before its engines run, so one that ends the process still moves toward
+  its flag, and given back when the drain holds or is canceled, or the
+  capture waits, is rerouted or is stopped. A failure
+  is transient (the attempt stands; flagged at ten), holding (no model or
+  one that will not load, a speech setting the Notebook cannot use, too
+  little memory on the phone route, dictation keeping the engines, no key,
+  a store file that
+  will not open, the server cases below: the drain stops), waiting (the
+  server cases below where another route takes the other captures, and too
+  little memory for a capture the server passed to the phone: only that
+  capture waits, attempt given back), rerouted (the cases below:
+  attempt given back, through the processing rules again) or one that
+  would repeat (no speech,
+  audio the platform cannot decode or that the rules above refuse, an
+  engine deadline, a prompt too long for the context, a value a store
+  refuses: flagged at once). A flagged capture keeps its recording,
+  except one whose recording failed to open, which the store has moved to
+  quarantine. The flag stores a reason code (`CaptureFailureReason`, a
+  stored format) in the entry; an entry flagged without one reads as having run
+  out of attempts, and one whose recording is gone reads as damaged. A note routed to a
+  folder it was not offered, or to an unindexed one, is written in
+  `unclassified`, and a note's file name is
+  cut so it and its largest suffix fit the store's limit. Host tests
+  cover these on fakes and temporary stores, except the strict folder
+  reads behind the store check (which reads those files first), the
+  readiness check's failed-load branch, `isPluggedIn`, the power receiver,
+  the charging work and its worker, the pause file's sync, and the Koin
+  wiring; `CapturePipelineDeviceTest` runs
+  WAV and AAC captures through the real engines and the Keystore. The
+  engines reach the pipeline through interfaces the app binds
+  (`NotebookEngines` in `:composeApp`). A capture is dated in the time zone
+  its entry carries; one without a zone, or with one the runtime does not
+  know, uses the current zone.
+- The speech setting routes captures (`NotebookSpeech` in `:composeApp`,
+  `SpeechRoute`): Local Only and the Rebble modes with a phone fallback
+  use the phone; Server Only, Server (with Local Fallback), and Local
+  (with Server Fallback) while the phone has no model, use the self-hosted
+  server; Local (with Server Fallback) with a model tries the phone first
+  and sends the server a capture whose model will not load, that it has
+  too little memory for, runs out of time on, or hears no speech in. It
+  marks the entry (`QueuedCapture.phoneTried`) when the phone ran or its
+  model would not load, so a later attempt skips the phone; a memory
+  refusal is not marked. When the setting has no server step by the end
+  of the phone step (another mode chosen, or the server URL removed), the
+  capture is not sent and is rerouted as below. A fallback mode
+  without a valid server URL uses
+  the phone; Rebble Only, the platform engine, and Server Only without a
+  URL hold with their own line. Server (with Local Fallback) with a phone
+  model (`SERVER_THEN_PHONE`) sends a short capture to the phone when the
+  server step fails for any reason but the server hearing no speech. A
+  long one waits while the Wi-Fi rule refuses or the app's default network
+  goes out over nothing but a VPN or not at all (`hasUplinkNetwork`);
+  each transport failure on an allowed network is a server try
+  (`QueuedCapture.serverTries`, with its time), at least 15 minutes apart,
+  each recorded try replacing a WorkManager job due when the next one is,
+  and after the third, or after a server error, the capture goes back
+  through the processing rules (`CaptureFailureKind.REROUTE`, once per
+  pass), which send it to the phone, where the charger rule applies,
+  unless the server settings changed meanwhile. A server error there
+  starts the server's hold with no capture to flag; while it lasts the
+  mode routes to the phone. A capture goes to the
+  server as one WAV built in
+  memory (`SelfHostedTranscriptionService.transcribeRecording`), on a
+  client of its own whose read timeout is 10 minutes, under dictation's
+  Wi-Fi-only rule, and that function ends the whole request at 15 minutes
+  (`RECORDING_REQUEST_LIMIT`); a capture known to go to the server
+  (`ProcessingRules.toServer`) never waits for the charger. A server step
+  that cannot run holds the drain on the server route and makes only its
+  capture wait where the phone takes the rest. The Wi-Fi rule refusing, or
+  a server whose name does not resolve, that refuses the connection or
+  that does not answer the connect (asked once per pass), waits for the
+  network: `ServerNetworkWatch` asks for a run when the rule starts
+  allowing a request, and after a pass that held so schedules a
+  WorkManager job on any connected network, whose drain applies the rule
+  and which retries with a linear backoff from 15 minutes while the hold
+  stays. On the other server routes, any other transport failure (a
+  connection lost once made, a timeout before the 10 minutes are up, a
+  socket the system refuses) is a transient failure (a counted attempt;
+  `TransportFailure` in `:util`
+  tells them apart by exception class). A server error (an HTTP error, a
+  reply without text or too large, a refused certificate, a timeout after
+  the 10 minutes, a request still open at 15 minutes) keeps captures off
+  the server (`ServerCheck`, in memory, so a restart tries again) until
+  Try again or a change of the server URL, model, token or pinned
+  certificate; Try again lets the capture whose
+  error started the hold through for its next request, and a server error
+  there flags it. Host tests cover the routing, the failure kinds, the
+  hold, the fallback mode's tries, reroute and notice, the watches, the
+  startup order and the client's read timeout on fakes or a local server.
 - Watch dictation and captures share the server through
-  `ServerDictationHold` (`:util`). `HybridTranscriptionService` reads a
+  `ServerDictationHold` (`:util`), whose `sendRecording` every server
+  request of a capture goes through. `HybridTranscriptionService` reads a
   long capture's request under way as a long recording on the server; in
   the two fallback modes with a phone model, a dictation made meanwhile
   stays on the phone alone, the server fallback included. Server Only,
@@ -1213,17 +1365,95 @@ in the app's device suite:
   holds with its own and releases it when it ends, so only a session that
   never reaches `transcribe` keeps one for its full `DICTATION_HOLD`.
   While a hold is up, captures wait before their request, and a long
-  capture's request under way is canceled and sent again from the start. A server that
+  capture's request under way is canceled and sent again from the start
+  inside the same speech step, so nothing is counted and the queue is
+  untouched; a capture whose route or server settings changed while it
+  waited goes back through the processing rules (`REROUTE`). A server that
   sends `Gravel-Dictation-Lane: separate` on a successful reply
   transcribes dictation apart from long audio: `SelfHostedServerStore`
   keeps the host and port of the last successful reply when that reply
   carried it, the settings dialog forgets it when it saves another
   address, and for that server dictation routes as if no capture were on
   it. Host tests cover the hold, the dictation routing with and without a
-  lane, the header and its memory; among what is not host-tested are the Koin wiring, the
+  lane, the header and its memory, and the Notebook's requests through
+  the hold; among what is not host-tested are the Koin wiring, the
   dialog's forget on save, a hang-up reaching a real server, the stop
   racing a request that has just ended, and Local (with Server
   Fallback)'s check after a timed-out phone attempt.
+- Before a transcription on the phone the pipeline compares the phone's
+  available memory with what a transcription on the dictation model adds
+  (`WhisperTier.longFormBytes`: whisper's own count of the call's state
+  and a five-minute recording's buffers, plus a quarter, measured on
+  device; plus the model's file size when that model is not loaded, since
+  the call loads it first), against the system's low-memory threshold.
+  When that is short it frees the text model and compares again, and a
+  second shortfall holds the drain, or, for a capture another route passed
+  to the phone (Server (with Local Fallback)), makes only that capture wait; otherwise the text
+  model stays
+  loaded.
+  Host tests pin the order and the need; the estimates are measurements to
+  repeat when the engine or the long-form limits change.
+- `CaptureCoordinator` runs the drain on a scope of its own, so no screen's
+  lifetime bounds it, one run at a time: at process start, where
+  `NotebookHousekeeping` sweeps stale staging files,
+  reconciles the note index, lists a missing Unclassified, rebuilds a
+  damaged recordings list, queues recordings held for a later attempt and
+  only then sweeps orphan blobs; whenever an
+  activity resumes after none was; and on Resume, Process now, the charging job, the Wi-Fi rule starting to
+  allow a request while the drain waits for the network, the network
+  job, a change of the speech settings in the app's config
+  (`SpeechSettingWatch`, on `STTConfig`; a change of the server's token or
+  pinned certificate alone starts no run), the download job finishing a
+  speech model's download (the same watch, on `SpeechModelInstalls`, which
+  the job counts up on its success path). A request during a
+  run is taken by that run, while a capture queued during one, a speech settings change, a finished speech model download, or
+  one of those processing changes
+  makes it go round once more. Each run first queues the recordings kept for
+  a later attempt. A capture that failed transiently waits for the next run;
+  nothing retries on a timer. From the moment a run has a capture in flight,
+  or a capture is queued, with no activity resumed until the run ends or an
+  activity resumes, the coordinator holds: a partial wake lock (30 minutes,
+  extended at each row change) and `NotebookProcessingService`, a
+  `specialUse` foreground service with a content-free notification that does
+  no work and stops itself when the hold ends (its KDoc states why nothing
+  stops it from outside). From the background, Android 12 and later refuse
+  that start without an exemption (see `InferenceBoostService`); the refusal
+  is logged, the wake lock is still taken, and a process the system then
+  freezes or ends leaves its capture queued for the next run. The phone
+  recorder takes the same service and wake lock under a hold of its own until its recording is queued (`PhoneRecorder` states why),
+  and the queue call takes the processing hold before the recorder lets go of
+  its own; the notification, when shown, says a note is being recorded while
+  the recorder holds it. `NotebookProcessingServiceTest` pins on a device that the service and the
+  wake lock follow each hold and its release.
+- The phone recorder (the `sources` package) records the microphone through
+  AudioRecord as 16 kHz mono PCM16 held in memory, one recording at a time,
+  and only while an activity is started. A recording ends at Stop, at five
+  minutes (the long-form limit), when the microphone is lost, when the last
+  resumed activity pauses or no activity is left started, and keeps what it had; one
+  under a second is discarded. The recording is dated with the time and zone its
+  microphone started in. The text model starts loading when the recording
+  starts, unless a capture run is under way. `CaptureIngest` stores a
+  finished recording as a WAV and asks the coordinator for a run; it runs to
+  its end if its caller is canceled, and a recording the queue refuses for
+  any reason goes to `pending_captures/` (above). A process death during a
+  recording loses it (`KNOWN_ISSUES.md`). Host tests pin the recorder on a fake microphone and the ingest
+  on a temporary store; `PhoneRecordingDeviceTest` checks on a device that
+  the platform decoder returns the WAV's samples, that a five-minute WAV is
+  not refused, that the microphone opens in the capture format, and that a
+  directory opens for a sync.
+- A typed note (`TypedNotes`) is written as typed, with no model and no tags,
+  in the chosen folder when a capture's note could be routed there and in
+  `unclassified` otherwise. Its title is cleaned and cut to what a restore
+  keeps, never inside a surrogate pair, and a note longer than a restore
+  takes (`RestorePlan.MAX_NOTE_CHARS`) is refused, so a typed note fits what
+  a backup keeps.
+- Captures and typed notes are written with `NoteStore.createListedNote`,
+  which puts a note in `unclassified` when its folder is no longer listed,
+  the list read under the index lock. `deleteFolder` unlists the folder
+  first, moves its notes under one hold of that lock, then drops its tags,
+  so a capture during a delete goes to `unclassified`; when a move fails
+  the folder is listed again where it was. A canceled caller does not stop
+  a folder delete or creation once it has started.
 
 ## In-app links and the What's-new popup
 

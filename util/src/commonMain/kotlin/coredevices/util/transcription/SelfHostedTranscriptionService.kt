@@ -22,10 +22,13 @@ import io.ktor.http.contentLength
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.io.Buffer
 import kotlinx.io.IOException
 import kotlinx.io.readByteArray
@@ -74,6 +77,7 @@ class SelfHostedTranscriptionService(
     private val unmeteredWifi: UnmeteredWifi,
     private val clientFactory: SelfHostedClientFactory,
     private val clock: TimeSource = TimeSource.Monotonic,
+    private val recordingLimit: Duration = RECORDING_REQUEST_LIMIT,
 ) : TranscriptionService {
     companion object {
         private val logger = Logger.withTag("SelfHostedTranscriptionService")
@@ -97,6 +101,9 @@ class SelfHostedTranscriptionService(
 
         /** Gravel: the same for a Notebook recording, up to 5 minutes of audio that the server transcribes before answering. */
         val RECORDING_ANSWER_WAIT = 10.minutes
+
+        /** Gravel: how long a Notebook recording's whole request may take, however the server spaces its bytes. */
+        val RECORDING_REQUEST_LIMIT = 15.minutes
 
         /** Gravel: what a server's successful replies carry when it transcribes dictation apart from long recordings. */
         internal const val DICTATION_LANE_HEADER = "Gravel-Dictation-Lane"
@@ -179,9 +186,10 @@ class SelfHostedTranscriptionService(
 
     /**
      * Gravel: one Notebook recording, [pcm16] at [sampleRate], sent as a WAV built in memory with
-     * [RECORDING_ANSWER_WAIT] for the answer. Fails as [transcribe] does, except that a refused
-     * certificate, and a timeout once the answer wait has passed since the call started, are the
-     * server's errors ([TranscriptionException.TranscriptionServiceError]); a network error's
+     * [RECORDING_ANSWER_WAIT] for the answer and [recordingLimit] for the whole request. Fails as
+     * [transcribe] does, except that a refused certificate, a timeout once the answer wait has passed
+     * since the call started, and a request still open at [recordingLimit] are the server's errors
+     * ([TranscriptionException.TranscriptionServiceError]); a network error's
      * [ServerUnreachableException] cause tells a connection never made from one lost.
      */
     suspend fun transcribeRecording(pcm16: ByteArray, sampleRate: Int): String {
@@ -193,7 +201,14 @@ class SelfHostedTranscriptionService(
         val language = normalizeSpokenLanguage(config.spokenLanguage)
         val started = clock.markNow()
         val reply = try {
-            post(recordingClients.clientFor(url, wifiOnly), url, wav, config.serverModel, store.tokenFor(serverHostPort(url)), language, wifiOnly, "recording.wav")
+            // Null only when this limit's own timer ran out (kotlinx.coroutines 1.11.0, Timeout.kt, withTimeoutOrNull).
+            withTimeoutOrNull(recordingLimit) {
+                post(recordingClients.clientFor(url, wifiOnly), url, wav, config.serverModel, store.tokenFor(serverHostPort(url)), language, wifiOnly, "recording.wav")
+            } ?: run {
+                // A caller's cancel that came as the limit ran out stays a cancel.
+                currentCoroutineContext().ensureActive()
+                throw TranscriptionException.TranscriptionServiceError("Server request failed: not finished within $recordingLimit", modelUsed = MODEL)
+            }
         } catch (e: TranscriptionException.TranscriptionNetworkError) {
             val failure = (e.cause as? ServerUnreachableException)?.failure
             val noAnswer = failure == TransportFailure.TIMED_OUT && started.elapsedNow() >= RECORDING_ANSWER_WAIT

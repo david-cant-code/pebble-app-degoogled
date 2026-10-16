@@ -109,7 +109,8 @@ internal fun saveServerSettings(
 
 /**
  * Gravel: whether Save writes [next] over the [current] token. An unchanged token is left alone: writing it again
- * stores a new ciphertext (KeystoreSecretCipher.encrypt takes a fresh IV per write).
+ * stores a new ciphertext (KeystoreSecretCipher.encrypt takes a fresh IV per write), which the Notebook reads as a
+ * change of the server settings.
  */
 internal fun writesServerToken(next: String?, current: String?): Boolean = next == null || next != current
 
@@ -235,7 +236,7 @@ fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
     ) {
         Column {
             Text(
-                "Sends dictation audio to your own " +
+                "Sends dictation audio, and Notebook recordings in the server modes, to your own " +
                     "transcription server over https, only while " +
                     "this phone is using Wi-Fi that isn't marked metered unless Use the Server on " +
                     "Mobile Data is on (it appears with the server modes). Works with whisper.cpp's " +

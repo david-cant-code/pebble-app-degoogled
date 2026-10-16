@@ -8,7 +8,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
-/** Pins the receivers' exported flags and the permissions the alarm stack needs, at the source. */
+/** Pins the receivers' exported flags and the permissions the alarm stack, the processing service and the recorder need, at the source. */
 class NotebookManifestTest {
 
     private val manifest = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(manifestFile())
@@ -33,6 +33,25 @@ class NotebookManifestTest {
         assertTrue("android.permission.RECEIVE_BOOT_COMPLETED" in permissions)
         assertTrue("android.permission.SCHEDULE_EXACT_ALARM" in permissions)
         assertTrue("android.permission.POST_NOTIFICATIONS" in permissions)
+    }
+
+    @Test
+    fun theProcessingServiceIsUnexportedAndDeclaresItsForegroundUse() {
+        val service = elements("service").single()
+        assertEquals("com.anopticlabs.gravel.notebook.pipeline.NotebookProcessingService", service.getAttribute("android:name"))
+        assertEquals("false", service.getAttribute("android:exported"))
+        assertEquals("specialUse", service.getAttribute("android:foregroundServiceType"))
+        val property = service.getElementsByTagName("property").item(0) as Element
+        assertEquals("android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE", property.getAttribute("android:name"))
+        val permissions = elements("uses-permission").map { it.getAttribute("android:name") }.toSet()
+        assertTrue("android.permission.FOREGROUND_SERVICE_SPECIAL_USE" in permissions)
+        assertTrue("android.permission.WAKE_LOCK" in permissions)
+    }
+
+    @Test
+    fun theRecorderDeclaresTheMicrophonePermission() {
+        val permissions = elements("uses-permission").map { it.getAttribute("android:name") }.toSet()
+        assertTrue("android.permission.RECORD_AUDIO" in permissions)
     }
 
     private fun elements(tag: String): List<Element> {

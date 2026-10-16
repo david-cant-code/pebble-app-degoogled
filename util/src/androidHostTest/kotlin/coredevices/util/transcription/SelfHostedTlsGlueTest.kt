@@ -1,13 +1,20 @@
 package coredevices.util.transcription
 
+import com.russhwolf.settings.MapSettings
 import com.sun.net.httpserver.HttpsConfigurator
 import com.sun.net.httpserver.HttpsServer
+import coredevices.util.CoreConfig
+import coredevices.util.CoreConfigFlow
+import coredevices.util.STTConfig
+import coredevices.util.security.DecryptResult
+import coredevices.util.security.SecretCipher
 import io.ktor.client.HttpClient
 import io.ktor.client.request.forms.formData
 import io.ktor.client.request.forms.submitFormWithBinaryData
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import com.anopticlabs.gravel.network.NotOnAllowedNetworkException
@@ -36,6 +43,8 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 /**
  * The client and probe as built, against a local TLS server whose
@@ -55,6 +64,8 @@ class SelfHostedTlsGlueTest {
     private companion object {
         const val PASSWORD = "changeit"
         const val SLOW_REPLY_MILLIS = 1_500L
+        const val DRIP_MILLIS = 20_000L
+        const val DRIP_GAP_MILLIS = 50L
         const val SERVER_NAME = "stt-server-c.test"
 
         private fun keytool(workDir: File, vararg args: String) {
@@ -103,6 +114,7 @@ class SelfHostedTlsGlueTest {
     private val issuer get() = material.issuer
     private lateinit var server: HttpsServer
     private val served = AtomicInteger()
+    private val dripped = AtomicInteger()
     private val port get() = server.address.port
     private val url get() = "https://127.0.0.1:$port/inference"
 
@@ -146,6 +158,22 @@ class SelfHostedTlsGlueTest {
                 val reply = """{"text":"late"}""".encodeToByteArray()
                 exchange.sendResponseHeaders(200, reply.size.toLong())
                 exchange.responseBody.use { it.write(reply) }
+            }
+            // A reply that keeps coming, a space at a time, then a whole answer.
+            createContext("/drip") { exchange ->
+                exchange.requestBody.use { it.readBytes() }
+                exchange.sendResponseHeaders(200, 0)
+                runCatching {
+                    exchange.responseBody.use { body ->
+                        repeat((DRIP_MILLIS / DRIP_GAP_MILLIS).toInt()) {
+                            body.write(' '.code)
+                            body.flush()
+                            dripped.incrementAndGet()
+                            Thread.sleep(DRIP_GAP_MILLIS)
+                        }
+                        body.write("""{"text":"late"}""".encodeToByteArray())
+                    }
+                }
             }
             start()
         }
@@ -293,6 +321,35 @@ class SelfHostedTlsGlueTest {
             "not a timeout: ${failure::class.simpleName}: ${failure.message}",
         )
         assertEquals(200, post((SLOW_REPLY_MILLIS * 4).milliseconds))
+    }
+
+    // No token is saved here, so the store never encrypts or decrypts.
+    private object NoCipher : SecretCipher {
+        override fun encrypt(plaintext: String): String? = error("no token in this test")
+        override fun decrypt(stored: String): DecryptResult = error("no token in this test")
+    }
+
+    @Test
+    fun aRecordingWhoseReplyKeepsTricklingEndsAtTheRequestLimit() = runBlocking {
+        val hostPort = "127.0.0.1:$port"
+        val config = CoreConfig(sttConfig = STTConfig(serverUrl = "https://$hostPort/drip", serverOnMobileData = true))
+        val store = SelfHostedServerStore(MapSettings(), NoCipher).also { it.trust(hostPort, sha256Fingerprint(certificate)) }
+        val real = AndroidSelfHostedClientFactory({ error("no binding without the rule") }, { HostPlatform })
+        val clients = ArrayList<HttpClient>()
+        // An answer wait the drip's gaps stay inside, so the request limit is what ends the reply.
+        val factory = SelfHostedClientFactory { key, pin, wifiOnly, _ -> real.create(key, pin, wifiOnly, 2.seconds).also { clients += it } }
+        val limit = 5.seconds
+        val service = SelfHostedTranscriptionService(CoreConfigFlow(MutableStateFlow(config)), store, FakeUnmeteredWifi(), factory, recordingLimit = limit)
+        val started = TimeSource.Monotonic.markNow()
+        val error = try {
+            assertFailsWith<TranscriptionException.TranscriptionServiceError> { service.transcribeRecording(ByteArray(3_200), 16_000) }
+        } finally {
+            clients.forEach { it.close() }
+        }
+        val elapsed = started.elapsedNow()
+        assertTrue(error.message.orEmpty().contains("not finished within"), "${error.message}")
+        assertTrue(elapsed >= limit && elapsed < (DRIP_MILLIS / 2).milliseconds, "ended after $elapsed")
+        assertTrue(dripped.get() > 0, "no reply byte was sent")
     }
 
     private suspend fun failureOf(client: HttpClient, target: String): Throwable = client.use {
