@@ -85,7 +85,7 @@ class BackupRulesTest {
         // each rule set that backs up the file domain must exclude that directory.
         val v28 = parse(resFile("xml-v28", "full_backup_content.xml"))
         assertEquals(
-            setOf("models", "debug-captures"),
+            setOf("models", "debug-captures", "notebook"),
             v28.elementsNamed("exclude").filter { it.getAttribute("domain") == "file" }.map { it.getAttribute("path") }.toSet(),
         )
         val v31 = parse(resFile("xml", "backup_rules.xml"))

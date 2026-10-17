@@ -1074,3 +1074,53 @@ whoever the user sends it to, which may be a public issue. Gating the
 payload bytes means changing upstream's own logging calls rather than the
 fork's seams, so it is recorded here and left to the pass over what the log
 writer accepts.
+## Notebook files can be rolled back or deleted without detection
+
+**Status: accepted; detecting it is left to a later change.**
+
+Each Notebook file is sealed under a data key of its own, which is sealed
+under a device-bound key, and both seals are bound to the file's path, so
+an offline adversary with access to the file system cannot read a file,
+forge one, or make one open from another path. The same adversary can still
+replace a file with an older authentic version of itself, or delete it, and
+the app accepts both: nothing binds a version or a directory listing into
+what is authenticated. For the capture queue this has a further cost: the
+blob of a capture queued after a rolled-back queue file has no entry, and
+the sweep for unreferenced blobs deletes it. A rolled-back reminders file
+hands out ids again that the event log still holds occurrences for, so a
+new reminder can inherit an older one's history. A note file put back after its note was deleted is listed again. Closing this needs authenticated state that is not rolled
+back along with the files.
+
+## The Notebook directory shows how many notes there are, their sizes and times
+
+**Status: accepted.**
+
+Note files are named by random ids and keep their folder, name and title
+inside the encryption, but the directory still shows anyone who can read
+the app's files how many notes and queued recordings there are, the size
+of each file, and when each file was last written. Hiding these would need
+padded files and a different layout.
+
+## A Notebook write just before a power loss can be undone
+
+**Status: open; syncing the directory after each write would close it.**
+
+A sealed Notebook file's move into place after its write is not synced
+(`DESIGN_NOTES.md` describes the write). If the phone loses power soon
+after a write, the file can be back at its earlier version after the
+restart, or missing if it was new. How soon is up to the storage and was not
+measured.
+
+## The Notebook key is usable while the device is locked
+
+**Status: accepted by design.**
+
+The Notebook key requires no user authentication and no unlocked device, so
+code running as Gravel can read and write Notebook files whenever the
+process runs, including on a locked phone.
+The cost is that a device seized while locked, if an attacker can execute
+code as Gravel on it, yields the notes; the offline file-system adversary
+the encryption is aimed at still cannot, because the key never leaves the
+Keystore. Gating the key on an unlocked device would break the background
+uses above and is not planned.
+

@@ -732,7 +732,27 @@ Gravel's Notebook feature (voice and typed notes, and reminders) lives in the
 `:notebook` module. Pure
 logic goes in `commonMain` on the standard library and kotlinx.serialization;
 `androidMain` holds only what the platform must supply (Unicode NFKD
-decomposition for note filenames).
+decomposition for note filenames, the Keystore-backed storage below).
+
+Storage is a directory of encrypted files under `files/notebook`. Each write
+draws a fresh AES-256 data key, seals the file with it in software
+(AES-GCM), and seals the data key with one Keystore key (alias
+`gravel_notebook_kek_v1`, in StrongBox, unless StrongBox is unavailable
+or five attempts there fail with a provider error,
+in which case it is generated without the StrongBox request;
+no user authentication so background captures and reminders can read and
+write). The `GNF1` envelope, version 1, holds magic, version byte, the
+key-wrap nonce, the sealed data key with its tag, the data nonce, then the
+ciphertext and its tag. The Keystore key seals and opens only the 32-byte
+data key, so its cost does not grow with the file. The existing `KeystoreSecretCipher` in `:util` is a string codec for
+single secrets without location binding, so the Notebook has its own codec
+rather than a second contract on that class. The Notebook needs API 28, the
+level that adds the StrongBox key generation API and the exception that
+sends a generation to the fallback at once; below it the key path throws. The
+directory is excluded from Android backup and device transfer in every rule
+set because the key never leaves the device, so a restored copy could only be
+quarantined. Gaps of
+this design are recorded in `KNOWN_ISSUES.md` (Notebook).
 
 Constraints the code relies on, each pinned by a test in the module or
 in the app's device suite:
@@ -743,7 +763,9 @@ in the app's device suite:
   has its own lenient strip, which defines the token vocabulary stored notes
   are indexed under, so changing it means re-indexing every note.
 - Stems are derived from display text and never re-stemmed: the Porter
-  stemmer is not idempotent.
+  stemmer is not idempotent. The note store therefore stems a note's tags
+  from the `tags:` field of its front matter at every write and move,
+  never from the stored stems.
 - Model output is shaped through `NoteSanitizers` from `JsonElement`s, so
   the type gates run against what the JSON parser actually produced.
 - Folder routing (`routedFolder`) is a deterministic stemmed-overlap score
@@ -774,10 +796,157 @@ in the app's device suite:
 - A capture's queue entry is written before any processing and
   removed after it, so a capture survives process death; the in-memory
   capture rows are a projection of that entry.
+- The data key's seal is bound to the file's path relative to the Notebook
+  root, and the data's seal to that path and the envelope header (under the
+  prefixes `gn1:key:` and `gn1:data:`), so an envelope copied to another path
+  or folder fails to open, as does a data key moved between envelopes;
+  renaming or moving a file means re-sealing it.
+- A read separates four outcomes: only an authentication failure (in
+  either layer) or a malformed envelope is corruption, moved to `.quarantine` (named
+  after the file's path and the time); a Keystore or I/O failure
+  that may
+  heal is transient and leaves the file in place; a missing key or a failure
+  the key store calls permanent is `KeyUnavailableException` and also leaves
+  the file in place (the key store's own verdict, read from Android 13 on,
+  is not pinned by a test); and a strict read (the read half of a
+  read-modify-write) rethrows both of the latter so nothing is written
+  back. Opening never
+  creates a key, and sealing creates one only while no file sealed under a
+  key remains in the Notebook root, so a lost key stays reported as
+  missing instead of a new key turning every old file into corruption.
+  Authentic plaintext that fails to parse is the store's
+  `PersistedFormatException`, which a strict read throws and a display read
+  degrades to empty; a storage failure raised inside the parse keeps its
+  class. A failure of the software layer other than authentication is not
+  classified and reaches the caller as it is.
+- A write seals for the destination's path, lands in a staging file of its
+  own that is synced before the move, and replaces the target in one move,
+  atomic where the file system supports it.
+- Keystore cipher operations run at most three at a time process-wide; a
+  Keystore-layer failure is retried a few times before it surfaces as
+  transient, each retry of a seal or open looking the key up again and
+  using the handle it finds, if any; an authentication failure is never
+  retried.
+- The note store keeps each note as `notes/<id>`, the id 32 lowercase hex
+  characters from 128 random bits, so file and directory names carry no
+  folder, name or title. A note file holds a versioned record of its
+  folder, name, title, date, modified time and content; the `notes_meta`
+  index lists the same fields by id plus the content hash, beside
+  `folders_list` and `folder_tags`. A folder name must be valid and a name
+  plain ASCII, and a name is unique within its folder.
+- A note's search stems (its body words and front matter tags, stemmed) are
+  kept out of the index, in one of 16 files under `note_stems/` picked by
+  the id's first hex digit, each entry carrying the content hash it was
+  computed from. They are written after the index; a stems file that cannot
+  be read or written that time is left as it is, and a corrupt or
+  unparseable one is quarantined and started again, without failing the note
+  write. `NoteStore.repairStems`, which a reader of the stems runs first,
+  recomputes entries that are missing or carry another hash than the index.
+  A note in an unindexed folder has no stems.
+- The parsed index is held in memory, process-wide per Notebook root, once a
+  read has succeeded or a write has landed, and every index write replaces
+  it; a read that degrades to empty is not held. Folder lists and note
+  writes use it instead of opening the index file again.
+- Each store file has one process-wide lock, keyed by file name, that every
+  store instance shares; the locks are not reentrant, and each file's
+  read-modify-write reads strictly under its lock before it writes, so a
+  read that fails (transient, missing key, corrupt, unparseable) changes
+  nothing on disk. Mutators run on the I/O dispatcher; the non-suspend
+  reads block on file and Keystore I/O, so callers run them there too.
+- No read quarantines the index, folder list or folder tags: a corrupt one
+  stays in place, display reads degrade to empty, and every mutator fails
+  with `CorruptFileException`; for the index this holds from a process
+  start until `reconcile` rebuilds it, and once the index is held in memory
+  the next index write replaces a bad file. An absent index while note
+  files exist is a transient failure for a strict read. A corrupt note file
+  is quarantined on its own; its index entry stays, moving with its folder
+  as an entry alone, until the note is deleted or the index is rebuilt.
+- A note file is written before the index entry that lists it, and deleted
+  before its entry is removed. `NoteStore.reconcile`, run under the index
+  lock, repairs an interrupted create or
+  rebuild: an index that fails to open or to parse is rebuilt from the note
+  files, which are all read before the old index is moved to `.quarantine`,
+  and an absent index while note files exist is rebuilt the same way; a
+  note file the index does not list is deleted when a listed note with the
+  same folder, name and content has a file that opens with that content,
+  and listed otherwise (under a free suffixed name if its own is taken). A
+  note file that fails to open is quarantined, and one that opens but does
+  not parse, or finds no free name, is left in place; both stay unlisted.
+  A transient or key failure leaves the index file as it was. A move
+  rewrites the note file, then the index, so a move cut short between the
+  two leaves the note listed in its old folder; a move to that folder
+  rewrites the file to match. A delete cut short leaves an entry without
+  its file.
+- A new note goes through `createNote`, which takes the first `-n`
+  suffixed name its folder does not hold, and reuses the note holding a
+  name on the way when its content is identical, rewritten when its file
+  is missing or does not open; a suffixed name the name
+  rule would refuse is never taken.
+  Deleting a folder lists it again while a note it could not move remains
+  under it; a process end before the move finishes, or a relist that
+  fails, leaves it unlisted with the notes not yet moved still shown under
+  it, and deleting it again moves them; a process end after the move
+  leaves the folder's tags behind. Not pinned by a test: what a process
+  end leaves. Folders are listed
+  from `folders_list` plus any folder that holds an indexed note, so every
+  listed note shows under a folder.
+- `EncryptedFiles.sweepStaging` deletes staging files older than two
+  minutes.
+- The queue store keeps `queue_meta`, the list of `QueuedCapture` entries,
+  and one blob per entry at `queue/<id>.bin`; an id is `[A-Za-z0-9_-]`, up
+  to 128 characters, and a list with any other id, or a duplicated one, is
+  refused on write and unparseable on read. `enqueue` writes the blob and
+  then the entry under the one lock and deletes the blob again if the entry
+  write fails, so it never writes an entry before the blob it names and a
+  crash inside it leaves at most a blob without an entry; `remove` drops
+  the entry, then the blob. An entry can still name a missing blob (a blob
+  quarantined by a read, or deleted on disk), so a reader handles absent.
+  Reading a blob, also under the lock, separates present, absent and
+  corrupt: a blob that fails to open, or whose file is over the cap, is
+  quarantined on that read and reported as corrupt, so the caller can flag
+  the entry rather than take it for stale; `queue_meta` follows the index
+  rule above and is never quarantined by a read. `sweepOrphanBlobs` runs under the
+  lock and deletes only `.bin` files at least two minutes old that have no
+  entry; it skips when the queue file is absent or cannot be read strictly.
+  A blob is sealed and opened in memory as a whole, so it is capped at
+  32 MiB on write and a longer file on disk is corrupt.
+- A capture the store could not seal is moved as plaintext to
+  `pending_captures/<id>~<name>`, one file per id (a recording held in memory
+  is written to a partial file first, synced, then renamed, and the directory
+  synced; a partial file at least two minutes old is deleted by the next
+  salvage), and `salvagePending` queues each such file, deleting the plaintext only once the queued blob holds its bytes; a
+  file that still fails, is over the cap, or differs from the blob already
+  queued under its id is kept and counted, an empty one is deleted, and a
+  symlink or a file not named that way is left alone. A file queued this way
+  has no zone of its own.
+- The reminder stores keep `reminders` (the active reminders and the next
+  id to hand out, taken and advanced under the lock, so a deleted id is
+  not reused in that store; a random store
+  identity, set by the first write, naming that id space), `reminder_events` (one event per occurrence, keyed by the
+  reminder id and the scheduled fire instant) and `voice_completions`
+  (completion claims waiting for the user to pick their reminder, oldest
+  first, capped at 50: a save past
+  the cap drops the oldest by insertion, so the entry just captured
+  survives whatever the clock did). All three are
+  encrypted JSON values read and written through one helper that follows
+  the index rule above (never quarantined by a read, strict read under the file's
+  lock before every write, a validator on read and on write, a write over
+  the file's size cap refused before it lands), so a failed read changes
+  nothing on disk and a file the reader would refuse is never written. A
+  value this build cannot parse, such as a recurrence frequency written by
+  a later build, fails closed the same way as a damaged one. The event
+  log's transitions are pure functions in the reminders package: a
+  replayed fire never resets an occurrence, a completed or canceled stamp
+  is kept once written, the two do not
+  exclude each other, a resolved occurrence is neither snoozed nor marked
+  delivered, and retention keeps an event until its scheduled fire, its
+  actual fire, any pending snooze and its completion all lie behind the
+  cutoff.
 - The backup (the `backup` package) is one password-sealed archive of the
   notes under their ids with their folder, name, title, date and time, the
   folder list, the folder tags, the capture queue with its recordings, the
-  reminders and the event log; parked completions and settings are not in it. The archive is a header of magic, version, key derivation id, salt
+  reminders and the event log; parked completions, pending
+  plaintext captures and settings are not in it. The archive is a header of magic, version, key derivation id, salt
   and nonce prefix, then a record stream sealed in 64 KiB segments with
   AES-256-GCM. The key comes from PBKDF2-HMAC-SHA256
   at 600,000 rounds over the NFC-normalized password and the archive's own
