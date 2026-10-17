@@ -74,7 +74,12 @@ import com.anopticlabs.gravel.notebook.storage.QueueStore
 import com.anopticlabs.gravel.notebook.storage.ReminderEventStore
 import com.anopticlabs.gravel.notebook.storage.ReminderStore
 import com.anopticlabs.gravel.notebook.storage.VoiceCompletionStore
+import com.anopticlabs.gravel.notebook.ui.AndroidAutoBackupControls
+import com.anopticlabs.gravel.notebook.ui.AutoBackupControls
+import com.anopticlabs.gravel.notebook.ui.BackupReminder
+import com.anopticlabs.gravel.notebook.ui.BackupReminderFile
 import com.anopticlabs.gravel.notebook.ui.NotebookLinkToken
+import com.anopticlabs.gravel.notebook.storage.DeviceStateFile
 import com.anopticlabs.gravel.notebook.ui.hasScreenLock
 import com.anopticlabs.gravel.notebook.ui.NotebookNavigator
 import com.anopticlabs.gravel.notebook.ui.NotebookStatusReader
@@ -184,6 +189,8 @@ val notebookModule = module {
             },
         )
     }
+    single<AutoBackupControls> { AndroidAutoBackupControls(get(), get(), get()) }
+    single { BackupReminder(BackupReminderFile(DeviceStateFile(androidContext().noBackupFilesDir, "notebook_backup_reminder")), get()) }
     single { AppVisibility() }
     single { CaptureRows() }
     single<CaptureAudioDecoder> { MediaCodecAudioDecoder() }

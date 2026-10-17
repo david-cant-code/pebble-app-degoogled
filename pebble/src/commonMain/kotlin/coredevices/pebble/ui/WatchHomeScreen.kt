@@ -229,7 +229,10 @@ fun WatchHomeScreen(
         val indexEnabled = viewModel.indexEnabled.collectAsState()
         val healthEnabledValue = viewModel.healthTrackingEnabled.collectAsState()
         val preferHealthTab = viewModel.preferHealthTab.collectAsState()
-        val notebookShown = rememberNotebookTab()?.shown?.collectAsState()?.value == true
+        val notebookTab = rememberNotebookTab()
+        val notebookShown = notebookTab?.shown?.collectAsState()?.value == true
+        // Gravel: outside the per-tab saved state, so a picker's answer or a report of an unfinished run reaches them on any tab.
+        notebookTab?.takeIf { it.supported }?.BackupDialogs()
         val watchOnboardingFinished: WatchOnboardingFinished = koinInject()
 
         // Create a SaveableStateHolder to preserve state for each tab
@@ -378,6 +381,8 @@ fun WatchHomeScreen(
                         is PebbleNavBarRoutes.IndexRoute -> WatchHomeNavTab.Index
                         is PebbleNavBarRoutes.NotebookRoute -> WatchHomeNavTab.Notebook
                         is PebbleNavBarRoutes.WatchesRoute -> WatchHomeNavTab.Watches
+                        // Gravel: a Notebook backup notice opens Settings > Notebook.
+                        is PebbleNavBarRoutes.WatchSettingsCategoryRoute -> WatchHomeNavTab.Settings
                         else -> null
                     }
                     if (tab != null) {

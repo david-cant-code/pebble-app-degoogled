@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -49,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.anopticlabs.gravel.notebook.R
 import com.anopticlabs.gravel.notebook.capture.CaptureQueueItem
@@ -72,7 +74,7 @@ import org.koin.compose.viewmodel.koinViewModel
 /**
  * The Notebook tab: the capture area above the Notes, Reminders and Calendar sections, or [setupGuide] in their place.
  * With [recordingSupported] false the capture area offers typed notes only, and while it is null no record button yet.
- * [notice] is drawn above the capture area.
+ * [notice] is drawn under the backup reminder line, above the capture area.
  */
 @Composable
 fun NotebookScreen(
@@ -125,6 +127,7 @@ private fun NotebookContent(topBarParams: TopBarParams, links: HoldActions, reco
             DisposableEffect(viewModel) {
                 onDispose { viewModel.stopRecording() }
             }
+            BackupReminderLine()
             tabNotice?.invoke()
             status?.let { StorageTroubleCard(it, recoveryState, viewModel) }
             CaptureBar(
@@ -308,6 +311,41 @@ private fun CaptureStatusLines(
     val retained = status?.retained ?: 0
     if (retained > 0) {
         Text(pluralStringResource(R.plurals.notebook_retained, retained, retained), color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun BackupReminderLine() {
+    val reminder = koinInject<BackupReminder>()
+    // Collected only while the screen is started, so coming back to it reads the clock again.
+    val action by reminder.action.collectAsStateWithLifecycle(null)
+    val shown = action ?: return
+    Column {
+        Text(
+            stringResource(
+                when (shown) {
+                    BackupReminderAction.SET_UP -> R.string.notebook_backup_nudge
+                    BackupReminderAction.TURN_ON -> R.string.notebook_backup_nudge_off
+                    BackupReminderAction.SET_UP_AGAIN -> R.string.notebook_backup_nudge_again
+                }
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { reminder.act(shown) }) {
+                Text(
+                    stringResource(
+                        when (shown) {
+                            BackupReminderAction.SET_UP -> R.string.notebook_backup_nudge_set_up
+                            BackupReminderAction.TURN_ON -> R.string.notebook_backup_nudge_turn_on
+                            BackupReminderAction.SET_UP_AGAIN -> R.string.notebook_backup_nudge_set_up_again
+                        }
+                    )
+                )
+            }
+            TextButton(onClick = reminder::notNow) { Text(stringResource(R.string.notebook_backup_nudge_not_now)) }
+            TextButton(onClick = reminder::never) { Text(stringResource(R.string.notebook_backup_nudge_never)) }
+        }
     }
 }
 

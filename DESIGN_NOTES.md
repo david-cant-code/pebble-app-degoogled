@@ -1106,7 +1106,9 @@ in the app's device suite:
   uses again is renamed to the time of that retry, unless that name is
   taken. `NotebookRecovery.removeStartOverLeftovers` deletes the `start-over-*`
   folders a Start over left there, and does nothing while a recovery step
-  holds the lock. Not pinned by a test: the
+  holds the lock. The Start fresh, Start over and restore dialogs say
+  beforehand what they delete; a file set aside by a read or by Set Up
+  Again goes the same way with no message. Not pinned by a test: the
   module handing the leftover step to the housekeeping (device runs only).
 - The queue store keeps `queue_meta`, the list of `QueuedCapture` entries,
   and one blob per entry at `queue/<id>.bin`; an id is `[A-Za-z0-9_-]`, up
@@ -1361,13 +1363,51 @@ in the app's device suite:
   the app no access to a document after renaming it, so no rename is used.
   The host suite pins the sequence on a fake store and the device suite
   pins the binding against a real cross-process DocumentsProvider.
+- Settings > Notebook runs a manual backup, restore or check through one
+  process-wide `BackupFlow`, so a run outlives the screen and one runs at a
+  time; its dialogs and pickers are composed by the home screen on every
+  tab, so a picker's answer after the process restarted still arrives. A
+  backup asks for a password of at least 15 Unicode code points after NFC
+  normalization (the archive reader refuses a shorter one too), typed
+  twice, then builds the archive into staging before the save picker
+  opens, so a backup that cannot read the Notebook fails without creating a
+  file. The picker suggests `gravel-notebook-<date>-<time>.gnbk` with the
+  type `application/octet-stream`, which keeps an extension `MimeTypeMap`
+  does not know (android16-release, `FileUtils.splitFileName`). The flow
+  holds the password array until the publish ends and then zeroes it, and
+  wipes its copy of a picked archive's key when the run ends; the text
+  field, the password checks and the key derivation make copies it does not
+  reach. A save under way is noted in the no-backup directory
+  (`FileRunRecord`) by stage, picked, writing (noted before the first byte,
+  once the document is known to be empty, and required to be noted) and
+  verified, with a persistable grant on the document (DocumentsUI grants one
+  with a save result: android17-release, `ActionHandler.finishPicking`). The
+  next process tries to remove the document of a save that reached writing,
+  and a picked one only when it reads empty, keeps a verified one, says what
+  it did, and reports a restore that was under way; it clears the note only
+  while the note is still the one it read. A picker answer that arrives with
+  no run waiting deletes the document only when it reads empty, and one the
+  activity lost while the process lived ends its run as backed out when the
+  host comes back to the front. A picked archive is copied into staging
+  after its header check; its key is derived once from the password
+  (`NotebookBackup.unlock`) and serves the check and both restore passes,
+  and a reader given that key for an archive with another salt reports
+  damage; the publish read-back derives its own. A check shows what the
+  archive holds and what a restore would skip; a restore asks first, cannot
+  be canceled once it starts, and asks for a capture drain unless it
+  finished having added none. The backup dialogs open as secure windows
+  (`notebookDialogProperties`). An archive with a recovery key asks for the
+  key instead of a password, in either of its forms.
 - Automatic backups hold the notes and reminders a manual backup holds,
   without the captures, sealed under a recovery key: 64 characters from
   `0-9a-z` drawn with `SecureRandom`, shown uppercase in groups of four
   with `O` as `#` and `0` as `=` (`RecoveryKey`). Setup
   (`AutoBackupSetup`) explains them, opens the folder picker and keeps a
-  persistable grant on the folder, shows the key,
-  copies it only after a warning,
+  persistable grant on the folder, shows the key in a secure dialog,
+  copies it only after a warning (marked sensitive, with an inexact alarm
+  set to clear the clipboard a minute later, `copySensitive`; the alarm is
+  set first, and when Android refuses it nothing is copied and an earlier
+  copy is taken off),
   asks for it typed back, and writes a first backup; it stores nothing
   until that backup is written and checked, and a failed one keeps the key
   and folder for Try again or another folder. Where the grant on the picked
@@ -1386,7 +1426,9 @@ in the app's device suite:
   backups over, leaving the files in the old folder and releasing its
   grant. A folder setup picked is listed in the no-backup directory until
   it is kept or let go of, and the next process start lets go of any still
-  listed that is not the stored folder. The key (its 64 ASCII bytes and an
+  listed that is not the stored folder. Settings offers setup only once it
+  has read that nothing is set up, or, as Set Up Automatic Backups Again
+  (below), that the state or key file is damaged or the key file gone. The key (its 64 ASCII bytes and an
   8-byte stamp of when setup made or took it) and the
   state (`AutoBackupStore`) are two sealed files under the Notebook root;
   setup alone writes the key file. Off keeps the key, the grant and the
@@ -1419,7 +1461,8 @@ in the app's device suite:
   wait for an automatic run, and an automatic run that finds it held is
   retried. Lost folder access, a missing folder (a folder app that answers
   but no longer has it), a key that cannot be read and damaged storage are
-  notified at once on the Notebook backups channel; other failures, a folder app
+  notified at once on the Notebook backups channel (a tap opens Settings >
+  Notebook) and shown under Automatic Backups; other failures, a folder app
   that cannot be reached or will not make the file among them, are retried
   with backoff from 30 minutes and notified after the fourth failed run in
   a row. A failure the stored count cannot take, the state being unreadable
@@ -1469,20 +1512,32 @@ in the app's device suite:
   the state. While automatic backups are on, a check that finds no backup
   confirmed for 24 hours asks for a run at once and warns an hour later if
   none came, then once a day while none does, each repeat taking the
-  earlier notice down first. A check
+  earlier notice down first (Settings shows the warned stretch). A check
   that cannot write a stretch's first mark still asks for the run, and
-  warns at each check once the last confirmed backup is 25 hours old. While they are set
+  warns at each check once the last confirmed backup is 25 hours old,
+  which Settings does not show. Not pinned by a test: that Settings does
+  not show that warning. While they are set
   up, recovery key reminders come 14 days
   after setup, three months after that and every six months after,
   counted again from each successful check; each point posts a
   notification on its own channel, Not now on it brings one more a week
-  later. A notice is
+  later, and Settings says a check is due until one passes. A notice is
   posted before the state that records it is written, so a failed write
   posts it again. The last confirmed backup, the stale marks and the last
   key check, when stored later than the clock, are moved back to it; the
   time the key was made is read so and stays stored as setup wrote it. Backup and
   key notices are marked private, with a public version that has a title
   only.
+- Recovery Key in Settings > Notebook checks a typed key by opening the
+  newest backup with it, or, when that does not open, by comparing it with
+  the stored key, which tells a wrong key from a damaged or gone backup. A
+  check that opens the newest backup records that read, clearing a stamp
+  left by a read without an answer.
+  Turning automatic backups on with the key a restore opened with counts
+  as a check. "I don't have my key" runs setup with a new key, made once
+  the screen lock is confirmed, into the same folder; the backups made
+  before it stay in the folder, out of the record and off the deletion
+  list, and need the old key.
 - The Notebook tab's recovery card reads every store part strictly
   (`NotebookRecovery.diagnose`): the key counts as gone when a read
   reports it missing or unusable and no file read from disk opened, or,
@@ -1545,7 +1600,14 @@ in the app's device suite:
   what the archive holds is not armed under both ids, leaving any id a
   reminder here holds to that reminder; history the old alarms above
   logged stays beside the restored history.
-  Not pinned by a
+  Settings > Notebook offers Set Up Automatic Backups Again when their
+  state file is damaged, or once a run has failed on a damaged or gone key
+  file: setup starts as a new one, and its save, after the screen lock and
+  the new key typed back, deletes the key file and then sets the state
+  aside, stops
+  the runs and lets go of unused folder grants; the earlier setup's
+  backups stay in the folder, outside the new record. It also shows where
+  the Notebook key is kept (`NotebookKeystore.placement`). Not pinned by a
   test: the card and its dialogs (device runs only), `resetKey`'s Keystore
   calls beyond a key that works and one that is absent,
   `BackupFolderDocuments.heldFolders`, `placement` on a real key, the sync
@@ -1561,7 +1623,7 @@ in the app's device suite:
   (`ProcessingControls`). Pause all holds every capture, Pause long recordings holds the long ones, and a pause stays
   until Resume, across restarts, in a no-backup file. A pause, and a short
   capture queued while a long one that may start again is still
-  transcribing (on by default), stops the matching
+  transcribing (Settings > Notebook, on by default), stops the matching
   capture through `CaptureDrain.interrupt`, even one picked but not yet
   started: it stays queued with its attempt given back and starts over
   from the beginning later; once its outcome is decided it is not
@@ -1742,7 +1804,9 @@ in the app's device suite:
   only then sweeps orphan blobs; whenever an
   activity resumes after none was; when the Notebook screen starts; and
   when a text download finishes, a text model is chosen or an installed one
-  is deleted (Settings > AI below); and on Resume, Process now, the charging job, the Wi-Fi rule starting to
+  is deleted (Settings > AI below); and on Resume, Process now, a change of
+  Long Recordings Wait for Power, the phone being plugged in or unplugged
+  while that setting is on, the charging job, the Wi-Fi rule starting to
   allow a request while the drain waits for the network, the network
   job, a change of the speech settings in the app's config
   (`SpeechSettingWatch`, on `STTConfig`; a change of the server's token or
@@ -1815,8 +1879,16 @@ in the app's device suite:
   ui-android 1.11.1, `PlatformTextInputModifierNode.kt`, marked
   experimental).
 - The tab (the `ui` package) sits second in the bottom bar, shown until the
-  user turns off "Show Notebook Tab" and absent below
-  API 28.
+  user turns off "Show Notebook Tab" in Settings > Notebook and absent below
+  API 28. That Settings category (after General, hidden below API 28) also
+  holds quick reminder completion (its trigger word set through
+  `TriggerWordDialog`), the default time for a voice reminder with no clear
+  time, the swipe-away snooze and how long reminder history is kept; the
+  last three are picked from a short list that also shows a stored value
+  outside it (`NotebookSettingsChoices`). `WatchSettingsScreen` reads and
+  writes them through `NotebookTab.settings`, which `AndroidNotebookTab`
+  keeps over `NotebookPreferences`. The page and its dialog show no note or
+  reminder content and keep the Settings window's screenshot policy.
   While shown it takes the slot upstream gives the Index tab, so Health
   and Notifications share one: the one the bar leaves out gets a row in
   Settings (`WatchHomeNavTab.displacedTabs`). The tab bar in `:pebble`
@@ -1847,6 +1919,25 @@ in the app's device suite:
   there and opens the tab only for one with that token, not relaunched
   from Recents, while the tab is shown; it reads only ids from the intent,
   never the text in it.
+- The tab's backup reminder (`BackupReminder`) shows while automatic
+  backups are off, never set up, or need to be set up again (not while
+  their state is unread or unreadable), with Set up, Turn on or Set up
+  again, Not now (7
+  days, which also undoes Never) and Never
+  remind me again. The answers stay on this phone (`BackupReminderFile`,
+  no-backup directory). A snooze reaching more than 7 days ahead counts as
+  run out; the tab reads the time again whenever it is shown.
+- Upstream's Settings > Calendar is named Phone Calendar and also holds the
+  Notebook's "Show in Notebook" switch and its own pick of calendars
+  (`PhoneCalendarsDialog`, opened when the switch is turned on with none
+  picked), whatever the watch's calendar settings are. The switch shows off
+  while Gravel lacks calendar access, so a tap asks again after access was
+  taken away, and a refused ask turns it off. Granting the access also
+  lets libpebble3 put the phone's calendar on the watch while the watch's
+  Enable Calendar is on, so with access missing and Enable Calendar on the
+  switch asks first (`phoneCalendarFirstStep`): "Notebook only" turns
+  Enable Calendar off before the access prompt. The picker lists calendar and account names in
+  the Settings window.
 - Settings > AI takes Speech Recognition's place in the list and opens two
   pages: Speech Recognition, upstream's category, now kept out of the
   top-level list (`Section.parent`), and, where the Notebook runs, LLM
@@ -2001,6 +2092,21 @@ in the app's device suite:
   its reminder edited; a later time offers only the edit. A switch in the
   calendar replaces a stamp; completing or marking missed elsewhere keeps
   the first one an occurrence gets.
+  With "Show in Notebook" on in Settings > Phone Calendar and a calendar
+  picked there, the section also shows the phone's own calendar events
+  (`PhoneCalendar`, read through `AndroidPhoneCalendar` for each month the
+  calendar shows, again on a zone change, on Try again and each time the
+  section starts): a neutral dot per event after the reminders' dots
+  (three dots at most), and the day's events under its reminders, all-day
+  ones first. Canceled events and ones the user declined are left out; of
+  each event the section keeps its title, times, all-day flag and calendar
+  name, and a tap on one does nothing. Picks are
+  stored as a calendar's identity (`calendarKey`: account, name, sync id),
+  not the provider's row id, so they follow the calendar through a restore
+  and do not pass to another calendar given the same row id. While shown,
+  the calendar pages at least a year either side of today, and a line under
+  the grid says when no calendar is picked, calendar access is off or the
+  read failed.
   The completion review, opened from the banner or the "to review"
   notification (which opening it clears), lists the parked claims, read
   strictly with the section's reads while it is open, each with up to four

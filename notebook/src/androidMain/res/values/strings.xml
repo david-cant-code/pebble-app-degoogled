@@ -126,6 +126,14 @@
     <string name="notebook_stop">Stop recording</string>
     <string name="notebook_record_hint">Tap to record a note or a reminder</string>
     <string name="notebook_typed_only">This phone can\'t turn recordings into text, so the Notebook keeps typed notes and reminders</string>
+    <string name="notebook_backup_nudge">Automatic backups aren\'t set up</string>
+    <string name="notebook_backup_nudge_again">Automatic backups need to be set up again</string>
+    <string name="notebook_backup_nudge_off">Automatic backups are off</string>
+    <string name="notebook_backup_nudge_set_up">Set up</string>
+    <string name="notebook_backup_nudge_turn_on">Turn on</string>
+    <string name="notebook_backup_nudge_set_up_again">Set up again</string>
+    <string name="notebook_backup_nudge_not_now">Not now</string>
+    <string name="notebook_backup_nudge_never">Never remind me again</string>
     <string name="notebook_recording_time">Recording %1$s of %2$s</string>
     <string name="notebook_saving_recording">Saving the recording</string>
     <string name="notebook_recording_too_short">That recording was too short. Record a little longer.</string>
@@ -351,6 +359,11 @@
         <item quantity="one">, %d phone calendar event</item>
         <item quantity="other">, %d phone calendar events</item>
     </plurals>
+    <string name="notebook_phone_calendars_title">Calendars in Notebook</string>
+    <string name="notebook_phone_calendars_not_read">Your phone\'s calendars could not be listed.</string>
+    <string name="notebook_phone_calendars_none">There are no calendars on this phone.</string>
+    <string name="notebook_phone_calendars_no_access">Gravel\'s calendar access is off, so your phone\'s calendars cannot be listed.</string>
+    <string name="notebook_done">Done</string>
     <string name="notebook_reminders_field_message">Reminder</string>
     <string name="notebook_reminders_field_date">Date</string>
     <string name="notebook_reminders_field_time">Time</string>
@@ -433,6 +446,37 @@
     <string name="notebook_completions_settled">Already handled, but it couldn\'t be taken off the review. Disregard it to remove it.</string>
     <string name="notebook_completions_confirm_leaves">It then leaves the review.</string>
     <string name="notebook_completions_removed">Taken off the review</string>
+    <string name="notebook_trigger_title_on">Turn on quick reminder completion</string>
+    <string name="notebook_trigger_title_change">Change trigger word</string>
+    <string name="notebook_trigger_what">Start a recording with a short word to log that you finished something, for example \"done, gave the dog its pills.\"</string>
+    <string name="notebook_trigger_never_alone">Nothing is marked done on its own: what you said after the word waits in the Notebook, and you pick the reminder it completes.</string>
+    <string name="notebook_trigger_pick">Pick a word you never start a normal note or reminder with, and that is transcribed reliably. Only a recording that starts with this exact word counts.</string>
+    <string name="notebook_trigger_field">Trigger word</string>
+    <string name="notebook_trigger_placeholder">e.g. done, finished, complete</string>
+    <string name="notebook_trigger_hint">One word of letters a-z or digits, at least two characters, not a common word like note or the.</string>
+    <string name="notebook_trigger_invalid">Use one word of letters a-z or digits, at least two characters, and not a common opener like \"the\" or \"note\".</string>
+    <string name="notebook_trigger_turn_on">Turn on</string>
+    <string name="notebook_backup_title">Back Up Notebook</string>
+    <string name="notebook_backup_password_body">Choose a password for this backup. You\'ll need it to restore the backup, and nobody can recover a forgotten password, not even Gravel.</string>
+    <string name="notebook_backup_password">Password</string>
+    <string name="notebook_backup_password_again">Password again</string>
+    <string name="notebook_backup_password_hint">At least %1$d characters. A few words in a row work well.</string>
+    <string name="notebook_backup_password_too_short">Use at least %1$d characters</string>
+    <string name="notebook_backup_password_different">The passwords don\'t match</string>
+    <string name="notebook_backup_password_not_text">This password has characters a backup can\'t use</string>
+    <string name="notebook_backup_password_show">Show password</string>
+    <string name="notebook_backup_password_hide">Hide password</string>
+    <string name="notebook_backup_back_up">Back up</string>
+    <string name="notebook_backup_building">Preparing backup</string>
+    <string name="notebook_backup_stage_captures">Copying recordings waiting to be processed</string>
+    <string name="notebook_backup_stage_notes">Copying notes</string>
+    <string name="notebook_backup_stage_reminders">Copying reminders</string>
+    <string name="notebook_backup_stage_preparing">Reading the Notebook</string>
+    <string name="notebook_backup_saving">Saving backup</string>
+    <string name="notebook_backup_saving_body">Writing the file, then reading it back to check it.</string>
+    <string name="notebook_backup_saved">Backup saved</string>
+    <string name="notebook_backup_saved_with_gaps">Backup saved with gaps</string>
+    <string name="notebook_backup_saved_as">Saved as %1$s. Gravel read it back and checked that it opens with your password and holds what was written.</string>
     <plurals name="notebook_backup_missing_notes">
         <item quantity="one">%1$d note couldn\'t be read and isn\'t in this backup.</item>
         <item quantity="other">%1$d notes couldn\'t be read and aren\'t in this backup.</item>
@@ -445,18 +489,185 @@
         <item quantity="one">%1$d note file the Notebook doesn\'t list isn\'t in this backup.</item>
         <item quantity="other">%1$d note files the Notebook doesn\'t list aren\'t in this backup.</item>
     </plurals>
+    <plurals name="notebook_backup_missing_captures">
+        <item quantity="one">%1$d waiting recording couldn\'t be read and isn\'t in this backup.</item>
+        <item quantity="other">%1$d waiting recordings couldn\'t be read and aren\'t in this backup.</item>
+    </plurals>
+    <string name="notebook_restore_title">Restore From Backup</string>
+    <string name="notebook_check_title">Check a Backup</string>
+    <string name="notebook_backup_opening">Opening backup</string>
+    <string name="notebook_backup_cleaning_up">Checking the unfinished backup file</string>
+    <string name="notebook_backup_enter_password">Enter the password this backup was made with.</string>
+    <string name="notebook_backup_file">File: %1$s</string>
+    <string name="notebook_backup_wrong_password">Wrong password, or the file is damaged.</string>
+    <string name="notebook_backup_open">Open</string>
+    <string name="notebook_backup_checking">Checking backup</string>
+    <string name="notebook_backup_checking_body">Decrypting and checking the whole file.</string>
+    <string name="notebook_restore_confirm_title">Restore this backup?</string>
+    <string name="notebook_restore_confirm_body">Restoring adds what this phone is missing. A note on both keeps the phone\'s version if it was changed after the backup\'s copy, and takes the backup\'s otherwise. No note is deleted.</string>
+    <string name="notebook_restore_confirm_reminders">Reminders already on this phone keep their times and messages.</string>
     <string name="notebook_restore">Restore</string>
     <string name="notebook_restore_plan_fresh">Before adding this backup, Gravel sets aside the parts of your Notebook that can\'t be read and deletes them after 30 days.</string>
+    <string name="notebook_restore_lock_reason">Restoring your automatic backup needs your screen lock.</string>
+    <string name="notebook_restore_not_started">Restore not started</string>
+    <string name="notebook_restore_fail_lock">Android couldn\'t ask for your screen lock, so the restore didn\'t start.</string>
+    <string name="notebook_restore_fail_no_automatic">Gravel couldn\'t find or read the automatic backup. Pick a backup file to restore instead.</string>
+    <string name="notebook_restore_fail_automatic">Gravel couldn\'t open the automatic backup it tried. Pick a backup file to restore instead.</string>
+    <string name="notebook_restore_pick_file">Pick a file</string>
     <string name="notebook_restore_plan_over">Before adding this backup, Gravel deletes every Notebook file on this phone, since none of them can be opened, and makes a new key. Completed tasks waiting for review aren\'t in backups, so they don\'t come back. Reminders that were already set may still ring.</string>
     <string name="notebook_restore_plan_reminders">Reminders in this backup come back with the backup\'s times and messages.</string>
+    <string name="notebook_check_ok">Backup checked</string>
+    <string name="notebook_check_problems">Backup checked, with items a restore would skip</string>
+    <string name="notebook_backup_made_on">Made %1$s</string>
+    <string name="notebook_backup_size">Size: %1$s</string>
     <plurals name="notebook_backup_notes">
         <item quantity="one">%1$d note</item>
         <item quantity="other">%1$d notes</item>
     </plurals>
+    <string name="notebook_backup_folders">In %1$s</string>
+    <string name="notebook_backup_folders_more">In %1$s, and %2$d more</string>
+    <string name="notebook_backup_folder_count">%1$s (%2$d)</string>
     <plurals name="notebook_backup_reminders">
         <item quantity="one">%1$d reminder</item>
         <item quantity="other">%1$d reminders</item>
     </plurals>
+    <plurals name="notebook_backup_history">
+        <item quantity="one">%1$d entry of reminder history</item>
+        <item quantity="other">%1$d entries of reminder history</item>
+    </plurals>
+    <plurals name="notebook_backup_captures">
+        <item quantity="one">%1$d queued recording</item>
+        <item quantity="other">%1$d queued recordings</item>
+    </plurals>
+    <plurals name="notebook_backup_folder_tags">
+        <item quantity="one">Tags for %1$d folder</item>
+        <item quantity="other">Tags for %1$d folders</item>
+    </plurals>
+    <plurals name="notebook_backup_skip_notes">
+        <item quantity="one">A restore would skip %1$d note.</item>
+        <item quantity="other">A restore would skip %1$d notes.</item>
+    </plurals>
+    <plurals name="notebook_backup_skip_folders">
+        <item quantity="one">A restore would skip %1$d folder.</item>
+        <item quantity="other">A restore would skip %1$d folders.</item>
+    </plurals>
+    <plurals name="notebook_backup_skip_captures">
+        <item quantity="one">A restore would skip %1$d waiting recording.</item>
+        <item quantity="other">A restore would skip %1$d waiting recordings.</item>
+    </plurals>
+    <plurals name="notebook_backup_skip_reminders">
+        <item quantity="one">A restore would skip %1$d reminder.</item>
+        <item quantity="other">A restore would skip %1$d reminders.</item>
+    </plurals>
+    <plurals name="notebook_backup_skip_history">
+        <item quantity="one">A restore would skip %1$d entry of reminder history.</item>
+        <item quantity="other">A restore would skip %1$d entries of reminder history.</item>
+    </plurals>
+    <string name="notebook_restoring">Restoring</string>
+    <string name="notebook_restoring_body">You can leave this screen. If Android closes Gravel before the restore finishes, Gravel tells you the next time it opens.</string>
+    <string name="notebook_restore_stage_checking">Checking the file again</string>
+    <string name="notebook_restore_stage_notes">Adding notes</string>
+    <string name="notebook_restore_stage_captures">Adding recordings</string>
+    <string name="notebook_restore_stage_reminders">Adding reminders</string>
+    <string name="notebook_restore_stage_rearming">Setting reminder alarms</string>
+    <string name="notebook_restored">Restore finished</string>
+    <string name="notebook_restored_nothing">Nothing new was added.</string>
+    <plurals name="notebook_restored_notes_written">
+        <item quantity="one">%1$d note added or updated</item>
+        <item quantity="other">%1$d notes added or updated</item>
+    </plurals>
+    <plurals name="notebook_restored_notes_kept">
+        <item quantity="one">%1$d note was already up to date</item>
+        <item quantity="other">%1$d notes were already up to date</item>
+    </plurals>
+    <plurals name="notebook_restored_folders">
+        <item quantity="one">%1$d folder added</item>
+        <item quantity="other">%1$d folders added</item>
+    </plurals>
+    <plurals name="notebook_restored_folder_tags">
+        <item quantity="one">Tags added for %1$d folder</item>
+        <item quantity="other">Tags added for %1$d folders</item>
+    </plurals>
+    <plurals name="notebook_restored_captures">
+        <item quantity="one">%1$d recording added to the processing queue</item>
+        <item quantity="other">%1$d recordings added to the processing queue</item>
+    </plurals>
+    <plurals name="notebook_restored_captures_kept">
+        <item quantity="one">%1$d recording was already in the queue</item>
+        <item quantity="other">%1$d recordings were already in the queue</item>
+    </plurals>
+    <plurals name="notebook_restored_reminders">
+        <item quantity="one">%1$d reminder added</item>
+        <item quantity="other">%1$d reminders added</item>
+    </plurals>
+    <plurals name="notebook_restored_reminders_kept">
+        <item quantity="one">%1$d reminder was already here</item>
+        <item quantity="other">%1$d reminders were already here</item>
+    </plurals>
+    <plurals name="notebook_restored_history">
+        <item quantity="one">%1$d entry of reminder history added</item>
+        <item quantity="other">%1$d entries of reminder history added</item>
+    </plurals>
+    <plurals name="notebook_restored_skip_notes">
+        <item quantity="one">%1$d note couldn\'t be restored</item>
+        <item quantity="other">%1$d notes couldn\'t be restored</item>
+    </plurals>
+    <plurals name="notebook_restored_skip_folders">
+        <item quantity="one">%1$d folder couldn\'t be restored</item>
+        <item quantity="other">%1$d folders couldn\'t be restored</item>
+    </plurals>
+    <plurals name="notebook_restored_skip_captures">
+        <item quantity="one">%1$d waiting recording couldn\'t be restored</item>
+        <item quantity="other">%1$d waiting recordings couldn\'t be restored</item>
+    </plurals>
+    <plurals name="notebook_restored_skip_reminders">
+        <item quantity="one">%1$d reminder couldn\'t be restored</item>
+        <item quantity="other">%1$d reminders couldn\'t be restored</item>
+    </plurals>
+    <plurals name="notebook_restored_skip_history">
+        <item quantity="one">%1$d entry of reminder history couldn\'t be restored</item>
+        <item quantity="other">%1$d entries of reminder history couldn\'t be restored</item>
+    </plurals>
+    <string name="notebook_backup_not_made">Backup not made</string>
+    <string name="notebook_backup_not_saved">Backup not saved</string>
+    <string name="notebook_backup_not_opened">Couldn\'t open backup</string>
+    <string name="notebook_restore_stopped">Restore stopped</string>
+    <string name="notebook_backup_no_space_title">Not enough space</string>
+    <string name="notebook_backup_fail_key_missing">The Notebook\'s key is missing on this phone, so its notes can\'t be read. No backup was made.</string>
+    <string name="notebook_backup_fail_damaged">Part of the Notebook is damaged, so no backup was made.</string>
+    <string name="notebook_backup_fail_unreadable">The Notebook couldn\'t be read just now, so no backup was made. Try again.</string>
+    <string name="notebook_backup_fail_no_space">There isn\'t enough free space on this phone. Free up some space and try again.</string>
+    <string name="notebook_backup_fail_the_file">the file you picked</string>
+    <string name="notebook_backup_fail_file_unreadable">Gravel couldn\'t read the file you picked.</string>
+    <string name="notebook_backup_fail_not_a_backup">This file isn\'t a Notebook backup.</string>
+    <string name="notebook_backup_fail_newer">This backup was made by a newer version of Gravel. Update Gravel to open it.</string>
+    <string name="notebook_backup_fail_file_damaged">This backup file is damaged, so it can\'t be opened.</string>
+    <string name="notebook_restore_fail_file">The restore stopped because the backup couldn\'t be read the same way twice. Anything it already added stays.</string>
+    <string name="notebook_restore_fail_key_missing">The restore stopped because the Notebook\'s key is missing on this phone. Anything it already added stays. The notice at the top of the Notebook tab can start the Notebook over first.</string>
+    <string name="notebook_restore_fail_damaged">The restore stopped because part of the Notebook is damaged. Anything it already added stays. Use the notice at the top of the Notebook tab to put the damaged part right first.</string>
+    <string name="notebook_restore_fail_unreadable">The restore stopped because the Notebook couldn\'t be read or written just now. Anything it already added stays. Restore again to finish; from Settings, pick the backup file and enter its password or recovery key.</string>
+    <string name="notebook_restore_fail_key_store">The restore stopped because Android can\'t use the Notebook\'s key right now, so Gravel added nothing. Restart the phone and try again. If that doesn\'t help, start over from the notice at the top of the Notebook tab.</string>
+    <string name="notebook_backup_no_picker_title">No file picker</string>
+    <string name="notebook_backup_fail_no_picker">This phone has no app for picking files.</string>
+    <string name="notebook_backup_fail_staging">Gravel couldn\'t use its own storage for the backup. Try again.</string>
+    <string name="notebook_backup_staging_title">Couldn\'t finish</string>
+    <string name="notebook_backup_fail_interrupted">Gravel closed before the backup was saved, and the unfinished file was removed. Run Back Up Notebook again.</string>
+    <string name="notebook_backup_fail_interrupted_kept">Gravel closed before the backup was saved. If the unfinished file is there, delete it, then run Back Up Notebook again.</string>
+    <string name="notebook_backup_fail_interrupted_empty_removed">Gravel closed before the backup was saved, and the empty file the save screen made was removed. Run Back Up Notebook again.</string>
+    <string name="notebook_backup_fail_interrupted_untouched">Gravel closed before the backup was saved and didn\'t write to the file you picked. Run Back Up Notebook again.</string>
+    <string name="notebook_backup_fail_empty_removed">The empty file the save screen made was removed.</string>
+    <string name="notebook_backup_fail_untouched">Gravel didn\'t write to the file you picked.</string>
+    <string name="notebook_backup_fail_not_empty">The file you picked already has something in it, so Gravel didn\'t write to it. Run Back Up Notebook again and save under a new name.</string>
+    <string name="notebook_backup_fail_not_checked">Gravel couldn\'t check that the file you picked is empty, so it didn\'t write to it. Run Back Up Notebook again and save it somewhere else.</string>
+    <string name="notebook_backup_fail_not_opened">Gravel couldn\'t write to the file you picked.</string>
+    <string name="notebook_backup_fail_not_written">Writing the backup file failed.</string>
+    <string name="notebook_backup_fail_not_read_back">Gravel couldn\'t read the backup file back to check it.</string>
+    <string name="notebook_backup_fail_not_verified">The backup file didn\'t read back as the backup that was written.</string>
+    <string name="notebook_backup_fail_removed">The file was removed. Run Back Up Notebook again.</string>
+    <string name="notebook_backup_fail_not_removed">Delete it, then run Back Up Notebook again.</string>
+    <string name="notebook_restore_fail_staging">The restore stopped because Gravel couldn\'t read its own copy of the backup. Anything it already added stays; pick the file again to finish.</string>
+    <string name="notebook_restore_interrupted_title">Restore interrupted</string>
+    <string name="notebook_restore_interrupted">Gravel closed before the restore finished. Anything it added stays. Restore again to finish; from Settings, pick the backup file and enter its password or recovery key.</string>
     <string name="notebook_close">Close</string>
     <string name="notebook_auto_channel">Notebook backups</string>
     <string name="notebook_auto_failed_title">Notebook backup failed</string>
@@ -482,6 +693,35 @@
     <string name="notebook_auto_status_failed">The last backup failed. %1$s</string>
     <string name="notebook_auto_status_unreadable">Automatic backup settings couldn\'t be read.</string>
     <string name="notebook_auto_status_none">No backup yet</string>
+    <string name="notebook_auto_title">Automatic Backups</string>
+    <string name="notebook_auto_explain">Gravel backs up your notes and reminders to a folder you pick, about an hour after you change something, and reads each backup back to check it. Recordings waiting to be processed aren\'t included.</string>
+    <string name="notebook_auto_explain_folder">Pick a folder that is copied off this phone, such as one a sync or cloud app keeps. Backups in a folder only on this phone are lost with the phone.</string>
+    <string name="notebook_auto_explain_key">The backups are sealed with a recovery key that Gravel shows you during setup. You need it to restore a backup on a new phone. Gravel keeps a copy on this phone so it can back up on its own, but if you lose the phone and the key, nobody can open the backups, not even Gravel.</string>
+    <string name="notebook_auto_pick_folder">Pick folder</string>
+    <string name="notebook_auto_key_title">Your recovery key</string>
+    <string name="notebook_auto_key_body">Write this key down or save it in a password manager now. Gravel won\'t show it again once setup is done. Anyone with the key and your backup files can read your notes.</string>
+    <string name="notebook_auto_copy">Copy</string>
+    <string name="notebook_auto_copy_warning_title">Don\'t share your recovery key</string>
+    <string name="notebook_auto_copy_warning_body">Anyone with this key can open your backups. Paste it only into a password manager you trust. Gravel tries to clear the clipboard a minute later.</string>
+    <string name="notebook_auto_copy_confirm">Copy key</string>
+    <string name="notebook_auto_key_saved">I saved it</string>
+    <string name="notebook_auto_typeback_title">Type your recovery key</string>
+    <string name="notebook_auto_typeback_body">Type the key back to show you have it. Spaces don\'t matter.</string>
+    <string name="notebook_auto_typeback_field">Recovery key</string>
+    <string name="notebook_auto_typeback_wrong">That isn\'t the key Gravel showed.</string>
+    <string name="notebook_auto_show_key_again">Show key</string>
+    <string name="notebook_auto_confirm">Confirm</string>
+    <string name="notebook_auto_saving_title">Making the first backup</string>
+    <string name="notebook_auto_saving_body">Writing it to your folder, then reading it back to check it.</string>
+    <string name="notebook_auto_done_title">Automatic backups are on</string>
+    <string name="notebook_auto_done_body">The first backup was saved as %1$s and checked.</string>
+    <string name="notebook_auto_folder_done_title">Backup folder changed</string>
+    <string name="notebook_auto_folder_done_body">A backup was saved in the new folder as %1$s and checked.</string>
+    <string name="notebook_auto_setup_failed_title">First backup failed</string>
+    <string name="notebook_auto_try_again">Try again</string>
+    <string name="notebook_auto_pick_another">Pick another folder</string>
+    <string name="notebook_auto_no_picker">This phone has no app for picking a folder.</string>
+    <string name="notebook_auto_use_key">Turn on automatic backups with this key</string>
     <string name="notebook_auto_status_stale">No backup confirmed since %1$s</string>
     <string name="notebook_auto_stale_title">No confirmed Notebook backup for over a day</string>
     <string name="notebook_auto_stale_body">No backup has been confirmed since %1$s. Tap to see Automatic Backups.</string>
@@ -527,4 +767,40 @@
     <string name="notebook_auto_key_status_due">Check that you still have your recovery key</string>
     <string name="notebook_auto_key_status_checked">Last checked %1$s</string>
     <string name="notebook_auto_key_status_never">Check that you still have it</string>
+    <string name="notebook_auto_check_title">Check your recovery key</string>
+    <string name="notebook_auto_check_body">Type your recovery key. Gravel opens your newest backup with it. Spaces don\'t matter.</string>
+    <string name="notebook_auto_check_wrong">That isn\'t your recovery key.</string>
+    <string name="notebook_auto_check_confirm">Check</string>
+    <string name="notebook_auto_not_now">Not now</string>
+    <string name="notebook_auto_no_key">I don\'t have my key</string>
+    <string name="notebook_auto_checking_title">Checking your key</string>
+    <string name="notebook_auto_checking_body">Opening your newest backup with it. This can take a moment while a backup is being made.</string>
+    <string name="notebook_auto_check_passed_title">Your recovery key is right</string>
+    <string name="notebook_auto_check_passed_opened">It opens your newest backup.</string>
+    <string name="notebook_auto_check_passed_none">It matches the key Gravel backs up with.</string>
+    <string name="notebook_auto_check_passed_not_read">It matches the key Gravel backs up with, but your newest backup couldn\'t be read just now.</string>
+    <string name="notebook_auto_check_passed_damaged">It matches the key Gravel backs up with, but your newest backup didn\'t read back as Gravel wrote it. Gravel leaves that file in the folder and writes a new backup with the next automatic run.</string>
+    <string name="notebook_auto_check_passed_damaged_off">It matches the key Gravel backs up with, but your newest backup didn\'t read back as Gravel wrote it. Gravel leaves that file in the folder. Turn automatic backups on to write a new backup.</string>
+    <string name="notebook_auto_check_passed_missing">It matches the key Gravel backs up with, but your newest backup is no longer in your backup folder. Gravel writes a new backup with the next automatic run.</string>
+    <string name="notebook_auto_check_passed_missing_off">It matches the key Gravel backs up with, but your newest backup is no longer in your backup folder. Turn automatic backups on to write a new backup.</string>
+    <string name="notebook_auto_check_not_checked_title">Key not checked</string>
+    <string name="notebook_auto_check_not_checked_settings">Gravel couldn\'t read its automatic backup settings, so your key wasn\'t checked.</string>
+    <string name="notebook_auto_check_not_checked_key">Gravel couldn\'t read the key it backs up with, so your key wasn\'t checked.</string>
+    <string name="notebook_auto_key_saving_title">Saving a backup with the new key</string>
+    <string name="notebook_auto_key_failed_title">Backup with the new key failed</string>
+    <string name="notebook_auto_lock_title">Confirm it\'s you</string>
+    <string name="notebook_auto_lock_failed">Android couldn\'t ask for your screen lock, so nothing was changed. Try again in a moment.</string>
+    <string name="notebook_auto_lock_setup">To set up automatic backups</string>
+    <string name="notebook_auto_lock_new_key">To make a new recovery key</string>
+    <string name="notebook_auto_lock_folder">To change where backups go</string>
+    <string name="notebook_auto_new_key_title">Make a new recovery key?</string>
+    <string name="notebook_auto_new_key_body">Backups already in your folder stay sealed with your current key, and without it they can\'t be restored. Gravel leaves them in the folder. New backups use the new key, which Gravel shows you next.</string>
+    <string name="notebook_auto_new_key_confirm">Make new key</string>
+    <string name="notebook_auto_key_done_title">New recovery key in use</string>
+    <string name="notebook_auto_key_done_body">A backup was saved with the new key as %1$s and checked. Backups made before it still need your old key.</string>
+    <string name="notebook_backup_enter_recovery_key">This is an automatic backup. Enter the recovery key that sealed it: the one Gravel showed when automatic backups were set up, or when you made a new key.</string>
+    <string name="notebook_backup_recovery_key">Recovery key</string>
+    <string name="notebook_backup_wrong_recovery_key">Wrong recovery key, or the file is damaged.</string>
+    <string name="notebook_backup_recovery_key_show">Show recovery key</string>
+    <string name="notebook_backup_recovery_key_hide">Hide recovery key</string>
 </resources>

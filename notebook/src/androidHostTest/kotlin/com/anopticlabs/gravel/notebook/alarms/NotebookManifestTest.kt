@@ -18,6 +18,7 @@ class NotebookManifestTest {
         val receivers = elements("receiver").associateBy { it.getAttribute("android:name") }
         assertEquals("false", receivers.getValue("com.anopticlabs.gravel.notebook.alarms.ReminderFireReceiver").getAttribute("android:exported"))
         assertEquals("false", receivers.getValue("com.anopticlabs.gravel.notebook.alarms.ReminderActionReceiver").getAttribute("android:exported"))
+        assertEquals("false", receivers.getValue("com.anopticlabs.gravel.notebook.ui.ClipboardClearReceiver").getAttribute("android:exported"))
         assertEquals("false", receivers.getValue("com.anopticlabs.gravel.notebook.backup.AutoBackupCheckReceiver").getAttribute("android:exported"))
         val rearm = receivers.getValue("com.anopticlabs.gravel.notebook.alarms.NotebookRearmReceiver")
         assertEquals("false", rearm.getAttribute("android:exported"))
@@ -25,7 +26,7 @@ class NotebookManifestTest {
             .map { (rearm.getElementsByTagName("action").item(it) as Element).getAttribute("android:name") }
         assertEquals(NotebookRearmReceiver.ACTIONS, actions.toSet())
         assertEquals(3, actions.size)
-        assertEquals(4, receivers.size)
+        assertEquals(5, receivers.size)
     }
 
     @Test

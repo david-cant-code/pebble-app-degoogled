@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PhoneIphone
@@ -56,6 +57,7 @@ import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -84,6 +86,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -105,6 +108,11 @@ import androidx.lifecycle.ViewModel
 import co.touchlab.kermit.Logger
 import coredevices.whisper.isWhisperSupported
 import com.anopticlabs.gravel.firmware.FirmwarePickerRoute
+import com.anopticlabs.gravel.ui.NotebookSettingsChoices
+import com.anopticlabs.gravel.ui.NotebookSettingsText
+import com.anopticlabs.gravel.ui.PhoneCalendarFirstStep
+import com.anopticlabs.gravel.ui.phoneCalendarFirstStep
+import com.anopticlabs.gravel.ui.phoneCalendarRefusalText
 import com.anopticlabs.gravel.ui.rememberNotebookTab
 import com.anopticlabs.gravel.ui.rememberTextModels
 import com.anopticlabs.gravel.ui.textModelsSummary
@@ -138,6 +146,7 @@ import coredevices.util.CoreConfigHolder
 import coredevices.util.Permission
 import coredevices.util.PermissionRequester
 import coredevices.util.STTConfig
+import coredevices.util.granted
 import coredevices.util.WeatherUnit
 import coredevices.util.emailOrNull
 import coredevices.util.models.CactusSTTMode
@@ -207,9 +216,10 @@ enum class Section(val title: String, val icon: ImageVector) {
     QuickLaunch("Quick Launch", Icons.Default.RocketLaunch), // watch only
     NotificationsWatch("Notifications", Icons.Default.Notifications), // watch only
     General("General", Icons.Default.Settings),
+    Notebook("Notebook", Icons.Outlined.EditNote), // Gravel
     Apps("Apps", Icons.Default.Apps),
     Battery("Battery (Not available without telemetry)", Icons.Default.BatteryFull),
-    Calendar("Calendar", Icons.Default.CalendarMonth),
+    Calendar("Phone Calendar", Icons.Default.CalendarMonth), // Gravel: it also holds the Notebook's phone calendar settings
     Health("Health", Icons.AutoMirrored.Filled.DirectionsRun),
     AI("AI", Icons.Default.AutoAwesome), // Gravel
     Speech("Speech Recognition", Icons.Default.Mic), // Gravel: opened from AI, see parent()
@@ -262,10 +272,12 @@ internal fun offlineAccuracyNote(mode: CactusSTTMode, serverConfigured: Boolean,
 internal fun serverOnMobileDataNote(mode: CactusSTTMode, phoneHasModel: Boolean): String? {
     val lead = "When this is off, audio goes to your server only while this phone is using Wi-Fi that isn't marked metered."
     return when {
-        mode == CactusSTTMode.RemoteOnly -> "$lead Otherwise, watch dictation doesn't work."
+        mode == CactusSTTMode.RemoteOnly -> "$lead Otherwise, watch dictation doesn't work and Notebook recordings wait for Wi-Fi."
         mode != CactusSTTMode.RemoteFirst && mode != CactusSTTMode.LocalFirst -> null
-        phoneHasModel -> "$lead Otherwise, watch dictation is transcribed on this phone."
-        else -> "$lead Otherwise, watch dictation doesn't work until this phone has a speech model."
+        !phoneHasModel -> "$lead Otherwise, watch dictation doesn't work until this phone has a speech model, and Notebook recordings wait for Wi-Fi."
+        mode == CactusSTTMode.RemoteFirst ->
+            "$lead Otherwise, watch dictation and Notebook recordings of 30 seconds or less are transcribed on this phone, and longer recordings wait for Wi-Fi."
+        else -> "$lead Otherwise, watch dictation is transcribed on this phone, and Notebook recordings the phone can't transcribe wait for Wi-Fi."
     }
 }
 
@@ -566,9 +578,70 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     val healthIsSyncing by platformHealthSync.syncing.collectAsState()
     val notebookTab = rememberNotebookTab()
     val notebookShown = notebookTab?.shown?.collectAsState()?.value == true
+    val notebookSettings = notebookTab?.takeIf { it.supported }?.settings?.collectAsState()?.value
+    val notebookAutoBackup = notebookTab?.takeIf { it.supported }?.autoBackup?.collectAsState()?.value
+    val notebookKeyLocation = notebookTab?.takeIf { it.supported }?.keyLocation?.collectAsState()?.value
     val textModels = rememberTextModels()?.takeIf { it.supported }
     val textModelFacts = textModels?.facts?.collectAsState()?.value
     LaunchedEffect(textModels) { textModels?.refresh() }
+    var showTriggerWordDialog by rememberSaveable { mutableStateOf(false) }
+    if (showTriggerWordDialog) {
+        notebookTab?.TriggerWordDialog(onDismiss = { showTriggerWordDialog = false })
+    }
+    var showPhoneCalendarsDialog by rememberSaveable { mutableStateOf(false) }
+    if (showPhoneCalendarsDialog) {
+        notebookTab?.PhoneCalendarsDialog(onDismiss = { showPhoneCalendarsDialog = false })
+    }
+    val calendarAccess by permissionRequester.granted(Permission.Calendar).collectAsState(false)
+    fun showPhoneCalendarInNotebook(pickedNone: Boolean) {
+        notebookTab?.setPhoneCalendarShown(true)
+        if (pickedNone) showPhoneCalendarsDialog = true
+    }
+    // A refused ask turns the switch off, so the Notebook does not wait on access the user said no to.
+    fun askCalendarAccessForNotebook(pickedNone: Boolean) = scope.launch {
+        val refused = phoneCalendarRefusalText(uiContext?.let { permissionRequester.requestPermission(Permission.Calendar, it) })
+        if (refused == null) {
+            showPhoneCalendarInNotebook(pickedNone)
+        } else {
+            notebookTab?.setPhoneCalendarShown(false)
+            snackbarDisplay.showSnackbar(refused)
+        }
+    }
+    // Holds whether nothing is picked yet while the watch question is open.
+    var watchCalendarQuestion by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    watchCalendarQuestion?.let { pickedNone ->
+        AlertDialog(
+            onDismissRequest = { watchCalendarQuestion = null },
+            title = { Text("Show on your watch too?") },
+            text = {
+                Text("Allowing calendar access also lets your watch get your calendar events, because Enable Calendar is on. Notebook only turns Enable Calendar off first.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    watchCalendarQuestion = null
+                    askCalendarAccessForNotebook(pickedNone)
+                }) { Text("Also on watch") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { watchCalendarQuestion = null }) { Text("Cancel") }
+                    TextButton(onClick = {
+                        watchCalendarQuestion = null
+                        libPebble.updateConfig(libPebbleConfig.copy(watchConfig = libPebbleConfig.watchConfig.copy(calendarPins = false)))
+                        askCalendarAccessForNotebook(pickedNone)
+                    }) { Text("Notebook only") }
+                }
+            },
+        )
+    }
+    fun turnOnPhoneCalendarInNotebook(pickedNone: Boolean) = scope.launch {
+        val hasAccess = permissionRequester.hasPermission(Permission.Calendar)
+        when (phoneCalendarFirstStep(hasAccess, libPebbleConfig.watchConfig.calendarPins)) {
+            PhoneCalendarFirstStep.SHOW -> showPhoneCalendarInNotebook(pickedNone)
+            PhoneCalendarFirstStep.ASK_ABOUT_WATCH -> watchCalendarQuestion = pickedNone
+            PhoneCalendarFirstStep.ASK_ACCESS -> askCalendarAccessForNotebook(pickedNone)
+        }
+    }
 
     val rawSettingsItems = remember(
             libPebbleConfig,
@@ -582,6 +655,9 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
             rebbleVoiceAvailable,
             platformSttAvailable,
             notebookShown,
+            notebookSettings,
+            notebookAutoBackup,
+            calendarAccess,
             textModelFacts,
         ) {
             listOfNotNull(
@@ -777,12 +853,194 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     title = "Show Notebook Tab",
                     description = "Notes and reminders you record or type",
                     topLevelType = TopLevelType.Phone,
-                    section = Section.General,
+                    section = Section.Notebook,
                     keywords = "notebook notes reminders tab",
                     checked = notebookShown,
                     show = { notebookTab?.supported == true },
                     onCheckChanged = { notebookTab?.setShown(it) },
                 ),
+                notebookSettings?.let { notebook ->
+                    basicSettingsToggleItem(
+                        title = "Quick Reminder Completion",
+                        description = "What you say after your trigger word waits for you to match it to a reminder; nothing is marked done on its own",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook trigger word completion done finished",
+                        checked = notebook.triggerWord != null,
+                        onCheckChanged = { on -> if (on) showTriggerWordDialog = true else notebookTab?.turnOffTriggerWord() },
+                    )
+                },
+                notebookSettings?.triggerWord?.let { word ->
+                    basicSettingsActionItem(
+                        title = "Trigger Word",
+                        description = "\"$word\"",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook trigger word completion",
+                        action = { showTriggerWordDialog = true },
+                    )
+                },
+                notebookSettings?.let { notebook ->
+                    basicSettingsToggleItem(
+                        title = "Interrupt Long Recordings",
+                        description = "A recording of 30 seconds or less stops a long one that is being transcribed. The long one starts over afterward, which uses more battery",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook recording long short interrupt priority order battery",
+                        checked = notebook.interruptLongRecordings,
+                        onCheckChanged = { notebookTab?.setInterruptLongRecordings(it) },
+                    )
+                },
+                notebookSettings?.let { notebook ->
+                    basicSettingsToggleItem(
+                        title = "Long Recordings Wait for Power",
+                        description = "Recordings over 30 seconds start only while the phone is plugged in. The Notebook tab offers Process now",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook recording long charging plugged power battery",
+                        checked = notebook.longRecordingsWaitForPower,
+                        onCheckChanged = { notebookTab?.setLongRecordingsWaitForPower(it) },
+                    )
+                },
+                notebookSettings?.let { notebook ->
+                    basicSettingsDropdownItem(
+                        title = "Default Reminder Time",
+                        description = NotebookSettingsText.QUICK_REMIND,
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook reminder time default quick",
+                        items = NotebookSettingsChoices.withCurrent(NotebookSettingsChoices.quickRemindMinutes, notebook.quickRemindMinutes),
+                        selectedItem = notebook.quickRemindMinutes,
+                        onItemSelected = { notebookTab?.setQuickRemindMinutes(it) },
+                        itemText = { NotebookSettingsChoices.minutesText(it) },
+                    )
+                },
+                notebookSettings?.let { notebook ->
+                    basicSettingsDropdownItem(
+                        title = "Swipe-Away Snooze",
+                        description = "A reminder notification you swipe away comes back after this long, up to ${notebook.swipeSnoozeLimit} times",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook reminder snooze swipe dismiss",
+                        items = NotebookSettingsChoices.withCurrent(NotebookSettingsChoices.swipeSnoozeMinutes, notebook.swipeSnoozeMinutes),
+                        selectedItem = notebook.swipeSnoozeMinutes,
+                        onItemSelected = { notebookTab?.setSwipeSnoozeMinutes(it) },
+                        itemText = { NotebookSettingsChoices.minutesText(it) },
+                    )
+                },
+                notebookSettings?.let { notebook ->
+                    basicSettingsDropdownItem(
+                        title = "Keep Reminder History",
+                        description = "How long past reminders stay on the Notebook calendar",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook reminder history retention calendar",
+                        items = NotebookSettingsChoices.withCurrent(NotebookSettingsChoices.historyRetentionDays, notebook.historyRetentionDays),
+                        selectedItem = notebook.historyRetentionDays,
+                        onItemSelected = { notebookTab?.setHistoryRetentionDays(it) },
+                        itemText = { NotebookSettingsChoices.daysText(it) },
+                    )
+                },
+                notebookAutoBackup?.takeIf { it.known && !it.setUp }?.let {
+                    basicSettingsActionItem(
+                        title = "Automatic Backups",
+                        description = "Back up your notes and reminders to a folder you choose, sealed with a recovery key you keep from setup",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook backup automatic recovery key folder",
+                        action = { notebookTab?.setUpAutoBackup() },
+                    )
+                },
+                notebookAutoBackup?.takeIf { it.setUp }?.let { auto ->
+                    basicSettingsToggleItem(
+                        title = "Automatic Backups",
+                        description = auto.status,
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook backup automatic recovery key folder",
+                        checked = auto.enabled,
+                        onCheckChanged = { notebookTab?.setAutoBackupEnabled(it) },
+                    )
+                },
+                notebookAutoBackup?.takeIf { it.setUpAgain }?.let {
+                    basicSettingsActionItem(
+                        title = "Set Up Automatic Backups Again",
+                        description = "Gravel can't read its automatic backup settings or key. Setting up again picks a folder and makes a new recovery key; backups already in your folder stay there and still open with your old key",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook backup automatic recovery key setup again damaged",
+                        action = { notebookTab?.setUpAutoBackupAgain() },
+                    )
+                },
+                notebookAutoBackup?.takeIf { it.setUp && it.enabled }?.let { auto ->
+                    basicSettingsActionItem(
+                        title = "Back Up Now",
+                        description = "Write a new automatic backup now, even if nothing changed",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook backup automatic now",
+                        action = { if (!auto.running) notebookTab?.backUpNow() },
+                    )
+                },
+                notebookAutoBackup?.takeIf { it.setUp }?.let { auto ->
+                    basicSettingsActionItem(
+                        title = "Recovery Key",
+                        description = auto.keyStatus,
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook backup automatic recovery key check",
+                        action = { notebookTab?.checkRecoveryKey() },
+                    )
+                },
+                notebookAutoBackup?.takeIf { it.setUp }?.let { auto ->
+                    basicSettingsActionItem(
+                        title = "Backup Folder",
+                        description = auto.folderName ?: "Change where automatic backups go",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook backup automatic folder change",
+                        action = { notebookTab?.changeBackupFolder() },
+                    )
+                },
+                notebookSettings?.let {
+                    basicSettingsActionItem(
+                        title = "Back Up Notebook",
+                        description = "Save your notes, reminders and waiting recordings to a password-protected file you choose",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook backup export save encrypted",
+                        action = { notebookTab?.startBackup() },
+                    )
+                },
+                notebookSettings?.let {
+                    basicSettingsActionItem(
+                        title = "Restore From Backup",
+                        description = "Merge a backup file's notes, reminders and recordings into this phone's Notebook",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook backup restore import",
+                        action = { notebookTab?.startRestore() },
+                    )
+                },
+                notebookSettings?.let {
+                    basicSettingsActionItem(
+                        title = "Check a Backup",
+                        description = "See whether a backup file opens with its password and what it holds, without restoring it",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook backup check verify",
+                        action = { notebookTab?.startBackupCheck() },
+                    )
+                },
+                notebookKeyLocation?.let { location ->
+                    basicSettingsActionItem(
+                        title = "Notebook Key",
+                        description = location,
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Notebook,
+                        keywords = "notebook key encryption strongbox secure hardware",
+                    )
+                },
                 basicSettingsToggleItem(
                     title = "Foreground Service",
                     description = "Show foreground service notification to keep app alive in background",
@@ -1163,7 +1421,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                 ),
                 navBarNav?.let { nav -> basicSettingsActionItem(
                     title = "Calendars",
-                    description = "Configure which calendars to display",
+                    description = "Configure which calendars to display on the watch",
                     topLevelType = TopLevelType.Phone,
                     section = Section.Calendar,
                     action = {
@@ -1171,6 +1429,31 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     },
                     show = { libPebbleConfig.watchConfig.calendarPins },
                 ) },
+                notebookSettings?.let { notebook ->
+                    basicSettingsToggleItem(
+                        title = "Show in Notebook",
+                        description = "Your phone's calendar events on the Notebook's Calendar, next to your reminders",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Calendar,
+                        keywords = "notebook phone calendar events",
+                        // On only with access, so a tap asks again after access was taken away.
+                        checked = notebook.phoneCalendarShown && calendarAccess,
+                        onCheckChanged = { on ->
+                            if (on) turnOnPhoneCalendarInNotebook(pickedNone = notebook.phoneCalendars.isEmpty())
+                            else notebookTab?.setPhoneCalendarShown(false)
+                        },
+                    )
+                },
+                notebookSettings?.takeIf { it.phoneCalendarShown && calendarAccess }?.let {
+                    basicSettingsActionItem(
+                        title = "Calendars in Notebook",
+                        description = "Configure which of your phone's calendars the Notebook shows",
+                        topLevelType = TopLevelType.Phone,
+                        section = Section.Calendar,
+                        keywords = "notebook phone calendars",
+                        action = { showPhoneCalendarsDialog = true },
+                    )
+                },
                 basicSettingsToggleItem(
                     id = EnableHealthTracking,
                     title = "Enable Health Tracking",

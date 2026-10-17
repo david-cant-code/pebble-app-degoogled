@@ -22,6 +22,10 @@
         <receiver
             android:name="com.anopticlabs.gravel.notebook.alarms.ReminderActionReceiver"
             android:exported="false" />
+        <!-- Clears the clipboard after a recovery key was copied; reached only by this app's alarm. -->
+        <receiver
+            android:name="com.anopticlabs.gravel.notebook.ui.ClipboardClearReceiver"
+            android:exported="false" />
         <!-- Runs the automatic backup checks; reached only by this app's alarm. -->
         <receiver
             android:name="com.anopticlabs.gravel.notebook.backup.AutoBackupCheckReceiver"

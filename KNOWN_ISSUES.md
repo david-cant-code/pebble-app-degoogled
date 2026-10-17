@@ -899,7 +899,16 @@ waits for that transcription to stop as described in the entry above.
 **Status: open; covering more needs more phrasings in the rules.**
 
 A voice reminder's time is read by fixed English rules, not by the text
-model. Some words are still read as a
+model. When the rules are unsure, for example with a time said another way
+("after lunch", "in a couple of hours", "every Tuesday", "by Friday") or a
+word around a time that could change it, the reminder is set for the
+Default Reminder Time and Gravel asks the user to check it with a mark in
+the Reminders list and, unless Android refused its alarm, a notification.
+A reminder whose words the rules do not take for a time at all is set for
+the Default Reminder Time without asking; this is the case for English
+phrasings the rules do not know, such as "first thing" or "at sunset", and
+often for a reminder said in another language, though English-looking
+words in it, such as "5 pm", are read. Some words are still read as a
 time the user did not mean:
 "stop at 7-Eleven" reads as 7:11 PM, and a time stated as a fact, as in "I
 parked at 9", is read as the time to remind. Gravel posts a notice saying
@@ -1428,7 +1437,7 @@ uses above and is not planned.
 **Status: accepted by design.**
 
 Automatic Notebook backups are sealed under a recovery key that Gravel
-keeps, sealed by the Notebook key, so a backup can
+shows at setup and also keeps, sealed by the Notebook key, so a backup can
 run without the user. Like the Notebook key, that copy needs no user
 authentication, so code running as Gravel, or as root, on the phone can
 open every automatic backup made with that key, in the current folder or an
@@ -1441,7 +1450,8 @@ backups are sealed under a password Gravel does not keep.
 
 Automatic backups go to the folder the user picks. Gravel cannot see
 whether another app copies that folder off the phone, so backups in a
-folder that stays on the phone are lost with the phone.
+folder that stays on the phone are lost with the phone. First setup asks
+for a folder a sync or cloud app keeps.
 
 ## Automatic backup files show when the Notebook changed
 
