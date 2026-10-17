@@ -826,8 +826,9 @@ more than one watch before its threshold can be set.
 
 ## A provider that fails before the recording ends is answered only after it
 
-**Status: open; reachable only through a codec frame the decoder rejects,
-which the firmware has not been observed to send.**
+**Status: open; reachable only through a codec frame the decoder rejects
+or a session declaring a frame size or rate the phone does not decode,
+neither of which the firmware has been observed to send.**
 
 The dictation session coordinator waits for the watch to end the
 recording before it looks at the provider's result, because the
@@ -838,8 +839,11 @@ while the user keeps speaking into a session that has already failed.
 The local provider decodes each codec frame as the watch sends it and
 throws on a frame the decoder rejects, so a corrupt frame would reach
 this case; no dictation has produced one, and the only encoder the
-firmware sends is the one every provider accepts. If a rejected frame,
-a second encoder or a provider that fails before reading ever shows up,
+firmware sends is the one every provider accepts. The local provider
+also refuses, before reading, a session that declares a frame size or
+rate other than its decoder's. If a rejected frame, a refused session,
+a second encoder or another provider that fails before reading ever
+shows up,
 the coordinator needs to race the provider against the end of the
 recording and stop the watch's transfer on an early failure, with a
 coordinator test for it.
