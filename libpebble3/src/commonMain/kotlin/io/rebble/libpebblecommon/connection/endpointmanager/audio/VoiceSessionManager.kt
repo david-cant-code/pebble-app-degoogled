@@ -1,5 +1,6 @@
 package io.rebble.libpebblecommon.connection.endpointmanager.audio
 
+import com.anopticlabs.gravel.watchapp.InjectedWatchAppCaptures
 import io.rebble.libpebblecommon.di.ConnectionCoroutineScope
 import io.rebble.libpebblecommon.packets.DictationResult
 import io.rebble.libpebblecommon.packets.Result
@@ -34,6 +35,7 @@ class VoiceSessionManager(
     private val audioStreamService: AudioStreamService,
     private val watchScope: ConnectionCoroutineScope,
     private val transcriptionProvider: TranscriptionProvider,
+    private val watchAppCaptures: InjectedWatchAppCaptures,
 ) {
     private val _currentSession = MutableStateFlow<CurrentSession?>(null)
     val currentSession = _currentSession.asStateFlow()
@@ -116,6 +118,7 @@ class VoiceSessionManager(
             )
         },
         provider = transcriptionProvider,
+        watchAppCaptures = watchAppCaptures.captures,
         onSessionStarted = { request ->
             _currentSession.value = CurrentSession(request, CompletableDeferred())
         },

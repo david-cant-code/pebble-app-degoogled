@@ -838,7 +838,9 @@ Gravel's Notebook feature (voice and typed notes, and reminders) lives in the
 `:notebook` module. The
 stores, the reminder alarm stack, the capture pipeline and the tab's screen
 are registered in the app's Koin graph (`notebookModule`) and the alarm
-receivers are in the merged manifest. Pure
+receivers are in the merged manifest. Notes and reminders come from the tab's
+record button, typed notes, the reminder editor and the Notebook watch app
+(below). Pure
 logic goes in `commonMain` on the standard library and kotlinx.serialization;
 `androidMain` holds only what the platform must supply (Unicode NFKD
 decomposition for note filenames, the Keystore-backed storage below, the
@@ -1572,7 +1574,9 @@ in the app's device suite:
   The note list and the recordings list are rebuilt (both also at each
   process start) from what remains: each recording that opens gets
   the name `recovered`, its file's time (now when that is unusable), no
-  zone, no attempts, no flag; what the rebuild processes again is in
+  zone, no attempts, no flag and no watch mark (so a watch recording is
+  handled as a phone recording, for example under Pause all and in the
+  limit on held watch recordings); what the rebuild processes again is in
   `KNOWN_ISSUES.md` (a capture published twice). For any other damaged part the card offers
   Restore and Start fresh side by side, or Start fresh alone for the parked
   completions, which backups do not hold. Start fresh sets the damaged
@@ -1642,9 +1646,10 @@ in the app's device suite:
   one capture at a time, one drain at a time (`CaptureDrain`), on the I/O
   dispatcher. Before each capture it reads the queue again and takes the
   first of `processingOrder`: short captures before long ones (long is
-  over 30 seconds or of unknown length), each
+  over 30 seconds or of unknown length, and never from the watch), each
   group oldest first, under the user's pauses and settings
-  (`ProcessingControls`). Pause all holds every capture, Pause long recordings holds the long ones, and a pause stays
+  (`ProcessingControls`). Pause all holds every capture but those from the
+  watch, Pause long recordings holds the long ones, and a pause stays
   until Resume, across restarts, in a no-backup file. A pause, and a short
   capture queued while a long one that may start again is still
   transcribing (Settings > Notebook, on by default), stops the matching
@@ -1658,7 +1663,8 @@ in the app's device suite:
   asks for a run through a receiver while the process runs, and a
   WorkManager job with the charging condition is scheduled after a pass
   when long captures still wait for power; its worker asks to run again
-  while they still do (`LongCaptureCharger`). Before the first capture a
+  while they still do (`LongCaptureCharger`). The watch mark is set by the
+  watch source (below). Before the first capture a
   drain reads every store file a publish writes, strictly, so one that
   will not open holds the drain before any engine runs. A capture is
   decoded through the platform's media extractor and codecs, called from
@@ -1746,7 +1752,9 @@ in the app's device suite:
   starts the server's hold with no capture to flag; while it lasts the
   mode routes to the phone and the screen shows a notice
   (`CaptureSpeech.notice`) with Try again. Try again on the failed list
-  resets the server tries. A capture goes to the
+  resets the server tries. In both fallback modes with a phone model,
+  Flaky Network Mode sends captures made on the watch
+  (`QueuedCapture.fromWatch`) to the phone alone. A capture goes to the
   server as one WAV built in
   memory (`SelfHostedTranscriptionService.transcribeRecording`), on a
   client of its own whose read timeout is 10 minutes, under dictation's
@@ -1776,11 +1784,97 @@ in the app's device suite:
   hold, the fallback mode's tries, reroute and notice, the watches, the
   startup order and the client's read timeout on fakes or a local server;
   the network and server-try jobs, their worker, the network check, the
-  Koin wiring of the route, the notice, the network
+  Koin wiring of the route, the notice and Flaky Network Mode, the network
   watch, the speech-setting watch and Try
   again, and the rendering of the hold and notice lines are not
   host-tested; the download job's reports of a finished download are
   checked as source text.
+- The watch source is the Notebook watch app (its own repository,
+  `gravel-watchapp`; UUID, message keys and digests in `NotebookWatchApp.kt`).
+  libpebble3 takes an embedder handler for one app UUID
+  (`WatchAppCaptures`, passed to `LibPebble3.create`):
+  `VoiceSessionCoordinator` gives that app's sessions to it instead of the
+  transcription provider, without `canServeSession` (which raises the
+  dictation holds), under the same bound, deadline and supersede rules;
+  the app gets no companion app (`startAppSession`) and its AppMessages go
+  to the handler, each ACKed after it; classic PebbleKit START and STOP
+  ignore its UUID. The UUID is self-declared, so `NotebookWatchApp`
+  accepts a recording only when the SHA-256 of the PBW the phone caches
+  for the locker entry (`LockerApi.cachedPbwSha256`, the file the watch is
+  served its binary from), read at the start and the end of the
+  recording, is the same both times and either a shipped release's
+  (`SHIPPED_WATCH_APP_RELEASES`) or the one the user marked as trusted
+  (next item); what that leaves open is in `KNOWN_ISSUES.md`. The
+  handler answers only after the recording ends, as text the watch shows
+  verbatim (an empty transcription is rejected by the watch: PebbleOS
+  70ed290, `services/voice/transcription.c`, `transcription_validate`).
+  It refuses, storing nothing: audio over 256 KiB (an empty frame counting
+  as one byte), an untrusted copy, a
+  Notebook that is off, not set up or unable to record on this phone, a
+  declared Speex rate or frame size other than the decoder's (16 kHz, 320
+  samples, `WATCH_SPEEX_FRAME_SAMPLES`), over five minutes of frames,
+  under a second, 50 watch recordings held (queued or kept), 60 stored in
+  the past hour (counted in memory on a monotonic clock). Once the audio
+  has ended the rest runs even if the session is canceled: a wait of
+  `WATCH_CANCEL_WAIT` from the recording's end for the watch's cancel
+  message, the Speex decode, and the ingest of a WAV with `fromWatch`,
+  dated at the session start;
+  an error before the store answers "Couldn't save", and a stored
+  recording answers "Saved", or that it waits for Wi-Fi or for a setting
+  or model (`NotebookSpeech.watchRecordingWait`, the drain's own holds
+  for engines that succeed, without their side effects; a missing text
+  model counts as a setting), with "Saved" when that lookup fails or takes
+  over 2 s. The watch app cannot tell BACK during recording from BACK
+  after SELECT (`applib/voice/voice_window.c`, `prv_mic_click_handler`
+  reports `DictationSessionStatusFailureTranscriptionRejected` in both
+  states), so a cancel applies to the recording in progress and only its
+  wait reads it. A recording ingest could not seal is kept under a
+  `watch_<start>` name, which `QueueStore.salvagePending` queues as a
+  watch recording dated at that start. Host tests cover the routing, the
+  relay, the session-start choice, the digest, the handler's refusals,
+  limits, cancel window, errors and answers, and the wait against the
+  drain for every setting; the Speex decode, the Koin wiring, the
+  lifecycle manager's and locker's calls into these
+  are checked on a device only.
+- Gravel installs the watch app itself. `SHIPPED_WATCH_APP_RELEASES`
+  (`NotebookWatchApp.kt`) lists each release Gravel has shipped, with
+  its version, SHA-256, size and release file address on GitHub, oldest
+  first; it is empty until the first watch app release, and the last
+  entry is the one Gravel installs. `WatchAppInstaller` downloads that
+  file with the app's shared HTTP client on a tap, stops reading once
+  the body is longer than the release, and calls
+  `LockerApi.sideloadAppWithoutLaunch` only when the download's length
+  and SHA-256 are the release's, so nothing parses the file before that.
+  That route stores a sideload without opening the app on a watch and
+  refuses a PBW that is another app's. It keeps the order of
+  `Locker.sideloadApp`, which deletes an entry's cached PBW before it
+  stores the new one and gives the entry a new sideload's place: a store
+  that fails leaves the entry without its PBW, shown as a copy that
+  could not be checked, and an update moves the app in the watch's app
+  list. `NotebookWatchAppControls` follows the app's locker entry and
+  derives the status from the digest of the copy the phone caches
+  (`watchAppStatus`): not installed, the newest release, an older
+  release, a copy marked as trusted, or unverified. It reads the status
+  again when Settings or the guide's watch page opens, because the
+  cached copy can change with no change to the entry. Settings >
+  Notebook shows the status with Install, Update or Replace (on phones
+  that record), Trust This Copy (the question shows the copy's whole
+  digest, and the mark, that digest, is saved only while the locker
+  still holds that copy; it stays on this phone, in the no-backup
+  directory), Stop Trusting This Copy, Record with a Watch Button (the
+  four hold buttons with what each opens now, offered under the
+  conditions the watch's own Quick Launch settings are shown under,
+  `watchButtonsCanBeSet`) and Remove Watch App, which first turns off
+  each Quick Launch button set to the app. An install or a removal from
+  these screens ends the mark. The setup guide has an optional watch
+  page while a release is listed, on phones that record, and the
+  Notebook tab names a newer release until its OK is tapped. Host tests
+  cover the installer against a mock engine, the status and trust rules,
+  the trust file, the controls, the removal's order, the update line's
+  put-away state, the guide's page list and the screens' text rules. No
+  host test covers `sideloadAppWithoutLaunch`, the Koin wiring or the
+  screens themselves: those are checked on a device, and the install
+  route cannot run on one until a release is listed.
 - Watch dictation and captures share the server through
   `ServerDictationHold` (`:util`), whose `sendRecording` every server
   request of a capture goes through. `HybridTranscriptionService` reads a
@@ -1815,7 +1909,8 @@ in the app's device suite:
   the call loads it first), against the system's low-memory threshold.
   When that is short it frees the text model and compares again, and a
   second shortfall holds the drain, or, for a capture another route passed
-  to the phone (Server (with Local Fallback)), makes only that capture wait; otherwise the text
+  to the phone (Server (with Local Fallback), or Flaky Network Mode for
+  one made on the watch), makes only that capture wait; otherwise the text
   model stays
   loaded.
   Host tests pin the order and the need; the estimates are measurements to
@@ -1953,7 +2048,8 @@ in the app's device suite:
   a backup; speech, only while the Notebook cannot transcribe under the
   app's speech setting (`NotebookTab.canTranscribe`), whose download sets
   the speech model watch dictation uses too; text model; long recordings;
-  quick reminder completion; default reminder time; automatic backups; done. A phone that cannot run
+  quick reminder completion; default reminder time; automatic backups; the
+  watch page, while one is offered (above); done. A phone that cannot run
   the speech or text engine gets one typed-only page in place of the
   recording pages, and its capture area offers New note only. The speech
   page goes on once a download is scheduled or running, under Rebble Only,

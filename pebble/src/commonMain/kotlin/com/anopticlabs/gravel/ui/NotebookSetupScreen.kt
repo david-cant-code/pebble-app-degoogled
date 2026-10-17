@@ -32,6 +32,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -163,7 +164,7 @@ class NotebookSetupViewModel(
                 SetupStep.SPEECH.takeIf { speechPage && speechNow == SpeechSetup.NEEDS_MODEL },
                 SetupStep.TEXT_MODEL.takeIf { recording && (text == null || !textModelReady(text, _textRequest.value)) },
             )
-            val steps = setupSteps(recording, speechPage)
+            val steps = setupSteps(recording, speechPage, watchPage = tab.watchApp.value.offered != null)
             _steps.value = steps
             _step.value = resumeStep(_step.value?.name ?: guide.value.step, steps, unmet)
             if (speechPage && _speechOffer.value == null) offerSpeechModel(thisRun)
@@ -296,6 +297,7 @@ fun NotebookSetupGuide(tab: NotebookTab) {
                     SetupStep.QUICK_COMPLETION -> QuickCompletionPage(tab)
                     SetupStep.REMINDER_TIME -> ReminderTimePage(tab)
                     SetupStep.BACKUPS -> BackupsPage(tab)
+                    SetupStep.WATCH -> WatchPage(tab)
                     SetupStep.DONE -> DonePage(recording)
                 }
             }
@@ -537,6 +539,57 @@ private fun BackupsPage(tab: NotebookTab) {
     if (backups.known && !backupsOn(backups) && !(backups.unreadable && !backups.setUpAgain)) {
         Body("If you choose Not now, the Notebook tab reminds you again in a week.")
     }
+}
+
+@Composable
+private fun WatchPage(tab: NotebookTab) {
+    val watchApp by tab.watchApp.collectAsState()
+    val buttonsCanBeSet = rememberWatchButtonsCanBeSet()
+    var pickButton by remember { mutableStateOf(false) }
+    var askReplace by remember { mutableStateOf(false) }
+    // A result stays on this page after it is put away for the other screens, until the next action starts.
+    var result by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(tab) { tab.rereadWatchApp() }
+    LaunchedEffect(watchApp.message, watchApp.busy) {
+        if (watchApp.busy) result = null
+        watchApp.message?.let {
+            result = it
+            tab.watchAppResultShown(it)
+        }
+    }
+    val offer = watchAppOffer(watchApp)
+    if (pickButton && buttonsCanBeSet) WatchButtonPicker(tab.watchAppId) { pickButton = false }
+    if (askReplace && offer != null) {
+        WatchAppInstallQuestion(
+            offer,
+            watchApp.offeredBytes,
+            onConfirm = {
+                askReplace = false
+                tab.installWatchApp()
+            },
+            onDismiss = { askReplace = false },
+        )
+    }
+    PageTitle("Record from your watch")
+    Body("The Notebook watch app records a note or a reminder on a Pebble with a microphone and hands it to Gravel. This page is optional.")
+    if (watchApp.status == null) CircularProgressIndicator(Modifier.size(24.dp))
+    watchAppStatusLine(watchApp)?.let { Body(it) }
+    if (watchAppCanBeTrusted(watchApp)) Body(WatchAppText.OWN_COPY)
+    if (offer != null) {
+        watchApp.offeredBytes?.let { Body(WatchAppText.download(it)) }
+        OutlinedButton(onClick = { if (offer == WatchAppOffer.REPLACE) askReplace = true else tab.installWatchApp() }) { Text(offer.label) }
+    }
+    if (watchApp.busy) CircularProgressIndicator(Modifier.size(24.dp))
+    result?.let { Body(it) }
+    if (watchAppInLocker(watchApp)) {
+        if (buttonsCanBeSet) {
+            Body("To record, open Notebook in the watch's app list, or hold a button you set here.")
+            OutlinedButton(onClick = { pickButton = true }) { Text("Set a watch button") }
+        } else {
+            Body("To record, open Notebook in the watch's app list.")
+        }
+    }
+    Body(WatchAppText.LATER)
 }
 
 @Composable

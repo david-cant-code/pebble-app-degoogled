@@ -1,5 +1,6 @@
 package io.rebble.libpebblecommon.connection.endpointmanager.audio
 
+import com.anopticlabs.gravel.watchapp.WatchAppCaptures
 import io.rebble.libpebblecommon.packets.Result
 import io.rebble.libpebblecommon.packets.SessionType
 import io.rebble.libpebblecommon.services.VoiceService
@@ -38,6 +39,7 @@ import kotlin.uuid.Uuid
  */
 class VoiceSessionCoordinatorTest {
     private val appA = Uuid.parse("00000000-0000-0000-0000-0000000000aa")
+    private val captureApp = Uuid.parse("00000000-0000-0000-0000-0000000000cc")
     private val speex = VoiceEncoderInfo.Speex(
         sampleRate = 16_000, version = "1.2", bitRate = 16_800, bitstreamVersion = 4, frameSize = 320,
     )
@@ -58,11 +60,14 @@ class VoiceSessionCoordinatorTest {
         val cancelled = mutableListOf<Int>()
         var serve = true
 
+        /** Readiness checks the coordinator asked the provider for; the check raises dictation holds in production. */
+        var serveChecks = 0
+
         /** Thrown by the provider once it has read the recording, when set. */
         var failure: Exception? = null
 
         private val provider = object : TranscriptionProvider {
-            override suspend fun canServeSession(): Boolean = serve
+            override suspend fun canServeSession(): Boolean = serve.also { serveChecks++ }
             override suspend fun transcribe(
                 encoderInfo: VoiceEncoderInfo,
                 audioFrames: Flow<UByteArray>,
@@ -82,6 +87,20 @@ class VoiceSessionCoordinatorTest {
             }
         }
 
+        /** Frame counts the capture handler read, each with the answer the test completes. */
+        val captures = mutableListOf<Pair<Int, CompletableDeferred<String>>>()
+
+        private val captureHandler = object : WatchAppCaptures {
+            override val appUuid = Uuid.parse("00000000-0000-0000-0000-0000000000cc")
+            override suspend fun capture(encoderInfo: VoiceEncoderInfo, frames: Flow<UByteArray>): String {
+                val answer = CompletableDeferred<String>()
+                captures += frames.toList().size to answer
+                return answer.await()
+            }
+
+            override suspend fun onMessage(data: Map<Int, Any>) = Unit
+        }
+
         val coordinator = VoiceSessionCoordinator(
             scope = scope.backgroundScope,
             setupRequests = setupRequests,
@@ -90,6 +109,7 @@ class VoiceSessionCoordinatorTest {
             sendDictationResult = { id, result, _ -> log += "result:$id:${describe(result)}" },
             provider = provider,
             onSessionEnded = { request, result -> ended += "${request.sessionId}:${describe(result)}" },
+            watchAppCaptures = captureHandler,
         )
 
         private fun describe(result: TranscriptionResult) = when (result) {
@@ -329,5 +349,89 @@ class VoiceSessionCoordinatorTest {
         runCurrent()
         assertEquals(listOf("setup:Dictation:FailDisabled:app=true"), h.log)
         assertTrue(h.calls.isEmpty())
+    }
+
+    @Test
+    fun aCaptureAppSessionGoesToItsHandlerEvenWhenTheProviderCannotServe() = runTest {
+        val h = harness()
+        h.serve = false
+        h.setupRequests.emit(request(1, app = captureApp))
+        runCurrent()
+        assertEquals(listOf("setup:Dictation:Success:app=true"), h.log)
+
+        h.frame(1u); h.frame(1u); h.frame(1u); h.endRecording(1u)
+        runCurrent()
+        assertEquals(3, h.captures.single().first, "the handler must see every buffered frame")
+        assertTrue(h.calls.isEmpty(), "the provider must not see the recording")
+        assertEquals(0, h.serveChecks, "the provider's readiness check must not run")
+        h.captures.single().second.complete("Saved. Waiting for Wi-Fi")
+        runCurrent()
+        assertEquals("result:1:success(Saved. Waiting for Wi-Fi)", h.log.last())
+    }
+
+    @Test
+    fun aBlankCaptureAnswerIsSentAsAFailedDictation() = runTest {
+        val h = harness()
+        h.setupRequests.emit(request(1, app = captureApp))
+        runCurrent()
+        h.endRecording(1u)
+        runCurrent()
+        h.captures.single().second.complete(" ")
+        runCurrent()
+        assertEquals("result:1:failed", h.log.last())
+    }
+
+    @Test
+    fun aNewSetupSupersedesACaptureStillWaitingForItsAnswer() = runTest {
+        val h = harness()
+        h.setupRequests.emit(request(1, app = captureApp))
+        runCurrent()
+        h.endRecording(1u)
+        runCurrent()
+        h.setupRequests.emit(request(2, app = captureApp))
+        runCurrent()
+        h.captures.first().second.complete("Saved")
+        runCurrent()
+        assertTrue(h.log.none { it.startsWith("result:1") }, "nothing is sent for the superseded capture")
+        assertEquals(listOf("1:failed"), h.ended)
+    }
+
+    @Test
+    fun aCaptureTheWatchNeverEndsIsAbandonedAtTheBound() = runTest {
+        val h = harness()
+        h.setupRequests.emit(request(1, app = captureApp))
+        runCurrent()
+        h.frame(1u)
+        advanceTimeBy(VoiceSessionCoordinator.RECORDING_BOUND + 1.seconds)
+        runCurrent()
+        assertEquals(listOf("setup:Dictation:Success:app=true"), h.log, "nothing is sent for an abandoned capture")
+        assertEquals(listOf("1:failed"), h.ended)
+    }
+
+    @Test
+    fun aCaptureAnswerPastTheDeadlineIsReportedLost() = runTest {
+        val h = harness()
+        h.setupRequests.emit(request(1, app = captureApp))
+        runCurrent()
+        h.endRecording(1u)
+        runCurrent()
+        advanceTimeBy(14.seconds); runCurrent()
+        assertEquals("result:1:failed", h.log.last())
+    }
+
+    @Test
+    fun otherAppsStillGoToTheProvider() = runTest {
+        val h = harness()
+        h.setupRequests.emit(request(1))
+        runCurrent()
+        h.endRecording(1u)
+        runCurrent()
+        assertTrue(h.captures.isEmpty())
+        assertEquals(1, h.calls.size)
+
+        h.serve = false
+        h.setupRequests.emit(request(2))
+        runCurrent()
+        assertEquals("setup:Dictation:FailDisabled:app=true", h.log.last())
     }
 }

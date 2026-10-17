@@ -85,8 +85,10 @@ That leaves the following classic entry points open to any installed
 application, deliberately:
 
 - `com.getpebble.action.app.START` and `.STOP` launch or close a watchapp
-  on the connected watch. Nuisance only: they take a watchapp UUID and
-  return nothing to the sender.
+  on the connected watch. They take a watchapp UUID and return nothing to
+  the sender. Requests naming the Notebook watch app are dropped, but
+  launching any other watchapp closes the Notebook app, and a recording it
+  was making is lost.
 - `com.getpebble.action.app.SEND` injects an app message into a live
   classic session as if it came from the watchapp's real companion. The
   session relays a SEND only when it addresses the session's own watchapp,
@@ -866,6 +868,50 @@ engine, and a dictation arriving mid-call stops the call, which starts
 again. A load of the model that is already under way when a dictation
 arrives runs to its end beside it.
 
+## The Notebook watch app check reads the phone's copy, not the watch's
+
+**Status: open; closing it needs the watch to report what it runs.**
+
+Gravel takes recordings into the Notebook only from a copy of the Notebook
+watch app it trusts, judged by the digest of the watch app file the phone
+keeps for the watch. The watch does not report which binary it runs, so in
+some conditions a different copy under the same app ID could pass the
+check. Such a copy can add recordings to the Notebook. It cannot read or
+change what is already there, and it gets back only the short answer the
+watch shows. Installing or replacing the watch app from Settings >
+Notebook stores Gravel's copy on the phone for the watch to fetch; it
+does not tell Gravel which copy the watch then runs. A copy you mark as
+trusted in Settings > Notebook passes the check the same way a shipped
+one does.
+
+## The watch can show a failure for a Notebook recording the phone then stores
+
+**Status: open; closing it needs the Notebook to answer before the watch's
+deadline with what it knows by then, for example that the recording may
+still be saved.**
+
+The Notebook watch app gets its answer within the deadline the watch allows
+a dictation. When the phone's checks, storing and lookup of the recording
+take longer, the watch is told the recording failed while the phone still
+stores and processes it, and a recording made again after the failure is
+stored twice. That takes a stall such as one of the phone's key store or
+storage, or a long wait for the recordings list while a restore writes to
+it, which device testing did not meet.
+
+## A BACK on the watch during a Notebook recording can leave it stored
+
+**Status: open; closing it needs the watch to report whether BACK was
+pressed during the recording.**
+
+BACK during a recording on the Notebook watch app discards it, and BACK
+after SELECT has ended it keeps it. Gravel tells the two apart by how soon
+after the audio ends the watch's message arrives (`DESIGN_NOTES.md`, the
+watch source): within 50 milliseconds counts as a discard. A discard whose
+message arrives later leaves the recording stored and processed, with no
+sign of it on the watch, and a BACK after SELECT whose message arrives
+within that time drops a recording the user meant to keep. The limit rests
+on eight measurements on one phone and one watch.
+
 ## A dictation can wait for a Notebook transcription's first seconds
 
 **Status: accepted; whisper offers no way to stop that part.**
@@ -1160,6 +1206,7 @@ whoever the user sends it to, which may be a public issue. Gating the
 payload bytes means changing upstream's own logging calls rather than the
 fork's seams, so it is recorded here and left to the pass over what the log
 writer accepts.
+
 ## Notebook files can be rolled back or deleted without detection
 
 **Status: accepted; detecting it is left to a later change.**
@@ -1219,10 +1266,13 @@ looks the key up again before deleting anything.
 **Status: accepted.**
 
 When the queue cannot take a just-finished recording, from the phone's
-microphone, whatever the failure, the app
+microphone or from the Notebook watch app, whatever the failure, the app
 writes it under the Notebook directory for a later attempt, and each later
-capture run tries again to seal and queue everything waiting there. If that write fails too, the recording is lost:
-the Notebook screen says a phone recording could not be saved. A recording kept this way is dated in the time zone current
+capture run tries again to seal and queue everything waiting there; the
+watch is answered "Saved". If that write fails too, the recording is lost:
+the Notebook screen says a phone recording could not be saved, and for a
+watch recording the watch shows "Couldn't save. Try again." and the phone
+shows nothing. A recording kept this way is dated in the time zone current
 when it is processed, not the one it was recorded in.
 Until that succeeds the recordings sit unencrypted in the app's private
 storage, still under Android's file-based encryption and excluded from
@@ -1259,7 +1309,8 @@ second or cannot be saved, which the Notebook screen reports.
 A sealed Notebook file's move into place after its write is not synced
 (`DESIGN_NOTES.md` describes the write). If the phone loses power soon
 after a write, the file can be back at its earlier version after the
-restart, or missing if it was new. How soon is up to the storage and was not
+restart, or missing if it was new, although a just-saved watch recording
+was already answered as saved. How soon is up to the storage and was not
 measured.
 
 ## Notebook processing that starts out of sight can wait for the app to open
@@ -1425,7 +1476,7 @@ instant can take its place and leave the reminder without one.
 The Notebook key requires no user authentication and no unlocked device, so
 code running as Gravel can read and write Notebook files whenever the
 process runs, including on a locked phone. That is what lets a reminder
-fire while the phone stays in a pocket.
+fire and a watch capture be stored while the phone stays in a pocket.
 The cost is that a device seized while locked, if an attacker can execute
 code as Gravel on it, yields the notes; the offline file-system adversary
 the encryption is aimed at still cannot, because the key never leaves the

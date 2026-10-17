@@ -41,6 +41,7 @@ import com.anopticlabs.gravel.notebook.ui.NotebookScreen
 import com.anopticlabs.gravel.notebook.ui.isNotebookLinkAction
 import com.anopticlabs.gravel.notebook.ui.notebookLinkFor
 import com.anopticlabs.gravel.ui.NotebookTab
+import com.anopticlabs.gravel.ui.NotebookWatchAppValues
 import coredevices.pebble.PebbleDeepLinkHandler
 import coredevices.pebble.ui.PebbleNavBarRoutes
 import coredevices.pebble.ui.Section
@@ -67,6 +68,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.sync.withLock
+import io.rebble.libpebblecommon.connection.LibPebble3
 
 /** Gravel: the Notebook tab, shown by the user's switch on phones that can run the Notebook, and its settings. */
 class AndroidNotebookTab(
@@ -86,6 +88,9 @@ class AndroidNotebookTab(
     private val snoozeBackups: () -> Unit = {},
     private val speechReady: suspend () -> Boolean = { false },
     private val recordingEngines: suspend () -> Boolean = { false },
+    private val watchAppControls: NotebookWatchAppControls? = null,
+    private val readUpdateLine: () -> String? = { null },
+    private val writeUpdateLine: (String) -> Unit = {},
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : NotebookTab {
@@ -111,6 +116,7 @@ class AndroidNotebookTab(
                 SetupSlot.NOTEBOOK -> null
             },
             openSpeechSettings = openSpeechSettings,
+            notice = { WatchAppUpdateLine(watchApp, updateLineDismissed(), ::dismissWatchAppUpdateLine) },
         )
     }
 
@@ -288,6 +294,51 @@ class AndroidNotebookTab(
 
     override suspend fun recordingSupported(): Boolean = recordingCheck.filterNotNull().first()
 
+    private val noWatchApp = MutableStateFlow(NotebookWatchAppValues()).asStateFlow()
+
+    override val watchApp: StateFlow<NotebookWatchAppValues>
+        get() = watchAppControls?.values ?: noWatchApp
+
+    override fun installWatchApp() {
+        watchAppControls?.install()
+    }
+
+    override fun removeWatchApp() {
+        watchAppControls?.remove()
+    }
+
+    override fun trustWatchAppCopy(sha256: String) {
+        watchAppControls?.trustCopy(sha256)
+    }
+
+    override fun stopTrustingWatchAppCopy() {
+        watchAppControls?.stopTrusting()
+    }
+
+    override fun watchAppResultShown(line: String) {
+        watchAppControls?.resultShown(line)
+    }
+
+    override fun rereadWatchApp() {
+        watchAppControls?.reread()
+    }
+
+    override val watchAppId = NOTEBOOK_WATCH_APP_UUID
+
+    private val _updateLineDismissed = MutableStateFlow<String?>(null)
+    private val updateLineReadStarted = AtomicBoolean(false)
+
+    /** Null until read on first use, then the version whose update line was put away, or empty for none. */
+    fun updateLineDismissed(): StateFlow<String?> {
+        if (updateLineReadStarted.compareAndSet(false, true)) scope.launch(io) { _updateLineDismissed.update { it ?: readUpdateLine().orEmpty() } }
+        return _updateLineDismissed
+    }
+
+    fun dismissWatchAppUpdateLine(version: String) {
+        _updateLineDismissed.value = version
+        scope.launch(io) { writeUpdateLine(version) }
+    }
+
     companion object {
         /** The guide's finished mark in its file; not the name of any page. */
         const val GUIDE_FINISHED = "FINISHED"
@@ -338,6 +389,7 @@ val notebookTabModule = module {
         val prefs = get<NotebookPreferences>()
         val resources = androidContext().resources
         val guideFile = DeviceStateFile(androidContext().noBackupFilesDir, "notebook_setup_guide")
+        val updateLineFile = DeviceStateFile(androidContext().noBackupFilesDir, "notebook_watch_app_update_line")
         AndroidNotebookTab(
             isNotebookSupported, { prefs.tabShown }, prefs::setTabShown, prefs, get(), get(), get(),
             statusText = { autoBackupStatusText(resources, it) },
@@ -349,6 +401,9 @@ val notebookTabModule = module {
             snoozeBackups = { get<BackupReminder>().notNow() },
             speechReady = { get<NotebookSpeech>().isSetUp() },
             recordingEngines = { isTextEngineSupported() && isWhisperSupported() },
+            watchAppControls = notebookWatchAppControls(androidContext(), { get<LibPebble3>() }, { get() }),
+            readUpdateLine = updateLineFile::read,
+            writeUpdateLine = { updateLineFile.write(it) },
         )
     }
     single {

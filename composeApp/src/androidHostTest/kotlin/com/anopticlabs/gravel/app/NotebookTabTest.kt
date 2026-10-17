@@ -494,6 +494,38 @@ class AndroidNotebookTabTest {
     }
 
     // Runs queued work newest first, so a test can make writes land in the opposite order to the calls.
+    private fun updateLineTab(saved: String?, writes: MutableList<String>, io: QueueDispatcher) = AndroidNotebookTab(
+        supported = true, savedShown = { true }, saveShown = {}, store = store, calendars = NoPhoneCalendar, backups = backups,
+        autoBackups = FakeAutoBackups(), statusText = { "status" },
+        readUpdateLine = { saved }, writeUpdateLine = { writes += it }, io = io,
+    )
+
+    @Test
+    fun theUpdateLinesDismissalIsUnreadUntilItsFileWasReadThenTheSavedVersionOrNone() {
+        val queue = QueueDispatcher()
+        val none = updateLineTab(null, mutableListOf(), queue)
+        assertNull(none.updateLineDismissed().value)
+        queue.runLastFirst()
+        assertEquals("", none.updateLineDismissed().value)
+        val saved = updateLineTab("0.2", mutableListOf(), queue)
+        saved.updateLineDismissed()
+        queue.runLastFirst()
+        assertEquals("0.2", saved.updateLineDismissed().value)
+    }
+
+    @Test
+    fun aDismissalBeforeTheReadIsKeptAndSaved() {
+        val queue = QueueDispatcher()
+        val writes = mutableListOf<String>()
+        val tab = updateLineTab("0.1", writes, queue)
+        tab.updateLineDismissed()
+        tab.dismissWatchAppUpdateLine("0.2")
+        assertEquals("0.2", tab.updateLineDismissed().value)
+        queue.runLastFirst()
+        assertEquals("0.2", tab.updateLineDismissed().value)
+        assertEquals(listOf("0.2"), writes)
+    }
+
     private class QueueDispatcher : kotlinx.coroutines.CoroutineDispatcher() {
         private val tasks = ArrayDeque<Runnable>()
         override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) {

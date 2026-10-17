@@ -98,6 +98,17 @@ class NotebookSetupTest {
     }
 
     @Test
+    fun theWatchPageComesBeforeTheLastOnPhonesThatRecordWhileThereIsAWatchAppToInstall() {
+        val steps = setupSteps(recordingSupported = true, speechPage = false, watchPage = true)
+        assertEquals(listOf(SetupStep.BACKUPS, SetupStep.WATCH, SetupStep.DONE), steps.takeLast(3))
+        assertFalse(SetupStep.WATCH in setupSteps(recordingSupported = true, speechPage = false))
+        assertFalse(SetupStep.WATCH in setupSteps(recordingSupported = false, speechPage = false, watchPage = true))
+        assertEquals(SetupStep.DONE, resumeStep("WATCH", setupSteps(recordingSupported = true, speechPage = false)))
+        assertEquals(SetupStep.WATCH, resumeStep("WATCH", steps))
+        assertTrue(canContinue(SetupStep.WATCH, speechGoOn = false, textReady = false, backupsOn = false))
+    }
+
+    @Test
     fun aModelPageNoLongerSatisfiedComesBeforeTheSavedPage() {
         val steps = setupSteps(recordingSupported = true, speechPage = true)
         assertEquals(SetupStep.SPEECH, resumeStep("BACKUPS", steps, unmet = setOf(SetupStep.SPEECH, SetupStep.TEXT_MODEL)))

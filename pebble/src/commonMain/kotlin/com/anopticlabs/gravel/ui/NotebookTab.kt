@@ -5,6 +5,7 @@ import androidx.compose.runtime.remember
 import coredevices.pebble.ui.TopBarParams
 import kotlinx.coroutines.flow.StateFlow
 import org.koin.compose.getKoin
+import kotlin.uuid.Uuid
 
 /**
  * The Notebook as common code sees it: the tab, Settings > Notebook and the Notebook's part of Settings > Phone
@@ -110,7 +111,52 @@ interface NotebookTab {
 
     /** Whether this phone can run what recording needs; false leaves typed notes and reminders. */
     suspend fun recordingSupported(): Boolean
+
+    /** The Notebook watch app as Settings > Notebook and the setup guide show it. */
+    val watchApp: StateFlow<NotebookWatchAppValues>
+
+    /** Downloads the release Gravel ships and installs it over any copy in the locker; ignored while [NotebookWatchAppValues.busy]. */
+    fun installWatchApp()
+
+    /** Removes the watch app from the locker and from the Quick Launch buttons that open it. */
+    fun removeWatchApp()
+
+    /**
+     * Lets the copy with [sha256] save recordings, when it is still the one in the locker; the caller has asked the
+     * user first, showing [NotebookWatchAppValues.sha256].
+     */
+    fun trustWatchAppCopy(sha256: String)
+
+    fun stopTrustingWatchAppCopy()
+
+    /** A screen has shown [line], the [NotebookWatchAppValues.message] it read; the message is put away. */
+    fun watchAppResultShown(line: String)
+
+    /** Reads [watchApp]'s status again; a screen calls it when it starts showing the watch app. */
+    fun rereadWatchApp()
+
+    /** The watch app's UUID, which a Quick Launch button is set to. */
+    val watchAppId: Uuid
 }
+
+/** What Gravel shows for the Notebook watch app copy in the locker, the one the phone serves the watch. */
+enum class WatchAppStatus { NOT_INSTALLED, INSTALLED, UPDATE_AVAILABLE, USER_TRUSTED, UNVERIFIED }
+
+/**
+ * [status] is null until it was read. [offered] is the version Gravel installs, null while it ships none,
+ * [offeredBytes] its download's size, and [installedVersion] the shipped version in the locker, null for any other
+ * copy. [sha256] is the digest of the copy in the locker, null when there is none or it cannot be read. [message] is
+ * how the last action ended, until a screen has shown it or another action starts.
+ */
+data class NotebookWatchAppValues(
+    val status: WatchAppStatus? = null,
+    val offered: String? = null,
+    val offeredBytes: Long? = null,
+    val installedVersion: String? = null,
+    val sha256: String? = null,
+    val busy: Boolean = false,
+    val message: String? = null,
+)
 
 /** [done] once the guide was finished on this phone, [step] the page it resumes at, [rerun] while it was opened again; nothing is known before [read]. */
 data class NotebookSetupState(

@@ -131,6 +131,8 @@ val watchModule = module {
             get(),
             // Gravel: bound by the platform's app module; absent fails closed.
             networkDenyEnforcement = getOrNull() ?: UnreportedNetworkDenyEnforcement,
+            // Gravel: the Notebook watch app, where the platform's app module binds it.
+            watchAppCaptures = getOrNull(),
         )
     } binds arrayOf(LibPebble3::class, NotificationApps::class, SystemGeolocation::class)
 

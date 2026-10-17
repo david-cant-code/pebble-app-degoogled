@@ -328,8 +328,9 @@ data class QuickLaunchOption(
     val displayName: String,
 )
 
+// Gravel: internal, for the Notebook's Quick Launch picker.
 @Composable
-private fun quickLaunchOptions(libPebble: LibPebble): List<QuickLaunchOption> {
+internal fun quickLaunchOptions(libPebble: LibPebble): List<QuickLaunchOption> {
     val installedApps by libPebble.getLocker(
         type = AppType.Watchapp,
         searchQuery = null,

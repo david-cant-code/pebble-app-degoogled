@@ -101,7 +101,7 @@ actual val platformModule: Module = module {
     singleOf(::AndroidClassicScanner) bind ClassicScanner::class
 
     single { PebbleKitComponentState.create(get(), get(), get()) }
-    single { PebbleKitClassicStartListeners.create(get(), get(), get(), get()) }
+    single { PebbleKitClassicStartListeners.create(get(), get(), get(), get(), get()) }
     single { PebbleKitProviderNotifier.create(get<LibPebble>(), get(), get(), get(), get()) }
     single { PebbleKitCompanionRegistry.create(get<LibPebble>(), get(), get()) }
     single { PebbleKitWatchIdentity() }

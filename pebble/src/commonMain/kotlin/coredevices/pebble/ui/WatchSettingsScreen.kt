@@ -116,6 +116,7 @@ import com.anopticlabs.gravel.ui.phoneCalendarRefusalText
 import com.anopticlabs.gravel.ui.rememberNotebookTab
 import com.anopticlabs.gravel.ui.rememberTextModels
 import com.anopticlabs.gravel.ui.textModelsSummary
+import com.anopticlabs.gravel.ui.notebookWatchAppSettings
 import com.russhwolf.settings.Settings
 import com.russhwolf.settings.set
 import coredevices.CoreBackgroundSync
@@ -589,6 +590,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     val notebookSettings = notebookTab?.takeIf { it.supported }?.settings?.collectAsState()?.value
     val notebookAutoBackup = notebookTab?.takeIf { it.supported }?.autoBackup?.collectAsState()?.value
     val notebookKeyLocation = notebookTab?.takeIf { it.supported }?.keyLocation?.collectAsState()?.value
+    val notebookWatchAppItems = notebookWatchAppSettings(notebookTab, notebookShown, snackbarDisplay)
     val textModels = rememberTextModels()?.takeIf { it.supported }
     val textModelFacts = textModels?.facts?.collectAsState()?.value
     LaunchedEffect(textModels) { textModels?.refresh() }
@@ -668,6 +670,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
             calendarAccess,
             textModelFacts,
             notebookGuideDone,
+            notebookWatchAppItems,
             hasOfflineModels,
             phoneHasModel,
         ) {
@@ -2452,7 +2455,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     },
                     show = { pebbleFeatures.supportsMusic() },
                 ),
-            ) + watchPrefs
+            ) + notebookWatchAppItems + watchPrefs
         }
 
     return SettingsItemsState(

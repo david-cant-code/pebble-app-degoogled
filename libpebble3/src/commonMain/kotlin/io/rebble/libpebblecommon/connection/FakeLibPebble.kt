@@ -196,6 +196,8 @@ class FakeLibPebble : LibPebble {
         return flow { emit(fakeLockerEntries.first()) }
     }
 
+    override suspend fun cachedPbwSha256(id: Uuid): String? = null
+
     override suspend fun sideloadAppWithoutLaunch(pbwPath: Path, id: Uuid): Boolean = true
 
     override suspend fun setAppOrder(id: Uuid, order: Int) {

@@ -7,7 +7,7 @@ import coredevices.util.models.ModelDownloadStatus
  * The setup guide's pages in order. Names are saved to resume at, so a rename sends a guide in progress back to its
  * first page; the order decides where a saved page this phone skips resumes ([resumeStep]).
  */
-enum class SetupStep { EARLY_BETA, WELCOME, SPEECH, TEXT_MODEL, TYPED_ONLY, PROCESSING, QUICK_COMPLETION, REMINDER_TIME, BACKUPS, DONE }
+enum class SetupStep { EARLY_BETA, WELCOME, SPEECH, TEXT_MODEL, TYPED_ONLY, PROCESSING, QUICK_COMPLETION, REMINDER_TIME, BACKUPS, WATCH, DONE }
 
 /** What the speech page offers under the app's speech setting. */
 enum class SpeechSetup { READY, DOWNLOADING, NEEDS_MODEL, REBBLE_ONLY }
@@ -33,8 +33,11 @@ fun speechSetup(canTranscribe: Boolean, mode: CactusSTTMode, download: ModelDown
 fun speechCanGoOn(speech: SpeechSetup?, offerFailed: Boolean): Boolean =
     speech != null && (speech != SpeechSetup.NEEDS_MODEL || offerFailed)
 
-/** The pages for this phone: one typed-only page replaces the recording pages; [speechPage] while the Notebook cannot transcribe. */
-fun setupSteps(recordingSupported: Boolean, speechPage: Boolean): List<SetupStep> = if (!recordingSupported) {
+/**
+ * The pages for this phone: one typed-only page replaces the recording pages; [speechPage] while the Notebook cannot
+ * transcribe; [watchPage] while Gravel has a watch app to install, on phones that record.
+ */
+fun setupSteps(recordingSupported: Boolean, speechPage: Boolean, watchPage: Boolean = false): List<SetupStep> = if (!recordingSupported) {
     listOf(SetupStep.EARLY_BETA, SetupStep.WELCOME, SetupStep.TYPED_ONLY, SetupStep.REMINDER_TIME, SetupStep.BACKUPS, SetupStep.DONE)
 } else {
     listOfNotNull(
@@ -46,6 +49,7 @@ fun setupSteps(recordingSupported: Boolean, speechPage: Boolean): List<SetupStep
         SetupStep.QUICK_COMPLETION,
         SetupStep.REMINDER_TIME,
         SetupStep.BACKUPS,
+        SetupStep.WATCH.takeIf { watchPage },
         SetupStep.DONE,
     )
 }

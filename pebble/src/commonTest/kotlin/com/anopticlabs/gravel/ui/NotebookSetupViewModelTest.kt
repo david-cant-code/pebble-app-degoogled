@@ -58,6 +58,21 @@ class NotebookSetupViewModelTest {
     }
 
     @Test
+    fun theWatchPageIsThereWhileGravelHasAWatchAppToInstall() = runTest(dispatcher) {
+        tab.watchApp.value = NotebookWatchAppValues(offered = "0.1")
+        started("WATCH")
+        assertEquals(listOf(SetupStep.BACKUPS, SetupStep.WATCH, SetupStep.DONE), vm.steps.value.orEmpty().takeLast(3))
+        assertEquals(SetupStep.WATCH, vm.step.value)
+    }
+
+    @Test
+    fun withNoWatchAppToInstallASavedWatchPageResumesAtTheEnd() = runTest(dispatcher) {
+        started("WATCH")
+        assertFalse(SetupStep.WATCH in vm.steps.value.orEmpty())
+        assertEquals(SetupStep.DONE, vm.step.value)
+    }
+
+    @Test
     fun noTextModelGoesBackToTheTextModelPage() = runTest(dispatcher) {
         text.facts.value = TextModelFacts(read = true)
         started("BACKUPS")
@@ -270,6 +285,14 @@ class NotebookSetupViewModelTest {
         }
         override suspend fun canTranscribe() = transcribes
         override suspend fun recordingSupported() = records
+        override val watchApp = MutableStateFlow(NotebookWatchAppValues())
+        override fun installWatchApp() = error("not used")
+        override fun removeWatchApp() = error("not used")
+        override fun trustWatchAppCopy(sha256: String) = error("not used")
+        override fun stopTrustingWatchAppCopy() = error("not used")
+        override fun watchAppResultShown(line: String) = error("not used")
+        override fun rereadWatchApp() = error("not used")
+        override val watchAppId: kotlin.uuid.Uuid get() = error("not used")
         override fun openSetupGuide() = error("not used")
         override fun closeSetupRerun() = error("not used")
         override val supported = true

@@ -1,6 +1,7 @@
 package io.rebble.libpebblecommon.connection.endpointmanager.audio
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.watchapp.WatchAppCaptures
 import io.rebble.libpebblecommon.SystemAppIDs
 import io.rebble.libpebblecommon.packets.Result
 import io.rebble.libpebblecommon.packets.SessionType
@@ -11,6 +12,7 @@ import io.rebble.libpebblecommon.voice.PEBBLE_FW_RECORDING_CAP
 import io.rebble.libpebblecommon.voice.PEBBLE_FW_TRANSCRIPTION_TIMEOUT
 import io.rebble.libpebblecommon.voice.TranscriptionProvider
 import io.rebble.libpebblecommon.voice.TranscriptionResult
+import io.rebble.libpebblecommon.voice.TranscriptionWord
 import io.rebble.libpebblecommon.voice.boundedForProtocol
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -63,6 +65,10 @@ import kotlin.uuid.Uuid
  * Frames are buffered from the moment the setup is accepted, because the
  * inbound packet flow has no replay and the provider only starts reading
  * once it is called.
+ *
+ * Gravel: a session from [watchAppCaptures]' app goes to it instead of the
+ * provider, under the same bound, deadline and supersede rules, and skips
+ * the provider's readiness check.
  */
 internal class VoiceSessionCoordinator(
     private val scope: CoroutineScope,
@@ -74,6 +80,7 @@ internal class VoiceSessionCoordinator(
     private val deadline: Duration = DICTATION_DEADLINE,
     private val onSessionStarted: (VoiceService.SessionSetupRequest) -> Unit = {},
     private val onSessionEnded: (VoiceService.SessionSetupRequest, TranscriptionResult) -> Unit = { _, _ -> },
+    private val watchAppCaptures: WatchAppCaptures? = null,
 ) {
     companion object {
         private val logger = Logger.withTag("VoiceSession")
@@ -111,7 +118,8 @@ internal class VoiceSessionCoordinator(
             sendSetupResult(request.sessionType, Result.FailInvalidMessage, appInitiated)
             return
         }
-        if (!provider.canServeSession()) {
+        val captures = watchAppCaptures?.takeIf { it.appUuid == request.appUuid }
+        if (captures == null && !provider.canServeSession()) {
             logger.w { "Voice session requested, but speech recognition is disabled or not available" }
             sendSetupResult(request.sessionType, Result.FailDisabled, appInitiated)
             return
@@ -146,7 +154,11 @@ internal class VoiceSessionCoordinator(
 
                 val transcription = async {
                     try {
-                        provider.transcribe(encoderInfo, frames.receiveAsFlow(), isNotificationReply(request))
+                        if (captures != null) {
+                            captures.capture(encoderInfo, frames.receiveAsFlow()).asAnswer()
+                        } else {
+                            provider.transcribe(encoderInfo, frames.receiveAsFlow(), isNotificationReply(request))
+                        }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -190,6 +202,11 @@ internal class VoiceSessionCoordinator(
             }
             throw e
         }
+    }
+
+    private fun String.asAnswer(): TranscriptionResult {
+        val words = split(' ').filter { it.isNotBlank() }
+        return if (words.isEmpty()) TranscriptionResult.Failed else TranscriptionResult.Success(words.map { TranscriptionWord(it, 1f) })
     }
 
     private fun describe(result: TranscriptionResult): String = when (result) {

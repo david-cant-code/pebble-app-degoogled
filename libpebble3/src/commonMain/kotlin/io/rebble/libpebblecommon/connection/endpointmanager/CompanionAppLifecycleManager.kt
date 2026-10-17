@@ -3,6 +3,10 @@ package io.rebble.libpebblecommon.connection.endpointmanager
 import co.touchlab.kermit.Logger
 import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
 import com.anopticlabs.gravel.pkjs.shouldRunPkjs
+import com.anopticlabs.gravel.watchapp.InjectedWatchAppCaptures
+import com.anopticlabs.gravel.watchapp.WatchAppCaptures
+import com.anopticlabs.gravel.watchapp.relayWatchAppMessages
+import com.anopticlabs.gravel.watchapp.startAppSession
 import io.rebble.libpebblecommon.LibPebbleConfigFlow
 import io.rebble.libpebblecommon.connection.CompanionApp
 import io.rebble.libpebblecommon.connection.ConnectedPebble
@@ -25,6 +29,7 @@ import io.rebble.libpebblecommon.pebblekit.launchPlatformSessionGateWatcher
 import io.rebble.libpebblecommon.services.WatchInfo
 import io.rebble.libpebblecommon.services.app.AppRunStateService
 import io.rebble.libpebblecommon.services.appmessage.AppMessageData
+import io.rebble.libpebblecommon.services.appmessage.AppMessageResult
 import io.rebble.libpebblecommon.services.appmessage.AppMessageService
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineName
@@ -55,6 +60,7 @@ class CompanionAppLifecycleManager(
     private val libpebbleCoroutineScope: LibPebbleCoroutineScope,
     private val watchappPermissions: WatchappPermissionResolver,
     private val networkDenyEnforcement: NetworkDenyEnforcement,
+    private val watchAppCaptures: InjectedWatchAppCaptures,
 ): ConnectedPebble.PKJS, ConnectedPebble.CompanionAppControl {
     companion object {
         private val logger = Logger.withTag(CompanionAppLifecycleManager::class.simpleName!!)
@@ -82,7 +88,10 @@ class CompanionAppLifecycleManager(
             // newest locker entry for the app.
             val lockerEntry = lockerEntryDao.getEntry(uuid)
             if (lockerEntry != null && !lockerEntry.systemApp) {
-                handleNewRunningApp(lockerEntry)
+                // Gravel: the embedder's capture app is relayed instead of getting companion apps.
+                startAppSession(lockerEntry.id, watchAppCaptures,
+                    relay = { relayCaptureApp(lockerEntry, it) },
+                    companions = { handleNewRunningApp(lockerEntry) })
             }
         },
     )
@@ -106,6 +115,20 @@ class CompanionAppLifecycleManager(
             }
         }
         runningApps.value = emptyList()
+    }
+
+    // Gravel: in the session scope, so stopping the session stops the relay.
+    private fun relayCaptureApp(lockerEntry: LockerEntry, captures: WatchAppCaptures) {
+        currentEntry = lockerEntry
+        val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
+            logger.e(throwable) { "Unhandled exception relaying ${lockerEntry.id}: ${throwable.message}" }
+        }
+        activeAppScope = connectionScope + Job() + CoroutineName("CompanionAppLifecycleManager-${lockerEntry.id}") + exceptionHandler
+        activeAppScope.launch {
+            relayWatchAppMessages(device.inboundAppMessages(lockerEntry.id), captures) { id ->
+                device.sendAppMessageResult(AppMessageResult.ACK(id))
+            }
+        }
     }
 
     private suspend fun handleNewRunningApp(lockerEntry: LockerEntry) {
