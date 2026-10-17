@@ -1,6 +1,9 @@
 package coredevices.pebble.services
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.dictation.decodesOnThePhone
+import com.anopticlabs.gravel.watchapp.WATCH_SPEEX_FRAME_SAMPLES
+import com.anopticlabs.gravel.watchapp.WATCH_SPEEX_SAMPLE_RATE
 import coredevices.speex.SpeexCodec
 import coredevices.speex.SpeexDecodeResult
 import coredevices.util.CoreConfigFlow
@@ -70,14 +73,18 @@ class HybridTranscription(
         require(encoderInfo is VoiceEncoderInfo.Speex) {
             "Local transcription only supports Speex encoding, got ${encoderInfo::class.simpleName}"
         }
+        if (!decodesOnThePhone(encoderInfo)) {
+            logger.w { "Refused a session declaring ${encoderInfo.sampleRate} Hz and ${encoderInfo.frameSize} samples a frame" }
+            return TranscriptionResult.Error("Unsupported Speex frame size or sample rate")
+        }
 
         val speex = SpeexCodec(
-            sampleRate = encoderInfo.sampleRate,
+            sampleRate = WATCH_SPEEX_SAMPLE_RATE.toLong(),
             bitRate = encoderInfo.bitRate,
-            frameSize = encoderInfo.frameSize
+            frameSize = WATCH_SPEEX_FRAME_SAMPLES
         )
         val decodedBuffer = Buffer()
-        val pcm = ByteArray(encoderInfo.frameSize * Short.SIZE_BYTES)
+        val pcm = ByteArray(WATCH_SPEEX_FRAME_SAMPLES * Short.SIZE_BYTES)
         // Debug-only: keep the frames as received so the capture dump holds
         // the codec input next to the decoded audio it produced.
         val archiveFrames = debugCaptureDumpApplies(coreConfigFlow.value.sttConfig.debugCaptureDump, isDebugBuild())
@@ -109,7 +116,7 @@ class HybridTranscription(
         // The firmware's result clock starts when the recording ends, so the
         // session line measures from here; the engine line (in the whisper
         // service) covers only the decode itself.
-        val audioSeconds = decodedBuffer.size / (encoderInfo.sampleRate.toDouble() * Short.SIZE_BYTES)
+        val audioSeconds = decodedBuffer.size / (WATCH_SPEEX_SAMPLE_RATE.toDouble() * Short.SIZE_BYTES)
         val audioEnded = TimeSource.Monotonic.markNow()
         var outcome = "error"
         return try {
@@ -126,10 +133,10 @@ class HybridTranscription(
                 service.transcribe(
                     audioStreamFrames = flow {
                         val totalBytes = decodedBuffer.size.toInt()
-                        val chunkSize = encoderInfo.sampleRate * Short.SIZE_BYTES // 1 second of audio
+                        val chunkSize = WATCH_SPEEX_SAMPLE_RATE * Short.SIZE_BYTES // 1 second of audio
                         var bytesRead = 0
                         while (bytesRead < totalBytes) {
-                            val bytesToRead = minOf(chunkSize.toInt(), totalBytes - bytesRead)
+                            val bytesToRead = minOf(chunkSize, totalBytes - bytesRead)
                             val chunk = decodedBuffer.readByteArray(bytesToRead)
                             emit(chunk)
                             bytesRead += bytesToRead
@@ -138,7 +145,7 @@ class HybridTranscription(
                     language = STTLanguage.fromCodeOrAutomatic(coreConfigFlow.value.sttConfig.spokenLanguage),
                     contentContext = if (isNotificationReply) "Reply to Instant Message" else null,
                     dictionaryContext = recentContacts,
-                    sampleRate = encoderInfo.sampleRate.toInt(),
+                    sampleRate = WATCH_SPEEX_SAMPLE_RATE,
                     encoding = coredevices.util.AudioEncoding.PCM_16BIT,
                 ).filterIsInstance<TranscriptionSessionStatus.Transcription>().first()
             }
