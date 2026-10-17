@@ -194,6 +194,8 @@ dependencies {
     // Same artifact and version the app already ships via libpebble3; test-scope only,
     // so the binder test can speak the PebbleKit 2 AIDL types to the exported service.
     androidTestImplementation(libs.pebblekit)
+    // The codec :pebble ships, for a test that decodes into a buffer larger than the decoder's frame.
+    androidTestImplementation(libs.coredevices.speex)
     // Fork: upstream additionally pulls firebase-auth, :cactus, :experimental,
     // :libindex, :index-ai, and :mcp into androidTest for its Ring recording
     // suites. Those suites are deleted here (Ring is unplugged and Firebase is

@@ -1,8 +1,9 @@
 package coredevices.pebble.services
 
 import co.touchlab.kermit.Logger
-import coredevices.speex.SpeexCodec
-import coredevices.speex.SpeexDecodeResult
+import com.anopticlabs.gravel.dictation.decodesOnThePhone
+import com.anopticlabs.gravel.watchapp.WATCH_SPEEX_SAMPLE_RATE
+import com.anopticlabs.gravel.watchapp.decodeWatchSpeex
 import coredevices.util.CoreConfigFlow
 import coredevices.util.models.CactusSTTMode
 import coredevices.util.transcription.WhisperTranscriptionService
@@ -109,11 +110,15 @@ class STTRouter(
         encoderInfo: VoiceEncoderInfo.Speex,
         frames: List<UByteArray>,
     ): TranscriptionResult {
-        val pcm = decodeSpeex(encoderInfo, frames)
+        if (!decodesOnThePhone(encoderInfo)) {
+            logger.w { "Local STT refused a session declaring ${encoderInfo.sampleRate} Hz and ${encoderInfo.frameSize} samples a frame" }
+            return TranscriptionResult.Error("Unsupported Speex frame size or sample rate")
+        }
+        val pcm = withContext(Dispatchers.IO) { decodeWatchSpeex(encoderInfo, frames) }
         return try {
             val text = whisperService.transcribeLocalForFallback(
                 audio = pcm,
-                sampleRate = encoderInfo.sampleRate.toInt(),
+                sampleRate = WATCH_SPEEX_SAMPLE_RATE,
             )
             TranscriptionResult.Success(
                 words = text.trim().split(" ").map { TranscriptionWord(it, 0.9f) }
@@ -127,29 +132,5 @@ class STTRouter(
         } catch (e: Exception) {
             TranscriptionResult.Error("Local transcription failed: ${e.message}")
         }
-    }
-
-    @OptIn(ExperimentalUnsignedTypes::class)
-    private suspend fun decodeSpeex(
-        encoderInfo: VoiceEncoderInfo.Speex,
-        frames: List<UByteArray>,
-    ): ByteArray {
-        val speex = SpeexCodec(
-            sampleRate = encoderInfo.sampleRate,
-            bitRate = encoderInfo.bitRate,
-            frameSize = encoderInfo.frameSize,
-        )
-        val pcm = ByteArray(encoderInfo.frameSize * Short.SIZE_BYTES)
-        val output = ArrayList<Byte>(frames.size * pcm.size)
-        withContext(Dispatchers.IO) {
-            for (frame in frames) {
-                val result = speex.decodeFrame(frame.asByteArray(), pcm, hasHeaderByte = true)
-                if (result != SpeexDecodeResult.Success) {
-                    error("Failed to decode Speex frame: $result")
-                }
-                for (b in pcm) output.add(b)
-            }
-        }
-        return output.toByteArray()
     }
 }
