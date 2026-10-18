@@ -2,7 +2,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 // Gravel module: the Notebook feature (voice and typed notes, reminders). Pure logic lives in
 // commonMain on the Kotlin standard library and kotlinx.serialization; androidMain holds what the
-// platform has to supply.
+// platform has to supply, including the Compose screens.
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.androidKotlinMultiplatformLibrary)
@@ -48,8 +48,14 @@ kotlin {
             implementation(compose.foundation)
             implementation(libs.compose.material3)
             implementation(compose.materialIconsExtended)
+            implementation(libs.koin.compose)
+            implementation(libs.koin.compose.viewmodel)
+            implementation(libs.androidx.lifecycle.runtime.compose)
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.work)
+            implementation(libs.markdown.renderer)
+            implementation(libs.markdown.renderer.m3)
+            implementation(libs.jetbrains.markdown)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

@@ -1,8 +1,438 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="notebook_title">Notebook</string>
+
+    <string name="notebook_section_notes">Notes</string>
+    <string name="notebook_section_reminders">Reminders</string>
+    <string name="notebook_section_calendar">Calendar</string>
+
+    <string name="notebook_problem_key_missing">The key that encrypts your Notebook is missing or unusable on this phone, so its notes and reminders can\'t be opened.</string>
+    <string name="notebook_problem_damaged">A Notebook file is damaged and can\'t be read.</string>
+    <string name="notebook_problem_unreadable">The Notebook couldn\'t read its storage just now.</string>
+    <string name="notebook_try_again">Try again</string>
+    <string name="notebook_trouble_key_gone">The key that encrypts your Notebook is missing or no longer works on this phone, so nothing in it can be opened.</string>
+    <string name="notebook_trouble_key_gone_choices">Restore from a backup file, or start over with an empty Notebook.</string>
+    <string name="notebook_trouble_damaged">Part of your Notebook can\'t be read: %1$s.</string>
+    <string name="notebook_trouble_damaged_automatic">Restore from your automatic backup of %1$s, or start fresh and set what can\'t be read aside.</string>
+    <string name="notebook_trouble_damaged_file">Restore from a backup file, or start fresh and set what can\'t be read aside.</string>
+    <string name="notebook_trouble_not_in_backups">Backups don\'t hold it, so start fresh to set it aside.</string>
+    <string name="notebook_trouble_also_rebuilt">Gravel also rebuilds %1$s from what\'s left.</string>
+    <string name="notebook_trouble_rebuild_body">Gravel can rebuild it from what\'s left.</string>
+    <string name="notebook_trouble_rebuild_body_many">Gravel can rebuild them from what\'s left.</string>
+    <string name="notebook_trouble_failed">That couldn\'t be finished. Try it again.</string>
+    <string name="notebook_trouble_key_store">Android can\'t use the Notebook\'s key right now, so Gravel kept it. Restarting the phone may fix that. If it doesn\'t, Start over anyway deletes the key.</string>
+    <string name="notebook_trouble_list">%1$s and %2$s</string>
+    <string name="notebook_trouble_rebuild">Rebuild</string>
+    <string name="notebook_trouble_start_fresh">Start fresh</string>
+    <string name="notebook_trouble_start_fresh_title">Start fresh?</string>
+    <string name="notebook_trouble_start_fresh_body">What can\'t be read is set aside on this phone, where Gravel doesn\'t open it, and deleted after 30 days.</string>
+    <string name="notebook_trouble_start_over">Start over</string>
+    <string name="notebook_trouble_start_over_title">Start over?</string>
+    <string name="notebook_trouble_start_over_body">Every note, reminder and waiting recording on this phone is deleted, since none of them can be opened, and the Notebook starts empty with a new key. Only a backup can bring them back. Completed tasks waiting for review are deleted too, and no backup holds them. Reminders that were already set may still ring. Recordings that arrived while the key was gone are kept. Automatic backups have to be set up again; the backups already in your folder stay there.</string>
+    <string name="notebook_trouble_start_over_anyway">Start over anyway</string>
+    <string name="notebook_trouble_start_over_anyway_title">Delete the key?</string>
+    <string name="notebook_trouble_start_over_anyway_body">If Android can use the key again after a restart, everything in your Notebook would open again. Starting over anyway deletes the key and every note, reminder and waiting recording on this phone, and only a backup can bring them back.</string>
+    <string name="notebook_fresh_note_list">Your notes list is rebuilt from your notes.</string>
+    <string name="notebook_fresh_folders">Your folder list keeps Unclassified and every folder that holds notes.</string>
+    <string name="notebook_fresh_folder_tags">Folder tags start again from each folder\'s name.</string>
+    <string name="notebook_fresh_recordings">The list of recordings waiting to be processed is rebuilt from the recordings that still open, each under a new name and its file\'s time.</string>
+    <string name="notebook_fresh_reminders">Your reminders and their history start empty. Reminders that were already set may still ring.</string>
+    <string name="notebook_fresh_reminder_history">Your reminder history starts empty.</string>
+    <string name="notebook_fresh_completions">The list of completed tasks waiting for review starts empty.</string>
+    <string name="notebook_key_strongbox">Kept in this phone\'s separate security chip</string>
+    <string name="notebook_key_tee">Kept in the protected area of this phone\'s processor</string>
+    <string name="notebook_key_secure_hardware">Kept in this phone\'s secure hardware</string>
+    <string name="notebook_key_software">Kept by Android\'s software, not in secure hardware</string>
+    <string name="notebook_key_unknown">This phone doesn\'t say where it keeps the key</string>
+    <string name="notebook_part_note_list">your notes list</string>
+    <string name="notebook_part_folders">your folder list</string>
+    <string name="notebook_part_folder_tags">your folder tags</string>
+    <string name="notebook_part_recordings">the list of recordings waiting to be processed</string>
+    <string name="notebook_part_reminders">your reminders</string>
+    <string name="notebook_part_reminder_history">your reminder history</string>
+    <string name="notebook_part_completions">completed tasks waiting for review</string>
+
+    <string name="notebook_held">Processing is on hold: %1$s</string>
+    <string name="notebook_held_some">Some recordings are on hold: %1$s</string>
+    <string name="notebook_text_model_settings">Text model settings</string>
+    <string name="notebook_speech_settings">Speech Recognition settings</string>
+    <string name="notebook_server_try_again">Try again</string>
+    <string name="notebook_pause_all">Pause all</string>
+    <string name="notebook_pause_long">Pause long recordings</string>
+    <string name="notebook_paused_all">Processing is paused</string>
+    <string name="notebook_paused_long">Long recordings are paused. Recordings of 30 seconds or less still go through</string>
+    <string name="notebook_resume">Resume</string>
+    <plurals name="notebook_waiting_for_power">
+        <item quantity="one">%1$d long recording waiting for the phone to be plugged in</item>
+        <item quantity="other">%1$d long recordings waiting for the phone to be plugged in</item>
+    </plurals>
+    <string name="notebook_process_now">Process now</string>
+    <plurals name="notebook_waiting">
+        <item quantity="one">%1$d recording waiting to be processed</item>
+        <item quantity="other">%1$d recordings waiting to be processed</item>
+    </plurals>
+    <plurals name="notebook_flagged">
+        <item quantity="one">%1$d recording couldn\'t be processed</item>
+        <item quantity="other">%1$d recordings couldn\'t be processed</item>
+    </plurals>
+    <string name="notebook_failed_review">Review</string>
+    <string name="notebook_failed_title">Recordings that couldn\'t be processed</string>
+    <string name="notebook_failed_try_all">Try all again</string>
+    <string name="notebook_failed_recorded">Recorded %1$s</string>
+    <string name="notebook_failed_recorded_length">Recorded %1$s \u00B7 %2$s</string>
+    <string name="notebook_failed_delete_title">Delete this recording?</string>
+    <string name="notebook_failed_delete_body">The recording is deleted from the Notebook. A backup you made earlier may still have it.</string>
+    <string name="notebook_failed_not_done">Couldn\'t change that recording. Try again later.</string>
+    <string name="notebook_failed_not_deleted">That recording is being tried again, so it wasn\'t deleted.</string>
+    <string name="notebook_failed_damaged">The recording file is damaged</string>
+    <string name="notebook_failed_unreadable_audio">Its audio can\'t be decoded or isn\'t supported</string>
+    <string name="notebook_failed_too_long">It\'s longer than %1$d minutes</string>
+    <string name="notebook_failed_no_speech">No speech was heard</string>
+    <string name="notebook_failed_speech_timeout">Transcribing it took too long</string>
+    <string name="notebook_failed_speech_refused">The speech engine refused it</string>
+    <string name="notebook_failed_text_too_long">Its transcript is too long for the text model</string>
+    <string name="notebook_failed_text_timeout">The text model took too long</string>
+    <string name="notebook_failed_text_refused">The text model refused it</string>
+    <string name="notebook_failed_not_saved">The Notebook couldn\'t process or save it</string>
+    <string name="notebook_failed_server_error">Your transcription server failed it again after Try again</string>
+    <string name="notebook_failed_tries_ran_out">It couldn\'t be processed after %1$d tries</string>
+    <string name="notebook_failed_unknown">Gravel doesn\'t know why it failed</string>
+
+    <plurals name="notebook_retained">
+        <item quantity="one">%1$d recording not stored in the Notebook yet</item>
+        <item quantity="other">%1$d recordings not stored in the Notebook yet</item>
+    </plurals>
+
+    <plurals name="notebook_completions">
+        <item quantity="one">%1$d completed task to review</item>
+        <item quantity="other">%1$d completed tasks to review</item>
+    </plurals>
+    <string name="notebook_completions_hint">Tap to review</string>
+
+    <string name="notebook_results_title">Recent captures (%1$d)</string>
+    <string name="notebook_results_show">Show recent captures</string>
+    <string name="notebook_results_hide">Hide recent captures</string>
+    <string name="notebook_result_working">Working</string>
+    <string name="notebook_result_note">Note</string>
+    <string name="notebook_result_reminder">Reminder</string>
+    <string name="notebook_result_failed">Not saved</string>
+    <string name="notebook_result_dismiss">Dismiss</string>
+
     <string name="notebook_processing_channel">Notebook processing</string>
     <string name="notebook_processing_title">Processing Notebook recordings</string>
     <string name="notebook_recording_title">Recording a note</string>
+
+    <string name="notebook_record">Record</string>
+    <string name="notebook_stop">Stop recording</string>
+    <string name="notebook_record_hint">Tap to record a note or a reminder</string>
+    <string name="notebook_typed_only">This phone can\'t turn recordings into text, so the Notebook keeps typed notes and reminders</string>
+    <string name="notebook_recording_time">Recording %1$s of %2$s</string>
+    <string name="notebook_saving_recording">Saving the recording</string>
+    <string name="notebook_recording_too_short">That recording was too short. Record a little longer.</string>
+    <string name="notebook_recording_interrupted">Recording stopped when Gravel left the screen.</string>
+    <string name="notebook_recording_limit">Recording stopped at the 5-minute limit and was kept.</string>
+    <string name="notebook_recording_mic_lost">The microphone stopped. What was recorded until then was kept.</string>
+    <string name="notebook_recording_not_started">The microphone couldn\'t be started. Another app may be using it.</string>
+    <string name="notebook_recording_not_saved">That recording couldn\'t be saved.</string>
+    <string name="notebook_mic_denied">Recording needs access to the microphone.</string>
+    <string name="notebook_mic_denied_for_good">Microphone access wasn\'t allowed. You can allow it in the app settings.</string>
+    <string name="notebook_mic_not_asked">Microphone access couldn\'t be requested here.</string>
+    <string name="notebook_open_settings">Open settings</string>
+
+    <string name="notebook_new_note">New note</string>
+    <string name="notebook_note_saved">Note saved</string>
+    <string name="notebook_editor_close">Close</string>
+    <string name="notebook_editor_save">Save</string>
+    <string name="notebook_editor_title">Title</string>
+    <string name="notebook_editor_body">Note</string>
+    <string name="notebook_editor_folder">Folder</string>
+    <string name="notebook_editor_title_missing">Give the note a title.</string>
+    <string name="notebook_editor_too_large">This note is too long to be kept in a backup. Shorten it to save it.</string>
+    <string name="notebook_editor_not_saved">The note couldn\'t be saved. Your text is still here.</string>
+    <string name="notebook_editor_discard_question">Discard this note?</string>
+    <string name="notebook_editor_discard">Discard</string>
+    <string name="notebook_editor_keep_editing">Keep editing</string>
+    <string name="notebook_edit_note">Edit note</string>
+    <string name="notebook_editor_changed">This note changed after you opened it, so your edit wasn\'t saved. Your text is still here.</string>
+    <string name="notebook_editor_gone">This note is no longer in the Notebook, so your edit wasn\'t saved. Your text is still here.</string>
+    <string name="notebook_editor_archived">This note was archived, so your edit wasn\'t saved. Your text is still here.</string>
+    <string name="notebook_editor_discard_changes">Discard your changes?</string>
+
+    <string name="notebook_back">Back</string>
+    <plurals name="notebook_folder_count">
+        <item quantity="one">%1$d note</item>
+        <item quantity="other">%1$d notes</item>
+    </plurals>
+    <string name="notebook_new_folder">New folder</string>
+    <string name="notebook_folder_unclassified">Unclassified</string>
+    <string name="notebook_folder_archive">Archive</string>
+    <string name="notebook_routing_hint">New notes go into the folder whose tags match theirs. None of your folders has tags yet, so new notes go to Unclassified. Long-press a folder to add tags.</string>
+
+    <string name="notebook_folder_name">Folder name</string>
+    <string name="notebook_folder_name_example">e.g. work, personal</string>
+    <string name="notebook_folder_name_rule">Lowercase letters, numbers, - and _</string>
+    <string name="notebook_folder_tags">Extra tags (optional)</string>
+    <string name="notebook_folder_tags_example">e.g. meetings, deadline, project</string>
+    <string name="notebook_folder_tags_rule">Comma-separated. The folder\'s name is its first tag, and a folder keeps up to 8.</string>
+    <string name="notebook_create">Create</string>
+    <string name="notebook_cancel">Cancel</string>
+    <string name="notebook_folder_invalid">Use up to 64 lowercase letters, numbers, - or _, starting with a letter or number.</string>
+    <string name="notebook_folder_reserved">That name belongs to a built-in folder.</string>
+    <string name="notebook_folder_exists">A folder with that name already exists.</string>
+    <string name="notebook_folder_not_saved">The folder couldn\'t be created. Try again.</string>
+    <string name="notebook_folder_created_without_tags">The folder was created, but its tags weren\'t saved. Long-press it to add them.</string>
+    <string name="notebook_folder_list_unreadable">The folder list couldn\'t be read, so only the folders that hold notes are shown.</string>
+    <string name="notebook_folder_tags_unreadable">The folder tags couldn\'t be read.</string>
+
+    <string name="notebook_edit_tags">Edit tags</string>
+    <string name="notebook_edit_tags_hint">Help new notes find this folder when their tags match.</string>
+    <string name="notebook_tags_for">Tags for %1$s</string>
+    <string name="notebook_tags">Tags</string>
+    <string name="notebook_tags_rule">Comma-separated, up to 8. Leave empty to remove them.</string>
+    <string name="notebook_tags_not_saved">The tags couldn\'t be saved. Try again.</string>
+    <string name="notebook_save">Save</string>
+
+    <string name="notebook_delete_folder">Delete folder</string>
+    <string name="notebook_delete_folder_title">Delete %1$s?</string>
+    <plurals name="notebook_delete_folder_moves">
+        <item quantity="one">%1$d note will be moved to Unclassified.</item>
+        <item quantity="other">%1$d notes will be moved to Unclassified.</item>
+    </plurals>
+    <string name="notebook_delete_folder_empty">This folder is empty and will be removed.</string>
+    <string name="notebook_delete">Delete</string>
+    <string name="notebook_folder_deleted_empty">Folder deleted.</string>
+    <plurals name="notebook_folder_deleted">
+        <item quantity="one">Folder deleted. %1$d note was moved to Unclassified.</item>
+        <item quantity="other">Folder deleted. %1$d notes were moved to Unclassified.</item>
+    </plurals>
+    <plurals name="notebook_folder_kept">
+        <item quantity="one">%1$d note couldn\'t be moved, so the folder was kept. Try again.</item>
+        <item quantity="other">%1$d notes couldn\'t be moved, so the folder was kept. Try again.</item>
+    </plurals>
+
+    <string name="notebook_no_notes">No notes in %1$s</string>
+    <string name="notebook_new_note_in">New note in %1$s</string>
+    <string name="notebook_empty_archive">Empty archive</string>
+    <plurals name="notebook_selected">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <string name="notebook_select_all">Select all</string>
+    <string name="notebook_exit_selection">Exit selection</string>
+    <string name="notebook_more_actions">More actions</string>
+    <string name="notebook_move_to">Move to…</string>
+    <string name="notebook_restore_to">Restore to…</string>
+    <string name="notebook_archive">Archive</string>
+    <string name="notebook_delete_permanently">Delete permanently</string>
+    <string name="notebook_edit">Edit</string>
+    <string name="notebook_select">Select</string>
+    <string name="notebook_choose_folder">Choose folder</string>
+    <string name="notebook_no_other_folder">There is no other folder to move to.</string>
+    <plurals name="notebook_delete_notes_title">
+        <item quantity="one">Delete %1$d note permanently?</item>
+        <item quantity="other">Delete %1$d notes permanently?</item>
+    </plurals>
+    <string name="notebook_cannot_undo">This can\'t be undone.</string>
+    <string name="notebook_empty_archive_title">Empty archive?</string>
+    <plurals name="notebook_empty_archive_body">
+        <item quantity="one">Permanently delete %1$d archived note? This can\'t be undone.</item>
+        <item quantity="other">Permanently delete %1$d archived notes? This can\'t be undone.</item>
+    </plurals>
+    <plurals name="notebook_notes_left">
+        <item quantity="one">%1$d note couldn\'t be changed. Try again.</item>
+        <item quantity="other">%1$d notes couldn\'t be changed. Try again.</item>
+    </plurals>
+    <string name="notebook_not_changed">That change couldn\'t be saved. Try again.</string>
+    <string name="notebook_note_gone">That note is no longer in the Notebook.</string>
+    <string name="notebook_note_gone_here">This note is no longer in the Notebook.</string>
+    <string name="notebook_link_title">Open link?</string>
+    <string name="notebook_link_body">This opens outside Gravel:</string>
+    <string name="notebook_link_host">Site: %1$s</string>
+    <string name="notebook_link_open">Open</string>
+    <string name="notebook_link_refused">That link can\'t be opened from a note.</string>
+    <string name="notebook_link_no_app">No app on this phone can open that link.</string>
+    <string name="notebook_too_long_to_edit">This note is too long to edit in the app.</string>
+    <string name="notebook_editor_at_limit">This is as long as a note can be in the editor.</string>
+    <string name="notebook_reminders_due_now">Due now</string>
+    <string name="notebook_reminders_snoozed">Snoozed</string>
+    <string name="notebook_reminders_upcoming">Upcoming</string>
+    <string name="notebook_reminders_empty">No reminders yet. Record one, or tap New reminder.</string>
+    <string name="notebook_reminders_new">New reminder</string>
+    <string name="notebook_reminders_edit">Edit reminder</string>
+    <string name="notebook_reminders_save_as_note">Save as note</string>
+    <string name="notebook_reminders_due_at">Due %1$s</string>
+    <string name="notebook_reminders_snoozed_until">Snoozed until %1$s</string>
+    <string name="notebook_reminders_late">%1$s, waiting to go off</string>
+    <string name="notebook_reminders_went_off">%1$s, went off</string>
+    <string name="notebook_reminders_check_time">%1$s, check this time</string>
+    <string name="notebook_reminders_keep_time">Keep this time</string>
+    <string name="notebook_reminders_time_to_check_note">Gravel couldn\'t use the time you said, so this reminder is set for your Default Reminder Time. Change it below, or keep it.</string>
+    <plurals name="notebook_reminders_repeats_daily">
+        <item quantity="one">Repeats every day</item>
+        <item quantity="other">Repeats every %d days</item>
+    </plurals>
+    <plurals name="notebook_reminders_repeats_weekly">
+        <item quantity="one">Repeats every week</item>
+        <item quantity="other">Repeats every %d weeks</item>
+    </plurals>
+    <plurals name="notebook_reminders_repeats_monthly">
+        <item quantity="one">Repeats every month</item>
+        <item quantity="other">Repeats every %d months</item>
+    </plurals>
+    <plurals name="notebook_reminders_repeats_yearly">
+        <item quantity="one">Repeats every year</item>
+        <item quantity="other">Repeats every %d years</item>
+    </plurals>
+    <string name="notebook_reminders_mark_complete">Mark complete</string>
+    <string name="notebook_reminders_mark_missed">Mark missed</string>
+    <string name="notebook_reminders_delete">Delete reminder</string>
+    <string name="notebook_reminders_delete_one">Delete</string>
+    <string name="notebook_reminders_more">More actions</string>
+    <string name="notebook_reminders_confirm_complete">Mark this reminder complete?</string>
+    <string name="notebook_reminders_confirm_complete_repeats">It repeats, so it moves on to its next time.</string>
+    <string name="notebook_reminders_confirm_missed">Mark this time missed?</string>
+    <string name="notebook_reminders_confirm_missed_occurrence">It is recorded as missed and leaves the list.</string>
+    <string name="notebook_reminders_confirm_missed_once">It is recorded as missed, and the reminder is taken off the list.</string>
+    <string name="notebook_reminders_confirm_missed_repeats">It is recorded as missed, and the reminder moves on to the time after it.</string>
+    <string name="notebook_reminders_confirm_delete">Delete this reminder?</string>
+    <string name="notebook_reminders_confirm_delete_repeats">It and its future repeats are removed.</string>
+    <string name="notebook_reminders_confirm_delete_once">It is removed and will not go off.</string>
+    <string name="notebook_reminders_confirm_delete_time">Delete this time?</string>
+    <string name="notebook_reminders_confirm_delete_one_body">This time is removed for good. The reminder itself does not change.</string>
+    <string name="notebook_reminders_confirm_delete_next_once">It does not repeat, so the reminder is removed and will not go off.</string>
+    <string name="notebook_reminders_confirm_delete_next_repeats">This time is removed for good, and the reminder moves on to the time after it.</string>
+    <string name="notebook_calendar_previous">Previous month</string>
+    <string name="notebook_calendar_next">Next month</string>
+    <string name="notebook_calendar_add">Add reminder</string>
+    <string name="notebook_calendar_day_empty">No reminders on this day.</string>
+    <string name="notebook_calendar_today_suffix">, today</string>
+    <plurals name="notebook_calendar_pending_suffix">
+        <item quantity="one">, %d pending</item>
+        <item quantity="other">, %d pending</item>
+    </plurals>
+    <plurals name="notebook_calendar_completed_suffix">
+        <item quantity="one">, %d completed</item>
+        <item quantity="other">, %d completed</item>
+    </plurals>
+    <plurals name="notebook_calendar_missed_suffix">
+        <item quantity="one">, %d missed</item>
+        <item quantity="other">, %d missed</item>
+    </plurals>
+    <string name="notebook_calendar_status_pending">Pending</string>
+    <string name="notebook_calendar_status_completed">Completed</string>
+    <string name="notebook_calendar_status_missed">Missed</string>
+    <string name="notebook_calendar_completed_at">Completed %1$s</string>
+    <string name="notebook_calendar_missed_due">Missed, due %1$s</string>
+    <string name="notebook_calendar_went_off">Pending, went off %1$s</string>
+    <string name="notebook_calendar_snoozed_until">Pending, snoozed until %1$s</string>
+    <string name="notebook_calendar_waiting">Pending, due %1$s, waiting to go off</string>
+    <string name="notebook_calendar_due">Pending, due %1$s</string>
+    <string name="notebook_calendar_first_due">First due %1$s</string>
+    <string name="notebook_calendar_counted_missed_at">Counted as missed %1$s</string>
+    <string name="notebook_calendar_last_snooze">Last snoozed to %1$s</string>
+    <string name="notebook_calendar_complete_early">Complete early</string>
+    <string name="notebook_calendar_missed_ahead">Mark missed ahead</string>
+    <string name="notebook_calendar_delete_this_one">Delete this one</string>
+    <string name="notebook_calendar_to_completed">Change to completed</string>
+    <string name="notebook_calendar_to_missed">Change to missed</string>
+    <string name="notebook_calendar_confirm_to_completed">Change to completed?</string>
+    <string name="notebook_calendar_confirm_to_completed_body">It stays on the day it was due.</string>
+    <string name="notebook_calendar_confirm_to_missed">Change to missed?</string>
+    <string name="notebook_calendar_confirm_to_missed_body">It shows on the day it was due.</string>
+    <string name="notebook_calendar_phone_header">From your phone\'s calendar</string>
+    <string name="notebook_calendar_phone_untitled">(No title)</string>
+    <string name="notebook_calendar_phone_all_day">All day</string>
+    <string name="notebook_calendar_phone_span">%1$s to %2$s</string>
+    <string name="notebook_calendar_phone_detail">%1$s, %2$s</string>
+    <string name="notebook_calendar_phone_none_picked">No calendar is picked to show here. Pick them in Settings > Phone Calendar.</string>
+    <string name="notebook_calendar_phone_no_access">Your phone\'s calendar is not shown: Gravel\'s calendar access is off.</string>
+    <string name="notebook_calendar_phone_not_read">Your phone\'s calendar could not be read.</string>
+    <plurals name="notebook_calendar_phone_suffix">
+        <item quantity="one">, %d phone calendar event</item>
+        <item quantity="other">, %d phone calendar events</item>
+    </plurals>
+    <string name="notebook_reminders_field_message">Reminder</string>
+    <string name="notebook_reminders_field_date">Date</string>
+    <string name="notebook_reminders_field_time">Time</string>
+    <string name="notebook_reminders_field_repeat">Repeat</string>
+    <string name="notebook_reminders_daily">Daily</string>
+    <string name="notebook_reminders_weekly">Weekly</string>
+    <string name="notebook_reminders_monthly">Monthly</string>
+    <string name="notebook_reminders_yearly">Yearly</string>
+    <string name="notebook_reminders_every">Every</string>
+    <plurals name="notebook_reminders_unit_days">
+        <item quantity="one">day</item>
+        <item quantity="other">days</item>
+    </plurals>
+    <plurals name="notebook_reminders_unit_weeks">
+        <item quantity="one">week</item>
+        <item quantity="other">weeks</item>
+    </plurals>
+    <plurals name="notebook_reminders_unit_months">
+        <item quantity="one">month</item>
+        <item quantity="other">months</item>
+    </plurals>
+    <plurals name="notebook_reminders_unit_years">
+        <item quantity="one">year</item>
+        <item quantity="other">years</item>
+    </plurals>
+    <string name="notebook_reminders_create">Create</string>
+    <string name="notebook_reminders_ok">OK</string>
+    <string name="notebook_reminders_discard_new">Discard this reminder?</string>
+    <string name="notebook_reminders_error_message_missing">Write what to remind you of.</string>
+    <string name="notebook_reminders_error_message_too_long">This is as long as a reminder can be.</string>
+    <string name="notebook_reminders_error_time_past">Pick a time in the future.</string>
+    <string name="notebook_reminders_error_interval">Repeat every 1 to 1000.</string>
+    <string name="notebook_reminders_error_out_of_range">That date is too far off.</string>
+    <string name="notebook_reminders_error_gone">This reminder is no longer stored, so the change was not saved.</string>
+    <string name="notebook_reminders_error_not_saved">The reminder couldn\'t be saved. Try again.</string>
+    <string name="notebook_reminders_error_ids">No more reminders can be created in the Notebook on this phone.</string>
+    <string name="notebook_reminders_snooze_title">Snooze reminder</string>
+    <string name="notebook_reminders_snooze_minutes">Minutes</string>
+    <string name="notebook_reminders_snooze">Snooze</string>
+    <string name="notebook_reminders_snooze_past_next">This reaches its next time, %1$s, and this one then counts as missed.</string>
+    <string name="notebook_reminders_snooze_hour">1 hour</string>
+    <string name="notebook_reminders_snooze_preset">%1$d min</string>
+    <string name="notebook_reminders_saved">Reminder saved</string>
+    <string name="notebook_reminders_done">Reminder updated</string>
+    <string name="notebook_reminders_done_not_recorded">Reminder updated, but it couldn\'t be added to its history.</string>
+    <string name="notebook_reminders_deleted_not_recorded">Reminder moved on, but this time couldn\'t be taken out of its history.</string>
+    <string name="notebook_reminders_not_read">Your reminders couldn\'t be read. Try again.</string>
+    <string name="notebook_reminders_not_snoozed">The reminder couldn\'t be snoozed.</string>
+    <string name="notebook_reminders_confirm_save_as_note">Save this as a note?</string>
+    <string name="notebook_reminders_gone">That reminder is no longer stored.</string>
+    <string name="notebook_reminders_saved_as_note">Saved as a note in Unclassified</string>
+    <string name="notebook_reminders_cannot_snooze">This reminder can\'t be snoozed from here.</string>
+    <plurals name="notebook_reminders_snoozed_for">
+        <item quantity="one">Snoozed for %d minute</item>
+        <item quantity="other">Snoozed for %d minutes</item>
+    </plurals>
+    <string name="notebook_completions_title">Completed tasks</string>
+    <string name="notebook_completions_close">Close</string>
+    <string name="notebook_completions_intro">You said you finished these. Find the reminder each one is about. Nothing changes until you confirm.</string>
+    <string name="notebook_completions_all_reviewed">All reviewed.</string>
+    <string name="notebook_completions_no_words">No words after the trigger word</string>
+    <string name="notebook_completions_said_at">Said %1$s</string>
+    <string name="notebook_completions_no_match">No reminder matches this. Was it a note, or a new reminder?</string>
+    <string name="notebook_completions_candidate_complete">Marked complete, due %1$s</string>
+    <string name="notebook_completions_candidate_missed">Marked missed, due %1$s</string>
+    <string name="notebook_completions_already_done">Already complete</string>
+    <string name="notebook_completions_was_note">Was a note</string>
+    <string name="notebook_completions_disregard">Disregard</string>
+    <string name="notebook_completions_remove">Remove</string>
+    <string name="notebook_completions_confirm_note_body">Its words go to a note in Unclassified, and it leaves the review.</string>
+    <string name="notebook_completions_confirm_already_done">Take this off the review?</string>
+    <string name="notebook_completions_confirm_already_done_body">For a task whose reminder is already marked complete. Its words are deleted and no reminder is changed.</string>
+    <string name="notebook_completions_confirm_disregard">Disregard this?</string>
+    <string name="notebook_completions_confirm_disregard_body">Its words are deleted and no reminder is changed.</string>
+    <string name="notebook_completions_done_kept">Reminder updated, but this task couldn\'t be taken off the review. Disregard it.</string>
+    <string name="notebook_completions_done_not_recorded_kept">Reminder updated without its history, and this task couldn\'t be taken off the review. Disregard it.</string>
+    <string name="notebook_completions_saved_kept">Reminder saved, but this task couldn\'t be taken off the review. Disregard it.</string>
+    <string name="notebook_completions_saved_as_note_kept">Saved as a note in Unclassified, but this task couldn\'t be taken off the review. Disregard it.</string>
+    <string name="notebook_completions_gone">This completed task was already reviewed.</string>
+    <string name="notebook_completions_settled">Already handled, but it couldn\'t be taken off the review. Disregard it to remove it.</string>
+    <string name="notebook_completions_confirm_leaves">It then leaves the review.</string>
+    <string name="notebook_completions_removed">Taken off the review</string>
     <plurals name="notebook_backup_missing_notes">
         <item quantity="one">%1$d note couldn\'t be read and isn\'t in this backup.</item>
         <item quantity="other">%1$d notes couldn\'t be read and aren\'t in this backup.</item>
@@ -15,6 +445,10 @@
         <item quantity="one">%1$d note file the Notebook doesn\'t list isn\'t in this backup.</item>
         <item quantity="other">%1$d note files the Notebook doesn\'t list aren\'t in this backup.</item>
     </plurals>
+    <string name="notebook_restore">Restore</string>
+    <string name="notebook_restore_plan_fresh">Before adding this backup, Gravel sets aside the parts of your Notebook that can\'t be read and deletes them after 30 days.</string>
+    <string name="notebook_restore_plan_over">Before adding this backup, Gravel deletes every Notebook file on this phone, since none of them can be opened, and makes a new key. Completed tasks waiting for review aren\'t in backups, so they don\'t come back. Reminders that were already set may still ring.</string>
+    <string name="notebook_restore_plan_reminders">Reminders in this backup come back with the backup\'s times and messages.</string>
     <plurals name="notebook_backup_notes">
         <item quantity="one">%1$d note</item>
         <item quantity="other">%1$d notes</item>
@@ -23,6 +457,7 @@
         <item quantity="one">%1$d reminder</item>
         <item quantity="other">%1$d reminders</item>
     </plurals>
+    <string name="notebook_close">Close</string>
     <string name="notebook_auto_channel">Notebook backups</string>
     <string name="notebook_auto_failed_title">Notebook backup failed</string>
     <string name="notebook_auto_problem_no_access">Gravel can no longer use your backup folder. Choose it again with Backup Folder in Settings.</string>

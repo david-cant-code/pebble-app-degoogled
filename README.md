@@ -189,9 +189,12 @@ server with local fallback, every connection failure while the phone is
 on an allowed network is instead one of a longer recording's 3 tries. An
 error from the server, a reply without text, a certificate Gravel does
 not trust, 10 minutes without a reply, or a request not finished in 15
-minutes stops sending recordings until you change the server's URL, model, token or trusted certificate. In server
+minutes stops sending recordings until you tap Try again in the Notebook
+or change the server's URL, model, token or trusted certificate; a
+recording whose next request after Try again fails the same way moves
+to the Notebook's failed list. In server
 with local fallback with a speech model on the phone, recordings go to
-the phone meanwhile. Pausing
+the phone meanwhile, and none moves to the failed list for it. Pausing
 processing, or a short recording interrupting a long one (Interrupt Long
 Recordings), hangs up on a recording the server is working on;
 whisper.cpp's server then stops working on it, while some other servers

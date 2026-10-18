@@ -31,6 +31,7 @@ import com.anopticlabs.gravel.socketfilter.InstallResult
 import com.anopticlabs.gravel.socketfilter.UdpSocketFilter
 import coredevices.ExperimentalDevices
 import com.anopticlabs.gravel.app.notebookEnginesModule
+import com.anopticlabs.gravel.app.notebookTabModule
 import com.anopticlabs.gravel.app.textModelsModule
 import com.anopticlabs.gravel.network.AndroidUnmeteredWifi
 import com.anopticlabs.gravel.transcription.adoptUnboundServerToken
@@ -107,6 +108,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
                 watchModule,
                 notebookModule,
                 notebookEnginesModule,
+                notebookTabModule,
                 textModelsModule,
             )
         }

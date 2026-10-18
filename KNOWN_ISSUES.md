@@ -1181,6 +1181,30 @@ the app's files how many notes and queued recordings there are, the size
 of each file, and when each file was last written. Hiding these would need
 padded files and a different layout.
 
+## A Notebook key that stops working can leave only Try again
+
+**Status: accepted.**
+
+When Android still holds the Notebook's key but can no longer use it, the
+Notebook tab offers Start over only when Android reports the failure as
+permanent, which it does from Android 13 on and not for every error.
+Otherwise the tab shows a read that may pass, with Try again only, until the
+key works again. Clearing Gravel's storage in Android's settings is the way
+out: it erases all of Gravel's data and settings, the Notebook key included
+(android16-release `PackageManagerService.clearApplicationUserDataLIF`
+clears the app's Keystore entries), after which a backup brings the
+Notebook back.
+
+## A Notebook key store that does not answer can be offered Start over
+
+**Status: open; retrying before taking Android's verdict would narrow it.**
+
+On Android 16, the release checked, a key store that does not answer a
+retried lookup of the Notebook key is reported as a permanent failure, and
+Gravel takes it as one at the first failure, so the Notebook tab can offer
+Start over for a key a restart of the phone would bring back. Start over
+looks the key up again before deleting anything.
+
 ## A Notebook capture the store could not seal waits as plaintext for a later attempt
 
 **Status: accepted.**
@@ -1188,17 +1212,19 @@ padded files and a different layout.
 When the queue cannot take a just-finished recording, from the phone's
 microphone, whatever the failure, the app
 writes it under the Notebook directory for a later attempt, and each later
-capture run tries again to seal and queue everything waiting there. If that write fails too, the recording is lost. A recording kept this way is dated in the time zone current
+capture run tries again to seal and queue everything waiting there. If that write fails too, the recording is lost:
+the Notebook screen says a phone recording could not be saved. A recording kept this way is dated in the time zone current
 when it is processed, not the one it was recorded in.
 Until that succeeds the recordings sit unencrypted in the app's private
 storage, still under Android's file-based encryption and excluded from
 backup with the rest of the Notebook. When the cause is a busy key store
 the window closes at the next run; when the queue file is corrupt it stays
-open until the file is rebuilt, at the next app start, and when the Notebook key is gone until the Notebook starts over, with
+open until the file is rebuilt, at the next app start or from the Notebook
+tab, and when the Notebook key is gone until the Notebook starts over, with
 every capture retained meanwhile joining it. The alternative,
 deleting the only copy of a recording because the store failed, was judged
 worse. The store provides the holding area, the retry, and a count of what
-is waiting. The holding area is also the one place where the store
+is waiting, which the Notebook screen shows. The holding area is also the one place where the store
 accepts a file it did not seal itself: a recording placed there by whoever
 can write to the app's private storage is queued and transcribed as if
 the user had recorded it, which the sealed files' authentication cannot
@@ -1212,7 +1238,10 @@ close it.**
 A phone recording is held in memory until it stops, so Gravel writes an
 unencrypted copy to storage only in the failure case above. If the app
 process ends before the recording stops, as in a crash, a restart of the
-phone or a flat battery, the recording is lost.
+phone or a flat battery, the recording is lost. Leaving the Notebook tab,
+leaving Gravel, turning the screen off or swiping Gravel away from recent
+apps stops the recording and keeps what was recorded, unless it is under a
+second or cannot be saved, which the Notebook screen reports.
 
 ## A Notebook write just before a power loss can be undone
 
@@ -1249,7 +1278,8 @@ waits for Android's idea of charging, not of being plugged in. On
 Android 14 that is the platform's charging broadcast alone, which a
 phone holding its charge below full (an adaptive or 80% charging limit)
 may not send, so the recordings can wait until charging resumes or
-another run starts, such as when Gravel is opened. Android 15 and 16 also count a held charge of
+another run starts, such as when Gravel is opened, a recording is made
+or Process now is tapped. Android 15 and 16 also count a held charge of
 70% or more as charging when the phone reports an adaptive charging
 mode. Releases before Android 14 were not checked. A run on power that
 leaves a long recording queued, such as after a failed attempt, leaves no
@@ -1275,7 +1305,19 @@ then 30, then 45, up to 5 hours (androidx.work 2.12.0,
 `WorkSpec.calculateNextRunTime` and `WorkRequest.MAX_BACKOFF_MILLIS`).
 After seven hours of waiting the next check is two hours away, so the
 recording can stay queued that long after the phone is back on Wi-Fi,
-or until another run starts, such as when Gravel is opened.
+or until another run starts, such as when Gravel is opened, a recording
+is made or Process now is tapped.
+
+## A damaged Notebook recording can leave the queue without being listed
+
+**Status: open; closing it needs the flag written before the file is set
+aside.**
+
+A recording whose file fails to open is set aside and meant to show in
+the failed list as damaged. When the failure is not stored after the
+file is set aside, a later processing pass finds no recording and
+removes the entry without listing it, so the user gets no notice. The
+recording could not have been read anyway.
 
 ## Set-aside Notebook files are aged by the phone's clock
 
@@ -1300,6 +1342,21 @@ much older, so it can delete backups the keeping rule would still keep, and
 they stay deleted once the clock is right. What goes is older restore
 points; the newest backup stays.
 
+## Start over anyway can leave the Notebook key in place
+
+**Status: accepted.**
+
+Start over anyway is offered when Android's key store cannot use or
+look up the Notebook key. If the key store still does not answer when
+the key is to be deleted, the delete is skipped and Gravel reports the
+key deleted. The old Notebook files are deleted all the same; the key
+stays, and the Notebook uses it again once the key store answers.
+`NotebookKeystore.deleteKey` asks whether the key exists before it
+deletes, and that check answers no when the key store cannot be
+reached (android16-release `AndroidKeyStoreSpi.getKeyMetadata`;
+android11-release, android10-release and pie-release
+`KeyStore.contains`). Deleting without the check would close this.
+
 ## A Notebook capture can be published twice
 
 **Status: open; closing it needs the capture's id stored with what it
@@ -1318,18 +1375,39 @@ second time, and a note whose second model reply differs is written beside
 the first. Storing the capture's id with each result, and skipping a
 capture already published, would close this.
 
+## A Notebook completion backlog past fifty drops the oldest
+
+**Status: accepted.**
+
+A spoken completion waiting for the user to choose the reminder it
+completes sits in a store until the user acts on it. The store holds fifty
+entries; the fifty-first save drops the oldest completion claim without
+asking. The bound keeps an ignored backlog from growing without limit.
+
 ## A Notebook reminder whose alarm Android refuses can stay silent
 
-**Status: open.**
+**Status: open; the screens do not tell a reminder or snooze stored
+without its alarm from one that has it.**
 
 Each Notebook reminder with a time ahead and each pending snooze holds one
 Android alarm, beside Gravel's other alarms, and Android refuses a new one
 once Gravel holds its per-app limit (500 by default; android16-release
 `AlarmManagerService`, `MAX_ALARMS_PER_UID`). Nothing in the Notebook keeps
 the number of reminders below that limit. A reminder whose alarm is
-refused is stored without one.
+refused is stored without one: one made under Reminders in the Notebook
+tab is reported as saved, one from a recording is listed under Recent
+captures as a reminder but gets no notice that it is set or that its time
+needs checking, and one brought back by a restore shows nothing.
 A snooze refused this way is kept without its alarm: a swiped
-notification is gone with nothing set. Nothing sets the missing alarms until the next re-arm runs, such as when Gravel next starts.
+notification is gone with nothing set, and a snooze picked in Gravel is
+reported as "The reminder couldn't be snoozed." but rings after the next
+re-arm. Nothing sets the missing alarms until the reminder is edited or
+the next re-arm runs, such as when Gravel next starts, and while Gravel
+stays at the limit both are refused too, an edit then being reported as
+not saved although it is stored; a reminder whose time has passed by then
+is shown late or listed as missed. An edit of a reminder that has its
+alarm moves that alarm, but another of Gravel's alarms set in the same
+instant can take its place and leave the reminder without one.
 
 ## The Notebook key is usable while the device is locked
 
@@ -1409,6 +1487,28 @@ already read the Notebook on it, and while part of the Notebook cannot be
 read can restore the newest automatic backup, bringing back what was
 deleted since it was made.
 
+## The Notebook tab's screen-capture block can start a frame late
+
+**Status: accepted.**
+
+Screenshots, screen recordings and the Recents preview leave out the
+Notebook tab: Gravel marks the app's window secure while the tab is open
+and clears the mark after the tab closes. Android applies each change a
+moment after Gravel makes it, so the tab holds its content back for two
+frames after setting the mark and keeps the mark for two frames after
+closing; on a slow phone, a screen recording already running as the tab
+opens or closes can still catch a frame of it.
+
+## A keyboard can ignore the Notebook's request not to learn
+
+**Status: accepted.**
+
+The Notebook's text fields ask the keyboard not to learn from what is
+typed in them, so note text stays out of its suggestions and typing
+history. Android leaves this to the keyboard ("the flag is not a
+guarantee, and some IMEs may not respect it", android16-release,
+`EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING`): a keyboard that ignores
+the request can keep words from notes, titles, folder names and tags.
 
 ## The Notebook's text models are community quantizations
 

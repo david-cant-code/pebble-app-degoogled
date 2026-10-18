@@ -14,6 +14,7 @@ import androidx.navigation.toRoute
 import com.anopticlabs.gravel.firmware.FirmwarePickerRoute
 import com.anopticlabs.gravel.firmware.FirmwarePickerScreen
 import com.anopticlabs.gravel.ui.TextModelsScreen
+import com.anopticlabs.gravel.ui.rememberNotebookTab
 import io.rebble.libpebblecommon.locker.AppType
 import kotlinx.serialization.Serializable
 import kotlin.uuid.Uuid
@@ -75,6 +76,9 @@ object PebbleNavBarRoutes {
 
     @Serializable
     data object IndexRoute : NavBarRoute
+
+    @Serializable
+    data object NotebookRoute : NavBarRoute
 
     @Serializable
     data object HealthRoute : NavBarRoute
@@ -208,6 +212,15 @@ fun NavGraphBuilder.addNavBarRoutes(
     }
     composableWithAnimations<PebbleNavBarRoutes.IndexRoute>(viewModel) {
         indexScreen(topBarParams, nav, scopedCoreNav)
+    }
+    composableWithAnimations<PebbleNavBarRoutes.NotebookRoute>(viewModel) {
+        rememberNotebookTab()?.Screen(
+            topBarParams,
+            openTextModels = { nav.navigateTo(PebbleNavBarRoutes.TextModelsRoute) },
+            openSpeechSettings = {
+                nav.navigateTo(PebbleNavBarRoutes.WatchSettingsCategoryRoute(section = Section.Speech.name, topLevelType = TopLevelType.Phone.name))
+            },
+        )
     }
     composableWithAnimations<PebbleNavBarRoutes.NotificationAppRoute>(viewModel) {
         val route: PebbleNavBarRoutes.NotificationAppRoute = it.toRoute()

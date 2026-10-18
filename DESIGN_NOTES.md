@@ -811,11 +811,14 @@ downloaded.
 ## Notebook
 
 Gravel's Notebook feature (voice and typed notes, and reminders) lives in the
-`:notebook` module. Pure
+`:notebook` module. The
+stores, the reminder alarm stack, the capture pipeline and the tab's screen
+are registered in the app's Koin graph (`notebookModule`) and the alarm
+receivers are in the merged manifest. Pure
 logic goes in `commonMain` on the standard library and kotlinx.serialization;
 `androidMain` holds only what the platform must supply (Unicode NFKD
 decomposition for note filenames, the Keystore-backed storage below, the
-alarm stack).
+alarm stack and the Compose screens).
 
 The text model behind the Notebook's titles, tags and reminder messages is
 llama.cpp (MIT), compiled from source like the speech engine and run the
@@ -929,7 +932,8 @@ data key, so its cost does not grow with the file. The existing `KeystoreSecretC
 single secrets without location binding, so the Notebook has its own codec
 rather than a second contract on that class. The Notebook needs API 28, the
 level that adds the StrongBox key generation API and the exception that
-sends a generation to the fallback at once; below it the key path throws. The
+sends a generation to the fallback at once; below it the tab is absent and
+the key path throws. The
 directory is excluded from Android backup and device transfer in every rule
 set because the key never leaves the device, so a restored copy could only be
 quarantined; the Notebook's own backup, below, is how data moves. Gaps of
@@ -939,7 +943,7 @@ Constraints the code relies on, each pinned by a test in the module or
 in the app's device suite:
 
 - Three front matter readers exist on purpose. `Frontmatter` is strict and
-  line-anchored;
+  line-anchored, because the editor splits and rejoins notes through it;
   `FrontmatterTags` walks the block for the `tags:` field; `BodyTokenizer`
   has its own lenient strip, which defines the token vocabulary stored notes
   are indexed under, so changing it means re-indexing every note.
@@ -967,21 +971,26 @@ in the app's device suite:
   a day or of next week; a stray number, "last" or "end of" beside one),
   and when a read time is already past as the capture is processed, the
   reminder is armed at the quick-remind default and the user is asked to
-  check it (the
+  check it (a mark until the editor is saved or the time kept, and the
   notice below); with no time words they
   recognize, or only vague ones, it is armed at that default without
   asking. A voice reminder, its time read or defaulted, posts one notice
   of when it is set (where notifications are allowed, and not when
-  Android refuses its alarm): "Reminder set" on its own channel, or
-  the notice asking to check the time in its place. Among the paths that take the notice down are the
+  Android refuses its alarm), a tap on which opens its editor and
+  dismisses it: "Reminder set" on its own channel, or
+  the notice asking to check the time in its place; a reminder made in the
+  editor posts none. Among the paths that take the notice down are the
   reminder going off, being completed, marked missed or deleted, a re-arm
-  dropping it or finding it gone; of the
+  dropping it or finding it gone, and an editor save or a Keep; of the
   "Reminder set" notices, only the newest ten (`MAX_SET_NOTICES`) stay up.
   Recurrence advances in local
   calendar units counted from the rule's anchor, so a 31st clamped to a
   shorter month's last day does not move the occurrences after it. An
   occurrence's status is decided as completed, then canceled, then by its
   latest fire against now.
+- A spoken completion is never resolved on its own: the matcher only ranks
+  candidates, every write follows a tap through `voiceCompletionWriteTarget`,
+  and an upcoming occurrence has no single-occurrence delete.
 - A capture's queue entry is written before any processing and
   removed after it, so a capture survives process death; the in-memory
   capture rows are a projection of that entry.
@@ -993,7 +1002,8 @@ in the app's device suite:
 - A read separates four outcomes: only an authentication failure (in
   either layer) or a malformed envelope is corruption, moved to `.quarantine` (named
   after the file's path and the time, and deleted by the cleanup below
-  once that time is 30 days behind the phone's clock); a Keystore or I/O failure
+  once that time is 30 days behind the phone's clock; the failed list's
+  Delete removes a recording's copies sooner); a Keystore or I/O failure
   that may
   heal is transient and leaves the file in place; a missing key or a failure
   the key store calls permanent is `KeyUnavailableException` and also leaves
@@ -1072,7 +1082,11 @@ in the app's device suite:
   suffixed name its folder does not hold, and reuses the note holding a
   name on the way when its content is identical, rewritten when its file
   is missing or does not open; a suffixed name the name
-  rule would refuse is never taken.
+  rule would refuse is never taken. `updateNote` replaces a note's content;
+  the note page's edits go through `editNote`, which times an edit at least
+  a millisecond past the note's listed time while that stays within the
+  stored window, so a restore of an archive made before such an edit keeps
+  the edit while its file opens with its content.
   Deleting a folder lists it again while a note it could not move remains
   under it; a process end before the move finishes, or a relist that
   fails, leaves it unlisted with the notes not yet moved still shown under
@@ -1142,7 +1156,7 @@ in the app's device suite:
   a later build, fails closed the same way as a damaged one. The event
   log's transitions are pure functions in the reminders package: a
   replayed fire never resets an occurrence, a completed or canceled stamp
-  is kept once written, the two do not
+  is kept once written (the calendar's switch replaces one), the two do not
   exclude each other, a resolved occurrence is neither snoozed nor marked
   delivered, and retention keeps an event until its scheduled fire, its
   actual fire, any pending snooze and its completion all lie behind the
@@ -1161,7 +1175,8 @@ in the app's device suite:
   while the item still sits on that occurrence: a one-shot is removed with
   its alarm, a recurring item advances from the later of now and that
   instant and is armed once stored (a series whose next occurrence falls
-  past the stores' window ends instead). A fire whose log write fails
+  past the stores' window ends instead), and a late fire of an occurrence
+  the user edited away leaves the item alone. A fire whose log write fails
   leaves an item it would remove stored (listed as waiting to go off), for
   a re-arm to log and remove as it does any past-due item, and
   still advances a recurring item. The fire then takes down the
@@ -1179,14 +1194,17 @@ in the app's device suite:
   too (libpebble3 `LibPebbleNotificationAction.fromNotificationAction`,
   `NotificationConfig.addShowsUserInterfaceActions`). A swipe snoozes for the
   configured minutes until the occurrence's chain reaches eight (an
-  unreadable log arms the re-fire uncounted), and a re-fire is posted for an open
+  unreadable log arms the re-fire uncounted), the picker snoozes
+  regardless and does not count and clears the notification only once the
+  snooze is recorded and armed, and a re-fire is posted for an open
   occurrence that is not missed, or for any occurrence when the log cannot
   be read, and marked delivered only when the user could see it. A re-fire
   the log holds no snooze awaiting delivery for (after the log was set aside
   or restored, for one) counts as a snooze to
   that moment, and an occurrence the log does not hold is logged with it;
   it is dropped like any other when its occurrence is resolved or a later
-  logged occurrence of its reminder has come due. One sweep alarm,
+  logged occurrence of its reminder has come due. The picker,
+  the swipe and the re-arm each refuse a missed occurrence. One sweep alarm,
   set at the earliest time an open occurrence turns missed (its cutoff, or a
   later logged occurrence of its reminder coming due), takes down the
   notifications of logged occurrences that are missed or completed (one
@@ -1201,7 +1219,10 @@ in the app's device suite:
   failed move changes nothing), then removes its record, notification and
   snooze alarm and runs the sweep; an earlier open time of the same
   reminder that was missed only because the deleted one came due is
-  recorded as missed. `rearmAll` re-arms from
+  recorded as missed. A reminder's write and the alarm set for it happen
+  under one lock (`arming`), in the fire path, the re-arm sweep and the
+  Reminders section's edits alike; a new reminder is armed once it is
+  stored, outside that lock. `rearmAll` re-arms from
   the stores and is idempotent; it runs at app start, at boot, after a
   package update, when exact alarms are allowed, after a restore and after
   a recovery step: a future reminder
@@ -1215,14 +1236,15 @@ in the app's device suite:
   failed already moved its item on, and the re-arm does not log it, which
   no test pins), a logged occurrence still due is posted as a fire and
   the missed ones share one notice without buttons, each notice beside any
-  earlier one, an
+  earlier one and opening the calendar on the latest one's due day, an
   unseen snooze of an occurrence still open is re-posted once and one
   already missed is skipped, events past the retention setting are
   pruned, and the lapse sweep runs. Exact alarms need the user's grant from
   Android 12; the app lists it among its required permissions while a
   reminder exists, without waiting on or failing with the Notebook's
   storage, and arms inexact alarms until it is granted. The receivers run
-  in the main process. A stored reminder's message is capped
+  in the main process and tell a live screen to re-read through the
+  in-process `ReminderRefreshSignal`. A stored reminder's message is capped
   and its recurrence rule must be usable, so what reaches an alarm intent
   or a notification is bounded.
 - The backup (the `backup` package) is one password-sealed archive of the
@@ -1461,6 +1483,75 @@ in the app's device suite:
   time the key was made is read so and stays stored as setup wrote it. Backup and
   key notices are marked private, with a public version that has a title
   only.
+- The Notebook tab's recovery card reads every store part strictly
+  (`NotebookRecovery.diagnose`): the key counts as gone when a read
+  reports it missing or unusable and no file read from disk opened, or,
+  with no file opened, when Android reports no key while files the key
+  guard counts remain;
+  otherwise each part whose file fails to open or parse is named, and a
+  failure that may pass offers Try again, which also runs the rebuilds.
+  The note list and the recordings list are rebuilt (both also at each
+  process start) from what remains: each recording that opens gets
+  the name `recovered`, its file's time (now when that is unusable), no
+  zone, no attempts, no flag; what the rebuild processes again is in
+  `KNOWN_ISSUES.md` (a capture published twice). For any other damaged part the card offers
+  Restore and Start fresh side by side, or Start fresh alone for the parked
+  completions, which backups do not hold. Start fresh sets the damaged
+  file aside in `.quarantine`: the recordings list, folder list and folder
+  tags are copied there, the copy synced, and replaced in one move (the
+  folder list with Unclassified plus every folder holding a note, the tags
+  from each listed folder's name, each built only from a note index or
+  folder list that reads); the note index and every other part are moved
+  there, and the reminders go with their history, which goes first.
+  Fire alarms already set for reminders set aside still go off: each posts
+  the text it carries and is logged in the new history, and so does a
+  snooze alarm already set (the re-fire above for an occurrence the log
+  does not hold). The new stores hold no record of such an alarm, so
+  `rearmAll` does not set it again after an event that drops alarms. Not
+  pinned by a test: that it is not set again.
+  A reminders store not yet written,
+  a replaced one included, takes a new identity and a first id at a random
+  point in a window below the highest id a backup may carry; the old
+  store's ids are unknown, so a new id may still match one whose alarm is
+  set, though the window makes that unlikely. With the key gone, Start over
+  diagnoses again and clears the key on its own only when Android reports
+  no key under the alias, from Android 12 (`NotebookKeystore.resetKey`
+  cites why earlier versions do not count); a key that fails or cannot be
+  looked up is kept
+  (one that passes an encrypt and decrypt stops the start over), and the
+  card then says a restart may help and offers Start over anyway, which
+  deletes it, except as `KNOWN_ISSUES.md` records ("Start over anyway can
+  leave the Notebook key in place"); a delete that fails stops it
+  unfinished. It then moves every file
+  outside the unsealed
+  directories to `.quarantine/start-over-<millis>/`, cancels the automatic
+  backup runs and lets go of every folder grant the app holds that no
+  setup in progress uses, and last deletes that folder, and any an
+  earlier Start over left, without following a link in them (the cleanup
+  above deletes what a Start over did not get to); the next write makes a
+  new key. Restore carries
+  the same step and runs it after the archive's first pass, before
+  anything is added: from the newest automatic backup made with the stored
+  key and not found damaged, after the screen lock on a phone that has one,
+  when a part backups hold is damaged and such a backup exists in a folder
+  the app still holds, else from a picked file; the automatic backup's file
+  must have the SHA-256 recorded when it was written, and one that does not
+  or cannot be opened, or a lock prompt that fails, offers a file with the
+  same step. A restore also drops the alarms and notifications under
+  archive ids it gave new ids, and of their logged occurrences the snooze
+  alarm where the archive holds a snooze still to come (the re-arm then
+  treats that snooze under the new id as any other; where the archive
+  holds none still to come, a snooze alarm already set stays), so that
+  what the archive holds is not armed under both ids, leaving any id a
+  reminder here holds to that reminder; history the old alarms above
+  logged stays beside the restored history.
+  Not pinned by a
+  test: the card and its dialogs (device runs only), `resetKey`'s Keystore
+  calls beyond a key that works and one that is absent,
+  `BackupFolderDocuments.heldFolders`, `placement` on a real key, the sync
+  of a kept copy, a failed restore's state written once with its file
+  plan, and the
+  module passing an automatic backup's recorded SHA-256 to the restore.
 - The capture pipeline (the `pipeline` package) works through the queue
   one capture at a time, one drain at a time (`CaptureDrain`), on the I/O
   dispatcher. Before each capture it reads the queue again and takes the
@@ -1522,14 +1613,18 @@ in the app's device suite:
   quarantine. The flag stores a reason code (`CaptureFailureReason`, a
   stored format) in the entry, and in manual backups for a capture whose
   recording still reads; an entry flagged without one reads as having run
-  out of attempts, and one whose recording is gone reads as damaged. A note routed to a
+  out of attempts, and one whose recording is gone reads as damaged. The failed list (the flagged count) leaves out the capture
+  the drain is running and offers Try again, which gives fresh attempts,
+  and Delete, which removes the entry, its recording and any quarantined
+  copies of it; one whose recording is gone has no Try again. A note routed to a
   folder it was not offered, or to an unindexed one, is written in
   `unclassified`, and a note's file name is
   cut so it and its largest suffix fit the store's limit. Host tests
   cover these on fakes and temporary stores, except the strict folder
   reads behind the store check (which reads those files first), the
   readiness check's failed-load branch, `isPluggedIn`, the power receiver,
-  the charging work and its worker, the pause file's sync, and the Koin
+  the charging work and its worker, the pause file's sync, the failed
+  list's buttons and notices, and the Koin
   wiring; `CapturePipelineDeviceTest` runs
   WAV and AAC captures through the real engines and the Keystore. The
   engines reach the pipeline through interfaces the app binds
@@ -1563,7 +1658,9 @@ in the app's device suite:
   pass), which send it to the phone, where the charger rule applies,
   unless the server settings changed meanwhile. A server error there
   starts the server's hold with no capture to flag; while it lasts the
-  mode routes to the phone. A capture goes to the
+  mode routes to the phone and the screen shows a notice
+  (`CaptureSpeech.notice`) with Try again. Try again on the failed list
+  resets the server tries. A capture goes to the
   server as one WAV built in
   memory (`SelfHostedTranscriptionService.transcribeRecording`), on a
   client of its own whose read timeout is 10 minutes, under dictation's
@@ -1591,7 +1688,12 @@ in the app's device suite:
   error started the hold through for its next request, and a server error
   there flags it. Host tests cover the routing, the failure kinds, the
   hold, the fallback mode's tries, reroute and notice, the watches, the
-  startup order and the client's read timeout on fakes or a local server; the download job's reports of a finished download are
+  startup order and the client's read timeout on fakes or a local server;
+  the network and server-try jobs, their worker, the network check, the
+  Koin wiring of the route, the notice, the network
+  watch, the speech-setting watch and Try
+  again, and the rendering of the hold and notice lines are not
+  host-tested; the download job's reports of a finished download are
   checked as source text.
 - Watch dictation and captures share the server through
   `ServerDictationHold` (`:util`), whose `sendRecording` every server
@@ -1638,7 +1740,7 @@ in the app's device suite:
   reconciles the note index, lists a missing Unclassified, rebuilds a
   damaged recordings list, queues recordings held for a later attempt and
   only then sweeps orphan blobs; whenever an
-  activity resumes after none was; and
+  activity resumes after none was; when the Notebook screen starts; and
   when a text download finishes, a text model is chosen or an installed one
   is deleted (Settings > AI below); and on Resume, Process now, the charging job, the Wi-Fi rule starting to
   allow a request while the drain waits for the network, the network
@@ -1646,7 +1748,8 @@ in the app's device suite:
   (`SpeechSettingWatch`, on `STTConfig`; a change of the server's token or
   pinned certificate alone starts no run), the download job finishing a
   speech model's download (the same watch, on `SpeechModelInstalls`, which
-  the job counts up on its success path). A request during a
+  the job counts up on its success path), and Try again on the server's
+  hold or notice. A request during a
   run is taken by that run, while a capture queued during one, a text model
   change, a speech settings change, a finished speech model download, or
   one of those processing changes
@@ -1662,7 +1765,8 @@ in the app's device suite:
   that start without an exemption (see `InferenceBoostService`); the refusal
   is logged, the wake lock is still taken, and a process the system then
   freezes or ends leaves its capture queued for the next run. The phone
-  recorder takes the same service and wake lock under a hold of its own until its recording is queued (`PhoneRecorder` states why),
+  recorder takes the same service and wake lock under a hold of its own from
+  the record tap until its recording is queued (`PhoneRecorder` states why),
   and the queue call takes the processing hold before the recorder lets go of
   its own; the notification, when shown, says a note is being recorded while
   the recorder holds it. Host tests pin the hold rules, the hand-over, the
@@ -1673,14 +1777,20 @@ in the app's device suite:
   AudioRecord as 16 kHz mono PCM16 held in memory, one recording at a time,
   and only while an activity is started. A recording ends at Stop, at five
   minutes (the long-form limit), when the microphone is lost, when the last
-  resumed activity pauses or no activity is left started, and keeps what it had; one
-  under a second is discarded. The recording is dated with the time and zone its
+  resumed activity pauses or no activity is left started, or when the
+  Notebook tab is left or a note is opened, and keeps what it had; one
+  under a second is discarded. The screen stays on while the tab
+  shows a recording. The recording is dated with the time and zone its
   microphone started in. The text model starts loading when the recording
   starts, unless a capture run is under way. `CaptureIngest` stores a
   finished recording as a WAV and asks the coordinator for a run; it runs to
   its end if its caller is canceled, and a recording the queue refuses for
   any reason goes to `pending_captures/` (above). A process death during a
-  recording loses it (`KNOWN_ISSUES.md`). Host tests pin the recorder on a fake microphone and the ingest
+  recording loses it (`KNOWN_ISSUES.md`). The microphone permission is asked
+  for at the record tap through `PermissionRequester` and is not in
+  `RequiredPermissions`, so the missing-permission prompt does not ask for
+  it; a refusal says so, and one reported as permanent links to the app's
+  settings. Host tests pin the recorder on a fake microphone and the ingest
   on a temporary store; `PhoneRecordingDeviceTest` checks on a device that
   the platform decoder returns the WAV's samples, that a five-minute WAV is
   not refused, that the microphone opens in the capture format, and that a
@@ -1690,7 +1800,53 @@ in the app's device suite:
   `unclassified` otherwise. Its title is cleaned and cut to what a restore
   keeps, never inside a surrogate pair, and a note longer than a restore
   takes (`RestorePlan.MAX_NOTE_CHARS`) is refused, so a typed note fits what
-  a backup keeps.
+  a backup keeps. The editor is a full-screen dialog; with text in it, it
+  closes on a save or a confirmed discard. The draft is held in the
+  ViewModel, not in saved screen state, so a process death discards it.
+  Dialogs, sheets and menus are windows of their own, so each one the
+  Notebook tab opens sets `FLAG_SECURE` itself (`notebookDialogProperties`,
+  `notebookSheetProperties`, `notebookMenuProperties`); a popup inside one
+  without properties of its own takes the flag from it (androidx-main,
+  `AndroidPopup.android.kt`, `isFlagSecureEnabled`). Every Notebook text
+  field asks the keyboard not to learn from it
+  (`IME_FLAG_NO_PERSONALIZED_LEARNING`, set in `NoKeyboardLearning`):
+  Compose builds the field's `EditorInfo` itself and its `KeyboardOptions`
+  carry no such flag, so an interceptor adds it (`InterceptPlatformTextInput`,
+  ui-android 1.11.1, `PlatformTextInputModifierNode.kt`, marked
+  experimental).
+- The tab (the `ui` package) sits second in the bottom bar, shown until the
+  user turns off "Show Notebook Tab" and absent below
+  API 28.
+  While shown it takes the slot upstream gives the Index tab, so Health
+  and Notifications share one: the one the bar leaves out gets a row in
+  Settings (`WatchHomeNavTab.displacedTabs`). The tab bar in `:pebble`
+  compiles for iOS too, so it reaches the screen through the `NotebookTab`
+  interface, which only the Android app binds (`notebookTabModule`) and
+  common code looks up with `getOrNull`. The screen puts the capture area
+  (the record button and New note, the drain's progress and hold reason,
+  the waiting and flagged counts with the failed list, the
+  parked-completion banner and the recent capture rows) above the Notes,
+  Reminders and Calendar sections.
+  Its counts come from strict reads of every store part
+  (`NotebookRecovery.diagnose`), the queue and the parked claims, taken one
+  at a time when the screen starts, after each drain pass, after each write
+  to the parked claims (`VoiceCompletionStore.revision`), after each
+  recovery card action, pause, resume or failed-list action, and when a
+  capture settles or joins the batch; a
+  missing or unusable key or a damaged file replaces them with the recovery
+  card (above), and an empty claim list clears the "to review" notification, one at a
+  time with a park's save and notice. While any Notebook screen is composed,
+  its window holds `FLAG_SECURE`: the screen shows its content two frames
+  after setting it, and the flag is cleared two frames after the last
+  Notebook screen goes unless one came back or the window already had it
+  (`NotebookSecureContent`, `SecureHolds`), so the other tabs stay
+  capturable; the debug build's adb receiver can lift it for screenshots.
+  The notification taps' OPEN_* intents carry a random token kept in the
+  app's no-backup directory (`NotebookLinkToken`). `MainActivity` hands
+  every such intent to `NotebookIntents` first, which ends its handling
+  there and opens the tab only for one with that token, not relaunched
+  from Recents, while the tab is shown; it reads only ids from the intent,
+  never the text in it.
 - Settings > AI takes Speech Recognition's place in the list and opens two
   pages: Speech Recognition, upstream's category, now kept out of the
   top-level list (`Section.parent`), and, where the Notebook runs, LLM
@@ -1708,11 +1864,164 @@ in the app's device suite:
   waits for that follow-up, in whichever process it runs. Deleting the
   chosen model clears the
   choice; deleting a part an interrupted download kept also cancels that
-  model's scheduled download. The device suite's `TextModelsContentTest`
+  model's scheduled download. The Notebook's paused line offers the LLM
+  page when the text model is what holds processing
+  (`CaptureRemedy.TEXT_MODEL`). The device suite's `TextModelsContentTest`
   pins the page's questions: a download of a model whose memory floor is
   more than 10% above the phone's memory, and a delete. Among what no test
-  pins: the Settings entries, the view model, the per-model job cancel, and the provider holding
+  pins: the Settings entries, the view model, the paused-line button
+  (device runs only), the per-model job cancel, and the provider holding
   the model's install lock while it deletes a part.
+- The Notes section (`NotesSection`, `NotesViewModel`) goes from the folder
+  grid to a folder's notes to one note, with Back stepping out; a selection
+  belongs to the folder page, and nothing goes into saved screen state.
+  While a note is open it takes the whole tab area, so the capture area is
+  hidden and a recording in progress stops and is kept, as when the tab is
+  left. The screen reads the page it shows when it opens and again after
+  each write to the note index, the folder list or the folder tags
+  (`NoteStore.revision`, one count per directory), so a capture, a typed
+  note or a restore shows without a refresh; a read that finishes after its
+  page was left is dropped. A failed read shows why instead of an empty
+  list; the folder grid needs only the index, and without the folder list
+  it shows Unclassified and the folders holding notes. A note is read for
+  display without quarantining a damaged file. Actions and edit saves run
+  in the ViewModel's scope, actions one at a time; a batch's selection and
+  a move dialog land only on the page they started from, and messages wait
+  in the state until shown, without folder names (a snackbar can outlast
+  the tab's `FLAG_SECURE`). Batches go to the store as one call
+  (`moveNotes`, `deleteArchivedNotes`), which writes the index once per 64
+  changed notes and goes on past a note it fails on. The section's Back
+  handler is added again each time it becomes enabled, so it runs ahead of
+  the home screen's (`NotesSection`).
+  A note is edited from what the editor opened, against the hash the index
+  lists: `NoteStore.editNote` refuses the save when the note changed since
+  (a restore, for example), was archived, or is gone, and the editor keeps
+  the text. The note page and the editor show the body after the front
+  matter as it is (`Frontmatter.editableBody`), an unchanged draft closes
+  without a write, and a title left as it was keeps the note's title and
+  name; a new title is
+  written into the front matter when the note has one and into the index,
+  and renames the note (the new title's slug, the old date stamp kept).
+  Archived notes are read-only; they can be restored to a folder or
+  deleted, and deleting asks first and deletes only notes still in the
+  archive. The note page renders the body as markdown (`NoteBody`), parsed
+  off the main thread and laid out in a lazy list one top-level block at a
+  time. It is shown as plain text in pieces of up to 4 Ki characters
+  (`NoteDisplay.chunks`) instead when `NoteRenderLimits` refuses it: before
+  parsing, a line starting with more than `MAX_DEPTH` levels as
+  `NoteRenderLimits.mayParse` counts them (a task-list box adding none) or
+  a run of lines
+  holding more than `MAX_RUN_BRACKETS` `[`; during it, a parse still running
+  after `PARSE_BUDGET_MILLIS` or once the page is left (through the parser's
+  cancellation token; where the parser consults it is cited there); after it,
+  a failed parse or a tree past the depth, block-size or item limits, or
+  with two top-level nodes at one offset (the lazy list keys items by
+  offset). Single line breaks are kept. Inline HTML, HTML blocks,
+  `==highlight==`, `=` signs, link definitions, links written with an
+  angle-bracketed destination and images show as the text they are written
+  as, and no image is loaded (the renderer loads images only through its
+  image transformer, whose default returns none: renderer 0.45.0,
+  `NoOpImageTransformerImpl`). A tapped link goes to the page's `UriHandler`
+  (`NoteBody` cites where the renderer reads it) and opens its own
+  destination: the page keeps no link table (`NoteLinks`), so
+  reference-style links do not resolve. Only printable-ASCII https links
+  with a host and no user part, and mailto and tel links (`NoteLinkSafety`),
+  are offered, after a confirmation showing the site and the whole link;
+  they open with `ACTION_VIEW` and `CATEGORY_BROWSABLE` on the trimmed text,
+  scheme lowercased (`linkIntent`), and any other link is refused with a
+  message. The renderer is `com.mikepenz:multiplatform-markdown-renderer`
+  0.45.0 on JetBrains' `org.jetbrains:markdown` 0.7.15, declared above the
+  0.7.9 the renderer asks for. The renderer ships Java 21 class files, which
+  a JDK 17 host test cannot load, so host tests cover `NoteRenderLimits`
+  (parser types only, including a check that the running text of sample
+  notes holds only tokens the renderer draws or Gravel appends), and the
+  renderer is exercised on a device: `NoteMarkdownDeviceTest` and the
+  Compose UI test `NoteBodyComposeTest` (androidx `ui-test-junit4`, kept at
+  the app's Compose UI version, with `ui-test-manifest` in debug builds;
+  the debug overlay unexports the test activity that library exports). A note longer than `NoteDisplay.MAX_EDIT_CHARS`
+  (32 Ki characters) opens read-only with a line saying so, and the editor,
+  typed notes included, takes no text past that length: typing slows with the field's length (about 50 ms per
+  keystroke at 32 Ki characters on a Pixel 6 Pro, seconds past 128 Ki).
+  Tapping a capture's "note saved" row opens that note.
+- The Reminders section (`RemindersSection`, `RemindersViewModel`) lists
+  fired occurrences still due (not missed), occurrences waiting on a
+  snooze, and every stored
+  reminder by its next fire, one whose time passed without a fire marked
+  as waiting to go off (`reminderListing`). It reads the reminders and
+  the event log strictly when it starts, on each
+  `ReminderRefreshSignal` tick (subscribed before the first read) and on
+  "Try again", and works the list out again each minute from that read, so
+  a due row lapses on time; a reminder still sitting on an occurrence the
+  log holds is shown as gone off. Completing, marking missed and deleting
+  a reminder ask first (there is no
+  undo), and the outcome is reported; deleting a single time is left to the
+  calendar. The editor (`planReminderEdit`)
+  takes a message up to the stores' cap, a date and a time in the phone's
+  12- or 24-hour setting (formatted by ICU from skeletons), and a repeat
+  rule: a one-shot must be in the future, a repeating reminder may start
+  in the past and first fires at its next occurrence, an edit that keeps
+  the time and the repeat changes only the message (re-armed at the
+  stored time, so a late reminder still fires), and one that keeps the
+  repeat and the shown day keeps the rule's anchor date. A reminder marked
+  to be checked shows "check this time" beside its time while that time
+  is ahead, a note in its editor and "Keep this time" in its row menu; a
+  save or a Keep clears the mark (not pinned by a test: the hint, the menu
+  item and the note). The date and
+  time pickers' states are not kept in saved state. A reminder is stored,
+  then armed. The notification's Snooze button
+  opens a picker for its occurrence, read from the event log rather than
+  from the intent; a set notice opens its reminder's editor, and a capture
+  row opens its reminder, neither replacing an editor already
+  open. The Reminders ViewModel takes those links; the tab's ViewModel
+  only shows the section: Calendar for the missed notice's link, which
+  waits until that section shows, and for the other links, the banner and
+  the capture rows, Reminders from Notes, leaving Reminders or Calendar
+  as shown; their editors and the review open over either.
+  The Calendar section, served by the same ViewModel and opened on
+  today's month with today listed by a tap on its tab, shows a
+  month calendar (`ReminderCalendar`, `buildCalendarOccurrences`, worked
+  out only while shown): six weeks starting on the phone's first day of
+  the week (`firstDayOfWeek`), a dot per time on each day (pending,
+  completed, missed; three at most, then a count), and the selected day's
+  times under the grid with Add reminder (09:00 on a later day, an hour
+  from now otherwise). A logged time shows on its due day, except a
+  completion not switched in the calendar, which shows on the day it was
+  done; one done before 02:00 counts on the day before when the time went
+  off at or after 22:00 that day, a snooze re-fire that late being kept on the
+  record when a later snooze replaces it (`lateNightFireAt`). A stored
+  reminder's next time always shows, a repeating one's later times up to a
+  month from today, and the calendar pages from the month history is kept
+  from to the furthest time it shows. Tapping a time opens its details
+  (words, status, first due, when completed or marked, the last snooze)
+  and what can be done with it, each asking first: a completed or missed
+  time switches to the other, which then shows on its due day
+  (`setInCalendar`), or is deleted; a pending one is completed, marked
+  missed or deleted; a next time is completed or marked missed ahead,
+  deleted (a repeating reminder moves on, a one-time one is removed) or
+  its reminder edited; a later time offers only the edit. A switch in the
+  calendar replaces a stamp; completing or marking missed elsewhere keeps
+  the first one an occurrence gets.
+  The completion review, opened from the banner or the "to review"
+  notification (which opening it clears), lists the parked claims, read
+  strictly with the section's reads while it is open, each with up to four
+  candidates (`completionCandidates`, worked out off the main thread with
+  each read): every stored reminder, one whose time passed included, and
+  the logged occurrences, a reminder still on a logged occurrence offered
+  as that occurrence. Candidates are ranked by distance from when the
+  claim was spoken, and a logged occurrence nobody completed or marked missed
+  stays completable after it lapses. The notification link waits while an
+  editor, a confirmation or the snooze picker is open, so the review does
+  not open over them, and while it is open the section's messages show
+  inside it. Every action but "New reminder" asks first, and that one
+  writes only when its editor is saved. An action that writes a reminder
+  or a note for a claim reads the claim again first and does nothing when
+  it is gone. A completion confirmed there is stamped at the time the
+  claim was spoken. A candidate's action goes through `ReminderAlarms` and takes
+  the claim once its write lands, a reminder moved on without its history
+  record included; "Was a note" and a new reminder made from the claim
+  take it once the note or the reminder is stored; "Already complete" and
+  "Disregard" only take it. A claim whose write landed but which could not
+  be taken is marked in the ViewModel and offers only "Disregard".
 - Captures and typed notes are written with `NoteStore.createListedNote`,
   which puts a note in `unclassified` when its folder is no longer listed,
   the list read under the index lock. `deleteFolder` unlists the folder

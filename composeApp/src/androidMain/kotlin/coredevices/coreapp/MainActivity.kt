@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.lifecycleScope
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.app.NotebookIntents
 import com.anopticlabs.gravel.firmware.firmwarePickerRouteForNotification
 import com.anopticlabs.gravel.firmware.firmwarePickerServes
 import com.eygraber.uri.toKmpUriOrNull
@@ -38,6 +39,7 @@ class MainActivity : ComponentActivity() {
     private val experimentalDevices: ExperimentalDevices by inject()
     private val pebbleBackgroundManager: PebbleBackgroundManager by inject()
     private val libPebble: LibPebble by inject()
+    private val notebookIntents: NotebookIntents by inject()
 
     companion object {
         private val logger = Logger.withTag(MainActivity::class.simpleName!!)
@@ -72,6 +74,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent) {
+        if (notebookIntents.take(
+                action = intent.action,
+                readString = intent::getStringExtra,
+                readInt = { if (intent.hasExtra(it)) intent.getIntExtra(it, 0) else null },
+                readLong = { if (intent.hasExtra(it)) intent.getLongExtra(it, 0L) else null },
+                launchedFromHistory = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0,
+            )
+        ) {
+            setIntent(null)
+            return
+        }
         firmwarePickerRouteForNotification(
             readExtra = intent::getStringExtra,
             launchedFromHistory = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0,

@@ -58,7 +58,12 @@ zxing = "3.5.4"
 compass = "3.2.0"
 health-kmp = "1.4.0"
 documentfile = "1.1.0"
-# Gravel: Compose UI tests (androidTest, debug manifest). Kept equal to the Compose UI version the
+# Gravel: markdown rendering on the Notebook's note page.
+markdown-renderer = "0.45.0"
+# Gravel: the renderer asks for parser 0.7.9; declared to take 0.7.15. A newer parser can add token types the
+# renderer drops; NoteRenderLimitsTest lists the ones a sample of notes produces against those drawn or appended.
+jetbrains-markdown = "0.7.15"
+# Gravel: Compose UI tests of the note page (androidTest, debug manifest). Kept equal to the Compose UI version the
 # app resolves (1.11.2, from Compose Multiplatform 1.11.1), which the test APK runs against; newer lines exist.
 compose-ui-test = "1.11.2"
 # Gravel: raises the Espresso that compose-ui-test brings (3.5.0, which fails on Android 17) to the current stable.
@@ -116,6 +121,9 @@ paging-compose = { module = "androidx.paging:paging-compose", version.ref = "pag
 sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
 okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
 kotlinx-io-core = { module = "org.jetbrains.kotlinx:kotlinx-io-core", version.ref = "kotlinx-io" }
+markdown-renderer = { module = "com.mikepenz:multiplatform-markdown-renderer", version.ref = "markdown-renderer" }
+markdown-renderer-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "markdown-renderer" }
+jetbrains-markdown = { module = "org.jetbrains:markdown", version.ref = "jetbrains-markdown" }
 compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4", version.ref = "compose-ui-test" }
 compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest", version.ref = "compose-ui-test" }
 espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "espresso" }

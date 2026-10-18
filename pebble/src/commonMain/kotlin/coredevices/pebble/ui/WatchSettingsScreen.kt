@@ -105,6 +105,7 @@ import androidx.lifecycle.ViewModel
 import co.touchlab.kermit.Logger
 import coredevices.whisper.isWhisperSupported
 import com.anopticlabs.gravel.firmware.FirmwarePickerRoute
+import com.anopticlabs.gravel.ui.rememberNotebookTab
 import com.anopticlabs.gravel.ui.rememberTextModels
 import com.anopticlabs.gravel.ui.textModelsSummary
 import com.russhwolf.settings.Settings
@@ -363,6 +364,7 @@ data class SettingsItemsState(
     val anyWatchSupportsSettingsSync: Boolean,
     val coreConfig: CoreConfig,
     val healthTrackingEnabled: Boolean,
+    val notebookShown: Boolean = false,
 )
 
 @Composable
@@ -562,6 +564,8 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     val healthSyncTracker: HealthSyncTracker = koinInject()
     val healthPlatformSyncEnabled by healthSyncTracker.enabled.collectAsState()
     val healthIsSyncing by platformHealthSync.syncing.collectAsState()
+    val notebookTab = rememberNotebookTab()
+    val notebookShown = notebookTab?.shown?.collectAsState()?.value == true
     val textModels = rememberTextModels()?.takeIf { it.supported }
     val textModelFacts = textModels?.facts?.collectAsState()?.value
     LaunchedEffect(textModels) { textModels?.refresh() }
@@ -577,6 +581,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
             watchPrefs,
             rebbleVoiceAvailable,
             platformSttAvailable,
+            notebookShown,
             textModelFacts,
         ) {
             listOfNotNull(
@@ -767,6 +772,16 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                             )
                         )
                     },
+                ),
+                basicSettingsToggleItem(
+                    title = "Show Notebook Tab",
+                    description = "Notes and reminders you record or type",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.General,
+                    keywords = "notebook notes reminders tab",
+                    checked = notebookShown,
+                    show = { notebookTab?.supported == true },
+                    onCheckChanged = { notebookTab?.setShown(it) },
                 ),
                 basicSettingsToggleItem(
                     title = "Foreground Service",
@@ -1392,7 +1407,11 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     topLevelType = TopLevelType.Phone,
                     section = Section.Health,
                     checked = coreConfig.preferHealthTab,
-                    show = { coreConfig.enableIndex && healthSettings.trackingEnabled },
+                    show = {
+                        WatchHomeNavTab.displacedTabs(
+                            coreConfig.enableIndex, healthSettings.trackingEnabled, coreConfig.preferHealthTab, notebookShown,
+                        ).isNotEmpty()
+                    },
                     onCheckChanged = {
                         coreConfigHolder.update(coreConfig.copy(preferHealthTab = it))
                     },
@@ -2136,6 +2155,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
         anyWatchSupportsSettingsSync = anyWatchSupportsSettingsSync,
         coreConfig = coreConfig,
         healthTrackingEnabled = healthSettings.trackingEnabled,
+        notebookShown = notebookShown,
     )
 }
 
@@ -2293,10 +2313,14 @@ fun WatchSettingsScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                         }
                     }
                 } else {
-                    val notificationsDisplaced = state.coreConfig.enableIndex &&
-                        state.healthTrackingEnabled && state.coreConfig.preferHealthTab
-                    val healthDisplaced = state.coreConfig.enableIndex &&
-                        state.healthTrackingEnabled && !state.coreConfig.preferHealthTab
+                    val displaced = WatchHomeNavTab.displacedTabs(
+                        state.coreConfig.enableIndex,
+                        state.healthTrackingEnabled,
+                        state.coreConfig.preferHealthTab,
+                        state.notebookShown,
+                    )
+                    val notificationsDisplaced = WatchHomeNavTab.Notifications in displaced
+                    val healthDisplaced = WatchHomeNavTab.Health in displaced
 
                     // When not searching, show category list
                     LazyColumn(state = listState) {

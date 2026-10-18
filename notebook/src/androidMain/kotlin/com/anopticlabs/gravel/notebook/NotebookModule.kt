@@ -56,6 +56,8 @@ import com.anopticlabs.gravel.notebook.pipeline.WorkManagerNetworkWork
 import com.anopticlabs.gravel.notebook.pipeline.WorkManagerServerTryWork
 import com.anopticlabs.gravel.network.UnmeteredWifi
 import com.anopticlabs.gravel.notebook.pipeline.isPluggedIn
+import com.anopticlabs.gravel.notebook.reminders.AndroidPhoneCalendar
+import com.anopticlabs.gravel.notebook.reminders.PhoneCalendar
 import com.anopticlabs.gravel.notebook.reminders.ReminderRefreshSignal
 import com.anopticlabs.gravel.notebook.sources.AudioRecordMicrophone
 import com.anopticlabs.gravel.notebook.sources.Microphone
@@ -76,13 +78,17 @@ import com.anopticlabs.gravel.notebook.ui.NotebookLinkToken
 import com.anopticlabs.gravel.notebook.ui.hasScreenLock
 import com.anopticlabs.gravel.notebook.ui.NotebookNavigator
 import com.anopticlabs.gravel.notebook.ui.NotebookStatusReader
+import com.anopticlabs.gravel.notebook.ui.NotebookViewModel
+import com.anopticlabs.gravel.notebook.ui.NotesViewModel
+import com.anopticlabs.gravel.notebook.ui.RemindersViewModel
 import com.anopticlabs.gravel.notebook.ui.StorageRecoveryRunner
 import org.koin.android.ext.koin.androidContext
 import java.io.File
+import org.koin.core.module.dsl.viewModel
 import org.koin.dsl.binds
 import org.koin.dsl.module
 
-/** The Notebook's stores, alarm stack, backups, capture pipeline and sources; constructing them touches neither the Keystore nor a file. */
+/** The Notebook's stores, alarm stack, backups, capture pipeline, sources and screen; constructing them touches neither the Keystore nor a file. */
 val notebookModule = module {
     single<Cryptographer> { NotebookFiles.crypto(NotebookKeystore(), NotebookFiles.root(androidContext())) }
     single { NoteStore(NotebookFiles.root(androidContext()), get()) }
@@ -225,11 +231,29 @@ val notebookModule = module {
     single { PhoneRecorder(microphone = get(), ingest = get(), keepAlive = get(), text = get(), coordinator = get()) }
     single { TypedNotes(get()) }
     single { NotebookNavigator() }
+    single<PhoneCalendar> { AndroidPhoneCalendar(androidContext()) }
     single {
         NotebookStatusReader(
             get(), get(), get(),
             automaticBackupAt = { get<AutoBackupStore>().newestBackupAt(get<BackupFolderDocuments>()::heldFolders) },
             rules = { get<ProcessingControls>().rules() },
+        )
+    }
+    viewModel {
+        NotebookViewModel(
+            get(), get(), get(), get(), get(), get(), get<VoiceCompletionStore>().revision, get<CaptureCoordinator>()::request, get(), get(), get(),
+            serverTryAgain = {
+                get<ServerCheck>().tryAgain()
+                get<CaptureCoordinator>().requestAgain()
+            },
+        )
+    }
+    viewModel { NotesViewModel(get()) }
+    viewModel {
+        RemindersViewModel(
+            reminders = get(), events = get(), alarms = get(), typedNotes = get(),
+            publisher = get(), completions = get(), navigator = get(), refresh = get(), settings = get(),
+            phoneCalendar = get(), phoneChoice = { get<NotebookPreferences>().phoneCalendar },
         )
     }
 }

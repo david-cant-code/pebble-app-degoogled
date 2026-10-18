@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.ui.rememberNotebookTab
 import com.russhwolf.settings.Settings
 import coredevices.ui.M3Dialog
 import coredevices.util.CoreConfigHolder
@@ -574,6 +575,7 @@ fun ModelManagementScreen(
         onCancelDownload = viewModel::cancelDownload,
         onDeleteModel = viewModel::deleteModel,
         onSetCurrentSTTModel = viewModel::setCurrentSTTModel,
+        notebookSupported = rememberNotebookTab()?.supported == true,
     )
 }
 

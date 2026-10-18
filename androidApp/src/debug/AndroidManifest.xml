@@ -19,6 +19,15 @@
                 <action android:name="coredevices.coreapp.SET_STT_DEBUG" />
             </intent-filter>
         </receiver>
+        <!-- Drives the Notebook from adb: arms reminders, queues and drains captures (see NotebookDebugReceiver); same DUMP gate. -->
+        <receiver
+            android:name="com.anopticlabs.gravel.debug.NotebookDebugReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="com.anopticlabs.gravel.notebook.DEBUG_REMINDER" />
+            </intent-filter>
+        </receiver>
         <!-- The Compose UI tests' host activity, which ui-test-manifest exports; the tests start it from inside the app. -->
         <activity
             android:name="androidx.activity.ComponentActivity"

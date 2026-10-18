@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.outlined.Notes
 import androidx.compose.material.icons.filled.BrowseGallery
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Tune
@@ -96,9 +97,11 @@ import coreapp.pebble.generated.resources.apps
 import coreapp.pebble.generated.resources.devices
 import coreapp.pebble.generated.resources.health
 import coreapp.pebble.generated.resources.index
+import coreapp.pebble.generated.resources.notebook
 import coreapp.pebble.generated.resources.notifications
 import coreapp.pebble.generated.resources.settings
 import coreapp.util.generated.resources.back
+import com.anopticlabs.gravel.ui.rememberNotebookTab
 import coredevices.libindex.LibIndex
 import coredevices.libindex.device.InterviewedIndexDevice
 import coredevices.libindex.device.KnownIndexDevice
@@ -226,6 +229,7 @@ fun WatchHomeScreen(
         val indexEnabled = viewModel.indexEnabled.collectAsState()
         val healthEnabledValue = viewModel.healthTrackingEnabled.collectAsState()
         val preferHealthTab = viewModel.preferHealthTab.collectAsState()
+        val notebookShown = rememberNotebookTab()?.shown?.collectAsState()?.value == true
         val watchOnboardingFinished: WatchOnboardingFinished = koinInject()
 
         // Create a SaveableStateHolder to preserve state for each tab
@@ -236,6 +240,7 @@ fun WatchHomeScreen(
         val watchfacesNavController = rememberNavController()
         val notificationsNavController = rememberNavController()
         val indexNavController = rememberNavController()
+        val notebookNavController = rememberNavController()
         val healthNavController = rememberNavController()
         val settingsNavController = rememberNavController()
 
@@ -244,6 +249,7 @@ fun WatchHomeScreen(
             watchfacesNavController,
             notificationsNavController,
             indexNavController,
+            notebookNavController,
             healthNavController,
             settingsNavController
         ) {
@@ -252,6 +258,7 @@ fun WatchHomeScreen(
                 WatchHomeNavTab.WatchFaces to watchfacesNavController,
                 WatchHomeNavTab.Notifications to notificationsNavController,
                 WatchHomeNavTab.Index to indexNavController,
+                WatchHomeNavTab.Notebook to notebookNavController,
                 WatchHomeNavTab.Health to healthNavController,
                 WatchHomeNavTab.Settings to settingsNavController,
             )
@@ -261,7 +268,7 @@ fun WatchHomeScreen(
             return
         }
 
-        val currentEntries = WatchHomeNavTab.navBarEntries(indexEnabled.value, healthEnabled, preferHealthTab.value)
+        val currentEntries = WatchHomeNavTab.navBarEntries(indexEnabled.value, healthEnabled, preferHealthTab.value, notebookShown)
         val currentTab = viewModel.selectedTab.value.let { tab ->
             if (tab in currentEntries) tab else currentEntries.first().also { viewModel.selectedTab.value = it }
         }
@@ -369,6 +376,7 @@ fun WatchHomeScreen(
                         is PebbleNavBarRoutes.LockerAppRoute -> WatchHomeNavTab.WatchFaces
                         is PebbleNavBarRoutes.AppstoreSettingsRoute -> WatchHomeNavTab.WatchFaces
                         is PebbleNavBarRoutes.IndexRoute -> WatchHomeNavTab.Index
+                        is PebbleNavBarRoutes.NotebookRoute -> WatchHomeNavTab.Notebook
                         is PebbleNavBarRoutes.WatchesRoute -> WatchHomeNavTab.Watches
                         else -> null
                     }
@@ -588,7 +596,7 @@ fun WatchHomeScreen(
                 NavigationBar(
                     modifier = Modifier.height(navBarHeight),
                 ) {
-                    WatchHomeNavTab.navBarEntries(indexEnabled.value, healthEnabled, preferHealthTab.value).forEach { route ->
+                    WatchHomeNavTab.navBarEntries(indexEnabled.value, healthEnabled, preferHealthTab.value, notebookShown).forEach { route ->
                         NavigationBarItem(
                             selected = viewModel.selectedTab.value == route,
                             onClick = {
@@ -799,6 +807,7 @@ enum class WatchHomeNavTab(
         Icons.AutoMirrored.Outlined.Notes,
         PebbleNavBarRoutes.IndexRoute
     ),
+    Notebook(Res.string.notebook, Icons.Outlined.EditNote, PebbleNavBarRoutes.NotebookRoute),
     Watches(Res.string.devices, Icons.Outlined.Watch, PebbleNavBarRoutes.WatchesRoute),
     Health(Res.string.health, Icons.AutoMirrored.Filled.DirectionsRun, PebbleNavBarRoutes.HealthRoute),
     Notifications(
@@ -817,14 +826,29 @@ enum class WatchHomeNavTab(
             indexEnabled: Boolean,
             healthEnabled: Boolean,
             preferHealthTab: Boolean,
+            notebookShown: Boolean = false,
         ): List<WatchHomeNavTab> {
+            // Gravel: a shown Notebook takes the slot Index takes, so Health and Notifications share one.
+            val sharedSlot = indexEnabled || notebookShown
             val tabs = mutableListOf(WatchFaces)
             if (indexEnabled) tabs.add(Index)
+            if (notebookShown) tabs.add(Notebook)
             tabs.add(Watches)
-            if (healthEnabled && (!indexEnabled || preferHealthTab)) tabs.add(Health)
-            if (!indexEnabled || !healthEnabled || !preferHealthTab) tabs.add(Notifications)
+            if (healthEnabled && (!sharedSlot || preferHealthTab)) tabs.add(Health)
+            if (!sharedSlot || !healthEnabled || !preferHealthTab) tabs.add(Notifications)
             tabs.add(Settings)
             return tabs
+        }
+
+        /** Gravel: the tabs [navBarEntries] leaves out that Settings links to instead. */
+        fun displacedTabs(
+            indexEnabled: Boolean,
+            healthEnabled: Boolean,
+            preferHealthTab: Boolean,
+            notebookShown: Boolean,
+        ): List<WatchHomeNavTab> {
+            val bar = navBarEntries(indexEnabled, healthEnabled, preferHealthTab, notebookShown)
+            return listOfNotNull(Notifications.takeIf { it !in bar }, Health.takeIf { healthEnabled && it !in bar })
         }
     }
 }

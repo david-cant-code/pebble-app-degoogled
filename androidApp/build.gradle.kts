@@ -182,6 +182,9 @@ dependencies {
     // module's own classpath otherwise.
     debugImplementation(libs.koin.core)
     debugImplementation(libs.kermit)
+    // Gravel: the debug-only NotebookDebugReceiver drives the Notebook stores
+    // from adb inside a coroutine; the notebook module keeps coroutines private.
+    debugImplementation(libs.coroutines)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.ktor.client.okhttp)
@@ -198,6 +201,8 @@ dependencies {
     androidTestImplementation(project(":socketfilter"))
     androidTestImplementation(project(":whisper"))
     androidTestImplementation(project(":notebook"))
+    androidTestImplementation(libs.markdown.renderer)
+    androidTestImplementation(libs.jetbrains.markdown)
     androidTestImplementation(libs.compose.ui)
     androidTestImplementation(libs.compose.ui.test.junit4)
     androidTestImplementation(libs.espresso.core)

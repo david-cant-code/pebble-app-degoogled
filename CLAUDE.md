@@ -183,7 +183,9 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   services where requesting permissions is not possible, and the app
   already prompts for missing permissions (see `RequiredPermissions` in
   `util`). Do not add manual `requestPermission()` calls in feature code;
-  handle the denied case gracefully.
+  handle the denied case gracefully. The exception is a permission that a
+  tap in the foreground needs at that moment (the Notebook's record button
+  asks for the microphone), requested through `PermissionRequester`.
 - **Keep changes single-purpose.** One concern per branch or PR.
 - **Prefer simple architectures.** For example, keep a storage format
   unchanged and convert at the boundary rather than adding format dispatch
