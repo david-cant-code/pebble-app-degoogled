@@ -734,7 +734,8 @@ logic goes in `commonMain` on the standard library and kotlinx.serialization;
 `androidMain` holds only what the platform must supply (Unicode NFKD
 decomposition for note filenames).
 
-Constraints the code relies on, each pinned by a test in the module:
+Constraints the code relies on, each pinned by a test in the module or
+in the app's device suite:
 
 - Three front matter readers exist on purpose. `Frontmatter` is strict and
   line-anchored;
@@ -751,6 +752,25 @@ Constraints the code relies on, each pinned by a test in the module:
   and fences are stripped, bare `NaN` and `Infinity` as null, and a reply
   over 256 KB or not a JSON object is a failed classification (fallback
   title).
+- A voice reminder's time is read by fixed English rules
+  (`SpokenTimeReader`), never by the model, which writes only the message;
+  the time words the rules read are removed from it when
+  `withoutTimeWords` finds a clean cut. A time they read is armed when
+  strictly in the future and at most one year ahead. When they are unsure
+  (time words they cannot read; a relation word such as "before", "by" or
+  "ahead of" earlier in a read time's clause; a correction after one, as
+  in "at 3, no, 4"; a time that describes something else, as in "the 5:15
+  train" or "the meeting is on Friday"; "early" or "late" naming part of
+  a day or of next week; a stray number, "last" or "end of" beside one), the
+  reminder is armed at the quick-remind default and the user is asked to
+  check it; with no time words they
+  recognize, or only vague ones, it is armed at that default without
+  asking.
+  Recurrence advances in local
+  calendar units counted from the rule's anchor, so a 31st clamped to a
+  shorter month's last day does not move the occurrences after it. An
+  occurrence's status is decided as completed, then canceled, then by its
+  latest fire against now.
 
 ## In-app links and the What's-new popup
 

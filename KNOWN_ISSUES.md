@@ -824,6 +824,18 @@ level floor measured after the microphone's start-up transient, or the
 engine's own per-segment no-speech probability) needs captures from
 more than one watch before its threshold can be set.
 
+## Notebook reminder times are read only from the phrasings the rules know
+
+**Status: open; covering more needs more phrasings in the rules.**
+
+A voice reminder's time is read by fixed English rules, not by the text
+model. Some words are still read as a
+time the user did not mean:
+"stop at 7-Eleven" reads as 7:11 PM, and a time stated as a fact, as in "I
+parked at 9", is read as the time to remind. Some words that only sound like a time
+make Gravel ask ("ask Sam when the party is"). A reminder cannot be set to
+repeat by voice.
+
 ## A provider that fails before the recording ends is answered only after it
 
 **Status: open; reachable only through a codec frame the decoder rejects

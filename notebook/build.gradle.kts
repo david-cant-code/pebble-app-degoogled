@@ -26,6 +26,8 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.serialization)
             implementation(libs.kotlinx.datetime)
+            implementation(libs.kermit)
+            implementation(libs.coroutines)
         }
         androidMain.dependencies {
         }

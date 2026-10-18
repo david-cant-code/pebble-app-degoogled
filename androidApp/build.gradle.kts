@@ -189,6 +189,7 @@ dependencies {
     androidTestImplementation(project(":pebble"))
     androidTestImplementation(project(":socketfilter"))
     androidTestImplementation(project(":whisper"))
+    androidTestImplementation(project(":notebook"))
     androidTestImplementation(project(":libpebble3"))
     androidTestImplementation(libs.serialization)
     // Same artifact and version the app already ships via libpebble3; test-scope only,
