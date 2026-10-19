@@ -1943,11 +1943,30 @@ in the app's device suite:
   there and opens the tab only for one with that token, not relaunched
   from Recents, while the tab is shown; it reads only ids from the intent,
   never the text in it.
+- The setup guide (`NotebookSetupGuide`, `:pebble`) takes the tab's place
+  until it is finished on this phone; the tab shows nothing until the
+  guide's state is read (`setupSlot`). Its place is saved at each page in
+  the no-backup directory (`DeviceStateFile`, which cites the platform
+  rule), so it resumes there, or back at a model page that would hold
+  Next, and a phone set up by Android's transfer runs it again.
+  The pages (`setupSteps`): early beta notice; welcome, with Restore from
+  a backup; speech, only while the Notebook cannot transcribe under the
+  app's speech setting (`NotebookTab.canTranscribe`), whose download sets
+  the speech model watch dictation uses too; text model; long recordings;
+  quick reminder completion; default reminder time; automatic backups; done. A phone that cannot run
+  the speech or text engine gets one typed-only page in place of the
+  recording pages, and its capture area offers New note only. The speech
+  page goes on once a download is scheduled or running, under Rebble Only,
+  or when no model can be offered; the text page once a model is there or
+  a download is scheduled or running; the backups page once backups are on
+  or after Not now. Settings > Notebook > Notebook Setup Guide reopens a
+  finished guide, which then has a close button and saves no place; a
+  Notebook notification that opens the tab closes it.
 - The tab's backup reminder (`BackupReminder`) shows while automatic
   backups are off, never set up, or need to be set up again (not while
   their state is unread or unreadable), with Set up, Turn on or Set up
   again, Not now (7
-  days, which also undoes Never) and Never
+  days, the guide's Not now included, which also undoes Never) and Never
   remind me again. The answers stay on this phone (`BackupReminderFile`,
   no-backup directory). A snooze reaching more than 7 days ahead counts as
   run out; the tab reads the time again whenever it is shown.

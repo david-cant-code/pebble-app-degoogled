@@ -36,6 +36,7 @@ import com.anopticlabs.gravel.notebook.ui.NotebookNavigator
 import com.anopticlabs.gravel.ui.NotebookSettingsChoices
 import com.anopticlabs.gravel.ui.NotebookAutoBackupValues
 import com.anopticlabs.gravel.ui.NotebookSettingsValues
+import com.anopticlabs.gravel.ui.NotebookSetupState
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -52,6 +53,7 @@ class NotebookIntentsTest {
     private var settingsOpened = 0
     private var keyChecksOpened = 0
     private var tokenReads = 0
+    private var rerunsClosed = 0
     private val intents = NotebookIntents(
         tabShown = { shown },
         token = { tokenReads++; token },
@@ -59,6 +61,7 @@ class NotebookIntentsTest {
         openTab = { opened++ },
         openBackupSettings = { settingsOpened++ },
         openKeyCheck = { keyChecksOpened++ },
+        closeRerun = { rerunsClosed++ },
     )
 
     private fun take(action: String?, extras: Map<String, Any> = emptyMap(), fromHistory: Boolean = false) =
@@ -71,6 +74,18 @@ class NotebookIntentsTest {
         assertTrue(take(ReminderIntents.ACTION_OPEN_VOICE_COMPLETIONS, withToken))
         assertEquals(NotebookLink.Completions, navigator.pending.value)
         assertEquals(1, opened)
+    }
+
+    @Test
+    fun onlyATapThatOpensTheTabClosesASetupGuideRerun() {
+        shown = false
+        take(ReminderIntents.ACTION_OPEN_VOICE_COMPLETIONS, withToken)
+        assertEquals(0, rerunsClosed)
+        shown = true
+        take(ReminderIntents.ACTION_OPEN_VOICE_COMPLETIONS)
+        assertEquals(0, rerunsClosed)
+        take(ReminderIntents.ACTION_OPEN_VOICE_COMPLETIONS, withToken)
+        assertEquals(1, rerunsClosed)
     }
 
     @Test
@@ -355,5 +370,137 @@ class AndroidNotebookTabTest {
         assertEquals("where 1", kotlinx.coroutines.withTimeout(5_000) { tab.keyLocation.first { it != null } })
         kotlinx.coroutines.withTimeout(5_000) { while (tab.keyLocation.value != null) kotlinx.coroutines.delay(10) }
         assertEquals("where 2", kotlinx.coroutines.withTimeout(5_000) { tab.keyLocation.first { it != null } })
+    }
+
+    private val guideWrites = mutableListOf<String>()
+
+    private fun guideTab(
+        saved: String?,
+        snoozes: () -> Unit = {},
+        read: () -> String? = { saved },
+        write: (String) -> Unit = { synchronized(guideWrites) { guideWrites += it } },
+        engines: Boolean = false,
+        io: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO,
+    ) = AndroidNotebookTab(
+        supported = true, savedShown = { true }, saveShown = {}, store = store, calendars = NoPhoneCalendar, backups = backups,
+        autoBackups = FakeAutoBackups(), statusText = { "status" },
+        readGuide = read, writeGuide = write, snoozeBackups = snoozes,
+        speechReady = { true }, recordingEngines = { engines }, io = io,
+    )
+
+    private val finished = AndroidNotebookTab.GUIDE_FINISHED
+
+    private fun lastGuideWrite(expected: String) = kotlinx.coroutines.runBlocking {
+        kotlinx.coroutines.withTimeout(5_000) {
+            while (synchronized(guideWrites) { guideWrites.lastOrNull() } != expected) kotlinx.coroutines.delay(10)
+        }
+    }
+
+    private fun AndroidNotebookTab.readGuide() =
+        kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeout(5_000) { setupGuide.first { it.read } } }
+
+    @Test
+    fun aFinishedGuideReadsAsDoneAndAnUnfinishedOneResumesAtItsPage() {
+        assertEquals(NotebookSetupState(read = true, done = true), guideTab(finished).readGuide())
+        assertEquals(NotebookSetupState(read = true, step = "BACKUPS"), guideTab("BACKUPS").readGuide())
+        assertEquals(NotebookSetupState(read = true), guideTab(null).readGuide())
+    }
+
+    @Test
+    fun pagesAreSavedUntilTheGuideIsFinishedAndFinishingSavesDone() {
+        val tab = guideTab(null)
+        tab.readGuide()
+        tab.saveSetupStep("SPEECH")
+        lastGuideWrite("SPEECH")
+        assertEquals("SPEECH", tab.setupGuide.value.step)
+        tab.finishSetupGuide()
+        lastGuideWrite(finished)
+        tab.saveSetupStep("WELCOME")
+        assertEquals(NotebookSetupState(read = true, done = true), tab.setupGuide.value)
+    }
+
+    @Test
+    fun aRerunOpensOnlyOverAFinishedGuideAndFinishingClosesIt() {
+        val first = guideTab("TEXT_MODEL")
+        first.readGuide()
+        first.openSetupGuide()
+        assertFalse(first.setupGuide.value.rerun)
+        val done = guideTab(finished)
+        done.readGuide()
+        done.openSetupGuide()
+        assertEquals(NotebookSetupState(read = true, done = true, rerun = true), done.setupGuide.value)
+        done.saveSetupStep("BACKUPS")
+        assertNull(done.setupGuide.value.step)
+        done.finishSetupGuide()
+        assertEquals(NotebookSetupState(read = true, done = true), done.setupGuide.value)
+    }
+
+    @Test
+    fun reachingTheDonePageSavesThatPageNotTheFinishedMark() {
+        val tab = guideTab(null)
+        tab.readGuide()
+        tab.saveSetupStep("DONE")
+        lastGuideWrite("DONE")
+        assertFalse(tab.setupGuide.value.done)
+        assertEquals(NotebookSetupState(read = true, step = "DONE"), guideTab("DONE").readGuide())
+    }
+
+    @Test
+    fun aRerunAskedBeforeTheStateIsReadOpensOnceItIsReadAndOnlyOverAFinishedGuide() {
+        val gate = java.util.concurrent.CountDownLatch(1)
+        val done = guideTab(null, read = { gate.await(); finished })
+        done.openSetupGuide()
+        assertFalse(done.setupGuide.value.read)
+        gate.countDown()
+        assertEquals(NotebookSetupState(read = true, done = true, rerun = true), done.readGuide())
+        val unfinished = java.util.concurrent.CountDownLatch(1)
+        val first = guideTab(null, read = { unfinished.await(); "SPEECH" })
+        first.openSetupGuide()
+        unfinished.countDown()
+        assertEquals(NotebookSetupState(read = true, step = "SPEECH"), first.readGuide())
+    }
+
+    @Test
+    fun writesSaveTheLatestPageWhateverOrderTheyRunIn() {
+        val queue = QueueDispatcher()
+        val tab = guideTab(null, io = queue)
+        tab.setupGuide
+        queue.runLastFirst()
+        assertTrue(tab.setupGuide.value.read)
+        tab.saveSetupStep("SPEECH")
+        tab.saveSetupStep("TEXT_MODEL")
+        queue.runLastFirst()
+        assertEquals(listOf("TEXT_MODEL", "TEXT_MODEL"), guideWrites)
+    }
+
+    @Test
+    fun closingARerunLeavesTheGuideFinished() {
+        val tab = guideTab(finished)
+        tab.readGuide()
+        tab.openSetupGuide()
+        tab.closeSetupRerun()
+        assertEquals(NotebookSetupState(read = true, done = true), tab.setupGuide.value)
+    }
+
+    @Test
+    fun theGuideReachesTheBackupReminderAndThePhoneChecks() = kotlinx.coroutines.runBlocking {
+        var snoozes = 0
+        val tab = guideTab(null, snoozes = { snoozes++ })
+        tab.snoozeBackupReminder()
+        assertEquals(1, snoozes)
+        assertTrue(tab.canTranscribe())
+        assertFalse(tab.recordingSupported())
+        assertTrue(guideTab(null, engines = true).recordingSupported())
+    }
+
+    // Runs queued work newest first, so a test can make writes land in the opposite order to the calls.
+    private class QueueDispatcher : kotlinx.coroutines.CoroutineDispatcher() {
+        private val tasks = ArrayDeque<Runnable>()
+        override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) {
+            synchronized(tasks) { tasks.addLast(block) }
+        }
+        fun runLastFirst() {
+            while (true) (synchronized(tasks) { tasks.removeLastOrNull() } ?: return).run()
+        }
     }
 }

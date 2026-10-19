@@ -179,6 +179,7 @@ import kotlinx.coroutines.withContext
 import coreapp.pebble.generated.resources.Res
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
+import coredevices.pebble.PebbleDeepLinkHandler
 import org.koin.compose.viewmodel.koinViewModel
 import theme.CoreAppTheme
 import theme.ThemeProvider
@@ -583,6 +584,8 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     val healthIsSyncing by platformHealthSync.syncing.collectAsState()
     val notebookTab = rememberNotebookTab()
     val notebookShown = notebookTab?.shown?.collectAsState()?.value == true
+    val deepLinks = koinInject<PebbleDeepLinkHandler>()
+    val notebookGuideDone = notebookTab?.takeIf { it.supported }?.setupGuide?.collectAsState()?.value?.done == true
     val notebookSettings = notebookTab?.takeIf { it.supported }?.settings?.collectAsState()?.value
     val notebookAutoBackup = notebookTab?.takeIf { it.supported }?.autoBackup?.collectAsState()?.value
     val notebookKeyLocation = notebookTab?.takeIf { it.supported }?.keyLocation?.collectAsState()?.value
@@ -664,6 +667,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
             notebookAutoBackup,
             calendarAccess,
             textModelFacts,
+            notebookGuideDone,
             hasOfflineModels,
             phoneHasModel,
         ) {
@@ -856,6 +860,18 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                         )
                     },
                 ),
+                basicSettingsActionItem(
+                    title = "Notebook Setup Guide",
+                    description = "Go through the Notebook's setup again, with your current choices",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Notebook,
+                    keywords = "notebook setup guide onboarding",
+                    show = { notebookShown && notebookGuideDone },
+                    action = {
+                        notebookTab?.openSetupGuide()
+                        deepLinks.navigateToTab(PebbleNavBarRoutes.NotebookRoute)
+                    },
+                ),
                 basicSettingsToggleItem(
                     title = "Show Notebook Tab",
                     description = "Notes and reminders you record or type",
@@ -890,7 +906,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                 notebookSettings?.let { notebook ->
                     basicSettingsToggleItem(
                         title = "Interrupt Long Recordings",
-                        description = "A recording of 30 seconds or less stops a long one that is being transcribed. The long one starts over afterward, which uses more battery",
+                        description = NotebookSettingsText.INTERRUPT_LONG,
                         topLevelType = TopLevelType.Phone,
                         section = Section.Notebook,
                         keywords = "notebook recording long short interrupt priority order battery",
@@ -901,7 +917,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                 notebookSettings?.let { notebook ->
                     basicSettingsToggleItem(
                         title = "Long Recordings Wait for Power",
-                        description = "Recordings over 30 seconds start only while the phone is plugged in. The Notebook tab offers Process now",
+                        description = NotebookSettingsText.WAIT_FOR_POWER,
                         topLevelType = TopLevelType.Phone,
                         section = Section.Notebook,
                         keywords = "notebook recording long charging plugged power battery",
@@ -951,7 +967,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                 notebookAutoBackup?.takeIf { it.known && !it.setUp }?.let {
                     basicSettingsActionItem(
                         title = "Automatic Backups",
-                        description = "Back up your notes and reminders to a folder you choose, sealed with a recovery key you keep from setup",
+                        description = NotebookSettingsText.AUTO_BACKUPS,
                         topLevelType = TopLevelType.Phone,
                         section = Section.Notebook,
                         keywords = "notebook backup automatic recovery key folder",
@@ -972,7 +988,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                 notebookAutoBackup?.takeIf { it.setUpAgain }?.let {
                     basicSettingsActionItem(
                         title = "Set Up Automatic Backups Again",
-                        description = "Gravel can't read its automatic backup settings or key. Setting up again picks a folder and makes a new recovery key; backups already in your folder stay there and still open with your old key",
+                        description = NotebookSettingsText.SET_UP_AGAIN,
                         topLevelType = TopLevelType.Phone,
                         section = Section.Notebook,
                         keywords = "notebook backup automatic recovery key setup again damaged",

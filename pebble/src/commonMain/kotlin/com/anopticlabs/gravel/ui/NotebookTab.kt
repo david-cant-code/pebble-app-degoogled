@@ -86,7 +86,39 @@ interface NotebookTab {
     /** The dialogs and pickers of the manual run or automatic backup setup in progress, which outlive the screen showing them; the home screen keeps them composed on every tab. */
     @Composable
     fun BackupDialogs()
+
+    /** The setup guide, which the tab shows in place of the Notebook until it is finished on this phone. */
+    val setupGuide: StateFlow<NotebookSetupState>
+
+    /** The page a guide in progress resumes at; a rerun does not save its place. */
+    fun saveSetupStep(step: String)
+
+    /** Ends the guide: the first run opens the Notebook, a rerun closes. */
+    fun finishSetupGuide()
+
+    /** Shows the guide again over a Notebook already set up; asked before the state is read, it applies once read. */
+    fun openSetupGuide()
+
+    /** Closes a rerun left open, so a Notebook notification tap shows the Notebook. */
+    fun closeSetupRerun()
+
+    /** The guide's Not now on backups: the tab's backup reminder starts a week from now, an earlier Never undone. */
+    fun snoozeBackupReminder()
+
+    /** Whether the app's speech setting gives the Notebook a way to turn recordings into text, a server counting whatever the network. */
+    suspend fun canTranscribe(): Boolean
+
+    /** Whether this phone can run what recording needs; false leaves typed notes and reminders. */
+    suspend fun recordingSupported(): Boolean
 }
+
+/** [done] once the guide was finished on this phone, [step] the page it resumes at, [rerun] while it was opened again; nothing is known before [read]. */
+data class NotebookSetupState(
+    val read: Boolean = false,
+    val done: Boolean = false,
+    val step: String? = null,
+    val rerun: Boolean = false,
+)
 
 /**
  * [status] is the line Settings shows under Automatic Backups once they are set up, and
@@ -102,6 +134,8 @@ data class NotebookAutoBackupValues(
     val folderName: String? = null,
     val keyStatus: String = "",
     val setUpAgain: Boolean = false,
+    /** Their stored state could not be read, so the rest may be stale. */
+    val unreadable: Boolean = false,
 )
 
 /** [triggerWord] is null while quick reminder completion is off; [swipeSnoozeLimit] is how often a swipe brings one reminder back. */

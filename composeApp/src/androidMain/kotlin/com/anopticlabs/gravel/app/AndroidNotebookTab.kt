@@ -50,6 +50,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.koin.dsl.module
+import com.anopticlabs.gravel.notebook.ui.BackupReminder
+import com.anopticlabs.gravel.notebook.storage.DeviceStateFile
+import kotlinx.coroutines.CoroutineDispatcher
+import com.anopticlabs.gravel.models.isTextEngineSupported
+import coredevices.whisper.isWhisperSupported
+import com.anopticlabs.gravel.ui.NotebookSetupGuide
+import com.anopticlabs.gravel.ui.NotebookSetupState
+import com.anopticlabs.gravel.ui.SetupSlot
+import com.anopticlabs.gravel.ui.setupSlot
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.sync.withLock
 
 /** Gravel: the Notebook tab, shown by the user's switch on phones that can run the Notebook, and its settings. */
 class AndroidNotebookTab(
@@ -64,7 +81,13 @@ class AndroidNotebookTab(
     private val keyStatusText: (AutoBackupStatus) -> String = { "" },
     private val keyLocationText: () -> String? = { null },
     private val requestDrain: () -> Unit = {},
+    private val readGuide: () -> String? = { null },
+    private val writeGuide: (String) -> Unit = {},
+    private val snoozeBackups: () -> Unit = {},
+    private val speechReady: suspend () -> Boolean = { false },
+    private val recordingEngines: suspend () -> Boolean = { false },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : NotebookTab {
     private val _shown = MutableStateFlow(supported && savedShown())
     override val shown: StateFlow<Boolean> = _shown.asStateFlow()
@@ -76,9 +99,17 @@ class AndroidNotebookTab(
 
     @Composable
     override fun Screen(topBarParams: TopBarParams, openTextModels: () -> Unit, openSpeechSettings: () -> Unit) {
+        val guide by setupGuide.collectAsState()
+        val recording by recordingCheck.collectAsState()
         NotebookScreen(
             topBarParams,
             openTextModels,
+            recordingSupported = recording,
+            setupGuide = when (setupSlot(guide)) {
+                SetupSlot.NOTHING -> ({})
+                SetupSlot.GUIDE -> ({ NotebookSetupGuide(this) })
+                SetupSlot.NOTEBOOK -> null
+            },
             openSpeechSettings = openSpeechSettings,
         )
     }
@@ -167,8 +198,9 @@ class AndroidNotebookTab(
     }
 
     // Settings offers setup only once the state reads and shows nothing set up; Set Up Again deletes or sets aside damaged files first.
-    private fun valuesOf(s: AutoBackupStatus) =
-        NotebookAutoBackupValues(s.loaded || s.unreadable, s.setUp || s.unreadable, s.enabled, s.running, statusText(s), s.folderName, keyStatusText(s), s.setUpAgain)
+    private fun valuesOf(s: AutoBackupStatus) = NotebookAutoBackupValues(
+        s.loaded || s.unreadable, s.setUp || s.unreadable, s.enabled, s.running, statusText(s), s.folderName, keyStatusText(s), s.setUpAgain, s.unreadable,
+    )
 
     override fun setUpAutoBackup() = autoBackups.setUp()
 
@@ -192,6 +224,74 @@ class AndroidNotebookTab(
         NotebookBackupDialogs(backups)
         autoBackups.Dialogs()
     }
+
+    private val _setupGuide = MutableStateFlow(NotebookSetupState())
+
+    private val guideReadStarted = AtomicBoolean(false)
+
+    // Read on first use, off the main thread; a rerun asked before then stands only over a finished guide.
+    private fun startGuideRead() {
+        if (!guideReadStarted.compareAndSet(false, true)) return
+        scope.launch(io) {
+            val saved = readGuide()
+            val done = saved == GUIDE_FINISHED
+            _setupGuide.update { it.copy(read = true, done = done, step = saved.takeUnless { done }, rerun = it.rerun && done) }
+        }
+    }
+
+    private val guideFlow = _setupGuide.asStateFlow()
+
+    override val setupGuide: StateFlow<NotebookSetupState>
+        get() {
+            startGuideRead()
+            return guideFlow
+        }
+
+    private val guideWrites = Mutex()
+
+    // Each write saves the state current at its turn, so writes finishing out of order still leave the latest.
+    private fun saveGuide() {
+        scope.launch(io) {
+            guideWrites.withLock {
+                val state = _setupGuide.value
+                (if (state.done) GUIDE_FINISHED else state.step)?.let(writeGuide)
+            }
+        }
+    }
+
+    override fun saveSetupStep(step: String) {
+        if (_setupGuide.updateAndGet { if (it.done) it else it.copy(step = step) }.done) return
+        saveGuide()
+    }
+
+    override fun finishSetupGuide() {
+        _setupGuide.update { it.copy(done = true, step = null, rerun = false) }
+        saveGuide()
+    }
+
+    // A rerun only over a finished guide: the first run has no way out but finishing.
+    override fun openSetupGuide() {
+        startGuideRead()
+        _setupGuide.update { it.copy(rerun = if (it.read) it.done else true) }
+    }
+
+    override fun closeSetupRerun() = _setupGuide.update { it.copy(rerun = false) }
+
+    override fun snoozeBackupReminder() = snoozeBackups()
+
+    override suspend fun canTranscribe(): Boolean = speechReady()
+
+    // Checked once per process, on IO.
+    private val recordingCheck: StateFlow<Boolean?> by lazy {
+        MutableStateFlow<Boolean?>(null).also { check -> scope.launch(io) { check.value = recordingEngines() } }
+    }
+
+    override suspend fun recordingSupported(): Boolean = recordingCheck.filterNotNull().first()
+
+    companion object {
+        /** The guide's finished mark in its file; not the name of any page. */
+        const val GUIDE_FINISHED = "FINISHED"
+    }
 }
 
 /**
@@ -207,6 +307,7 @@ class NotebookIntents(
     private val openTab: () -> Unit,
     private val openBackupSettings: () -> Unit,
     private val openKeyCheck: () -> Unit = {},
+    private val closeRerun: () -> Unit = {},
 ) {
     /** True when [action] is a Notebook tap, which the caller then treats as handled. */
     fun take(
@@ -224,6 +325,7 @@ class NotebookIntents(
             openBackupSettings()
             openKeyCheck()
         } else if (tabShown()) {
+            closeRerun()
             navigator.open(link)
             openTab()
         }
@@ -235,12 +337,18 @@ val notebookTabModule = module {
     single<NotebookTab> {
         val prefs = get<NotebookPreferences>()
         val resources = androidContext().resources
+        val guideFile = DeviceStateFile(androidContext().noBackupFilesDir, "notebook_setup_guide")
         AndroidNotebookTab(
             isNotebookSupported, { prefs.tabShown }, prefs::setTabShown, prefs, get(), get(), get(),
             statusText = { autoBackupStatusText(resources, it) },
             keyStatusText = { recoveryKeyStatusText(resources, it) },
             keyLocationText = { NotebookKeystore().placement()?.let { keyLocationText(resources, it) } },
             requestDrain = { get<CaptureCoordinator>().requestAgain() },
+            readGuide = guideFile::read,
+            writeGuide = { guideFile.write(it) },
+            snoozeBackups = { get<BackupReminder>().notNow() },
+            speechReady = { get<NotebookSpeech>().isSetUp() },
+            recordingEngines = { isTextEngineSupported() && isWhisperSupported() },
         )
     }
     single {
@@ -256,6 +364,7 @@ val notebookTabModule = module {
                 deepLinks.navigateToTab(PebbleNavBarRoutes.WatchSettingsCategoryRoute(section = Section.Notebook.name, topLevelType = TopLevelType.Phone.name))
             },
             openKeyCheck = tab::checkRecoveryKey,
+            closeRerun = tab::closeSetupRerun,
         )
     }
 }
