@@ -22,9 +22,9 @@ import io.rebble.libpebblecommon.voice.PEBBLE_FW_TRANSCRIPTION_TIMEOUT
  * users on update. The popup auto-shows once per user per bump (`WhatsNewDialog` in
  * composeApp) and can be reopened any time from Settings > About.
  */
-const val WHATS_NEW_VERSION = 13
+const val WHATS_NEW_VERSION = 14
 
-/** A single announced change: a short heading and a sentence or two of body. */
+/** A single announced change: a short heading and a paragraph of body. */
 data class WhatsNewEntry(val title: String, val body: String)
 
 /**
@@ -33,6 +33,20 @@ data class WhatsNewEntry(val title: String, val body: String)
  * changelog (that lives in git history and the repo docs).
  */
 val whatsNewEntries: List<WhatsNewEntry> = listOf(
+    WhatsNewEntry(
+        title = "Notebook (early beta)",
+        body = "Record a note or a reminder from your watch with the new Notebook watch app, " +
+            "which Gravel offers to install, or from the Notebook tab. Recording needs a phone " +
+            "whose processor can run the AI models; other phones get typed notes and reminders. " +
+            "The AI runs on this phone: Whisper turns your words into text (or your own " +
+            "transcription server, if you set one up), and a local language model titles each " +
+            "note and writes each reminder's message. Reminder times come from deterministic " +
+            "rules: a time they're unsure of is set to your default and marked for you to check, " +
+            "and a notice shows the time a spoken reminder was set for. Reminder notices can show " +
+            "their text on the lock screen and on the watch. Spotting a spoken reminder and " +
+            "reading its time work only in English for now; reminders you type can be in any " +
+            "language. Contributions for other languages are welcome on GitHub.",
+    ),
     WhatsNewEntry(
         title = "Your transcription server and mobile data",
         body = "Settings > AI > Speech Recognition has two new switches for a self-hosted " +

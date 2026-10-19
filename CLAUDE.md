@@ -30,6 +30,10 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   `--recursive` (or run `git submodule update --init`) before building.
   Model weights are integrity-pinned runtime downloads, never committed;
   the re-pin procedure lives in `WhisperModelCatalog`.
+  The Notebook's text engine is llama.cpp, built from source the same way
+  (`:llm`/`:llm-native`, submodule at `llm-native/src/main/cpp/llama.cpp`);
+  its models are integrity-pinned runtime downloads too
+  (`LlmModelCatalog`).
 - **Distinct branding: the app is Gravel.** applicationId is
   `com.anopticlabs.gravel`; the Kotlin `namespace` and source packages
   deliberately stay `coredevices.coreapp` so upstream merges stay cheap;
@@ -60,7 +64,7 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   `DESIGN_NOTES.md` (F-Droid section).
 - **Security first.** No known security flaw ships, however small; genuinely
   deferred issues are documented in `KNOWN_ISSUES.md` with rationale. Any
-  cross-app interface (e.g. the third-party mic API) must be explicitly
+  cross-app interface must be explicitly
   authorization-gated (signature/knownSigner-level permissions or equivalent),
   never openly exported. Vulnerability reports follow `SECURITY.md`.
 - **Tests come with the change.** New logic (parsers, encoders, state

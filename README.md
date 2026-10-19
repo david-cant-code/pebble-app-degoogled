@@ -26,10 +26,10 @@ De-google work is completed, all telemetry is removed. What remains is polish an
 - [x] Per-app watchapp permissions (internet + location, deny by default)
 - [x] Free speech engine (whisper.cpp built from source, replacing the
       proprietary Cactus stack)
-- [ ] Third-party microphone API
+- [ ] Notebook: voice and typed notes and reminders, from the phone or a
+      Pebble watch (in the app; the watch app's first release is pending)
 - [ ] Local on-device battery analytics (secondary goal, feasibility open)
-- [ ] Pebble Index 01 (Ring) / Index AI support without Firebase or other
-      cloud services (approach open)
+- [ ] Recording into the Notebook from a Pebble Index 01 ring (planned)
 - [x] F-Droid inclusion (listing live)
 
 ## Goals
@@ -53,7 +53,8 @@ De-google work is completed, all telemetry is removed. What remains is polish an
 - **Hardening beyond the de-Googling.** The app's own attack surface is in
   scope, not just its Google dependencies
   ([KNOWN_ISSUES.md](KNOWN_ISSUES.md) records the trade-offs). Landed so far:
-  - The speech engine runs in an isolated process with no permissions and
+  - The speech and text engines each run in an isolated process with no
+    permissions and
     no path into the app's files, so a memory-safety bug in the model
     parser or decoder, reached through a model file, is contained to that
     process.
@@ -115,29 +116,47 @@ De-google work is completed, all telemetry is removed. What remains is polish an
   follow the same setting; see
   [Using your own transcription server](#using-your-own-transcription-server).
   Nothing is sent anywhere unless you configure a server.
-- **A watch microphone API for third-party applications** documented and
-  authorization-gated, rather than locking watch mic audio to first-party
-  features.
+- **A Notebook on the phone.** Voice and typed notes and reminders, taken
+  from the Notebook tab or from a Pebble watch running the Notebook watch
+  app (until that app's first release, a copy of it you mark as trusted).
+  It needs Android 9 or newer, and voice notes need a phone whose
+  processor can run both engines; other phones get typed notes and
+  reminders. The speech recognition and the text model that writes
+  titles, tags, and a reminder's wording run on the phone, in
+  isolated processes, on whisper.cpp and llama.cpp built from source; a
+  recording goes to a transcription server only if you set one up.
+  Notes, reminders and waiting recordings are stored as encrypted files
+  whose keys are sealed by a key in the phone's keystore;
+  `KNOWN_ISSUES.md` records gaps of that storage. A reminder that goes
+  off, and the notice of when a voice reminder is set, are phone
+  notifications like any other: their text can show on the lock screen,
+  goes to the watch, and is kept in Gravel's notification history. Backups
+  are files written where you choose, sealed with a password or a recovery
+  key. The text models are downloads you start
+  yourself, checked against a pinned SHA-256; recordings wait until one
+  is installed.
 - **Distribution through F-Droid.** Gravel is in F-Droid's main
   repository, as
   [`com.anopticlabs.gravel`](https://f-droid.org/packages/com.anopticlabs.gravel/),
   and staying there constrains every change: the tree holds no binaries
   and every dependency is free software from a repository F-Droid allows.
-  The speech engine is built from source, and the Ring satellite library,
+  The speech and text engines are built from source, and the Ring
+  satellite library,
   the last dependency whose native code had no public source, is replaced
   by a stub. `DESIGN_NOTES.md` records what the tree guarantees and what
   the build recipe supplies.
 
 Out of scope: iOS (sources remain in-tree but are unmaintained here).
 
-Not functional for now: the Pebble Index 01 (Ring) / Index AI features,
-because of how heavily they rely on Firebase and other cloud services.
-Finding a way to incorporate them without that reliance is a plan, not a
-current capability. Until then the Ring feature module (`experimental`) is
+Not functional: upstream's Pebble Index 01 (Ring) and Index AI features.
+The Ring feature module (`experimental`) depends on the Firebase SDKs and is
 unplugged from the build; the `libindex`/`index-ai`/`mcp` libraries stay
 compiled because the watch UI shares code with them, but their runtime is
 disabled at the dependency-injection seam (verified against the built APK:
-no Ring services, no Ring endpoints, rings can never be scanned or paired).
+no Ring services, no Ring endpoints, rings cannot be scanned or paired).
+The Notebook is separate from those features and was written
+independently of them. Recording into the Notebook from an Index 01 ring
+is planned; bringing back Index AI is not.
 
 ## Using your own transcription server
 
@@ -290,6 +309,7 @@ Kermit (logging).
 | `util` | Shared utilities (logging, IO, theme) |
 | `whisper`, `whisper-native` | The speech engine: Kotlin bindings, and the NDK/CMake build of the pinned whisper.cpp submodule |
 | `socketfilter` | A process-wide filter that refuses the creation of UDP sockets, built from its C source with the NDK; not installed, for example, where the platform's name lookups need UDP, before Android 10, or on a device that is not ARM (see `KNOWN_ISSUES.md`) |
+| `notebook` | The Notebook feature (voice and typed notes, reminders): its tab, note screens, reminder list, calendar (which can also show the phone's calendar) and editor, completion review, reminder alarms, its reminder and quick-completion settings, backup, restore and check of a backup file, automatic backups to a folder, with their keeping rules, warnings and recovery key checks, recovery from a damaged file or a lost key, its text model settings, a setup guide, and recordings from the Notebook watch app (until its first release, from a copy you mark as trusted). Its settings, setup guide and text model screens are in `pebble`, its engine wiring in `composeApp` and `util`, and its watch app wiring in `composeApp` and `libpebble3` |
 | `llm`, `llm-native` | The Notebook's text engine: Kotlin bindings, and the NDK/CMake build of the pinned llama.cpp submodule |
 | `resampler` | Audio resampling |
 | `blobannotations`, `blobdbgen` | KSP annotations and code generator for BlobDB records |

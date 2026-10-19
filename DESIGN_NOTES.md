@@ -46,7 +46,7 @@ release build.
 
 ## Ring / Index AI
 
-The out-of-scope Ring/Index AI feature module (`experimental`) is
+Upstream's Ring/Index AI feature module (`experimental`) is
 unplugged from the build (`settings.gradle.kts` + DI wiring) with sources
 left in place so upstream merges stay cheap.
 
