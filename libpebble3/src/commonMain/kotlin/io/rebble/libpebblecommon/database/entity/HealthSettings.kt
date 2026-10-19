@@ -185,15 +185,32 @@ suspend fun HealthSettingsEntryDao.setWatchSettings(healthSettings: HealthSettin
     insertOrReplace(
         HealthSettingsEntry(
             id = KEY_HEART_RATE_PREFERENCES,
-            value = HeartRatePreferencesValue(
+            value = HeartRatePreferencesValue.forAge(
+                ageYears = healthSettings.ageYears,
                 restingHr = healthSettings.restingHr,
                 elevatedHr = healthSettings.elevatedHr,
-                maxHr = healthSettings.maxHr,
-                zone1Threshold = healthSettings.hrZone1Threshold,
-                zone2Threshold = healthSettings.hrZone2Threshold,
-                zone3Threshold = healthSettings.hrZone3Threshold,
             ).encodeToString(),
             timestamp = now,
+        )
+    )
+}
+
+/** Re-derives the heart rate zones from the stored age if they don't match it. */
+suspend fun HealthSettingsEntryDao.updateHeartRateZonesFromAge() {
+    val activityPrefs = ActivityPrefsValue.fromString(getEntry(KEY_ACTIVITY_PREFERENCES)?.value) ?: return
+    val current = HeartRatePreferencesValue.fromString(getEntry(KEY_HEART_RATE_PREFERENCES)?.value)
+        ?: HeartRatePreferencesValue()
+    val derived = HeartRatePreferencesValue.forAge(
+        ageYears = activityPrefs.ageYears,
+        restingHr = current.restingHr,
+        elevatedHr = current.elevatedHr,
+    )
+    if (derived == current) return
+    insertOrReplace(
+        HealthSettingsEntry(
+            id = KEY_HEART_RATE_PREFERENCES,
+            value = derived.encodeToString(),
+            timestamp = Clock.System.now().asMillisecond(),
         )
     )
 }
@@ -274,6 +291,29 @@ data class HeartRatePreferencesValue(
     companion object {
         fun HeartRatePreferencesValue.encodeToString(): String = json.encodeToString(this)
         fun fromString(value: String?): HeartRatePreferencesValue? = value?.let { json.decodeFromString(value) }
+
+        /**
+         * Max HR is 220 - age and the zones start at 50%, 70% and 85% of the heart rate reserve,
+         * as the firmware defaults do for age 30.
+         */
+        fun forAge(
+            ageYears: Int,
+            restingHr: Short = 70,
+            elevatedHr: Short = 100,
+        ): HeartRatePreferencesValue {
+            val maxHr = (220 - ageYears.coerceIn(1, 120)).coerceAtLeast(elevatedHr.toInt())
+            val reserve = (maxHr - restingHr).coerceAtLeast(0)
+            fun threshold(percent: Int) = (restingHr + (reserve * percent + 50) / 100).toShort()
+            return HeartRatePreferencesValue(
+                restingHr = restingHr,
+                elevatedHr = elevatedHr,
+                maxHr = maxHr.toShort(),
+                zone1Threshold = threshold(50),
+                zone2Threshold = threshold(70),
+                zone3Threshold = threshold(85),
+            )
+        }
+
         fun HeartRatePreferencesValue.asBytes(): UByteArray = HeartRatePreferencesBlobItem(
             restingHr = restingHr.toUByte(),
             elevatedHr = elevatedHr.toUByte(),

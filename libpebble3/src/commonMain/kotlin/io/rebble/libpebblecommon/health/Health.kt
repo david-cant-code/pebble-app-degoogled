@@ -15,6 +15,7 @@ import io.rebble.libpebblecommon.database.entity.HealthStatDao
 import io.rebble.libpebblecommon.database.entity.OverlayDataEntity
 import io.rebble.libpebblecommon.database.entity.getWatchSettings
 import io.rebble.libpebblecommon.database.entity.setWatchSettings
+import io.rebble.libpebblecommon.database.entity.updateHeartRateZonesFromAge
 import io.rebble.libpebblecommon.datalogging.HealthDataProcessor
 import io.rebble.libpebblecommon.di.LibPebbleCoroutineScope
 import io.rebble.libpebblecommon.services.DailySleep
@@ -62,6 +63,9 @@ class Health(
     override val healthSettings: Flow<HealthSettings> = healthSettingsDao.getWatchSettings()
 
     fun init() {
+        libPebbleCoroutineScope.launch {
+            healthSettingsDao.updateHeartRateZonesFromAge()
+        }
         startPeriodicStatsUpdate()
     }
 
