@@ -441,6 +441,8 @@ enum class WindUnits(override val code: UByte, override val displayName: String)
     FromDistance(0u, "Automatic"),
     KmH(1u, "km/h"),
     Mph(2u, "mph"),
+    MetersPerSecond(3u, "m/s"),
+    Knots(4u, "knots"),
 }
 
 enum class MotionSensitivityLevel(override val code: UByte, override val displayName: String) : WatchPrefEnum {
