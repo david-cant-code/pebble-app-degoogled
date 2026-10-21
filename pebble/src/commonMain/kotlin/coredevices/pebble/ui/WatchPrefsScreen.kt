@@ -27,8 +27,10 @@ import io.rebble.libpebblecommon.SystemAppIDs.AIRPLANE_MODE_UUID
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import io.rebble.libpebblecommon.SystemAppIDs.BACKLIGHT_UUID
+import io.rebble.libpebblecommon.SystemAppIDs.CLEAR_NOTIFICATIONS_UUID
 import io.rebble.libpebblecommon.SystemAppIDs.MOTION_BACKLIGHT_UUID
 import io.rebble.libpebblecommon.SystemAppIDs.QUIET_TIME_TOGGLE_UUID
+import io.rebble.libpebblecommon.SystemAppIDs.TOUCH_TOGGLE_UUID
 import io.rebble.libpebblecommon.SystemAppIDs.TIMELINE_FUTURE_UUID
 import io.rebble.libpebblecommon.SystemAppIDs.TIMELINE_PAST_UUID
 import io.rebble.libpebblecommon.connection.LibPebble
@@ -143,7 +145,8 @@ fun WatchPref<*>.section(): Section = when (this) {
     EnumWatchPref.WindSpeed -> Section.Weather
 //    ColorWatchPref.SettingsMenuHighlightColor -> Section.Display
 //    ColorWatchPref.AppMenuHighlightColor -> Section.Display
-    EnumWatchPref.TextSize -> Section.Notifications
+    EnumWatchPref.SystemTextSize -> Section.Display
+    EnumWatchPref.NotificationTextSize -> Section.Notifications
     EnumWatchPref.MotionSensitivity -> Section.Display
     EnumWatchPref.BacklightPreset -> Section.Display
     EnumWatchPref.BacklightIntensity -> Section.Display
@@ -162,6 +165,7 @@ fun WatchPref<*>.section(): Section = when (this) {
     QuicklaunchWatchPref.QlSingleClickDown -> Section.QuickLaunch
     BoolWatchPref.TimelineQuickViewEnabled -> Section.Timeline
     NumberWatchPref.TimelineQuickViewMinsBefore -> Section.Timeline
+    EnumWatchPref.TimelineQuickViewUnsupportedFaces -> Section.Timeline
     EnumWatchPref.NotificationFilter -> Section.Notifications
     EnumWatchPref.QuietTimeInterruptions -> Section.QuietTime
     EnumWatchPref.QuietTimeShowNotifications -> Section.QuietTime
@@ -182,6 +186,8 @@ fun WatchPref<*>.section(): Section = when (this) {
     BoolWatchPref.MenuScrollWrapAround -> Section.Display
     EnumWatchPref.MenuScrollVibe -> Section.Display
     BoolWatchPref.QuietTimeMotionBacklight -> Section.QuietTime
+    BoolWatchPref.QuietTimeTouchBacklight -> Section.QuietTime
+    BoolWatchPref.QuietTimeNotificationBacklight -> Section.QuietTime
     BoolWatchPref.QuietTimeAutoDismiss -> Section.QuietTime
     BoolWatchPref.MusicShowVolumeControls -> Section.Music
     BoolWatchPref.MusicShowProgressBar -> Section.Music
@@ -474,8 +480,10 @@ internal fun quickLaunchOptions(libPebble: LibPebble): List<QuickLaunchOption> {
                 QuickLaunchOption(BACKLIGHT_UUID, "Backlight") +
                 QuickLaunchOption(MOTION_BACKLIGHT_UUID, "Motion Backlight") +
                 QuickLaunchOption(AIRPLANE_MODE_UUID, "Airplane Mode") +
+                QuickLaunchOption(TOUCH_TOGGLE_UUID, "Touch") +
                 QuickLaunchOption(TIMELINE_PAST_UUID, "Timeline Past") +
                 QuickLaunchOption(TIMELINE_FUTURE_UUID, "Timeline Future") +
+                QuickLaunchOption(CLEAR_NOTIFICATIONS_UUID, "Clear Notifications") +
                 installedApps.map { app ->
                     QuickLaunchOption(app.properties.id, app.properties.title)
                 }
