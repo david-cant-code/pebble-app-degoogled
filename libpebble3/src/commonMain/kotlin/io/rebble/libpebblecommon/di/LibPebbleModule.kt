@@ -1,6 +1,7 @@
 package io.rebble.libpebblecommon.di
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.link.WatchLinkPace
 import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
 import com.anopticlabs.gravel.watchapp.InjectedWatchAppCaptures
 import com.russhwolf.settings.Settings
@@ -528,6 +529,7 @@ fun initKoin(
                     scopedOf(::PpogPacketSenderProxy) bind PPoGPacketSender::class
                     scopedOf(::ConnectionParams)
                     scopedOf(::Mtu)
+                    scopedOf(::WatchLinkPace)
                     scopedOf(::ConnectivityWatcher)
                     scopedOf(::BatteryWatcher)
                     scopedOf(::PebblePairing)

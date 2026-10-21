@@ -813,6 +813,13 @@ watch: the microphone port covered while the watch is held to the
 mouth, debris or moisture in the port, and the firmware's microphone
 or gain state.
 
+The watch can also lose the first syllables of a recording when speech
+starts the moment the microphone icon shows. The audio Gravel received in
+those recordings was complete, so the loss happens on the watch. In one
+test, a phrase spoken right at the icon kept its first words in 1 of 3
+recordings, and in 3 of 3 when the speaker waited about a second after
+the icon before speaking.
+
 ## A silent dictation can transcribe as a stray word
 
 **Status: open; engine behavior.**
@@ -911,6 +918,60 @@ message arrives later leaves the recording stored and processed, with no
 sign of it on the watch, and a BACK after SELECT whose message arrives
 within that time drops a recording the user meant to keep. The limit rests
 on eight measurements on one phone and one watch.
+
+## A Notebook watch recording can start on the slow link or be refused
+
+**Status: open; closing it needs watch firmware that starts the
+microphone only on the fast link, or keeps what it records before.**
+
+The watch starts its microphone when the phone answers a recording's
+start, and audio recorded while the Bluetooth link is still in its slow
+idle state can be lost. Gravel therefore holds that answer for a
+Notebook watch app recording until Android reports the link as fast,
+for up to 6 seconds, asks for the fast link itself while it waits, and
+refuses the recording if the link is still slow then
+(`VoiceSessionCoordinator`). Known cases where it falls short:
+
+- **No link report.** The link's speed comes from an Android callback
+  outside the public SDK, which reports a change of the link's settings.
+  Before a connection's first report, and after Gravel's GATT server
+  closes or reopens until the next report (also when that happens during
+  the hold), a recording is answered at once and can lose its start as
+  before the hold. On a phone that does not deliver the callback, and on a
+  Bluetooth Classic connection, that is every recording. Both test
+  phones deliver it: a Pixel running GrapheneOS (Android 17) and one
+  running LineageOS 22.2 (Android 15).
+- **A slow switch.** On some phones the link turns fast later than the
+  hold allows, and the watch shows "Something went wrong. Try again."
+  without starting the microphone. On the phone running LineageOS, 2 of
+  6 recordings were refused this way; the switch took about 3 seconds
+  when the watch asked for it, and longer when only the phone did. On
+  the one running GrapheneOS, held recordings waited 1.3 to 4.6 seconds
+  and none was refused.
+- **The end of a fast window.** The link stays fast for about 10 seconds
+  after the watch app sends a message (among them one when it opens and,
+  while its menu stays open, one after a recording), and after a refusal
+  it can turn fast for a few seconds. A recording started in the moment the
+  watch returns the link to slow can be answered as if the link were
+  fast and lose its start.
+  Device testing did not reach this case.
+
+## A notice that a reminder is set can cut a watch recording short
+
+**Status: open; closing it needs Gravel to hold its own notices while a
+watch recording is in progress.**
+
+Gravel posts a notice when it sets a voice reminder ("Reminder set", or
+"Check this reminder's time" when it asks the user to check the time),
+and the watch shows it. When the notice arrives while the next recording is
+still running on the watch, the watch ends that recording where it is
+(PebbleOS v4.41.1, `fw/applib/voice/voice_window.c`,
+`prv_mic_window_disappear`), and Gravel keeps what was recorded up to
+then. When the notice is dismissed, the watch starts a new recording on
+its own (`prv_mic_window_appear`), which can be saved as a note of a
+stray phrase (see "A silent dictation can transcribe as a stray word").
+Seen once, on a Pixel running GrapheneOS (Android 17), when a second
+recording was started right after a reminder.
 
 ## A dictation can wait for a Notebook transcription's first seconds
 

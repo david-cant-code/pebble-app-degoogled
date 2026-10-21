@@ -6,6 +6,7 @@ import io.rebble.libpebblecommon.connection.PebbleBleIdentifier
 import io.rebble.libpebblecommon.di.LibPebbleCoroutineScope
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlin.uuid.Uuid
 
 actual fun openGattServer(appContext: AppContext, bleConfigFlow: BleConfigFlow, libPebbleCoroutineScope: LibPebbleCoroutineScope): GattServer? {
@@ -49,4 +50,6 @@ actual class GattServer {
 
     actual fun initServer() {
     }
+
+    actual val connectionUpdates: Flow<ServerConnectionUpdate> = emptyFlow()
 }

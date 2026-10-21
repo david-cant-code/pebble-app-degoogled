@@ -16,3 +16,5 @@ actual suspend fun Peripheral.requestMtuNative(mtu: Int): Int {
 }
 
 actual suspend fun Peripheral.refreshServicesNative(): Boolean = false
+
+actual fun Peripheral.requestHighConnectionPriorityNative(): Boolean = false

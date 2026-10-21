@@ -1795,7 +1795,13 @@ in the app's device suite:
   (`WatchAppCaptures`, passed to `LibPebble3.create`):
   `VoiceSessionCoordinator` gives that app's sessions to it instead of the
   transcription provider, without `canServeSession` (which raises the
-  dictation holds), under the same bound, deadline and supersede rules;
+  dictation holds), under the same bound, deadline and supersede rules,
+  and holds the setup reply up to `FAST_LINK_WAIT` (6 s) until the BLE
+  link has no peripheral latency, refusing the setup if it still has;
+  the pace (`WatchLinkPace`) comes from a hidden GATT server callback, a
+  link whose pace is unknown is not waited on, also when a GATT server
+  change forgets the pace during the wait, and while it waits
+  Gravel asks for the fast link (Kable `requestConnectionPriority`);
   the app gets no companion app (`startAppSession`) and its AppMessages go
   to the handler, each ACKed after it; classic PebbleKit START and STOP
   ignore its UUID. The UUID is self-declared, so `NotebookWatchApp`
@@ -1831,11 +1837,14 @@ in the app's device suite:
   wait reads it. A recording ingest could not seal is kept under a
   `watch_<start>` name, which `QueueStore.salvagePending` queues as a
   watch recording dated at that start. Host tests cover the routing, the
+  hold, the link pace and its requests, the
   relay, the session-start choice, the digest, the handler's refusals,
   limits, cancel window, errors and answers, and the wait against the
   drain for every setting; the Speex decode, the Koin wiring, the
-  lifecycle manager's and locker's calls into these
-  are checked on a device only.
+  lifecycle manager's and locker's calls into these, the hidden callback,
+  its keep rule, the BLE transport's attach call and the priority request
+  are checked on a device only; following a reopened GATT server is not
+  tested.
 - Gravel installs the watch app itself. `SHIPPED_WATCH_APP_RELEASES`
   (`NotebookWatchApp.kt`) lists each release Gravel has shipped, with
   its version, SHA-256, size and release file address on GitHub, oldest

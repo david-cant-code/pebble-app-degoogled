@@ -26,6 +26,17 @@ actual suspend fun Peripheral.requestMtuNative(mtu: Int): Int {
     throw IllegalStateException("Not an AndroidPeripheral")
 }
 
+actual fun Peripheral.requestHighConnectionPriorityNative(): Boolean {
+    if (this !is AndroidPeripheral) return false
+    return try {
+        requestConnectionPriority(AndroidPeripheral.Priority.High)
+    } catch (e: Exception) {
+        // Throws when not connected (Kable 0.43.1, BluetoothDeviceAndroidPeripheral.requestConnectionPriority, connectionOrThrow).
+        Logger.w(e, tag = "Peripheral.requestHighConnectionPriorityNative") { "connection priority request failed" }
+        false
+    }
+}
+
 private val LOG_TAG = "Peripheral.refreshServicesNative"
 private val REDISCOVER_TIMEOUT = 10.seconds
 private const val KABLE_ON_SERVICE_CHANGED_CLASS = "com.juul.kable.gatt.OnServiceChanged"

@@ -160,6 +160,8 @@ expect suspend fun Peripheral.requestMtuNative(mtu: Int): Int
  */
 expect suspend fun Peripheral.refreshServicesNative(): Boolean
 
+expect fun Peripheral.requestHighConnectionPriorityNative(): Boolean
+
 class KableConnectedGattClient(
     val identifier: PebbleBleIdentifier,
     val peripheral: Peripheral,
@@ -281,6 +283,10 @@ class KableConnectedGattClient(
 
     override suspend fun refreshServicesNative(): Boolean {
         return peripheral.refreshServicesNative()
+    }
+
+    override fun requestHighConnectionPriority(): Boolean {
+        return peripheral.requestHighConnectionPriorityNative()
     }
 
     override fun close() {
