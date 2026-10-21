@@ -256,6 +256,7 @@ enum class BoolWatchPref(
     Backlight("lightEnabled", "Backlight", true),
     AmbientLightSensor("lightAmbientSensorEnabled", "Ambient Light Sensor", true, description = "Only enable backlight when in a dark environment (using light sensor)"),
     BacklightMotion("lightMotion", "Backlight Motion", true, description = "Turn on backlight by flicking wrist"),
+    BacklightColorDayNightEnabled("lightColorDayNightEnabled", "Change Backlight Color at Night", false, description = "Use a different backlight color between sunset and sunrise (color-backlight watches only)"),
     TimelineQuickViewEnabled("timelineQuickViewEnabled", "Timeline Quick View", true, description = "Show upcoming events below watchface"),
     QuietTimeManuallyEnabled("dndManuallyEnabled", "Quiet Time - Manual", false, description = "Notifications are muted (and will stay on-screen without a timeout) when in quiet time"),
     CalendarAwareQuietTime("dndSmartEnabled", "Quiet Time - Calendar Aware", false, description = "Automatically enable Quiet Time during calendar events"),
@@ -715,6 +716,24 @@ enum class NumberWatchPref(
         max = 10.minutes.inWholeMilliseconds.toInt(),
         unit = "ms",
     ),
+    BacklightColorSunriseMinute(
+        id = "lightColorSunriseMinute",
+        displayName = "Sunrise Time",
+        defaultValue = 6L * 60,
+        type = WatchPrefType.TypeUInt16,
+        min = 0,
+        max = 1439,
+        unit = "",
+    ),
+    BacklightColorSunsetMinute(
+        id = "lightColorSunsetMinute",
+        displayName = "Sunset Time",
+        defaultValue = 18L * 60,
+        type = WatchPrefType.TypeUInt16,
+        min = 0,
+        max = 1439,
+        unit = "",
+    ),
     ;
 
     override fun decodeValue(value: String): Long = value.toLongOrNull() ?: defaultValue
@@ -758,6 +777,13 @@ enum class RgbColorWatchPref(
         defaultValue = LED_WARM_WHITE_RGB,
         presets = BACKLIGHT_COLOR_PRESETS,
         description = "LED color used when the backlight is on, unless over-ridden by an app (color-backlight watches only)",
+    ),
+    BacklightColorNight(
+        id = "lightColorNight",
+        displayName = "Night Backlight Color",
+        defaultValue = LED_WARM_WHITE_RGB,
+        presets = BACKLIGHT_COLOR_PRESETS,
+        description = "LED color used at night when \"Change Backlight Color at Night\" is on",
     ),
     ;
 

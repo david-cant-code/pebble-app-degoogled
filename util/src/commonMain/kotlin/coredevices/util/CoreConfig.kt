@@ -112,6 +112,8 @@ data class CoreConfig(
      * chose during setup.
      */
     val lastSeenWhatsNewVersion: Int = 0,
+    /** Set the day/night backlight switch times from the local sunrise/sunset during weather sync. */
+    val backlightColorAutoSunriseSunset: Boolean = true,
 )
 
 @Serializable
