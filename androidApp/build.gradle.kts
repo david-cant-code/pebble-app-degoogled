@@ -150,6 +150,8 @@ dependencies {
     implementation(project(":composeApp"))
     // Components this module's manifest declares, so lint can resolve them.
     implementation(project(":util"))
+    // Gravel: the Notebook's receivers, which the merged manifest declares.
+    implementation(project(":notebook"))
     implementation(libs.androidx.core.ktx)
     // Fork: string notation on purpose, mirroring composeApp; the catalog has
     // no health-kmp alias so that upstream's plain libs.health.kmp fails at

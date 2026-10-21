@@ -732,7 +732,8 @@ Gravel's Notebook feature (voice and typed notes, and reminders) lives in the
 `:notebook` module. Pure
 logic goes in `commonMain` on the standard library and kotlinx.serialization;
 `androidMain` holds only what the platform must supply (Unicode NFKD
-decomposition for note filenames, the Keystore-backed storage below).
+decomposition for note filenames, the Keystore-backed storage below, the
+alarm stack).
 
 Storage is a directory of encrypted files under `files/notebook`. Each write
 draws a fresh AES-256 data key, seals the file with it in software
@@ -942,6 +943,82 @@ in the app's device suite:
   delivered, and retention keeps an event until its scheduled fire, its
   actual fire, any pending snooze and its completion all lie behind the
   cutoff.
+- The alarm stack (the `alarms` package) keys one fire alarm per reminder
+  and one snooze alarm and one notification per occurrence, the pending
+  intents told apart by the occurrence in their data URI and the
+  notifications by a tag carrying the fire instant, so each occurrence is
+  acted on separately; every
+  Notebook notification is tagged, and the rest of the app posts untagged
+  ids today. An open occurrence counts as missed at its cutoff (`statusFor`:
+  midnight after its latest fire, or 02:00 for a fire at or after 22:00) or
+  once a later logged occurrence of its reminder comes due, whichever is
+  first; the log keeps no stamp for it. A fire posts its notification, logs the occurrence under its
+  scheduled instant, then moves the item under the file's lock, and only
+  while the item still sits on that occurrence: a one-shot is removed with
+  its alarm, a recurring item advances from the later of now and that
+  instant and is armed once stored (a series whose next occurrence falls
+  past the stores' window ends instead). A fire whose log write fails
+  leaves an item it would remove stored (listed as waiting to go off), for
+  a re-arm to log and remove as it does any past-due item, and
+  still advances a recurring item. The fire then takes down the
+  notification and snooze alarm of its reminder's open occurrences that are
+  missed by the log, and a fire already missed when it lands moves from its
+  notification to a notice without buttons. Complete and Mark missed dismiss the
+  occurrence, drop its snooze, move the item past it the same way, and
+  stamp it, creating the event when it was never logged; when that move
+  fails, only an occurrence the log already holds is stamped. The
+  notification and the snooze go once the stamp has landed, and each
+  reports whether the occurrence was recorded, whether only the item
+  moved, or neither. The two buttons
+  are marked as showing no UI, which is what the watch mirror keeps by
+  default; with the watch setting for such actions on, Snooze is mirrored
+  too (libpebble3 `LibPebbleNotificationAction.fromNotificationAction`,
+  `NotificationConfig.addShowsUserInterfaceActions`). A swipe snoozes for the
+  configured minutes until the occurrence's chain reaches eight (an
+  unreadable log arms the re-fire uncounted), and a re-fire is posted for an open
+  occurrence that is not missed, or for any occurrence when the log cannot
+  be read, and marked delivered only when the user could see it. A re-fire
+  the log holds no snooze awaiting delivery for counts as a snooze to
+  that moment, and an occurrence the log does not hold is logged with it;
+  it is dropped like any other when its occurrence is resolved or a later
+  logged occurrence of its reminder has come due. One sweep alarm,
+  set at the earliest time an open occurrence turns missed (its cutoff, or a
+  later logged occurrence of its reminder coming due), takes down the
+  notifications of logged occurrences that are missed or completed (one
+  not logged yet stays, because a fire posts before it logs) and sets
+  itself again; a fire, a re-fire, a Complete or Mark missed and `rearmAll`
+  set it. The alarms are absolute instants, so after a time zone change a
+  cutoff moves only at the next set. Deleting a reminder (`delete`) clears
+  its pending snoozes in the log with their alarms, then removes the item
+  with its fire alarm and notifications; a failed write leaves the
+  reminder stored. Deleting one time (`deleteOccurrence`) first moves a
+  reminder still sitting on it past it, so no re-arm logs it again (a
+  failed move changes nothing), then removes its record, notification and
+  snooze alarm and runs the sweep; an earlier open time of the same
+  reminder that was missed only because the deleted one came due is
+  recorded as missed. `rearmAll` re-arms from
+  the stores and is idempotent; it runs at boot, after a
+  package update, when exact alarms are allowed: a future reminder
+  is armed when it still reads as the sweep read it or cannot be read
+  again, a past-due one-shot is removed and a recurring one advances
+  from now, every fire that passed unlogged is logged at its scheduled time
+  before its item moves (one per cycle of a recurring reminder, none before
+  the retention cutoff, at most 366, newest first; a log write that fails
+  keeps the item for the next re-arm, a full log drops the oldest and the
+  item still moves; a recurring reminder's fire whose own log write
+  failed already moved its item on, and the re-arm does not log it, which
+  no test pins), a logged occurrence still due is posted as a fire and
+  the missed ones share one notice without buttons, each notice beside any
+  earlier one, an
+  unseen snooze of an occurrence still open is re-posted once and one
+  already missed is skipped, events past the retention setting are
+  pruned, and the lapse sweep runs. Exact alarms need the user's grant from
+  Android 12; the app lists it among its required permissions while a
+  reminder exists, without waiting on or failing with the Notebook's
+  storage, and arms inexact alarms until it is granted. The receivers run
+  in the main process. A stored reminder's message is capped
+  and its recurrence rule must be usable, so what reaches an alarm intent
+  or a notification is bounded.
 - The backup (the `backup` package) is one password-sealed archive of the
   notes under their ids with their folder, name, title, date and time, the
   folder list, the folder tags, the capture queue with its recordings, the

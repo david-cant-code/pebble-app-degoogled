@@ -30,6 +30,8 @@ kotlin {
             implementation(libs.coroutines)
         }
         androidMain.dependencies {
+            implementation(project(":util"))
+            implementation(libs.androidx.core.ktx)
             implementation(libs.koin.core)
             implementation(libs.koin.android)
         }

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <application>
+        <!--
+            The reminder alarms and notification actions of the Notebook. Both
+            receivers are reached only by this app's own pending intents, so
+            they stay unexported; NotebookManifestTest pins that.
+        -->
+        <receiver
+            android:name="com.anopticlabs.gravel.notebook.alarms.ReminderFireReceiver"
+            android:exported="false" />
+        <receiver
+            android:name="com.anopticlabs.gravel.notebook.alarms.ReminderActionReceiver"
+            android:exported="false" />
+        <!-- Unexported: the system uid passes the exported check (android16-release ActivityManager.checkComponentPermission). -->
+        <receiver
+            android:name="com.anopticlabs.gravel.notebook.alarms.NotebookRearmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

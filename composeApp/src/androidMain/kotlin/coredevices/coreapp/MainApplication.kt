@@ -30,6 +30,7 @@ import com.anopticlabs.gravel.pkjs.webViewMajorVersion
 import com.anopticlabs.gravel.socketfilter.InstallResult
 import com.anopticlabs.gravel.socketfilter.UdpSocketFilter
 import coredevices.ExperimentalDevices
+import com.anopticlabs.gravel.notebook.notebookModule
 import coredevices.coreapp.di.androidDefaultModule
 import coredevices.coreapp.di.apiModule
 import coredevices.coreapp.di.ringStubsModule
@@ -94,6 +95,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
                 apiModule,
                 utilModule,
                 watchModule,
+                notebookModule,
             )
         }
         initLogging()

@@ -1111,13 +1111,27 @@ after a write, the file can be back at its earlier version after the
 restart, or missing if it was new. How soon is up to the storage and was not
 measured.
 
+## A Notebook reminder whose alarm Android refuses can stay silent
+
+**Status: open.**
+
+Each Notebook reminder with a time ahead and each pending snooze holds one
+Android alarm, beside Gravel's other alarms, and Android refuses a new one
+once Gravel holds its per-app limit (500 by default; android16-release
+`AlarmManagerService`, `MAX_ALARMS_PER_UID`). Nothing in the Notebook keeps
+the number of reminders below that limit. A reminder whose alarm is
+refused is stored without one.
+A snooze refused this way is kept without its alarm: a swiped
+notification is gone with nothing set. Nothing sets the missing alarms until the next re-arm runs.
+
 ## The Notebook key is usable while the device is locked
 
 **Status: accepted by design.**
 
 The Notebook key requires no user authentication and no unlocked device, so
 code running as Gravel can read and write Notebook files whenever the
-process runs, including on a locked phone.
+process runs, including on a locked phone. That is what lets a reminder
+fire while the phone stays in a pocket.
 The cost is that a device seized while locked, if an attacker can execute
 code as Gravel on it, yields the notes; the offline file-system adversary
 the encryption is aimed at still cannot, because the key never leaves the

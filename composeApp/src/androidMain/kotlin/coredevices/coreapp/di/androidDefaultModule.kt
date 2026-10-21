@@ -4,6 +4,7 @@ import CoreAppVersion
 import PlatformContext
 import PlatformShareLauncher
 import android.content.Context
+import com.anopticlabs.gravel.notebook.alarms.ReminderPresence
 import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
 import com.anopticlabs.gravel.pkjs.udpFilterEnforcement
 import com.anopticlabs.gravel.pkjs.webViewMajorVersion
@@ -25,6 +26,7 @@ import coredevices.util.AndroidPlatform
 import coredevices.util.auth.AppleAuthUtil
 import coredevices.util.CompanionDevice
 import coredevices.util.auth.GoogleAuthUtil
+import coredevices.util.Permission
 import coredevices.util.PermissionRequester
 import coredevices.util.Platform
 import coredevices.util.RequiredPermissions
@@ -39,6 +41,7 @@ import coredevices.util.models.ModelDownloadManager
 import coredevices.util.transcription.CactusModelPathProvider
 import coredevices.util.transcription.InferenceBoost
 import io.ktor.client.engine.HttpClientEngine
+import kotlinx.coroutines.flow.combine
 import io.ktor.client.engine.okhttp.OkHttp
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.singleOf
@@ -79,10 +82,17 @@ val androidDefaultModule = module {
     singleOf(::NoOpAppUpdate) bind AppUpdate::class
     single {
         // Ring support is unplugged in this fork, so the watch delegate's
-        // permissions are the whole set; the upstream version unioned in the
-        // RingDelegate permissions when CoreConfig.enableIndex was on.
+        // permissions plus the Notebook's are the whole set; the upstream
+        // version unioned in the RingDelegate permissions when
+        // CoreConfig.enableIndex was on. The exact-alarm grant is required
+        // only while a Notebook reminder exists.
         val pebbleDelegate = get<PebbleAndroidDelegate>()
-        RequiredPermissions(pebbleDelegate.requiredPermissions)
+        val reminderPresence = get<ReminderPresence>()
+        RequiredPermissions(
+            pebbleDelegate.requiredPermissions.combine(reminderPresence.hasReminders) { watch, reminders ->
+                if (reminders) watch + Permission.SetAlarms else watch
+            },
+        )
     }
     single { createAndroidAnalytics(get()) }
     singleOf(::ModelDownloadManager)
