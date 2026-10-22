@@ -168,6 +168,7 @@ import io.rebble.libpebblecommon.database.entity.HealthGender
 import io.rebble.libpebblecommon.js.PKJSApp
 import io.rebble.libpebblecommon.metadata.WatchType
 import io.rebble.libpebblecommon.packets.ProtocolCapsFlag
+import io.rebble.libpebblecommon.services.FirmwareVersion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.Flow
@@ -187,6 +188,7 @@ import kotlin.math.roundToLong
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Instant
 
 enum class TopLevelType(val displayName: String) {
     Phone("Phone"),
@@ -577,6 +579,20 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
             )
         }
     }
+    val anyWatchSupportsFiveMinHrm = remember(watchesCastable) {
+        watchesCastable.any {
+            if (it !is KnownPebbleDevice) return@any false
+            val fw = FirmwareVersion.from(
+                tag = it.runningFwVersion,
+                isRecovery = false,
+                gitHash = "",
+                timestamp = Instant.DISTANT_PAST,
+                isDualSlot = false,
+                isSlot0 = false,
+            ) ?: return@any false
+            HRMonitoringInterval.FiveMin.isSupportedBy(fw)
+        }
+    }
     val watchPrefs = watchPrefs()
     val platformHealthSync: PlatformHealthSync = koinInject()
     val healthSyncTracker: HealthSyncTracker = koinInject()
@@ -672,6 +688,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
             notebookWatchAppItems,
             hasOfflineModels,
             phoneHasModel,
+            anyWatchSupportsFiveMinHrm,
         ) {
             listOfNotNull(
                 basicSettingsActionItem(
@@ -1529,7 +1546,9 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     topLevelType = TopLevelType.Phone,
                     section = Section.Health,
                     selectedItem = healthSettings.hrmMeasurementInterval,
-                    items = HRMonitoringInterval.entries,
+                    items = HRMonitoringInterval.entries.filter {
+                        it != HRMonitoringInterval.FiveMin || anyWatchSupportsFiveMinHrm
+                    },
                     onItemSelected = {
                         libPebble.updateHealthSettings(
                             healthSettings.copy(hrmMeasurementInterval = it)
@@ -1537,6 +1556,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     },
                     itemText = {
                         when (it) {
+                            HRMonitoringInterval.FiveMin -> "Every 5 minutes"
                             HRMonitoringInterval.TenMin -> "Every 10 minutes"
                             HRMonitoringInterval.ThirtyMin -> "Every 30 minutes"
                             HRMonitoringInterval.OneHour -> "Every hour"
