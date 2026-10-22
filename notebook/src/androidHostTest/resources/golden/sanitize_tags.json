@@ -1,0 +1,147 @@
+[
+  {
+    "in": [
+      "work",
+      "Work",
+      "WORK"
+    ],
+    "out": [
+      "work"
+    ]
+  },
+  {
+    "in": [
+      "  spaced  out  ",
+      "tabs\there"
+    ],
+    "out": [
+      "spaced  out",
+      "tabshere"
+    ]
+  },
+  {
+    "in": [
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+      "f",
+      "g"
+    ],
+    "out": [
+      "a",
+      "b",
+      "c",
+      "d",
+      "e"
+    ]
+  },
+  {
+    "in": [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ],
+    "out": [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ]
+  },
+  {
+    "in": [
+      "café",
+      "naïve"
+    ],
+    "out": [
+      "café",
+      "naïve"
+    ]
+  },
+  {
+    "in": [
+      "ctrl\u0000char",
+      "bell\u0007x"
+    ],
+    "out": [
+      "ctrlchar",
+      "bellx"
+    ]
+  },
+  {
+    "in": [
+      "a\u0001b"
+    ],
+    "out": [
+      "ab"
+    ]
+  },
+  {
+    "in": [
+      ""
+    ],
+    "out": []
+  },
+  {
+    "in": [
+      "  ",
+      "\t",
+      "real"
+    ],
+    "out": [
+      "real"
+    ]
+  },
+  {
+    "in": [
+      "MixedCase",
+      "mixedcase"
+    ],
+    "out": [
+      "mixedcase"
+    ]
+  },
+  {
+    "in": [
+      "ok",
+      123,
+      "fine"
+    ],
+    "out": [
+      "ok",
+      "fine"
+    ]
+  },
+  {
+    "in": [
+      "ok",
+      [
+        "x"
+      ],
+      "y"
+    ],
+    "out": [
+      "ok",
+      "y"
+    ]
+  },
+  {
+    "in": "single-string-not-list",
+    "out": []
+  },
+  {
+    "in": null,
+    "out": []
+  },
+  {
+    "in": 12345,
+    "out": []
+  },
+  {
+    "in": {
+      "not": "a list"
+    },
+    "out": []
+  },
+  {
+    "in": [],
+    "out": []
+  }
+]

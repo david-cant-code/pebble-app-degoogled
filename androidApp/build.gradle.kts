@@ -9,6 +9,9 @@ import java.util.zip.ZipFile
 // DESIGN_NOTES.md for the de-Googling seams.
 plugins {
     alias(libs.plugins.android.application)
+    // Gravel: for the instrumented Compose tests; the module's main code has no composables, and the
+    // compiler wants the Compose runtime (already in the app through composeApp) on its classpath too.
+    alias(libs.plugins.composeCompiler)
 }
 
 val properties = Properties().apply {
@@ -150,6 +153,11 @@ dependencies {
     implementation(project(":composeApp"))
     // Components this module's manifest declares, so lint can resolve them.
     implementation(project(":util"))
+    // Gravel: the Notebook's receivers, which the merged manifest declares.
+    implementation(project(":notebook"))
+    implementation(libs.compose.runtime)
+    // Gravel: the text engine's isolated service, which the merged manifest declares.
+    implementation(project(":llm"))
     implementation(libs.androidx.core.ktx)
     // Fork: string notation on purpose, mirroring composeApp; the catalog has
     // no health-kmp alias so that upstream's plain libs.health.kmp fails at
@@ -174,6 +182,9 @@ dependencies {
     // module's own classpath otherwise.
     debugImplementation(libs.koin.core)
     debugImplementation(libs.kermit)
+    // Gravel: the debug-only NotebookDebugReceiver drives the Notebook stores
+    // from adb inside a coroutine; the notebook module keeps coroutines private.
+    debugImplementation(libs.coroutines)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.ktor.client.okhttp)
@@ -189,6 +200,14 @@ dependencies {
     androidTestImplementation(project(":pebble"))
     androidTestImplementation(project(":socketfilter"))
     androidTestImplementation(project(":whisper"))
+    androidTestImplementation(project(":notebook"))
+    androidTestImplementation(libs.markdown.renderer)
+    androidTestImplementation(libs.jetbrains.markdown)
+    androidTestImplementation(libs.compose.ui)
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(libs.espresso.core)
+    debugImplementation(libs.compose.ui.test.manifest)
+    androidTestImplementation(project(":llm"))
     androidTestImplementation(project(":libpebble3"))
     androidTestImplementation(libs.serialization)
     // Same artifact and version the app already ships via libpebble3; test-scope only,
@@ -300,15 +319,20 @@ abstract class VerifyExportedComponents : DefaultTask() {
 
 /**
  * Fork: services that must ship isolated and unexported in the merged manifest of every variant.
- * The whisper engine parses untrusted model bytes in a process of its own, and
+ * Each engine parses untrusted model bytes in a process of its own, and
  * `android:isolatedProcess` on its service is what makes that process isolated. The attribute is
- * declared in the `:whisper` module manifest, which WhisperEngineManifestTest pins, but a merge
- * rule in this module (`tools:remove`, `tools:replace`) can take it out of the manifest the APK
- * ships without touching that file, and the merged manifest is what installs. Wired like
+ * declared in the engine module's manifest, which WhisperEngineManifestTest and
+ * LlmEngineManifestTest pin, but a merge rule in this module (`tools:remove`, `tools:replace`)
+ * can take it out of the manifest the APK ships without touching that file, and the merged
+ * manifest is what installs. Wired like
  * VerifyApkContents, as a listener on the artifact, so it runs whenever a variant's merged
  * manifest is produced.
  */
-val isolatedServices = setOf("coredevices.whisper.WhisperEngineService")
+val isolatedServices = setOf(
+    "coredevices.whisper.WhisperEngineService",
+    // Gravel: the llama.cpp text engine behind the Notebook, in a process of its own.
+    "com.anopticlabs.gravel.llm.LlmEngineService",
+)
 
 abstract class VerifyIsolatedServices : DefaultTask() {
 
@@ -355,9 +379,9 @@ abstract class VerifyIsolatedServices : DefaultTask() {
                 appendLine("Engine containment changed in the merged manifest ${mergedManifest.get().asFile}:")
                 problems.forEach { appendLine("  $it") }
                 appendLine()
-                appendLine("The engine parses untrusted model bytes; isolatedProcess=\"true\" and exported=\"false\" on")
+                appendLine("An engine parses untrusted model bytes; isolatedProcess=\"true\" and exported=\"false\" on")
                 appendLine("its service are its containment. A merge rule in this module can drop either without")
-                appendLine("changing the whisper module's manifest, so fix the manifest rather than this list.")
+                appendLine("changing the engine module's manifest, so fix the manifest rather than this list.")
             },
         )
     }

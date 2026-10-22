@@ -1,6 +1,15 @@
 package coredevices.util.transcription
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.transcription.DictationHold
+import com.anopticlabs.gravel.transcription.DictationPriority
+import com.anopticlabs.gravel.transcription.LongFormTimeoutException
+import com.anopticlabs.gravel.transcription.awaitPreemptibleEngineWork
+import com.anopticlabs.gravel.whisper.WhisperLongForm
+import com.anopticlabs.gravel.whisper.WhisperLongFormResult
+import com.anopticlabs.gravel.whisper.WhisperMemoryException
+import com.anopticlabs.gravel.whisper.WhisperEngineTimeoutException
+import com.anopticlabs.gravel.whisper.WhisperSegment
 import coredevices.analytics.CoreAnalytics
 import coredevices.resampler.Resampler
 import coredevices.util.CoreConfigFlow
@@ -17,7 +26,10 @@ import coredevices.whisper.whisperCancel
 import coredevices.whisper.whisperFree
 import coredevices.whisper.whisperInit
 import coredevices.whisper.whisperTranscribe
+import coredevices.whisper.whisperTranscribeLongForm
 import io.rebble.libpebblecommon.voice.DICTATION_DEADLINE
+import io.rebble.libpebblecommon.voice.PEBBLE_FW_RECORDING_CAP
+import io.rebble.libpebblecommon.voice.PEBBLE_FW_TRANSCRIPTION_TIMEOUT
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -258,6 +270,14 @@ internal interface WhisperEngine {
         placement: EnginePlacement,
         stats: TranscribeStats?,
     ): String
+    fun transcribeLongForm(
+        handle: Long,
+        pcm16: ByteArray,
+        threads: Int,
+        language: String?,
+        callId: Long,
+        placement: EnginePlacement,
+    ): WhisperLongFormResult
     fun cancel(callId: Long)
     fun free(handle: Long)
 
@@ -303,6 +323,14 @@ internal object RealWhisperEngine : WhisperEngine {
         placement: EnginePlacement,
         stats: TranscribeStats?,
     ): String = whisperTranscribe(handle, pcm, threads, language, callId, placement, stats)
+    override fun transcribeLongForm(
+        handle: Long,
+        pcm16: ByteArray,
+        threads: Int,
+        language: String?,
+        callId: Long,
+        placement: EnginePlacement,
+    ): WhisperLongFormResult = whisperTranscribeLongForm(handle, pcm16, threads, language, callId, placement)
     override fun cancel(callId: Long) = whisperCancel(callId)
     override fun free(handle: Long) = whisperFree(handle)
     override fun processGeneration(): Long = engineProcessGeneration()
@@ -340,6 +368,11 @@ internal object RealWhisperEngine : WhisperEngine {
  * on its own; every dictation still makes its own attempt through
  * [ensureInit]. A dictation that finds the engine gone reports it
  * unavailable, which the hybrid service's fallback routes to remote.
+ *
+ * Notebook recordings go through [transcribeLongForm] on the same handle,
+ * serialized on [longFormMutex] (dictation never takes it) and holding
+ * [modelMutex] per engine call; a dictation stops one through [DictationHold]
+ * and it starts again from the beginning.
  */
 class WhisperTranscriptionService internal constructor(
     private val coreConfigFlow: CoreConfigFlow,
@@ -356,6 +389,11 @@ class WhisperTranscriptionService internal constructor(
     private val recordCancelledAfter: Duration = DICTATION_DEADLINE,
     // How long a cancelled decode may take to unwind before it is abandoned (see ENGINE_UNWIND_BOUND); tests shorten it.
     private val engineUnwindBound: Duration = ENGINE_UNWIND_BOUND,
+    // How long a dictation keeps long-form work off the engine at most (see DICTATION_HOLD); tests shorten it.
+    private val dictationHoldBound: Duration = DICTATION_HOLD,
+    // Long-form: the longest wait on one hold and the unwind bound; tests shorten both.
+    private val longFormHoldWait: Duration = LONG_FORM_HOLD_WAIT,
+    private val longFormUnwindBound: Duration = LONG_FORM_UNWIND_BOUND,
     // The service scope's dispatcher and the one for blocking work (model
     // init, engine calls, capture files); tests pass inline dispatchers to
     // run the init path to completion inside the constructor.
@@ -398,6 +436,19 @@ class WhisperTranscriptionService internal constructor(
          * costs a full model load.
          */
         internal const val MAX_PROACTIVE_RELOADS = 3
+
+        /** The watch's recording cap plus its result timeout: past that no answer can reach it. */
+        internal val DICTATION_HOLD = PEBBLE_FW_RECORDING_CAP + PEBBLE_FW_TRANSCRIPTION_TIMEOUT
+
+        /** Engine losses or timed-out hold waits one long-form transcription retries before giving up. */
+        internal const val MAX_LONG_FORM_RETRIES = 3
+
+        private val LONG_FORM_INIT_TIMEOUT = 2.minutes
+        private val LONG_FORM_HOLD_WAIT = 5.minutes
+
+        /** [ENGINE_UNWIND_BOUND] for long-form: untrimmed passes, and work before the first abort poll (see shim). */
+        private val LONG_FORM_UNWIND_BOUND = 60.seconds
+
     }
 
     private val transcriptionMutex = Mutex()
@@ -449,6 +500,14 @@ class WhisperTranscriptionService internal constructor(
 
     private val scope = CoroutineScope(dispatcher)
 
+    private val dictationHold = DictationHold(scope, dictationHoldBound)
+
+    /** The dictation hold as other on-device inference sees it: Notebook text generation gives way to it too. */
+    val dictationPriority: DictationPriority get() = dictationHold
+
+    // Long-form calls run one at a time; dictation never takes this.
+    private val longFormMutex = Mutex()
+
     val lastModelUsed get() = lastInitedModel
     val isModelReady get() = modelHandle != 0L
     val configuredModel get() = sttConfig.value.modelName
@@ -471,10 +530,8 @@ class WhisperTranscriptionService internal constructor(
     // inference after load pays one-time setup costs the warm-up absorbs.
     private val silentPcm = FloatArray(ENGINE_SAMPLE_RATE)
 
-    // Monotonic call-id source. Only ever incremented from
-    // withWhisperCancelOnCancel, which every caller enters holding
-    // [modelMutex], so the increment is already serialized and the ids are
-    // unique even against an abandoned wedged call still running.
+    // Monotonic call-id source, only ever incremented under [modelMutex], so
+    // ids stay unique even against an abandoned wedged call still running.
     private var callIdCounter: Long = 0L
 
     // Last of the initializers: the collector's first emission runs
@@ -550,14 +607,15 @@ class WhisperTranscriptionService internal constructor(
      * the wedged call keeps its own per-id abort armed either way, so a
      * fresh call does not disturb it.
      */
-    private fun abandonWedgedContext() {
+    private fun abandonWedgedContext(unwindBound: Duration = engineUnwindBound) {
         logger.e {
-            "Whisper engine ignored cancellation for $engineUnwindBound; " +
+            "Whisper engine ignored cancellation for $unwindBound; " +
                 "abandoning the native context and ending the engine process"
         }
         modelHandle = 0L
         lastInitedModel = null
-        engine.endProcess("a decode ignored its abort for $engineUnwindBound")
+        engineUnavailable = true
+        engine.endProcess("a decode ignored its abort for $unwindBound")
     }
 
     /**
@@ -571,6 +629,14 @@ class WhisperTranscriptionService internal constructor(
         threads: Int,
         stats: TranscribeStats? = null,
     ): String {
+        requireTranscriptionMemory()
+        val language = engineLanguage(sttConfig.value.modelName)
+        return withWhisperCancelOnCancel { callId ->
+            engine.transcribe(handle, pcm, threads, language, callId, EnginePlacement.DEFAULT, stats).trim()
+        }
+    }
+
+    private suspend fun requireTranscriptionMemory() {
         val freeMemory = try {
             getFreeMemoryMB()
         } catch (e: Exception) {
@@ -581,15 +647,12 @@ class WhisperTranscriptionService internal constructor(
             logger.e { "Low free memory ($freeMemory MB), skipping local transcription" }
             throw TranscriptionException.NotEnoughMemory(modelUsed = sttConfig.value.modelName)
         }
-        val language = whisperLanguageFor(
-            modelMultilingual = sttConfig.value.modelName
-                ?.let { WhisperModelCatalog.byId(it) }?.multilingual,
-            spokenLanguage = sttConfig.value.spokenLanguage,
-        )
-        return withWhisperCancelOnCancel { callId ->
-            engine.transcribe(handle, pcm, threads, language, callId, EnginePlacement.DEFAULT, stats).trim()
-        }
     }
+
+    private fun engineLanguage(model: String?): String? = whisperLanguageFor(
+        modelMultilingual = model?.let { WhisperModelCatalog.byId(it) }?.multilingual,
+        spokenLanguage = sttConfig.value.spokenLanguage,
+    )
 
     /**
      * PCM16 bytes to the engine's float format, resampling when the source
@@ -733,8 +796,7 @@ class WhisperTranscriptionService internal constructor(
         if (config.mode == CactusSTTMode.RemoteOnly) return
         if (!engine.supported()) return
         // The configured model is the single source of truth; null means no
-        // local model has been chosen yet (fresh install, or the migration
-        // sweep cleared it) and there is nothing to initialize.
+        // local model is chosen and there is nothing to initialize.
         val modelName = config.modelName ?: run {
             logger.d { "No STT model configured, skipping init" }
             return
@@ -835,10 +897,10 @@ class WhisperTranscriptionService internal constructor(
                 onInitialized.trySend(modelHandle != 0L || sttConfig.value.mode == CactusSTTMode.RemoteOnly)
             } catch (e: Throwable) {
                 outcome = "error:${transcriptionFailureReason(e)}"
-                // An engine process that could not be reached is what the
-                // next dictation reports. Set only here, and cleared only
-                // by the next attempt to reach the engine (initIfNeeded),
-                // so a job with nothing to load leaves the report alone.
+                // An engine process that could not be reached, or that a call
+                // lost, is what the next dictation reports; cleared only by the
+                // next attempt to reach it (initIfNeeded), so a job with
+                // nothing to load leaves the report alone.
                 if (e is WhisperEngineUnavailableException) engineUnavailable = true
                 logger.e(e) { "Whisper STT model initialization failed: ${e.message}" }
                 onInitialized.trySend(false)
@@ -867,10 +929,46 @@ class WhisperTranscriptionService internal constructor(
      */
     private fun placementSnapshot(): EngineRuntimeSnapshot = engine.runtimeSnapshot() ?: engineRuntimeSnapshot()
 
-    /** True if the local model is loaded, or downloaded and ready to load, on a supported device. */
-    fun isLocalAvailable(): Boolean = engine.supported() && (modelHandle != 0L || modelExists())
+    /** True if a model still on the phone is loaded, or the chosen one is downloaded and ready to load, on a supported device. */
+    fun isLocalAvailable(): Boolean = engine.supported() && (loadedModelInstalled() || modelExists())
 
-    fun earlyInit() {
+    // Gravel: a deleted model's copy stays loaded while a call is inside the engine (modelDeleted).
+    private fun loadedModelInstalled(): Boolean =
+        modelHandle != 0L && lastInitedModel?.let { modelProvider.isModelDownloaded(it) } == true
+
+    /** True when [transcribeLongForm] can run: a local dictation mode and [isLocalAvailable]. Reads the disk. */
+    fun isLongFormAvailable(): Boolean = sttConfig.value.mode.usesLocalCactus() && isLocalAvailable()
+
+    /**
+     * Gravel: [modelName] was deleted from the phone: its loaded copy is freed, behind a call that is inside the
+     * engine, unless the model is installed again by then.
+     */
+    fun modelDeleted(modelName: String) {
+        scope.launch(ioDispatcher) {
+            modelMutex.withLock {
+                val handle = modelHandle
+                if (handle == 0L || lastInitedModel != modelName || modelProvider.isModelDownloaded(modelName)) return@withLock
+                modelHandle = 0L
+                lastInitedModel = null
+                // This launch has no handler to fail into.
+                try {
+                    engine.free(handle)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logger.w(e) { "Freeing the deleted STT model '$modelName' failed: ${e.message}" }
+                }
+            }
+        }
+    }
+
+    /**
+     * Called as a transcription opens (a watch session's `canServeSession`,
+     * every `HybridTranscriptionService.transcribe` flow); where local comes
+     * first ([localFirst]) it also stops a long-form call, during the recording.
+     */
+    fun earlyInit(localFirst: Boolean = sttConfig.value.mode.localComesFirst()) {
+        if (localFirst) dictationHold.raise()
         if (initJob == null || modelHandle == 0L || lastInitedModel != sttConfig.value.modelName) {
             if (initJob?.isActive == true) {
                 logger.d { "Whisper STT model initialization already in progress" }
@@ -1016,6 +1114,7 @@ class WhisperTranscriptionService internal constructor(
             // leaves in place.
             modelHandle = 0L
             lastInitedModel = null
+            engineUnavailable = true
             val unavailable = TranscriptionException.TranscriptionServiceUnavailable(modelUsed = model)
             analytics.logTranscriptionFailure("whisper", transcriptionFailureReason(unavailable), e.message)
             throw unavailable
@@ -1055,19 +1154,28 @@ class WhisperTranscriptionService internal constructor(
         timeout: Duration? = null,
         initTimeout: Duration = 10.seconds,
     ): String {
-        val initWaitMillis = ensureInit(initTimeout)
-        if (!transcriptionMutex.tryLock()) {
-            throw TranscriptionException.TranscriptionInProgress(modelUsed = sttConfig.value.modelName)
-        }
-        return try {
-            // Debug builds can archive the exact bytes the engine is about to see.
-            withContext(ioDispatcher) {
-                debugArchiveDictationAudio(sttConfig.value.debugCaptureDump, debugBuild(), audio, sampleRate)
+        // Held from the start, so a long-form call ahead of a model load gives way; replaced by the
+        // dictation's own hold once it has the lock, released on every exit.
+        val waiting = dictationHold.raise()
+        try {
+            val initWaitMillis = ensureInit(initTimeout)
+            if (!transcriptionMutex.tryLock()) {
+                throw TranscriptionException.TranscriptionInProgress(modelUsed = sttConfig.value.modelName)
             }
-            val pcm = toEngineFloats(audio, sampleRate)
-            modelMutex.withLock { runLocalTranscribe(pcm, initWaitMillis, timeout) }
+            val hold = dictationHold.supersede()
+            return try {
+                // Debug builds can archive the exact bytes the engine is about to see.
+                withContext(ioDispatcher) {
+                    debugArchiveDictationAudio(sttConfig.value.debugCaptureDump, debugBuild(), audio, sampleRate)
+                }
+                val pcm = toEngineFloats(audio, sampleRate)
+                modelMutex.withLock { runLocalTranscribe(pcm, initWaitMillis, timeout) }
+            } finally {
+                dictationHold.release(hold)
+                transcriptionMutex.unlock()
+            }
         } finally {
-            transcriptionMutex.unlock()
+            dictationHold.release(waiting)
         }
     }
 
@@ -1095,5 +1203,147 @@ class WhisperTranscriptionService internal constructor(
                 "empty_result",
                 modelUsed = sttConfig.value.modelName,
             )
+    }
+
+    /**
+     * Transcribes a recording (16 kHz mono PCM16, at most
+     * [WhisperLongForm.MAX_RECORDING_MILLIS]) on the dictation model in one
+     * engine call, started again from the beginning whenever a dictation
+     * stops it. Fails as [transcribeLocal] does, and as unavailable without
+     * a local mode, for a model not loaded in time, for a call past its
+     * deadline, or after [MAX_LONG_FORM_RETRIES] retries of a lost engine
+     * or of a hold that did not end (in progress for the last).
+     */
+    suspend fun transcribeLongForm(pcm16: ByteArray): List<WhisperSegment> = withContext(dispatcher) {
+        require(pcm16.size % 2 == 0 && pcm16.size / 2 in 1..WhisperLongForm.MAX_CALL_SAMPLES) {
+            "long-form audio of ${pcm16.size} bytes"
+        }
+        if (!sttConfig.value.mode.usesLocalCactus()) {
+            throw TranscriptionException.TranscriptionServiceUnavailable(modelUsed = sttConfig.value.modelName)
+        }
+        longFormMutex.withLock { transcribeUntilDone(pcm16) }
+    }
+
+    private suspend fun transcribeUntilDone(pcm16: ByteArray): List<WhisperSegment> {
+        var retries = 0
+        while (true) {
+            val step = if (withTimeoutOrNull(longFormHoldWait) { dictationHold.awaitReleased() } == null) {
+                LongFormStep.HoldTimedOut
+            } else {
+                try {
+                    ensureInit(LONG_FORM_INIT_TIMEOUT)
+                } catch (e: TimeoutCancellationException) {
+                    // The caller's own timeout passes through as the cancellation it is.
+                    if (!currentCoroutineContext().isActive) throw e
+                    throw TranscriptionException.TranscriptionServiceUnavailable(modelUsed = sttConfig.value.modelName)
+                }
+                modelMutex.withLock { runLongFormCall(pcm16) }
+            }
+            when (step) {
+                is LongFormStep.Done -> return step.segments
+                LongFormStep.Held, LongFormStep.Stopped -> continue
+                LongFormStep.EngineLost -> if (retries++ >= MAX_LONG_FORM_RETRIES) {
+                    throw TranscriptionException.TranscriptionServiceUnavailable(modelUsed = sttConfig.value.modelName)
+                }
+                LongFormStep.HoldTimedOut -> if (retries++ >= MAX_LONG_FORM_RETRIES) {
+                    throw TranscriptionException.TranscriptionInProgress(modelUsed = lastInitedModel)
+                }
+            }
+        }
+    }
+
+    private sealed interface LongFormStep {
+        class Done(val segments: List<WhisperSegment>) : LongFormStep
+        object Stopped : LongFormStep
+        object Held : LongFormStep
+        object HoldTimedOut : LongFormStep
+        object EngineLost : LongFormStep
+    }
+
+    /** One engine call under [modelMutex], or [LongFormStep.Held] while a hold is up; logs one line, never the text. */
+    private suspend fun runLongFormCall(pcm16: ByteArray): LongFormStep {
+        val handle = modelHandle
+        val model = lastInitedModel
+        if (handle == 0L) {
+            if (!engine.supported()) {
+                throw TranscriptionException.TranscriptionServiceUnavailable(modelUsed = sttConfig.value.modelName)
+            }
+            // A lost engine (the load could not reach it, or the other path lost it) is retried after a reload;
+            // a model that failed to load for any other reason would fail the same way again.
+            if (engineUnavailable && modelExists()) return LongFormStep.EngineLost
+            throw TranscriptionException.TranscriptionRequiresDownload("Model not initialized")
+        }
+        requireTranscriptionMemory()
+        if (dictationHold.isHeld) return LongFormStep.Held
+        val threads = dictationThreadCount(sttConfig.value)
+        val language = engineLanguage(model)
+        val callId = nextCallId()
+        // Watches from before the call; a StateFlow collector sees a hold already up.
+        val preemption = scope.async { dictationHold.awaitRaised() }
+        val started = TimeSource.Monotonic.markNow()
+        var outcome = "error"
+        var segments = 0
+        try {
+            val worker = scope.async(ioDispatcher) {
+                runCatching {
+                    engine.transcribeLongForm(handle, pcm16, threads, language, callId, EnginePlacement.DEFAULT)
+                }
+            }
+            val result = awaitPreemptibleEngineWork(
+                worker = worker,
+                preemption = preemption,
+                cancel = { engine.cancel(callId) },
+                unwindBound = longFormUnwindBound,
+                onWedged = { abandonWedgedContext(longFormUnwindBound) },
+            )
+            proactiveReloads = 0
+            lastTranscriptionAt = TimeSource.Monotonic.markNow()
+            segments = result.segments.size
+            if (result.complete) {
+                outcome = "ok"
+                return LongFormStep.Done(result.segments)
+            }
+            if (preemption.isCompleted && !preemption.isCancelled) {
+                outcome = "restart"
+                return LongFormStep.Stopped
+            }
+            // Stopped although nothing asked it to: not an answer this process takes.
+            outcome = "error:unrequested-stop"
+            modelHandle = 0L
+            lastInitedModel = null
+            engineUnavailable = true
+            engine.endProcess("a long-form call reported a stop nothing requested")
+            return LongFormStep.EngineLost
+        } catch (e: CancellationException) {
+            outcome = "cancelled"
+            throw e
+        } catch (e: WhisperEngineTimeoutException) {
+            // Past its deadline this call would be past it again: no retry.
+            outcome = "error:timeout"
+            modelHandle = 0L
+            lastInitedModel = null
+            engineUnavailable = true
+            throw LongFormTimeoutException(modelUsed = model)
+        } catch (e: WhisperEngineUnavailableException) {
+            outcome = "error:${transcriptionFailureReason(e)}"
+            // As in runLocalTranscribe: the handle went with its process.
+            modelHandle = 0L
+            lastInitedModel = null
+            engineUnavailable = true
+            return LongFormStep.EngineLost
+        } catch (e: WhisperMemoryException) {
+            outcome = "error:memory"
+            throw TranscriptionException.NotEnoughMemory(modelUsed = model)
+        } catch (e: Exception) {
+            outcome = "error:${transcriptionFailureReason(e)}"
+            throw e
+        } finally {
+            preemption.cancel()
+            logger.i {
+                "longform engine: model=$model lang=${language ?: "auto"} threads=$threads " +
+                    "audioMs=${pcm16.size / 2 * 1000L / ENGINE_SAMPLE_RATE} " +
+                    "decodeMs=${started.elapsedNow().inWholeMilliseconds} segments=$segments outcome=$outcome"
+            }
+        }
     }
 }

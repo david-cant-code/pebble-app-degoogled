@@ -167,6 +167,13 @@ kotlin {
             }
         }
         androidMain.dependencies {
+            // Gravel: the Notebook's Koin module and its required-permission
+            // contribution are registered from the Android app graph; the
+            // module has no iOS target, so it stays out of commonMain.
+            implementation(project(":notebook"))
+            // Gravel: the Application class attaches the text engine's client;
+            // Android only, like the Notebook it serves.
+            implementation(project(":llm"))
             // Gravel: the Application class installs the UDP socket filter at process start.
             implementation(project(":socketfilter"))
             implementation(compose.preview)

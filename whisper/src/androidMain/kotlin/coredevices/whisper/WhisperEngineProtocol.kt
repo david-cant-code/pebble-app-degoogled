@@ -21,6 +21,10 @@ internal object WhisperEngineProtocol {
     const val TRANSACTION_FREE = IBinder.FIRST_CALL_TRANSACTION + 3
     const val TRANSACTION_BENCHMARK = IBinder.FIRST_CALL_TRANSACTION + 4
     const val TRANSACTION_RUNTIME = IBinder.FIRST_CALL_TRANSACTION + 5
+    const val TRANSACTION_TRANSCRIBE_LONG = IBinder.FIRST_CALL_TRANSACTION + 6
+
+    /** The highest code this protocol defines; the codes run contiguously from INIT. */
+    const val LAST_TRANSACTION = TRANSACTION_TRANSCRIBE_LONG
 
     /** The call ran; its result follows. */
     const val STATUS_OK = 0

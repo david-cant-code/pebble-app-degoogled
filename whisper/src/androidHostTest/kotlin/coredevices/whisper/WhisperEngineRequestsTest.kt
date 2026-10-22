@@ -1,5 +1,6 @@
 package coredevices.whisper
 
+import com.anopticlabs.gravel.whisper.WhisperLongForm
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -20,6 +21,17 @@ class WhisperEngineRequestsTest {
         assertFalse(audioFitsRegion(samples = 240_001, regionBytes = 960_000), "one sample past the region")
         assertFalse(audioFitsRegion(samples = -1, regionBytes = 960_000), "a negative count is not a short read")
         assertFalse(audioFitsRegion(samples = Int.MAX_VALUE, regionBytes = Int.MAX_VALUE), "the byte product must not wrap")
+    }
+
+    @Test
+    fun aLongFormRequestMustFitItsBoundAndItsRegion() {
+        val minute = 60 * WhisperLongForm.SAMPLE_RATE
+        assertTrue(longFormRequestFits(samples = minute, regionBytes = minute * 4))
+        assertFalse(longFormRequestFits(samples = minute, regionBytes = minute * 4 - 1), "one float past the region")
+        assertFalse(longFormRequestFits(samples = 0, regionBytes = 4), "no audio")
+        val max = WhisperLongForm.MAX_CALL_SAMPLES
+        assertTrue(longFormRequestFits(samples = max, regionBytes = max * 4))
+        assertFalse(longFormRequestFits(samples = max + 1, regionBytes = Int.MAX_VALUE), "past the per-call bound")
     }
 
     @Test

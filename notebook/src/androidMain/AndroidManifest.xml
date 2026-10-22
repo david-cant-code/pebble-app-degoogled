@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- The screen-lock prompt before backup setup, a new key or a folder change (BiometricPrompt from API 29). -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Asked for when the user taps record; the Notebook records only after that tap. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <application>
+        <!--
+            The reminder alarms and notification actions of the Notebook. Both
+            receivers are reached only by this app's own pending intents, so
+            they stay unexported; NotebookManifestTest pins that.
+        -->
+        <receiver
+            android:name="com.anopticlabs.gravel.notebook.alarms.ReminderFireReceiver"
+            android:exported="false" />
+        <receiver
+            android:name="com.anopticlabs.gravel.notebook.alarms.ReminderActionReceiver"
+            android:exported="false" />
+        <!-- Clears the clipboard after a recovery key was copied; reached only by this app's alarm. -->
+        <receiver
+            android:name="com.anopticlabs.gravel.notebook.ui.ClipboardClearReceiver"
+            android:exported="false" />
+        <!-- Runs the automatic backup checks; reached only by this app's alarm. -->
+        <receiver
+            android:name="com.anopticlabs.gravel.notebook.backup.AutoBackupCheckReceiver"
+            android:exported="false" />
+        <!-- Unexported: the system uid passes the exported check (android16-release ActivityManager.checkComponentPermission). -->
+        <receiver
+            android:name="com.anopticlabs.gravel.notebook.alarms.NotebookRearmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+        <!--
+            Holds the app in the foreground while Notebook recordings are processed with no
+            activity resumed, and from a recording's start until it is saved. Started only by
+            this app, so unexported; NotebookManifestTest pins it.
+        -->
+        <service
+            android:name="com.anopticlabs.gravel.notebook.pipeline.NotebookProcessingService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Saves a voice note the user is recording and finishes its transcription, on the device or on the user's own server, and its text processing" />
+        </service>
+    </application>
+</manifest>

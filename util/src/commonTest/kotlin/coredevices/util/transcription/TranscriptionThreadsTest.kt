@@ -77,6 +77,13 @@ class TranscriptionThreadsTest {
     }
 
     @Test
+    fun threadCountForTiersAReadableMaskAndFallsBackWithoutOne() {
+        assertEquals(2, threadCountFor((0..5).toList(), fourTwoTwo, possibleCpus = 8))
+        assertEquals(MAX_ENGINE_THREADS, threadCountFor(null, fourTwoTwo, possibleCpus = 8))
+        assertEquals(3, threadCountFor(emptyList(), fourTwoTwo, possibleCpus = 3))
+    }
+
+    @Test
     fun singleThreadOverrideActsOnlyInDebugBuilds() {
         assertEquals(1, effectiveThreadCount(singleThreadOverride = true, debugBuild = true, measured = 4))
         assertEquals(4, effectiveThreadCount(singleThreadOverride = true, debugBuild = false, measured = 4))

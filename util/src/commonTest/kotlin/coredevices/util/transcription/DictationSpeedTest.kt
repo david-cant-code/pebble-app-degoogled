@@ -129,7 +129,7 @@ class DictationSpeedTest {
         assertTrue(copy.body.contains("later than $deadline seconds"), copy.body)
         assertTrue(copy.body.contains("\"Error occurred. Try again.\""))
         assertTrue(copy.body.contains("Whisper Base (English only) is faster"))
-        assertTrue(copy.body.contains("Manage Offline Models"))
+        assertTrue(copy.body.contains("Settings > AI > Speech Recognition > Manage Offline Models"))
         assertEquals("Switch to Whisper Base (English only)", copy.switchLabel)
         assertEquals("Keep Whisper Small (English only)", copy.keepLabel)
     }

@@ -2,10 +2,13 @@ package coredevices.util.transcription
 
 import com.russhwolf.settings.MapSettings
 import coredevices.util.security.DecryptResult
+import coredevices.util.security.EncryptedStringSetting
 import coredevices.util.security.SecretCipher
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Pins the self-hosted server rules that carry security weight: the URL
@@ -40,6 +43,10 @@ class SelfHostedServerTest {
         assertEquals("stt.example.net:443", serverHostPort("https://STT.example.net/v1/audio/transcriptions"))
         assertEquals("10.0.0.5:8443", serverHostPort("https://10.0.0.5:8443/inference"))
         assertNull(serverHostPort("http://10.0.0.5:8080/inference"))
+        // Two names a client dials as different servers: capital letters with a last sigma, and small ones with a final sigma.
+        val capitals = "https://\u039F\u0394\u039F\u03A3/inference"
+        val small = "https://\u03BF\u03B4\u03BF\u03C2/inference"
+        assertNotEquals(serverHostPort(capitals), serverHostPort(small))
     }
 
     @Test
@@ -114,16 +121,92 @@ class SelfHostedServerTest {
     }
 
     @Test
+    fun theTokenIsReadOnlyForTheServerItWasSavedFor() {
+        val store = SelfHostedServerStore(MapSettings(), PlainCipher)
+        store.setToken("a.test:443", "tok-a")
+        assertNull(store.tokenFor("b.test:443"))
+        assertNull(store.tokenFor("a.test:8443"), "another port is another server")
+        assertNull(store.tokenFor(null))
+        store.setToken("b.test:443", "tok-b")
+        assertNull(store.tokenFor("a.test:443"), "one token is kept")
+        assertEquals("tok-b", store.tokenFor("b.test:443"))
+        store.setToken(null, "tok-c")
+        assertNull(store.tokenFor("b.test:443"), "no server, no token")
+        assertNull(store.storedToken())
+        store.setToken("b.test:443", "line one\nline two")
+        assertEquals("line one\nline two", store.tokenFor("b.test:443"))
+    }
+
+    /** A cipher that can fail the way a Keystore hiccup does. */
+    private class FlakyCipher : SecretCipher {
+        var failing = false
+        var failingEncrypt = false
+        override fun encrypt(plaintext: String): String? = if (failingEncrypt) null else "enc:" + plaintext.reversed()
+        override fun decrypt(stored: String): DecryptResult =
+            if (failing) DecryptResult.TransientFailure else DecryptResult.Success(stored.removePrefix("enc:").reversed())
+    }
+
+    private fun unbound(settings: MapSettings, cipher: SecretCipher, token: String) =
+        EncryptedStringSetting(settings, cipher, "stt_server_token").set(token)
+
+    @Test
+    fun aTokenSavedBeforeTokensCarriedAnAddressIsNoServersUntilAdopted() {
+        val settings = MapSettings()
+        val cipher = FlakyCipher()
+        val store = SelfHostedServerStore(settings, cipher)
+        unbound(settings, cipher, "old-token")
+        assertNull(store.tokenFor("a.test:443"))
+        assertNull(store.storedToken())
+
+        cipher.failing = true
+        store.adoptUnboundToken("a.test:443")
+        assertNull(store.tokenFor("a.test:443"))
+        assertTrue(settings.hasKey("stt_server_token"), "kept while it cannot be read")
+        cipher.failing = false
+        cipher.failingEncrypt = true
+        store.adoptUnboundToken("a.test:443")
+        assertTrue(settings.hasKey("stt_server_token"), "kept while it cannot be stored")
+        cipher.failingEncrypt = false
+
+        store.adoptUnboundToken("a.test:443")
+        assertEquals("old-token", store.tokenFor("a.test:443"))
+        assertNull(store.tokenFor("b.test:443"))
+        assertEquals(false, settings.hasKey("stt_server_token"))
+    }
+
+    @Test
+    fun anUnboundTokenIsRemovedWithoutAServerAndTakesTheSavedOnesPlace() {
+        val settings = MapSettings()
+        val store = SelfHostedServerStore(settings, PlainCipher)
+        unbound(settings, PlainCipher, "old-token")
+        store.adoptUnboundToken(null)
+        assertEquals(false, settings.hasKey("stt_server_token"))
+        assertNull(store.tokenFor("a.test:443"))
+
+        store.setToken("a.test:443", "new-token")
+        unbound(settings, PlainCipher, "old-token")
+        store.adoptUnboundToken("b.test:443")
+        assertEquals("old-token", store.tokenFor("b.test:443"), "an older build wrote it after the saved one")
+        assertNull(store.tokenFor("a.test:443"))
+        assertEquals(false, settings.hasKey("stt_server_token"))
+
+        unbound(settings, PlainCipher, "old-token")
+        store.setToken("a.test:443", "newer-token")
+        assertEquals(false, settings.hasKey("stt_server_token"), "a save leaves no unbound token behind")
+    }
+
+    @Test
     fun storeEncryptsTheTokenAndKeepsPinsPerHost() {
         val settings = MapSettings()
         val store = SelfHostedServerStore(settings, PlainCipher)
-        assertNull(store.token())
-        store.setToken("  secret-token  ")
-        assertEquals("secret-token", store.token())
-        // The token never sits in the clear.
-        assertEquals(false, settings.getStringOrNull("stt_server_token")!!.contains("secret-token"))
-        store.setToken("   ")
-        assertNull(store.token())
+        assertNull(store.tokenFor("a.test:443"))
+        store.setToken("a.test:443", "  secret-token  ")
+        assertEquals("secret-token", store.tokenFor("a.test:443"))
+        // Neither the token nor its address sits in the clear.
+        val stored = settings.getStringOrNull("stt_server_token_bound")!!
+        assertEquals(false, stored.contains("secret-token") || stored.contains("a.test"))
+        store.setToken("a.test:443", "   ")
+        assertNull(store.tokenFor("a.test:443"))
 
         assertNull(store.pinnedFingerprint("a.test:443"))
         store.trust("a.test:443", "AA:BB")

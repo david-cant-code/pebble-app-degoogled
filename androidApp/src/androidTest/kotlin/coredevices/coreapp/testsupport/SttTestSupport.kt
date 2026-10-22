@@ -1,5 +1,6 @@
 package coredevices.coreapp.testsupport
 
+import com.anopticlabs.gravel.models.ModelCatalog
 import coredevices.analytics.CoreAnalytics
 import coredevices.util.models.WhisperModelCatalog
 import coredevices.util.transcription.CactusModelPathProvider
@@ -17,7 +18,7 @@ class ReadOnlyModelPathProvider(
     private val sttModelId: String,
 ) : CactusModelPathProvider {
     private fun installedFile(modelId: String): File? {
-        val model = WhisperModelCatalog.byId(modelId) ?: return null
+        val model = ModelCatalog.byId(modelId) ?: return null
         return modelsDir.resolve(model.id).resolve(model.fileName)
     }
 

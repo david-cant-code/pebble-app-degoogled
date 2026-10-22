@@ -5,3 +5,8 @@
 # Ktor
 -dontwarn java.lang.management.ManagementFactory
 -dontwarn java.lang.management.RuntimeMXBean
+
+# Gravel: overrides a hidden framework callback that nothing in the app calls, so R8 would drop or rename it
+-keepclassmembers class io.rebble.libpebblecommon.connection.bt.ble.transport.GattServerCallback {
+    public void onConnectionUpdated(android.bluetooth.BluetoothDevice, int, int, int, int);
+}

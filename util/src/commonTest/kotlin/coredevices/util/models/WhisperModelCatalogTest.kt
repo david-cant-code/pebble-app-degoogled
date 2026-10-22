@@ -1,5 +1,7 @@
 package coredevices.util.models
 
+import com.anopticlabs.gravel.models.ModelCatalog
+
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -66,7 +68,7 @@ class WhisperModelCatalogTest {
             assertEquals(
                 "https://huggingface.co/ggerganov/whisper.cpp/resolve/" +
                     "5359861c739e955e79d9a303bcbc70fb988958b1/${model.fileName}",
-                WhisperModelCatalog.urlFor(model),
+                ModelCatalog.urlFor(model),
             )
         }
     }
@@ -132,6 +134,15 @@ class WhisperModelCatalogTest {
                 WhisperModelCatalog.STANDARD_TIER_MIN_TOTAL_RAM, preferEnglishOnly = false,
             ).standardTier,
         )
+    }
+
+    @Test
+    fun selectionAmongTakesTheRecommendedModelThenTheCatalogsOrder() {
+        val installed = listOf("whisper-tiny-en", "whisper-base", "not-in-the-catalog")
+        assertEquals("whisper-tiny-en", WhisperModelCatalog.selectionAmong(installed, recommended = "whisper-tiny-en"))
+        assertEquals("whisper-base", WhisperModelCatalog.selectionAmong(installed, recommended = "whisper-small-en"))
+        assertNull(WhisperModelCatalog.selectionAmong(listOf("not-in-the-catalog"), recommended = "whisper-small-en"))
+        assertNull(WhisperModelCatalog.selectionAmong(emptyList(), recommended = "whisper-small-en"))
     }
 
     @Test

@@ -1,7 +1,9 @@
 package coredevices.whisper
 
 import android.os.Build
+import com.anopticlabs.gravel.whisper.WhisperLongFormResult
 import java.io.File
+import java.nio.ByteBuffer
 
 /**
  * Android actuals. The engine runs in an isolated process
@@ -76,6 +78,19 @@ internal object WhisperJNI {
         stats: IntArray?,
     ): ByteArray?
 
+    /** [pcm] must be a direct buffer of native-order floats; the shim reads it in place. */
+    @JvmStatic
+    external fun nativeTranscribeLong(
+        handle: Long,
+        pcm: ByteBuffer,
+        samples: Int,
+        threads: Int,
+        language: String?,
+        callId: Long,
+        cpuMask: Long,
+        nice: Int,
+    ): ByteArray?
+
     @JvmStatic
     external fun nativeCancel(callId: Long)
 
@@ -112,6 +127,16 @@ actual fun whisperTranscribe(
         if (stats != null && slots != null) stats.inputSamples = slots[0]
     }
 }
+
+actual fun whisperTranscribeLongForm(
+    handle: Long,
+    pcm16: ByteArray,
+    threads: Int,
+    language: String?,
+    callId: Long,
+    placement: EnginePlacement,
+): WhisperLongFormResult =
+    WhisperEngineClient.transcribeLong(handle, pcm16, threads, language, callId, placement.cpuMask, placement.nice)
 
 actual fun whisperCancel(callId: Long) = WhisperEngineClient.cancel(callId)
 

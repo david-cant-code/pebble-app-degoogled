@@ -30,6 +30,10 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   `--recursive` (or run `git submodule update --init`) before building.
   Model weights are integrity-pinned runtime downloads, never committed;
   the re-pin procedure lives in `WhisperModelCatalog`.
+  The Notebook's text engine is llama.cpp, built from source the same way
+  (`:llm`/`:llm-native`, submodule at `llm-native/src/main/cpp/llama.cpp`);
+  its models are integrity-pinned runtime downloads too
+  (`LlmModelCatalog`).
 - **Distinct branding: the app is Gravel.** applicationId is
   `com.anopticlabs.gravel`; the Kotlin `namespace` and source packages
   deliberately stay `coredevices.coreapp` so upstream merges stay cheap;
@@ -51,7 +55,7 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   so a change must not add non-free dependencies, dependencies from
   repositories F-Droid does not allow, or prebuilt binaries in the tree.
   `FdroidGuardrailsTest` in `:androidApp` replicates F-Droid's source
-  scanner over the tracked tree, the whisper.cpp submodule included, minus
+  scanner over the tracked tree, the engine submodules included, minus
   the paths the F-Droid recipe removes (dependency lines in every gradle
   file, iOS-only and unplugged modules included; maven URLs; checked-in
   binaries; lockfile-less dependency manifests), and defines the envelope:
@@ -60,7 +64,7 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   `DESIGN_NOTES.md` (F-Droid section).
 - **Security first.** No known security flaw ships, however small; genuinely
   deferred issues are documented in `KNOWN_ISSUES.md` with rationale. Any
-  cross-app interface (e.g. the third-party mic API) must be explicitly
+  cross-app interface must be explicitly
   authorization-gated (signature/knownSigner-level permissions or equivalent),
   never openly exported. Vulnerability reports follow `SECURITY.md`.
 - **Tests come with the change.** New logic (parsers, encoders, state
@@ -183,7 +187,9 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   services where requesting permissions is not possible, and the app
   already prompts for missing permissions (see `RequiredPermissions` in
   `util`). Do not add manual `requestPermission()` calls in feature code;
-  handle the denied case gracefully.
+  handle the denied case gracefully. The exception is a permission that a
+  tap in the foreground needs at that moment (the Notebook's record button
+  asks for the microphone), requested through `PermissionRequester`.
 - **Keep changes single-purpose.** One concern per branch or PR.
 - **Prefer simple architectures.** For example, keep a storage format
   unchanged and convert at the boundary rather than adding format dispatch

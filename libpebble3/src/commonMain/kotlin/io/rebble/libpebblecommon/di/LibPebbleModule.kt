@@ -1,7 +1,9 @@
 package io.rebble.libpebblecommon.di
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.link.WatchLinkPace
 import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
+import com.anopticlabs.gravel.watchapp.InjectedWatchAppCaptures
 import com.russhwolf.settings.Settings
 import io.ktor.client.HttpClient
 import io.rebble.libpebblecommon.BleConfigFlow
@@ -324,6 +326,7 @@ fun initKoin(
     transcriptionProvider: TranscriptionProvider,
     injectedPKJSHttpInterceptors: InjectedPKJSHttpInterceptors,
     networkDenyEnforcement: NetworkDenyEnforcement,
+    watchAppCaptures: InjectedWatchAppCaptures,
 ): Koin {
     val koin = LibPebbleKoinContext.koin
     val libPebbleScope = LibPebbleCoroutineScope(CoroutineName("libpebble3"))
@@ -345,6 +348,7 @@ fun initKoin(
                 single { transcriptionProvider }
                 single { injectedPKJSHttpInterceptors }
                 single { networkDenyEnforcement }
+                single { watchAppCaptures }
                 single { getRoomDatabase(get()) }
                 singleOf(::StaticLockerPBWCache) bind LockerPBWCache::class
                 singleOf(::PebbleDeviceFactory)
@@ -525,6 +529,7 @@ fun initKoin(
                     scopedOf(::PpogPacketSenderProxy) bind PPoGPacketSender::class
                     scopedOf(::ConnectionParams)
                     scopedOf(::Mtu)
+                    scopedOf(::WatchLinkPace)
                     scopedOf(::ConnectivityWatcher)
                     scopedOf(::BatteryWatcher)
                     scopedOf(::PebblePairing)

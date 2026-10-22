@@ -1,6 +1,7 @@
 package io.rebble.libpebblecommon.connection.bt.ble.pebble
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.link.WatchLinkPace
 import io.rebble.libpebblecommon.LibPebbleConfigFlow
 import io.rebble.libpebblecommon.connection.ConnectionFailureReason
 import io.rebble.libpebblecommon.connection.KnownWatchProperties
@@ -42,6 +43,7 @@ class PebbleBle(
     private val batteryWatcher: BatteryWatcher,
     private val preConnectScanner: PreConnectScanner,
     private val libPebbleConfigFlow: LibPebbleConfigFlow,
+    private val linkPace: WatchLinkPace,
 ) : TransportConnector {
     private val logger = Logger.withTag("PebbleBle/${identifier.asString}")
 
@@ -64,6 +66,7 @@ class PebbleBle(
 
             is GattConnectionResult.Success -> result.client
         }
+        linkPace.attach(gattServerManager.connectionUpdates, device::requestHighConnectionPriority)
         // Force a refresh of the OS GATT cache (not used, but an option later if we don't find a
         // better way to do this).
 //        device.refreshServicesNative()

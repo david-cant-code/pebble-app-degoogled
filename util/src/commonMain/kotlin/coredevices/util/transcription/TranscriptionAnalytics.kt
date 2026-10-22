@@ -25,6 +25,7 @@ fun CoreAnalytics.logTranscriptionFailure(service: String, reason: String, desc:
 fun transcriptionFailureReason(e: Throwable): String = when (e) {
     is WhisperEngineUnavailableException -> "engine_unavailable"
     is TranscriptionException.NotEnoughMemory -> "not_enough_memory"
+    is TranscriptionException.ServerNotAllowedOnNetwork -> "server_not_allowed"
     is TranscriptionException.TranscriptionServiceUnavailable -> "service_unavailable"
     is TranscriptionException.TranscriptionNetworkError -> "network_error"
     is TranscriptionException.TranscriptionRequiresDownload -> "requires_download"

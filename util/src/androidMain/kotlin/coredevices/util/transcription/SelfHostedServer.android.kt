@@ -6,12 +6,15 @@ import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.withContext
+import okhttp3.ConnectionPool
+import okhttp3.Dns
 import java.net.InetSocketAddress
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
+import javax.net.SocketFactory
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SNIHostName
@@ -21,6 +24,7 @@ import javax.net.ssl.SSLSocket
 import javax.net.ssl.TrustManager
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
+import kotlin.time.Duration
 
 /**
  * The platform's own server trust: the system CA store plus the CAs the
@@ -145,7 +149,13 @@ internal fun tlsAuthType(keyAlgorithm: String): String = when (keyAlgorithm.uppe
 }
 
 /** [selfHostedHttpClient] with the platform's view injected, for host tests against a local server. */
-internal fun selfHostedHttpClient(hostPort: String, pinnedFingerprint: () -> String?, platform: PlatformServerTrust): HttpClient {
+internal fun selfHostedHttpClient(
+    hostPort: String,
+    pinnedFingerprint: () -> String?,
+    platform: PlatformServerTrust,
+    binding: NetworkBinding? = null,
+    answerWait: Duration = SelfHostedTranscriptionService.DICTATION_ANSWER_WAIT,
+): HttpClient {
     val trust = PinningTrustManager(platform, hostPort.substringBeforeLast(':'), pinnedFingerprint)
     val context = SSLContext.getInstance("TLS").apply { init(null, arrayOf<TrustManager>(trust), null) }
     return HttpClient(OkHttp) {
@@ -153,11 +163,18 @@ internal fun selfHostedHttpClient(hostPort: String, pinnedFingerprint: () -> Str
             config {
                 sslSocketFactory(context.socketFactory, trust)
                 hostnameVerifier(pinAwareHostnameVerifier(platform, pinnedFingerprint))
-                // The dictation deadline is the caller's; these only stop a
-                // dead server from holding the connection open for minutes.
+                // A whole request's deadline is the caller's; the read timeout is the
+                // purpose's answer wait (SelfHostedTranscriptionService).
                 connectTimeout(3, TimeUnit.SECONDS)
-                readTimeout(20, TimeUnit.SECONDS)
+                readTimeout(answerWait.inWholeMilliseconds, TimeUnit.MILLISECONDS)
                 writeTimeout(20, TimeUnit.SECONDS)
+                binding?.let {
+                    socketFactory(it.socketFactory)
+                    dns(it.dns)
+                    // No idle connection is kept: one made on an earlier network would be reused
+                    // after the allowed network changed, around a VPN that came up since, say.
+                    connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
+                }
             }
         }
     }
@@ -165,6 +182,20 @@ internal fun selfHostedHttpClient(hostPort: String, pinnedFingerprint: () -> Str
 
 actual fun selfHostedHttpClient(hostPort: String, pinnedFingerprint: () -> String?): HttpClient =
     selfHostedHttpClient(hostPort, pinnedFingerprint, AndroidServerTrust())
+
+/** Gravel: where a client's connections and name lookups go. */
+class NetworkBinding(val socketFactory: SocketFactory, val dns: Dns)
+
+/** Gravel: the Android server clients; a Wi-Fi-only one takes [wifiBinding]. */
+class AndroidSelfHostedClientFactory internal constructor(
+    private val wifiBinding: () -> NetworkBinding,
+    private val platform: () -> PlatformServerTrust,
+) : SelfHostedClientFactory {
+    constructor(wifiBinding: () -> NetworkBinding) : this(wifiBinding, ::AndroidServerTrust)
+
+    override fun create(hostPort: String, pinnedFingerprint: () -> String?, wifiOnly: Boolean, answerWait: Duration): HttpClient =
+        selfHostedHttpClient(hostPort, pinnedFingerprint, platform(), if (wifiOnly) wifiBinding() else null, answerWait)
+}
 
 /** Accepts every chain and keeps it: for the probe handshake only, which sends nothing. */
 private class RecordingTrustManager : X509TrustManager {

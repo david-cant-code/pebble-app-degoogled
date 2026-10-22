@@ -48,18 +48,22 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.ui.rememberNotebookTab
 import com.russhwolf.settings.Settings
 import coredevices.ui.M3Dialog
 import coredevices.util.CoreConfigHolder
+import coredevices.util.STTConfig
 import coredevices.util.models.CactusSTTMode
 import coredevices.util.models.ModelDownloadStatus
 import coredevices.util.models.ModelInfo
 import coredevices.util.models.ModelManager
 import coredevices.util.models.RecommendedModel
+import coredevices.util.models.WhisperModelCatalog
 import coredevices.util.models.awaitModelDownloadSettled
 import coredevices.util.transcription.SpeedScore
 import coredevices.util.transcription.WhisperSpeedCalibration
 import coredevices.util.transcription.modelRowText
+import coredevices.util.transcription.validateServerUrl
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -97,6 +101,52 @@ internal suspend fun settleDownloadThenSelect(
     awaitModelDownloadSettled(status)
     refresh()
     if (isInstalled()) select()
+}
+
+internal const val NO_SPEECH_MODEL_MESSAGE = "No speech model is installed on this phone"
+
+/**
+ * Gravel: [NO_SPEECH_MODEL_MESSAGE], naming the mode's other destination for watch dictation in a mode that has
+ * one: Rebble, signed in or not, or the server while a valid address is set.
+ */
+internal fun noSpeechModelMessage(stt: STTConfig): String {
+    val elsewhere = when (stt.mode) {
+        CactusSTTMode.RebbleFirst, CactusSTTMode.RebbleFallback -> "Rebble"
+        CactusSTTMode.RemoteFirst, CactusSTTMode.LocalFirst -> when {
+            stt.serverUrl?.let { validateServerUrl(it) == null } != true -> null
+            stt.serverOnMobileData -> "your server"
+            else -> "your server on Wi-Fi"
+        }
+        CactusSTTMode.LocalOnly, CactusSTTMode.RemoteOnly, CactusSTTMode.RebbleOnly, CactusSTTMode.PlatformOnly -> null
+    }
+    if (elsewhere == null) return NO_SPEECH_MODEL_MESSAGE
+    return "$NO_SPEECH_MODEL_MESSAGE. Watch dictation uses $elsewhere"
+}
+
+/**
+ * Gravel: deletes [slug] and returns what the screen says about it, null for nothing. A deliberate difference from
+ * upstream, which switches to Server Only once no speech model is left: the mode stays as chosen. Deleting the
+ * selected model selects an installed one, [recommended] ahead of the catalog's order, or clears the selection.
+ */
+internal fun deleteModelKeepingMode(
+    slug: String,
+    holder: CoreConfigHolder,
+    installed: () -> List<String>,
+    delete: (String) -> Unit,
+    recommended: () -> String,
+): String? {
+    val wasInstalled = slug in installed()
+    delete(slug)
+    val left = installed()
+    if (slug in left) return null
+    val config = holder.config.value
+    val usesPhone = config.sttConfig.mode.usesLocalCactus()
+    if (config.sttConfig.modelName == slug) {
+        val next = WhisperModelCatalog.selectionAmong(left, recommended())
+        holder.update(config.copy(sttConfig = config.sttConfig.copy(modelName = next)))
+        if (next != null) return "Now using $next".takeIf { usesPhone }
+    }
+    return noSpeechModelMessage(config.sttConfig).takeIf { usesPhone && wasInstalled && left.isEmpty() }
 }
 
 class ModelManagementScreenViewModel(
@@ -180,22 +230,15 @@ class ModelManagementScreenViewModel(
     val snackbarMessages = _snackbarMessages.asSharedFlow()
 
     fun deleteModel(slug: String) {
-        modelManager.deleteModel(slug)
+        val message = deleteModelKeepingMode(
+            slug = slug,
+            holder = coreConfigHolder,
+            installed = modelManager::getDownloadedSTTModelSlugs,
+            delete = modelManager::deleteModel,
+            recommended = { modelManager.getRecommendedSTTModel().modelSlug },
+        )
         refreshDownloadedModels()
-        // With no STT models left, local speech recognition can't run, so fall
-        // back to cloud-only and let the user know.
-        if (modelManager.getDownloadedSTTModelSlugs().isEmpty() &&
-            coreConfigHolder.config.value.sttConfig.mode.usesLocalCactus()
-        ) {
-            coreConfigHolder.update(
-                coreConfigHolder.config.value.copy(
-                    sttConfig = coreConfigHolder.config.value.sttConfig.copy(
-                        mode = CactusSTTMode.RemoteOnly
-                    )
-                )
-            )
-            _snackbarMessages.tryEmit("Speech recognition switched to Cloud Only")
-        }
+        message?.let(_snackbarMessages::tryEmit)
     }
 
     fun downloadSTTModel(info: ModelInfo) {
@@ -307,7 +350,7 @@ fun ModelDownloadPromptDialog(
  * system update, say, or with the phone cooler).
  */
 @Composable
-private fun SpeedTestRow(score: SpeedScore?, measuring: Boolean, onRetest: () -> Unit) {
+private fun SpeedTestRow(score: SpeedScore?, measuring: Boolean, notebookSupported: Boolean, onRetest: () -> Unit) {
     ListItem(
         headlineContent = {
             Text(
@@ -324,6 +367,8 @@ private fun SpeedTestRow(score: SpeedScore?, measuring: Boolean, onRetest: () ->
             val deadline = WhisperSpeedCalibration.MARGINAL_LIMIT_SECONDS.roundToInt()
             Text(
                 when {
+                    // Gravel: the probe waits for a Notebook generation to end.
+                    measuring && notebookSupported -> "This takes about a second, longer while the phone is processing a Notebook recording."
                     measuring -> "This takes about a second."
                     score == null -> "Each model will show how long a $window second dictation would take once the speed test has run."
                     else -> "Each model shows how long a full $window second dictation would take on this phone " +
@@ -357,6 +402,7 @@ fun ModelManagementScreen(
     onCancelDownload: () -> Unit,
     onDeleteModel: (String) -> Unit,
     onSetCurrentSTTModel: (String) -> Unit,
+    notebookSupported: Boolean = false,
 ) {
     LaunchedEffect(Unit) {
         topBarParams.title("Manage Models")
@@ -384,6 +430,7 @@ fun ModelManagementScreen(
                     SpeedTestRow(
                         score = speedScore.value,
                         measuring = measuringSpeed.value,
+                        notebookSupported = notebookSupported,
                         onRetest = onRetestSpeed,
                     )
                 }
@@ -570,6 +617,7 @@ fun ModelManagementScreen(
         onCancelDownload = viewModel::cancelDownload,
         onDeleteModel = viewModel::deleteModel,
         onSetCurrentSTTModel = viewModel::setCurrentSTTModel,
+        notebookSupported = rememberNotebookTab()?.supported == true,
     )
 }
 

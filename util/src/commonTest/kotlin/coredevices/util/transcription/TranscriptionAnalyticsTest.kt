@@ -66,6 +66,10 @@ class TranscriptionAnalyticsTest {
             transcriptionFailureReason(TranscriptionException.NotEnoughMemory()),
         )
         assertEquals(
+            "server_not_allowed",
+            transcriptionFailureReason(TranscriptionException.ServerNotAllowedOnNetwork()),
+        )
+        assertEquals(
             "service_unavailable",
             transcriptionFailureReason(TranscriptionException.TranscriptionServiceUnavailable()),
         )

@@ -1,0 +1,61 @@
+[
+  {
+    "in": [
+      "Project",
+      "Client",
+      "project"
+    ],
+    "cap": 8,
+    "out": [
+      "project",
+      "client"
+    ]
+  },
+  {
+    "in": [
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+      "f",
+      "g",
+      "h",
+      "i"
+    ],
+    "cap": 8,
+    "out": [
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+      "f",
+      "g",
+      "h"
+    ]
+  },
+  {
+    "in": [
+      "KeepThisCase"
+    ],
+    "cap": 8,
+    "out": [
+      "keepthiscase"
+    ]
+  },
+  {
+    "in": [
+      "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    ],
+    "cap": 8,
+    "out": [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ]
+  },
+  {
+    "in": "notalist",
+    "cap": 8,
+    "out": []
+  }
+]

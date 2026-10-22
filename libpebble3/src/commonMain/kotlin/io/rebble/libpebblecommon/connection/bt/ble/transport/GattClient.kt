@@ -42,4 +42,7 @@ interface ConnectedGattClient : AutoCloseable {
     suspend fun requestMtu(mtu: Int): Int
     suspend fun getMtu(): Int
     suspend fun refreshServicesNative(): Boolean
+
+    /** Gravel: asks the phone stack for its high-priority connection parameters; false where unsupported or refused. */
+    fun requestHighConnectionPriority(): Boolean
 }

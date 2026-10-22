@@ -1,6 +1,7 @@
 package coredevices.util.transcription
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.transcription.ServerDictationHold
 import coredevices.analytics.CoreAnalytics
 import coredevices.util.AudioEncoding
 import coredevices.util.CoreConfigFlow
@@ -8,6 +9,7 @@ import coredevices.util.models.CactusSTTMode
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
@@ -41,6 +43,8 @@ class HybridTranscriptionService(
     // Fork: the user's self-hosted server, the remote backend that stands
     // in for the cloud pair above, which cannot sign in here.
     private val selfHosted: SelfHostedTranscriptionService? = null,
+    // Gravel: shared with the Notebook's long recordings on that server.
+    private val serverDictation: ServerDictationHold,
 ) : TranscriptionService {
     companion object {
         private val logger = Logger.withTag("HybridTranscriptionService")
@@ -68,20 +72,26 @@ class HybridTranscriptionService(
     override val onInitialized: Channel<Boolean> get() = whisper.onInitialized
 
     override fun earlyInit() {
-        if (sttConfig.mode.usesLocalCactus()) {
-            whisper.earlyInit()
+        val mode = sttConfig.mode
+        // Gravel: raised as the recording starts, so a long recording's request is stopped before the audio is sent.
+        if (needsServerToItself()) serverDictation.raise()
+        if (mode.usesLocalCactus()) {
+            whisper.earlyInit(
+                localFirst = mode.localComesFirst() || (keepsDictationOnPhone() && whisper.isLocalAvailable()),
+            )
         }
     }
 
     override suspend fun isAvailable(): Boolean {
         return when (configuredMode) {
-            CactusSTTMode.RemoteOnly -> serverAvailable() || wisprFlow.isAvailable() || kirinki.isAvailable()
+            CactusSTTMode.RemoteOnly -> serverUsable() || wisprFlow.isAvailable() || kirinki.isAvailable()
             CactusSTTMode.LocalOnly -> whisper.isLocalAvailable()
+            // Gravel: a model on disk counts, loaded or not.
             CactusSTTMode.RemoteFirst, CactusSTTMode.LocalFirst ->
-                serverAvailable() || wisprFlow.isAvailable() || kirinki.isAvailable() || whisper.isModelReady
+                serverUsable() || wisprFlow.isAvailable() || kirinki.isAvailable() || whisper.isLocalAvailable()
             CactusSTTMode.PlatformOnly ->
                 (platform.isAvailable() && platform.isAuthorized()) ||
-                    serverAvailable() || wisprFlow.isAvailable() || kirinki.isAvailable()
+                    serverUsable() || wisprFlow.isAvailable() || kirinki.isAvailable()
             // Rebble modes are dispatched by STTRouter and never reach this service.
             CactusSTTMode.RebbleOnly,
             CactusSTTMode.RebbleFirst,
@@ -90,6 +100,38 @@ class HybridTranscriptionService(
     }
 
     private suspend fun serverAvailable(): Boolean = selfHosted?.isAvailable() == true
+
+    private suspend fun serverUsable(): Boolean = serverAvailable() && selfHosted?.allowedOnCurrentNetwork() == true
+
+    /**
+     * Gravel: the two modes with a server and a phone fallback keep watch dictation on the phone
+     * while the Wi-Fi-only rule refuses the server, or, when the phone has a model (without one,
+     * the server is the only way to get words back), while Flaky Network Mode is on or a long
+     * Notebook recording is on a server without a separate dictation lane.
+     */
+    private fun keepsDictationOnPhone(): Boolean {
+        val mode = sttConfig.mode
+        if (mode != CactusSTTMode.RemoteFirst && mode != CactusSTTMode.LocalFirst) return false
+        val server = selfHosted?.takeIf { it.configuredUrl() != null } ?: return false
+        if (!server.allowedOnCurrentNetwork()) return true
+        if (!whisper.isLocalAvailable()) return false
+        return sttConfig.flakyNetworkMode || longRecordingInTheWay()
+    }
+
+    private fun longRecordingInTheWay(): Boolean = serverDictation.longRecordingOnServer && selfHosted?.hasDictationLane() != true
+
+    /**
+     * Gravel: a dictation only the server can answer (Server Only, or a fallback mode without a
+     * model on the phone), on a server without a separate dictation lane. Its hold stops a long
+     * Notebook recording there and keeps recordings off until the dictation is over.
+     */
+    private fun needsServerToItself(): Boolean {
+        val mode = sttConfig.mode
+        if (mode != CactusSTTMode.RemoteOnly && mode != CactusSTTMode.RemoteFirst && mode != CactusSTTMode.LocalFirst) return false
+        val server = selfHosted?.takeIf { it.configuredUrl() != null } ?: return false
+        if (!server.allowedOnCurrentNetwork() || server.hasDictationLane()) return false
+        return mode == CactusSTTMode.RemoteOnly || !whisper.isLocalAvailable()
+    }
 
     /**
      * Fork: the self-hosted server takes the remote slot whenever one is
@@ -254,6 +296,13 @@ class HybridTranscriptionService(
             )
 
         logger.d { "Using transcription mode ${sttConfig.mode}" }
+        if (keepsDictationOnPhone()) {
+            logger.d { "Keeping this dictation on the phone" }
+            // Only the network rule gets here without a model.
+            if (!whisper.isLocalAvailable()) throw TranscriptionException.ServerNotAllowedOnNetwork(SelfHostedTranscriptionService.MODEL)
+            val text = whisper.transcribeLocal(audio, sampleRate)
+            return RoutedResult(text, CactusSTTMode.LocalOnly, configuredModel)
+        }
         return when (val sttMode = sttConfig.mode) {
             CactusSTTMode.RemoteOnly -> {
                 val result = remote(willFallbackLocal = false)
@@ -336,12 +385,15 @@ class HybridTranscriptionService(
                     validateContainsSpeech(text, configuredModel)
                     RoutedResult(text, sttMode, configuredModel)
                 } catch (e: TimeoutCancellationException) {
+                    // Gravel: a long recording that reached the server meanwhile keeps this dictation on the phone.
+                    if (longRecordingInTheWay()) throw e
                     logger.w(e) { "Local transcription timed out, falling back to remote: ${e.message}" }
                     val result = remote(willFallbackLocal = false)
                     RoutedResult(result.text, CactusSTTMode.RemoteOnly, result.modelUsed)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
+                    if (longRecordingInTheWay()) throw e
                     logger.w(e) { "Local transcription failed, falling back to remote: ${e.message}" }
                     val result = remote(willFallbackLocal = false)
                     RoutedResult(result.text, CactusSTTMode.RemoteOnly, result.modelUsed)
@@ -368,9 +420,32 @@ class HybridTranscriptionService(
         logger.d { "HybridTranscriptionService.transcribe() called" }
         // Kick off local model init concurrently with audio collection so it's warm if we need it.
         earlyInit()
+        // Gravel: this dictation's server hold replaces the ones raised as its session opened and ends with it.
+        val serverHold = if (needsServerToItself()) {
+            serverDictation.supersede()
+        } else {
+            serverDictation.clear()
+            null
+        }
+        try {
+            dictate(audioStreamFrames, sampleRate, language, conversationContext, dictionaryContext, contentContext, initialTimeout)
+        } finally {
+            serverHold?.let(serverDictation::release)
+        }
+    }
+
+    private suspend fun FlowCollector<TranscriptionSessionStatus>.dictate(
+        audioStreamFrames: Flow<ByteArray>?,
+        sampleRate: Int,
+        language: STTLanguage,
+        conversationContext: STTConversationContext?,
+        dictionaryContext: List<String>?,
+        contentContext: String?,
+        initialTimeout: Duration?,
+    ) {
         emit(TranscriptionSessionStatus.Open)
 
-        if (audioStreamFrames == null) return@flow
+        if (audioStreamFrames == null) return
 
         val buffer = Buffer()
         var audioSize = 0

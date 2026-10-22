@@ -46,7 +46,7 @@ fun Permission.description(): String = when (this) {
     Permission.PostNotifications -> "Get a notification when there is a new software update for your Pebble and show connection status"
     Permission.Bluetooth -> "Connect to your Pebble"
     Permission.ReadCallLog -> "To access the call log - to show missed calls on the watch"
-    Permission.Calendar -> "To show calendar events on the watch, and respond to invitations"
+    Permission.Calendar -> "To show calendar events on the watch and in the Notebook, and respond to invitations"
     Permission.Contacts -> "To show who is calling, and filter notifications by contact"
     Permission.ReadPhoneState -> "To show phone calls on the watch"
     Permission.ReadNotifications -> "To display notifications on the watch"

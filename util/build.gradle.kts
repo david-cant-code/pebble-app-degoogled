@@ -164,6 +164,7 @@ kotlin {
                 implementation(compose.uiTooling)
                 implementation(libs.androidx.activity.compose)
                 implementation(libs.ktor.client.okhttp)
+                implementation(project(":llm"))
             }
         }
 

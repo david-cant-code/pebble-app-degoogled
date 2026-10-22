@@ -1,8 +1,11 @@
 package io.rebble.libpebblecommon.connection.endpointmanager.audio
 
+import com.anopticlabs.gravel.link.LinkPace
+import com.anopticlabs.gravel.watchapp.WatchAppCaptures
 import io.rebble.libpebblecommon.packets.Result
 import io.rebble.libpebblecommon.packets.SessionType
 import io.rebble.libpebblecommon.services.VoiceService
+import io.rebble.libpebblecommon.voice.PEBBLE_FW_SESSION_SETUP_TIMEOUT
 import io.rebble.libpebblecommon.voice.TranscriptionProvider
 import io.rebble.libpebblecommon.voice.TranscriptionResult
 import io.rebble.libpebblecommon.voice.TranscriptionWord
@@ -11,6 +14,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.flow.toList
@@ -22,6 +26,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.Uuid
 
@@ -32,12 +37,14 @@ import kotlin.uuid.Uuid
  * running and its late result goes nowhere, a recording the watch never
  * ends is abandoned at the bound, and a new setup request supersedes the
  * session in flight: its decode is cancelled and nothing more is sent for
- * it. Effects are recorded as strings; the provider's
+ * it. A capture app's setup reply waits for the fast link, up to a
+ * limit. Effects are recorded as strings; the provider's
  * results are completed by the test so timing is explicit under the
  * virtual clock.
  */
 class VoiceSessionCoordinatorTest {
     private val appA = Uuid.parse("00000000-0000-0000-0000-0000000000aa")
+    private val captureApp = Uuid.parse("00000000-0000-0000-0000-0000000000cc")
     private val speex = VoiceEncoderInfo.Speex(
         sampleRate = 16_000, version = "1.2", bitRate = 16_800, bitstreamVersion = 4, frameSize = 320,
     )
@@ -58,11 +65,18 @@ class VoiceSessionCoordinatorTest {
         val cancelled = mutableListOf<Int>()
         var serve = true
 
+        /** Readiness checks the coordinator asked the provider for; the check raises dictation holds in production. */
+        var serveChecks = 0
+
+        /** The link pace the coordinator reads, moved by the test in place of the phone stack's reports. */
+        val pace = MutableStateFlow(LinkPace.Unknown)
+        var fastLinkRequests = 0
+
         /** Thrown by the provider once it has read the recording, when set. */
         var failure: Exception? = null
 
         private val provider = object : TranscriptionProvider {
-            override suspend fun canServeSession(): Boolean = serve
+            override suspend fun canServeSession(): Boolean = serve.also { serveChecks++ }
             override suspend fun transcribe(
                 encoderInfo: VoiceEncoderInfo,
                 audioFrames: Flow<UByteArray>,
@@ -82,6 +96,20 @@ class VoiceSessionCoordinatorTest {
             }
         }
 
+        /** Frame counts the capture handler read, each with the answer the test completes. */
+        val captures = mutableListOf<Pair<Int, CompletableDeferred<String>>>()
+
+        private val captureHandler = object : WatchAppCaptures {
+            override val appUuid = Uuid.parse("00000000-0000-0000-0000-0000000000cc")
+            override suspend fun capture(encoderInfo: VoiceEncoderInfo, frames: Flow<UByteArray>): String {
+                val answer = CompletableDeferred<String>()
+                captures += frames.toList().size to answer
+                return answer.await()
+            }
+
+            override suspend fun onMessage(data: Map<Int, Any>) = Unit
+        }
+
         val coordinator = VoiceSessionCoordinator(
             scope = scope.backgroundScope,
             setupRequests = setupRequests,
@@ -90,6 +118,9 @@ class VoiceSessionCoordinatorTest {
             sendDictationResult = { id, result, _ -> log += "result:$id:${describe(result)}" },
             provider = provider,
             onSessionEnded = { request, result -> ended += "${request.sessionId}:${describe(result)}" },
+            watchAppCaptures = captureHandler,
+            linkPace = pace,
+            requestFastLink = { fastLinkRequests++ },
         )
 
         private fun describe(result: TranscriptionResult) = when (result) {
@@ -329,5 +360,189 @@ class VoiceSessionCoordinatorTest {
         runCurrent()
         assertEquals(listOf("setup:Dictation:FailDisabled:app=true"), h.log)
         assertTrue(h.calls.isEmpty())
+    }
+
+    @Test
+    fun aCaptureAppSessionGoesToItsHandlerEvenWhenTheProviderCannotServe() = runTest {
+        val h = harness()
+        h.serve = false
+        h.setupRequests.emit(request(1, app = captureApp))
+        runCurrent()
+        assertEquals(listOf("setup:Dictation:Success:app=true"), h.log)
+
+        h.frame(1u); h.frame(1u); h.frame(1u); h.endRecording(1u)
+        runCurrent()
+        assertEquals(3, h.captures.single().first, "the handler must see every buffered frame")
+        assertTrue(h.calls.isEmpty(), "the provider must not see the recording")
+        assertEquals(0, h.serveChecks, "the provider's readiness check must not run")
+        h.captures.single().second.complete("Saved. Waiting for Wi-Fi")
+        runCurrent()
+        assertEquals("result:1:success(Saved. Waiting for Wi-Fi)", h.log.last())
+    }
+
+    @Test
+    fun aBlankCaptureAnswerIsSentAsAFailedDictation() = runTest {
+        val h = harness()
+        h.setupRequests.emit(request(1, app = captureApp))
+        runCurrent()
+        h.endRecording(1u)
+        runCurrent()
+        h.captures.single().second.complete(" ")
+        runCurrent()
+        assertEquals("result:1:failed", h.log.last())
+    }
+
+    @Test
+    fun aNewSetupSupersedesACaptureStillWaitingForItsAnswer() = runTest {
+        val h = harness()
+        h.setupRequests.emit(request(1, app = captureApp))
+        runCurrent()
+        h.endRecording(1u)
+        runCurrent()
+        h.setupRequests.emit(request(2, app = captureApp))
+        runCurrent()
+        h.captures.first().second.complete("Saved")
+        runCurrent()
+        assertTrue(h.log.none { it.startsWith("result:1") }, "nothing is sent for the superseded capture")
+        assertEquals(listOf("1:failed"), h.ended)
+    }
+
+    @Test
+    fun aCaptureTheWatchNeverEndsIsAbandonedAtTheBound() = runTest {
+        val h = harness()
+        h.setupRequests.emit(request(1, app = captureApp))
+        runCurrent()
+        h.frame(1u)
+        advanceTimeBy(VoiceSessionCoordinator.RECORDING_BOUND + 1.seconds)
+        runCurrent()
+        assertEquals(listOf("setup:Dictation:Success:app=true"), h.log, "nothing is sent for an abandoned capture")
+        assertEquals(listOf("1:failed"), h.ended)
+    }
+
+    @Test
+    fun aCaptureAnswerPastTheDeadlineIsReportedLost() = runTest {
+        val h = harness()
+        h.setupRequests.emit(request(1, app = captureApp))
+        runCurrent()
+        h.endRecording(1u)
+        runCurrent()
+        advanceTimeBy(14.seconds); runCurrent()
+        assertEquals("result:1:failed", h.log.last())
+    }
+
+    @Test
+    fun otherAppsStillGoToTheProvider() = runTest {
+        val h = harness()
+        h.setupRequests.emit(request(1))
+        runCurrent()
+        h.endRecording(1u)
+        runCurrent()
+        assertTrue(h.captures.isEmpty())
+        assertEquals(1, h.calls.size)
+
+        h.serve = false
+        h.setupRequests.emit(request(2))
+        runCurrent()
+        assertEquals("setup:Dictation:FailDisabled:app=true", h.log.last())
+    }
+
+    @Test
+    fun aCaptureSetupOnTheSlowLinkIsAnsweredOnceTheLinkIsFast() = runTest {
+        val h = harness()
+        h.pace.value = LinkPace.Slow
+        h.setupRequests.emit(request(1, app = captureApp))
+        runCurrent()
+        assertEquals(1, h.fastLinkRequests)
+        advanceTimeBy(2.seconds)
+        assertTrue(h.log.isEmpty(), "no reply while the link is slow")
+        h.pace.value = LinkPace.Fast
+        runCurrent()
+        assertEquals(listOf("setup:Dictation:Success:app=true"), h.log)
+
+        h.frame(1u); h.endRecording(1u)
+        runCurrent()
+        assertEquals(1, h.captures.single().first)
+    }
+
+    @Test
+    fun aCaptureSetupStillOnTheSlowLinkAtTheLimitIsRefused() = runTest {
+        val h = harness()
+        h.pace.value = LinkPace.Slow
+        h.setupRequests.emit(request(1, app = captureApp))
+        advanceTimeBy(VoiceSessionCoordinator.FAST_LINK_WAIT - 1.milliseconds)
+        assertTrue(h.log.isEmpty())
+        advanceTimeBy(2.milliseconds)
+        runCurrent()
+        assertEquals(listOf("setup:Dictation:FailTimeout:app=true"), h.log)
+        assertTrue(h.captures.isEmpty())
+        assertTrue(h.ended.isEmpty(), "a refused setup starts no session")
+    }
+
+    @Test
+    fun aCaptureSetupOnALinkWithoutReportsIsAnsweredAtOnce() = runTest {
+        val h = harness()
+        h.setupRequests.emit(request(1, app = captureApp))
+        runCurrent()
+        assertEquals(listOf("setup:Dictation:Success:app=true"), h.log)
+        assertEquals(0, h.fastLinkRequests, "an unreported link is not asked for")
+    }
+
+    @Test
+    fun aCaptureSetupWhosePaceIsLostDuringTheWaitIsAnsweredAtOnce() = runTest {
+        val h = harness()
+        h.pace.value = LinkPace.Slow
+        h.setupRequests.emit(request(1, app = captureApp))
+        advanceTimeBy(1.seconds)
+        assertTrue(h.log.isEmpty())
+        h.pace.value = LinkPace.Unknown
+        runCurrent()
+        assertEquals(listOf("setup:Dictation:Success:app=true"), h.log)
+
+        h.endRecording(1u)
+        runCurrent()
+        assertEquals(1, h.captures.size)
+    }
+
+    @Test
+    fun theLimitLeavesARefusalTimeToCrossTheSlowLink() {
+        // The slow link's listen gap as in FAST_LINK_WAIT's KDoc: 31 events of 45 ms.
+        assertTrue(VoiceSessionCoordinator.FAST_LINK_WAIT + 45.milliseconds * 31 < PEBBLE_FW_SESSION_SETUP_TIMEOUT)
+    }
+
+    @Test
+    fun aCaptureSetupOnTheFastLinkIsAnsweredAtOnceWithoutARequest() = runTest {
+        val h = harness()
+        h.pace.value = LinkPace.Fast
+        h.setupRequests.emit(request(1, app = captureApp))
+        runCurrent()
+        assertEquals(listOf("setup:Dictation:Success:app=true"), h.log)
+        assertEquals(0, h.fastLinkRequests)
+    }
+
+    @Test
+    fun otherSetupsOnTheSlowLinkAreNotHeld() = runTest {
+        val h = harness()
+        h.pace.value = LinkPace.Slow
+        h.setupRequests.emit(request(1))
+        runCurrent()
+        assertEquals(listOf("setup:Dictation:Success:app=true"), h.log)
+        assertEquals(0, h.fastLinkRequests)
+    }
+
+    @Test
+    fun aCaptureSetupSupersededWhileWaitingForTheFastLinkGetsNoReply() = runTest {
+        val h = harness()
+        h.pace.value = LinkPace.Slow
+        h.setupRequests.emit(request(1, app = captureApp))
+        advanceTimeBy(3.seconds)
+        h.setupRequests.emit(request(2, app = captureApp))
+        advanceTimeBy(5.seconds)
+        assertTrue(h.log.isEmpty(), "the superseded setup is not refused")
+        h.pace.value = LinkPace.Fast
+        runCurrent()
+        assertEquals(listOf("setup:Dictation:Success:app=true"), h.log)
+        h.endRecording(2u)
+        runCurrent()
+        assertEquals(1, h.captures.size)
     }
 }

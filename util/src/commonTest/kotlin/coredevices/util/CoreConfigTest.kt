@@ -40,6 +40,13 @@ class CoreConfigTest {
     }
 
     @Test
+    fun serverNetworkSettingsAreOffForExistingConfigs() {
+        val decoded = json.decodeFromString<CoreConfig>("""{"sttConfig":{"mode":"RemoteOnly","serverUrl":"https://stt.example.net/inference"}}""")
+        assertEquals(false, decoded.sttConfig.serverOnMobileData)
+        assertEquals(false, decoded.sttConfig.flakyNetworkMode)
+    }
+
+    @Test
     fun sttConfigNeverPrintsTheServerUrl() {
         val printed = STTConfig(serverUrl = "https://stt.example.net:8443/inference", serverModel = "whisper-1").toString()
         assertFalse(printed.contains("example.net"), printed)
