@@ -74,6 +74,10 @@ android {
         // deliberately stays "coredevices.coreapp" so source packages match upstream and
         // merges stay cheap; only the applicationId is rebranded.
         applicationId = "com.anopticlabs.gravel"
+        // The open ring build installs beside a stub build.
+        if (providers.gradleProperty("gravel.ring").orElse("stub").get() == "open") {
+            applicationIdSuffix = ".ring"
+        }
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

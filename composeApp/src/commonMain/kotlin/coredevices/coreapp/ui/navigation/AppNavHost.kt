@@ -20,6 +20,8 @@ import androidx.navigation.toRoute
 import co.touchlab.kermit.Logger
 import coredevices.EnableExperimentalDevices
 import coredevices.ExperimentalDevices
+import coredevices.coreapp.di.indexOnboardingAvailable
+import coredevices.coreapp.indexfeed.GravelIndexFeedScreen
 import coredevices.ring.ui.navigation.RingRoute
 import coredevices.coreapp.ui.screens.BugReportScreen
 import coredevices.coreapp.ui.screens.BugReportsListScreen
@@ -111,11 +113,12 @@ fun AppNavHost(navController: NavHostController, startDestination: Any) {
         experimentalDevices.addExperimentalRoutes(this, coreNav)
         addPebbleRoutes(
             coreNav,
-            indexScreen = { topBarParams, navBarNav, scopedCoreNav ->
-                // Use the inner-scoped CoreNav so detail navigations
-                // (RecordingDetails, ObjectDetails, FullFeed, ...) stay
-                // inside the bottom-nav chrome.
-                experimentalDevices.IndexScreen(scopedCoreNav, topBarParams)
+            indexScreen = { topBarParams, _, scopedCoreNav ->
+                if (indexOnboardingAvailable()) {
+                    GravelIndexFeedScreen(topBarParams)
+                } else {
+                    experimentalDevices.IndexScreen(scopedCoreNav, topBarParams)
+                }
             },
             addExperimentalRoutes = { scopedCoreNav ->
                 experimentalDevices.addExperimentalRoutes(this, scopedCoreNav)
@@ -190,12 +193,9 @@ fun AppNavHost(navController: NavHostController, startDestination: Any) {
                     coreNav = coreNav,
                 )
             }
-            // CommonRoutes.RingOnboardingRoute is deliberately not registered:
-            // the ring onboarding screens are removed with the unplugged ring
-            // feature. Both navigations to it are dead: WatchHomeScreen's (on
-            // a newly interviewed ring) cannot fire while LibIndex is the
-            // no-op, and WatchSettingsScreen's "Show Ring Onboarding" debug
-            // item is hidden. Navigating here anyway would crash the nav host.
+            // CommonRoutes.RingOnboardingRoute stays unregistered. WatchHomeScreen
+            // records that a ring was interviewed without navigating here, and
+            // WatchSettingsScreen's "Show Ring Onboarding" item stays hidden.
         }
     }
 }

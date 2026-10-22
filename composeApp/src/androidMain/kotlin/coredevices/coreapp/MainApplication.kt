@@ -32,7 +32,9 @@ import com.anopticlabs.gravel.socketfilter.UdpSocketFilter
 import coredevices.ExperimentalDevices
 import coredevices.coreapp.di.androidDefaultModule
 import coredevices.coreapp.di.apiModule
+import coredevices.coreapp.di.openRingModules
 import coredevices.coreapp.di.ringStubsModule
+import coredevices.coreapp.di.startGravelRing
 import coredevices.coreapp.di.utilModule
 import coredevices.coreapp.util.FileLogWriter
 import coredevices.coreapp.util.FirebaseResidueCleanup
@@ -84,18 +86,21 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         // engine process; attached before the DI graph exists so no engine
         // call can precede it.
         WhisperEngineClient.attach(this)
-        startKoin {
+        val koinApp = startKoin {
             modules(
-                module {
-                    androidContext(this@MainApplication)
+                buildList {
+                    add(module { androidContext(this@MainApplication) })
+                    add(androidDefaultModule)
+                    add(ringStubsModule)
+                    add(apiModule)
+                    add(utilModule)
+                    add(watchModule)
                 },
-                androidDefaultModule,
-                ringStubsModule,
-                apiModule,
-                utilModule,
-                watchModule,
             )
         }
+        // Open ring replaces NoOpLibIndex. The stub list is empty.
+        koinApp.koin.loadModules(openRingModules(), allowOverride = true)
+        startGravelRing()
         initLogging()
         logUdpFilterResult()
         // Gravel: kept across process starts; see udpFilterEnforcement.

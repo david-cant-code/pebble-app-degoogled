@@ -15,7 +15,8 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   implementations for no-op or GMS-free ones at the Koin module level, keeping
   upstream call sites intact so upstream merges stay cheap. `DESIGN_NOTES.md`
   maps the existing seams (the `:firebase-stubs` and `:haversine-stubs`
-  modules, the unplugged `experimental` module, the no-op `LibIndex`);
+  modules, `:haversine-open` selected with `-Pgravel.ring=open`, the
+  unplugged `experimental` module, the no-op `LibIndex`);
   extend those seams rather than deleting upstream code. The FCM push stack
   is the one deliberate exception to the seam rule: push either registers a
   device token with Google or does not exist, so `PushMessaging`,

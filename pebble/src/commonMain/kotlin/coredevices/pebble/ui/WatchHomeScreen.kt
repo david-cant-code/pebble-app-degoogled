@@ -261,20 +261,17 @@ fun WatchHomeScreen(
             return
         }
 
-        val currentEntries = WatchHomeNavTab.navBarEntries(indexEnabled.value, healthEnabled, preferHealthTab.value)
-        val currentTab = viewModel.selectedTab.value.let { tab ->
-            if (tab in currentEntries) tab else currentEntries.first().also { viewModel.selectedTab.value = it }
+        val indexTab = indexEnabled.value
+        val currentEntries = WatchHomeNavTab.navBarEntries(indexTab, healthEnabled, preferHealthTab.value)
+        val currentTab = resolveSelectedHomeTab(viewModel.selectedTab.value, currentEntries).also {
+            if (it != viewModel.selectedTab.value) viewModel.selectedTab.value = it
         }
         val pebbleNavHostController = navControllers[currentTab]!!
 
-        // The Index tab — and EVERY destination inside it (home, recording
-        // detail, list/object detail, full feed, all-lists, all-answers,
-        // settings, etc.) — renders its own inline header. Hide the chrome
-        // TopAppBar for the entire Index tab regardless of which inner
-        // route is active so we don't get a stacked "double top bar" when
-        // navigating from home into a detail screen.
+        // Leaving Index restores the shared top bar. The Gravel feed also
+        // clears the flag itself; the experimental feed may still hide it.
         LaunchedEffect(currentTab) {
-            viewModel.setHidden(currentTab == WatchHomeNavTab.Index)
+            if (currentTab != WatchHomeNavTab.Index) viewModel.setHidden(false)
         }
 
         LaunchedEffect(Unit) {
@@ -413,12 +410,12 @@ fun WatchHomeScreen(
             val uiContext = rememberUiContext()
             M3Dialog(
                 onDismissRequest = {
-                    coreConfigHolder.update(coreConfig.copy(enableIndex = false))
+                    coreConfigHolder.update(coreConfig.withIndexFeedEnabled(false))
                 },
                 title = { Text("Index Permissions") },
                 buttons = {
                     TextButton(onClick = {
-                        coreConfigHolder.update(coreConfig.copy(enableIndex = false))
+                        coreConfigHolder.update(coreConfig.withIndexFeedEnabled(false))
                     }) {
                         Text("Cancel")
                     }
@@ -467,10 +464,11 @@ fun WatchHomeScreen(
             settings.setHasSeenWatchOnboarding(true)
             coreNav.navigateTo(CommonRoutes.WatchOnboardingRoute)
         }
-        if (rings.any { it is InterviewedIndexDevice && !hasSeenRingOnboarding }) {
+        // Ring onboarding from :experimental is not registered. Marking the
+        // flag keeps a newly interviewed ring from navigating there.
+        if (rings.any { it is InterviewedIndexDevice } && !hasSeenRingOnboarding) {
             hasSeenRingOnboarding = true
-            coreConfigHolder.update(coreConfig.copy(enableIndex = true))
-            coreNav.navigateTo(CommonRoutes.RingOnboardingRoute)
+            settings.setHasSeenRingOnboarding(true)
         }
 
         Scaffold(
@@ -588,7 +586,7 @@ fun WatchHomeScreen(
                 NavigationBar(
                     modifier = Modifier.height(navBarHeight),
                 ) {
-                    WatchHomeNavTab.navBarEntries(indexEnabled.value, healthEnabled, preferHealthTab.value).forEach { route ->
+                    WatchHomeNavTab.navBarEntries(indexTab, healthEnabled, preferHealthTab.value).forEach { route ->
                         NavigationBarItem(
                             selected = viewModel.selectedTab.value == route,
                             onClick = {
@@ -828,6 +826,12 @@ enum class WatchHomeNavTab(
         }
     }
 }
+
+/** A hidden tab falls back to the first bar entry, which is WatchFaces. */
+fun resolveSelectedHomeTab(
+    selected: WatchHomeNavTab,
+    entries: List<WatchHomeNavTab>,
+): WatchHomeNavTab = if (selected in entries) selected else entries.first()
 
 @Preview
 @Composable

@@ -7,7 +7,7 @@ import coredevices.libindex.IndexDevices
 import coredevices.libindex.Rings
 import coredevices.libindex.database.BasePreferences
 import coredevices.libindex.database.PrefsCollectionIndexStorage
-import coredevices.libindex.database.repository.RingTransferRepository
+import coredevices.libindex.database.repository.RingIterationStore
 import coredevices.libindex.di.LibIndexCoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -32,7 +32,7 @@ class IndexDeviceManager(
     // Not present on some platforms (iOS)
     private val associations: IndexPlatformBluetoothAssociations?,
     private val indexStorage: PrefsCollectionIndexStorage,
-    private val transferRepo: RingTransferRepository,
+    private val transferRepo: RingIterationStore,
 ): Rings {
     private val _rings = MutableStateFlow(emptyList<IndexDevice>())
     override val rings: IndexDevices = _rings

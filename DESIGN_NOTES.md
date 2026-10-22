@@ -61,31 +61,49 @@ is dead:
 - fork stubs in `composeApp` replace the `experimental` types the app
   wiring touches, under the same fully-qualified names, so re-plugging
   the `experimental` module trips duplicate-class errors;
-- `CoreConfig.enableIndex` has no reachable set-point in a release build
-  (debug builds' adb-driven settings receiver can write it, and a flag
-  flipped that way reaches only the empty stubs).
+- `CoreConfig.enableIndex` defaults off. The stub build has no in-app
+  set-point (debug builds' adb-driven settings receiver can still write
+  it, and a flag flipped that way reaches only the empty stubs). The
+  open ring build exposes Settings → General → Enable Index Feed.
 
 The Ring satellite library `libindex` compiles against
 (`io.github.coredevices.haversine`, a prebuilt AAR with no public source
-that bundles two native libraries per ABI) is replaced by the fork module
-`:haversine-stubs`: inert same-FQN stand-ins for the eight symbols
-`libindex` references, whose satellite classes have private constructors
-and no factory, so no ring object can exist anywhere in the app
-(`HaversineStubShapeTest` pins that shape, `HaversineStubTest` the
-static entry points). The wiring is a `dependencySubstitution` rule in
-`settings.gradle.kts`, applied to every project, rather than an edited
-dependency line: the artifact is a transitive runtime dependency of every
-module that depends on `libindex`, which the rule covers and a single
-edited line would not, and the rule matches the coordinate by group and
-name, so an upstream version bump still lands on the stub. Nothing names
-`:haversine-stubs` directly, so a lost rule would bring the AAR back
-silently; `AppClasspathSentinelTest` in `:androidApp` pins the swap from
-the shipping runtime graph (the AAR's wrapped `com.wtlp.*` vendor classes
-must be absent), and `VerifyApkContents` asserts the release APK carries
-no `libhaversinesatellitelibrary.so` / `libppcommon.so`. This was the
-last dependency whose native code had no public source, and the last
-tree-level F-Droid inclusion blocker (the F-Droid section below records
-what the tree guarantees).
+that bundles two native libraries per ABI) is replaced by a fork module.
+`settings.gradle.kts` substitutes that coordinate, for every project, to
+`:haversine-stubs` unless `-Pgravel.ring=open`, which selects
+`:haversine-open` (pure Kotlin, Kable, no native code; see that module's
+README). The default stays the stub: `NoOpLibIndex` is what the app binds,
+onboarding offers only a watch, and the devices screen has no Index scan
+item. The open flag replaces that binding with `RealLibIndex`, offers
+Watch, Index 01, and Both during onboarding, and the devices screen
+always shows **Add Index 01**. Choosing Index 01 asks for Bluetooth
+and then scans and pairs; Both runs the existing watch setup first.
+Pairing promotes a Watch or unset choice to Both.
+Each finished recording is stored under `index-recordings` (WAV plus
+`catalog.json`), keyed by ring, iteration, and collection index.
+`markTransfersAsPreviousIndexIteration` advances the iteration, so a
+re-pair can reuse collection indexes without duplicating history.
+The Index tab follows Enable Index Feed, the same flag upstream uses.
+Choosing Index 01 or Both during onboarding turns it on, and so does
+pairing a ring (upstream does that after a signed-in account already
+has recordings). The user can turn it off; recordings and ring sync
+stay. Devices still offers **Add Index 01** while the feed is off.
+The tab uses the same top bar as the other tabs and lists recordings
+newest first, with playback, delete, and a transcript.
+The overflow exports every recording as one zip (`manifest.json`,
+`manifest.csv`, `transcripts.txt`, and a folder per recording).
+Transcription uses the on-device whisper service already in the app
+(Settings → Speech Recognition), or the self-hosted server when that
+mode is selected. `:experimental` stays unplugged.
+`HaversineStubShapeTest` pins the stub's private constructors.
+`AppClasspathSentinelTest` in `:androidApp` pins the swap from the shipping
+runtime graph (the AAR's wrapped `com.wtlp.*` vendor classes must be absent
+whichever module is selected), and `VerifyApkContents` asserts the release
+APK carries no `libhaversinesatellitelibrary.so` / `libppcommon.so`. The
+rule matches the coordinate by group and name, so an upstream version bump
+still lands on the selected module. Nothing names either module as a
+direct project dependency of `:libindex`, so a lost rule would bring the
+AAR back silently.
 
 ## Firebase
 

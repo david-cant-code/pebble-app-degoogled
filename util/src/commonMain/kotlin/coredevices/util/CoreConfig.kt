@@ -58,6 +58,12 @@ class CoreConfigHolder(
         _config.value = value
     }
 
+    /** Sets the feed on and keeps a permission confirmation the user already gave. */
+    fun enableIndexFeed() {
+        val current = config.value
+        if (!current.enableIndex) update(current.withIndexFeedEnabled(true))
+    }
+
     private val _config: MutableStateFlow<CoreConfig> = MutableStateFlow(defaultValue())
     val config: StateFlow<CoreConfig> = _config.asStateFlow()
 }
@@ -113,6 +119,12 @@ data class CoreConfig(
     /** Null until the user picks explicitly; the settings [Json] omits defaults, so a
      * locale-derived default here would never be persisted. */
     val resolvedWeatherUnits: WeatherUnit get() = weatherUnits ?: deviceDefaultWeatherUnit()
+
+    /** Turning the feed off clears the permission confirmation, so the next enable asks again. */
+    fun withIndexFeedEnabled(enabled: Boolean): CoreConfig = copy(
+        enableIndex = enabled,
+        indexPermissionsConfirmed = if (enabled) indexPermissionsConfirmed else false,
+    )
 }
 
 @Serializable
