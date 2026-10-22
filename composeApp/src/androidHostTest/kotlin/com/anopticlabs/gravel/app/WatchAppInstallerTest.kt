@@ -163,4 +163,11 @@ class WatchAppInstallerTest {
         assertEquals(SHIPPED_WATCH_APP_RELEASES.size, SHIPPED_WATCH_APP_RELEASES.map { it.sha256 }.toSet().size)
         assertEquals(SHIPPED_WATCH_APP_RELEASES.size, SHIPPED_WATCH_APP_RELEASES.map { it.version }.toSet().size)
     }
+
+    @Test
+    fun everyShippedReleaseUrlIsTheWatchAppReleaseFileForItsVersion() {
+        for (release in SHIPPED_WATCH_APP_RELEASES) {
+            assertEquals("https://github.com/david-cant-code/gravel-watchapp/releases/download/${release.version}/notebook.pbw", release.url)
+        }
+    }
 }

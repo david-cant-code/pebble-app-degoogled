@@ -55,7 +55,14 @@ const val WATCH_PING_KEY = 2
 data class WatchAppRelease(val version: String, val sha256: String, val sizeBytes: Long, val url: String)
 
 /** The releases Gravel has shipped, oldest first: Gravel installs the last one. */
-val SHIPPED_WATCH_APP_RELEASES: List<WatchAppRelease> = emptyList()
+val SHIPPED_WATCH_APP_RELEASES: List<WatchAppRelease> = listOf(
+    WatchAppRelease(
+        version = "0.1",
+        sha256 = "ac24a06db4b06b573747337d463d34f557cc9448f2bede64fbb8e26f7d15b3ad",
+        sizeBytes = 49_116,
+        url = "https://github.com/david-cant-code/gravel-watchapp/releases/download/0.1/notebook.pbw",
+    ),
+)
 
 /**
  * [installed]: the locker has an entry for the watch app; [sha256]: the digest of that entry's cached PBW, null when

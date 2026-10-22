@@ -1850,10 +1850,9 @@ in the app's device suite:
 - Gravel installs the watch app itself. `SHIPPED_WATCH_APP_RELEASES`
   (`NotebookWatchApp.kt`) lists each release Gravel has shipped, with
   its version, SHA-256, size and release file address on GitHub, oldest
-  first; it is empty until the first watch app release, and the last
-  entry is the one Gravel installs. `WatchAppInstaller` downloads that
-  file with the app's shared HTTP client on a tap, stops reading once
-  the body is longer than the release, and calls
+  first; the last entry is the one Gravel installs. `WatchAppInstaller`
+  downloads that file with the app's shared HTTP client on a tap, stops
+  reading once the body is longer than the release, and calls
   `LockerApi.sideloadAppWithoutLaunch` only when the download's length
   and SHA-256 are the release's, so nothing parses the file before that.
   That route stores a sideload without opening the app on a watch and
@@ -1884,8 +1883,7 @@ in the app's device suite:
   the trust file, the controls, the removal's order, the update line's
   put-away state, the guide's page list and the screens' text rules. No
   host test covers `sideloadAppWithoutLaunch`, the Koin wiring or the
-  screens themselves: those are checked on a device, and the install
-  route cannot run on one until a release is listed.
+  screens themselves: those are checked on a device.
 - Watch dictation and captures share the server through
   `ServerDictationHold` (`:util`), whose `sendRecording` every server
   request of a capture goes through. `HybridTranscriptionService` reads a
@@ -2487,7 +2485,9 @@ What the recipe has to supply (field names as in the fdroiddata format):
 - Anti-features: the on-device dictation models and the Notebook's text
   models are runtime downloads from Hugging Face (`ModelCatalog`), which
   is expected to draw the NonFreeNet anti-feature flag; that documents
-  but does not block inclusion.
+  but does not block inclusion. The Notebook watch app is a runtime
+  download from its GitHub releases (`SHIPPED_WATCH_APP_RELEASES`), as
+  PebbleOS firmware is.
 
 ## Branding assets
 

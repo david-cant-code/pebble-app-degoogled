@@ -26,8 +26,10 @@ De-google work is completed, all telemetry is removed. What remains is polish an
 - [x] Per-app watchapp permissions (internet + location, deny by default)
 - [x] Free speech engine (whisper.cpp built from source, replacing the
       proprietary Cactus stack)
-- [ ] Notebook: voice and typed notes and reminders, from the phone or a
-      Pebble watch (in the app; the watch app's first release is pending)
+- [x] Notebook: voice and typed notes and reminders, from the phone or a
+      Pebble watch with the
+      [Notebook watch app](https://github.com/david-cant-code/gravel-watchapp)
+      (early beta)
 - [ ] Local on-device battery analytics (secondary goal, feasibility open)
 - [ ] Recording into the Notebook from a Pebble Index 01 ring (planned)
 - [x] F-Droid inclusion (listing live)
@@ -118,7 +120,8 @@ De-google work is completed, all telemetry is removed. What remains is polish an
   Nothing is sent anywhere unless you configure a server.
 - **A Notebook on the phone.** Voice and typed notes and reminders, taken
   from the Notebook tab or from a Pebble watch running the Notebook watch
-  app (until that app's first release, a copy of it you mark as trusted).
+  app ([source](https://github.com/david-cant-code/gravel-watchapp)),
+  which Gravel offers to install.
   It needs Android 9 or newer, and voice notes need a phone whose
   processor can run both engines; other phones get typed notes and
   reminders. The speech recognition and the text model that writes
@@ -309,7 +312,7 @@ Kermit (logging).
 | `util` | Shared utilities (logging, IO, theme) |
 | `whisper`, `whisper-native` | The speech engine: Kotlin bindings, and the NDK/CMake build of the pinned whisper.cpp submodule |
 | `socketfilter` | A process-wide filter that refuses the creation of UDP sockets, built from its C source with the NDK; not installed, for example, where the platform's name lookups need UDP, before Android 10, or on a device that is not ARM (see `KNOWN_ISSUES.md`) |
-| `notebook` | The Notebook feature (voice and typed notes, reminders): its tab, note screens, reminder list, calendar (which can also show the phone's calendar) and editor, completion review, reminder alarms, its reminder and quick-completion settings, backup, restore and check of a backup file, automatic backups to a folder, with their keeping rules, warnings and recovery key checks, recovery from a damaged file or a lost key, its text model settings, a setup guide, and recordings from the Notebook watch app (until its first release, from a copy you mark as trusted). Its settings, setup guide and text model screens are in `pebble`, its engine wiring in `composeApp` and `util`, and its watch app wiring in `composeApp` and `libpebble3` |
+| `notebook` | The Notebook feature (voice and typed notes, reminders): its tab, note screens, reminder list, calendar (which can also show the phone's calendar) and editor, completion review, reminder alarms, its reminder and quick-completion settings, backup, restore and check of a backup file, automatic backups to a folder, with their keeping rules, warnings and recovery key checks, recovery from a damaged file or a lost key, its text model settings, a setup guide, and recordings from the Notebook watch app. Its settings, setup guide and text model screens are in `pebble`, its engine wiring in `composeApp` and `util`, and its watch app wiring in `composeApp` and `libpebble3` |
 | `llm`, `llm-native` | The Notebook's text engine: Kotlin bindings, and the NDK/CMake build of the pinned llama.cpp submodule |
 | `resampler` | Audio resampling |
 | `blobannotations`, `blobdbgen` | KSP annotations and code generator for BlobDB records |
