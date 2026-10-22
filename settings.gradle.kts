@@ -61,6 +61,7 @@ include(":firebase-stubs")
 // dependency substitution rule below; the seam is described in
 // DESIGN_NOTES.md (Ring / Index AI).
 include(":haversine-stubs")
+include(":haversine-open")
 
 // Every project resolves the substitution, not just :libindex: the artifact
 // is a transitive runtime dependency of everything that depends on libindex
@@ -70,11 +71,17 @@ include(":haversine-stubs")
 // The coordinate is matched by group:name only, so an upstream version bump
 // in libs.versions.toml still lands on the stub.
 gradle.lifecycle.beforeProject {
+    val selected = providers.gradleProperty("gravel.ring").orElse("stub").get()
+    val replacement = when (selected) {
+        "stub" -> ":haversine-stubs"
+        "open" -> ":haversine-open"
+        else -> error("gravel.ring must be stub or open (was '$selected')")
+    }
     configurations.configureEach {
         resolutionStrategy.dependencySubstitution {
             substitute(module("io.github.coredevices.haversine:haversine"))
-                .using(project(":haversine-stubs"))
-                .because("Gravel replaces the prebuilt Ring satellite AAR with :haversine-stubs")
+                .using(project(replacement))
+                .because("Gravel replaces the prebuilt Ring satellite AAR with $replacement")
         }
     }
 }

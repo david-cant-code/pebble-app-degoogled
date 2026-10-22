@@ -5,7 +5,7 @@ import coredevices.haversine.KMPHaversineHacksDelegate
 import coredevices.haversine.KMPHaversineSatelliteManager
 import coredevices.libindex.database.BasePreferences
 import coredevices.libindex.database.PrefsCollectionIndexStorage
-import coredevices.libindex.database.repository.RingTransferRepository
+import coredevices.libindex.database.repository.RingIterationStore
 import io.rebble.libpebblecommon.connection.AppContext
 import io.rebble.libpebblecommon.connection.bt.ble.pebble.LEConstants.BOND_BONDED
 import io.rebble.libpebblecommon.connection.bt.ble.pebble.LEConstants.BOND_NONE
@@ -38,7 +38,7 @@ expect fun getBluetoothDevicePairEvents(
 class RealIndexPairing(
     private val context: AppContext,
     private val indexStorage: PrefsCollectionIndexStorage,
-    private val transferRepo: RingTransferRepository,
+    private val transferRepo: RingIterationStore,
     private val prefs: BasePreferences,
     private val deviceRepo: IndexDeviceManager,
     private val deviceFactory: IndexDeviceFactory,

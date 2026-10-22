@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 
 class RingHacksDelegate(
     private val prefs: Preferences,
+    @Suppress("unused")
     private val collectionIndexStorage: CollectionIndexStorage,
     private val transferRepo: RingTransferRepository,
     private val scope: RecordingBackgroundScope
@@ -32,7 +33,7 @@ class RingHacksDelegate(
     override fun wipedCollectionsBeforeTransfer(satellite: KMPHaversineSatellite) {
         logger.i { "Marking paired ring ${satellite.id} as wiped" }
         prefs.setLastWipedRing(satellite.id)
-        collectionIndexStorage.setLastSuccessfulCollectionIndex(null)
+        // Soft-erase index is applied around this callback. Leave it stored.
         scope.launch(Dispatchers.IO) {
             transferRepo.markTransfersAsPreviousIndexIteration()
         }

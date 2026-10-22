@@ -1,0 +1,3 @@
+# One name per line. Each name needs golden/<name>.collection.hex and
+# golden/<name>.pcm.hex (signed 16-bit little-endian, before removeDCBias).
+synthetic-silence

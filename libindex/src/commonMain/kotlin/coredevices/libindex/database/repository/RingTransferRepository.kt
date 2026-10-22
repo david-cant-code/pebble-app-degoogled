@@ -17,7 +17,7 @@ import kotlin.time.Instant
 class RingTransferRepository(
     private val ringTransferDao: RingTransferDao,
     private val db: RoomDatabase
-) {
+) : RingIterationStore {
     companion object {
         private val logger = Logger.Companion.withTag("RingTransferRepository")
     }
@@ -113,7 +113,7 @@ class RingTransferRepository(
         return orphaned
     }
 
-    suspend fun markTransfersAsPreviousIndexIteration() {
+    override suspend fun markTransfersAsPreviousIndexIteration() {
         ringTransferDao.markTransfersAsPreviousIndexIteration()
     }
 

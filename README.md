@@ -128,14 +128,16 @@ De-google work is completed, all telemetry is removed. What remains is polish an
 
 Out of scope: iOS (sources remain in-tree but are unmaintained here).
 
-Not functional for now: the Pebble Index 01 (Ring) / Index AI features,
-because of how heavily they rely on Firebase and other cloud services.
-Finding a way to incorporate them without that reliance is a plan, not a
-current capability. Until then the Ring feature module (`experimental`) is
-unplugged from the build; the `libindex`/`index-ai`/`mcp` libraries stay
-compiled because the watch UI shares code with them, but their runtime is
-disabled at the dependency-injection seam (verified against the built APK:
-no Ring services, no Ring endpoints, rings can never be scanned or paired).
+The F-Droid and default builds leave the Pebble Index 01 unplugged.
+`:experimental` stays out of the build because it depends on Firebase
+and other cloud services. `libindex` stays compiled because the watch UI
+shares code with it, and the default graph binds `NoOpLibIndex`, so that
+APK never scans or pairs a ring and has no Index tab.
+
+An open-ring build (`-Pgravel.ring=open`, application id
+`com.anopticlabs.gravel.ring`) pairs an Index 01 and shows an Index tab
+when onboarding was Index 01 or Both. See
+[Index recordings](#index-recordings).
 
 ## Using your own transcription server
 
@@ -186,6 +188,56 @@ certificates (Caddy's internal CA renews every 12 hours by default):
 each rotation would ask you to confirm again. The bearer token belongs
 to the server it was saved with: a URL edited to another host or port is
 tested and saved without it unless you type one.
+
+## Index recordings
+
+The open-ring build stores every synced Index 01 recording on the phone:
+the WAV, the time, the duration, and the button or tap sequence. A later
+sync of the same ring, iteration, and collection index does not add a
+second copy. Re-pairing the ring starts a new iteration, so collection
+indexes can repeat without hiding the older recordings.
+
+The Index tab lists them newest first, in the same top bar as the other
+tabs. Each row shows the date and time, duration, transcript (or a
+pending / not-transcribed state), playback, and delete. New recordings
+show up as the sync finishes. The tab follows Settings → General →
+Enable Index Feed. Getting started with Index 01 or Both turns that on,
+and so does pairing a ring. Turning it off hides the tab and keeps the
+recordings. Devices always offers Add Index 01 in this build, including
+while the feed is off.
+
+The overflow on that tab can export or share every recording as one zip.
+The archive is `manifest.json` and `manifest.csv` (time, duration, ring,
+iteration, collection index, button sequence, transcription status and
+text), `transcripts.txt`, and one folder per recording named from its
+UTC timestamp: `audio.wav` when the file is still on the phone,
+`transcript.txt`, and `metadata.json`. Saving uses the system document
+picker. An empty library still writes the manifest.
+
+Transcription reuses the speech stack the watch already uses. The default
+is on-device whisper.cpp, which this app builds from source. Nothing is
+sent off the phone unless you point Speech Recognition at a server.
+
+Other options that were considered, and why they are not the default:
+
+- Android's on-device `SpeechRecognizer` (`createOnDeviceSpeechRecognizer`)
+  needs API 31 or 33, has no file-input API this app can rely on, and the
+  platform recognizer in this tree is not implemented on Android. Where a
+  device does ship one, it is often a Google module.
+- A second on-device engine such as Vosk would add another native library
+  and another model download. whisper.cpp is already in the APK, built
+  from the pinned submodule, so the F-Droid checks that reject checked-in
+  binaries and the closed ring `.so` files stay as they are.
+- A self-hosted OpenAI-compatible Whisper server is supported, as the
+  optional remote mode above. It is not the default, because it needs a
+  server you run.
+
+Until a model is installed, the recording still appears, marked not
+transcribed, with Retry. Download one under Settings → Speech
+Recognition → Manage Offline Models (the picker recommends a model from
+the phone's memory). Local Only is the default mode. To use a server
+instead, set Self-hosted Server and choose a server mode in the same
+screen; Retry uses whatever that screen is set to.
 
 ## Building
 

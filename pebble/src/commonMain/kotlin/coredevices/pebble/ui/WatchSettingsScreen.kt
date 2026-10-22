@@ -164,6 +164,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import coreapp.pebble.generated.resources.Res
 import org.jetbrains.compose.resources.stringResource
+import coredevices.libindex.IndexRingClient
+import coredevices.util.indexFeedToggleVisible
+import org.koin.compose.getKoin
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import theme.CoreAppTheme
@@ -317,6 +320,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     val libPebbleConfig by libPebble.config.collectAsState()
     val coreConfigHolder: CoreConfigHolder = koinInject()
     val coreConfig by coreConfigHolder.config.collectAsState()
+    val showIndexFeedToggle = indexFeedToggleVisible(getKoin().getOrNull<IndexRingClient>() != null)
     val themeProvider: ThemeProvider = koinInject()
     val settings: Settings = koinInject()
     val currentTheme by themeProvider.theme.collectAsState()
@@ -691,17 +695,9 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     topLevelType = TopLevelType.Phone,
                     section = Section.General,
                     checked = coreConfig.enableIndex,
-                    // Fork: hidden, never removed. The Index feature modules
-                    // are unplugged from this build, and this toggle is one
-                    // of the set-points that could flip enableIndex on.
-                    show = { false },
+                    show = { showIndexFeedToggle },
                     onCheckChanged = {
-                        coreConfigHolder.update(
-                            coreConfig.copy(
-                                enableIndex = it,
-                                indexPermissionsConfirmed = if (it) coreConfig.indexPermissionsConfirmed else false,
-                            )
-                        )
+                        coreConfigHolder.update(coreConfig.withIndexFeedEnabled(it))
                     },
                 ),
                 basicSettingsToggleItem(
