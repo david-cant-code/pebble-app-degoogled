@@ -1348,17 +1348,14 @@ fun WatchMenu(watch: PebbleDevice, navBarNav: NavBarNav) {
                 )
 
                 if (watch.watchInfo.platform.isCoreDevice()) {
-                    // Battery analytics runs on the watch-telemetry relay this fork strips
-                    // (see Section.Battery); disabled rather than removed to keep merges cheap.
                     DropdownMenuItem(
-                        text = { Text("Battery Life (Not available without telemetry)") },
+                        text = { Text("Battery Life") },
                         leadingIcon = {
                             Icon(
                                 Icons.Default.BatteryFull,
                                 contentDescription = null
                             )
                         },
-                        enabled = false,
                         onClick = {
                             showMenu = false
                             navBarNav.navigateTo(PebbleNavBarRoutes.BatterySettingsRoute)

@@ -1,6 +1,7 @@
 package coredevices.pebble
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.battery.BatteryHistory
 import com.russhwolf.settings.Settings
 import coredevices.analytics.CoreAnalytics
 import coredevices.analytics.heartbeatWatchConnectGoalName
@@ -57,6 +58,7 @@ class PebbleAppDelegate(
     private val analyticsHeartbeatQueue: AnalyticsHeartbeatQueue,
     private val pebbleWebServices: PebbleWebServices,
     private val batteryChargedNotifier: BatteryChargedNotifier,
+    private val batteryHistory: BatteryHistory,
 ) {
     private val logger = Logger.withTag("PebbleAppDelegate")
 
@@ -127,6 +129,8 @@ class PebbleAppDelegate(
                                 watch.name,
                                 watch.batteryLevel,
                             )
+                            // Gravel: the history behind the local battery page.
+                            watch.batteryLevel?.let { batteryHistory.record(watch.serial, it, clock.now()) }
                         }
                     }
                     watches.groupBy { it.watchType() }.forEach { (watchType, watches) ->

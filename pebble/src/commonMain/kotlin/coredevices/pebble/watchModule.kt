@@ -2,6 +2,7 @@ package coredevices.pebble
 
 import co.touchlab.kermit.Logger
 import com.algolia.client.api.SearchClient
+import com.anopticlabs.gravel.battery.BatteryHistory
 import com.anopticlabs.gravel.firmware.PebbleOsChangelogListSource
 import com.anopticlabs.gravel.pkjs.UnreportedNetworkDenyEnforcement
 import com.anopticlabs.gravel.ui.AppSetupSpeech
@@ -149,6 +150,7 @@ val watchModule = module {
         val appContext: AppContext = get()
         RealBatteryChargedNotifier(get()) { postWatchFullyChargedNotification(appContext, it) }
     }
+    singleOf(::BatteryHistory)
     factory<Clock> { Clock.System }
     singleOf(::RealPebbleAccount) bind PebbleAccount::class
     single { FirestoreLockerDao { get() } }

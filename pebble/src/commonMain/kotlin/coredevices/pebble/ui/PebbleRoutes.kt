@@ -13,6 +13,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
 import com.anopticlabs.gravel.firmware.FirmwarePickerRoute
 import com.anopticlabs.gravel.firmware.FirmwarePickerScreen
+import com.anopticlabs.gravel.ui.LocalBatteryScreen
 import com.anopticlabs.gravel.ui.TextModelsScreen
 import com.anopticlabs.gravel.ui.rememberNotebookTab
 import io.rebble.libpebblecommon.locker.AppType
@@ -230,7 +231,9 @@ fun NavGraphBuilder.addNavBarRoutes(
         WatchSettingsScreen(nav, topBarParams)
     }
     composableWithAnimations<PebbleNavBarRoutes.BatterySettingsRoute>(viewModel) {
-        BatterySettingsScreen(nav, topBarParams)
+        // Gravel: upstream's page is fed by the telemetry relay this fork strips; this one by the
+        // levels the watch reports (DESIGN_NOTES.md, "Local battery estimate").
+        LocalBatteryScreen(topBarParams)
     }
     composableWithAnimations<PebbleNavBarRoutes.PermissionsRoute>(viewModel) {
         PermissionsScreen(nav, topBarParams)
