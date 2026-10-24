@@ -30,7 +30,8 @@ De-google work is completed, all telemetry is removed. What remains is polish an
       Pebble watch with the
       [Notebook watch app](https://github.com/david-cant-code/gravel-watchapp)
       (early beta)
-- [ ] Local on-device battery analytics (secondary goal, feasibility open)
+- [x] Local battery estimate: drain per day, a full charge and time left,
+      worked out on the phone from the levels the watch reports
 - [ ] Recording into the Notebook from a Pebble Index 01 ring (planned)
 - [x] F-Droid inclusion (listing live)
 
@@ -40,9 +41,9 @@ De-google work is completed, all telemetry is removed. What remains is polish an
   work on a de-Googled phone.
 - **No telemetry.** Crash reporting, analytics heartbeats, and the watch
   firmware-diagnostics relay are removed. Upstream's battery-analytics
-  screen is a server-rendered page fed by that relay, so it has no data
-  source in Gravel and its entry points are disabled; usable battery
-  analytics would need a local, on-device reimplementation. The hosts the
+  screen is a server-rendered page fed by that relay; Gravel's battery
+  page estimates on the phone from the levels the watch reports while
+  connected, and sends nothing. The hosts the
   app talks to are fixed in the app, with two exceptions you control: an
   app store source you add yourself is fetched from the host you entered,
   with no account token attached and no store search sent to it, and a

@@ -22,7 +22,7 @@ import io.rebble.libpebblecommon.voice.PEBBLE_FW_TRANSCRIPTION_TIMEOUT
  * users on update. The popup auto-shows once per user per bump (`WhatsNewDialog` in
  * composeApp) and can be reopened any time from Settings > About.
  */
-const val WHATS_NEW_VERSION = 14
+const val WHATS_NEW_VERSION = 15
 
 /** A single announced change: a short heading and a paragraph of body. */
 data class WhatsNewEntry(val title: String, val body: String)
@@ -33,6 +33,14 @@ data class WhatsNewEntry(val title: String, val body: String)
  * changelog (that lives in git history and the repo docs).
  */
 val whatsNewEntries: List<WhatsNewEntry> = listOf(
+    WhatsNewEntry(
+        title = "Battery life, estimated on this phone",
+        body = "Settings > Battery, and Battery Life in a Core watch's menu, now show how fast the " +
+            "watch's battery drains, how long a full charge lasts and about how much time is left. " +
+            "Gravel works this out on the phone from the levels the watch reports while it is " +
+            "connected, so the estimate appears after about a day of use, and nothing is sent " +
+            "anywhere.",
+    ),
     WhatsNewEntry(
         title = "Notebook (early beta)",
         body = "Record a note or a reminder from your watch with the new Notebook watch app, " +
