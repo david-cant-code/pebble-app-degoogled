@@ -680,12 +680,13 @@ The replacement is whisper.cpp (MIT), compiled from source:
   the model installed (each KDoc carries the command); the process
   boundary (an isolated uid, a dictation and a full window across it, a
   refused stale handle, the app outliving a crashed engine process) by
-  `WhisperEngineIsolationTest` beside them; the long-form path (a
-  recording across the boundary, a cancel and the call made again, a
-  deadline timeout, a dictation answered mid-recording) by
-  `WhisperLongFormDeviceTest`. An
-  engine bump, a shim edit or a protocol change gets a device run of
-  those four before it merges.
+  `WhisperEngineIsolationTest` beside them, which also has the model
+  loader refuse a tensor type outside ggml's range while the engine
+  process lives on; the long-form path (a recording across the boundary,
+  a cancel and the call made again, a deadline timeout, a dictation
+  answered mid-recording) by `WhisperLongFormDeviceTest`. An engine
+  bump, a shim edit or a protocol change gets a device run of those four
+  before it merges.
 - The watch's dictation deadline is owned by `VoiceSessionCoordinator`
   in libpebble3, not by the provider. The firmware records for at most
   15 seconds, gives the phone 15 seconds from the end of the recording,

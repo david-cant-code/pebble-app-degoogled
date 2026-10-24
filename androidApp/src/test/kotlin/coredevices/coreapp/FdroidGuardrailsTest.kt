@@ -69,9 +69,9 @@ class FdroidGuardrailsTest {
      * removed nothing as an error, `rm:` tolerates a missing path.
      */
     private val recipeRemovedPaths = listOf(
-        // whisper.cpp ships language bindings with their own gradle builds and
-        // a lockfile-less package.json, example apps with a maven URL off the
-        // allowlist, binary test-fixture models, sample audio, and its own
+        // whisper.cpp ships a language binding with its own gradle build,
+        // example apps with a maven URL off the allowlist and a lockfile-less
+        // package.json, binary test-fixture models, sample audio, and its own
         // test suite; none of it takes part in the fork's build.
         "whisper-native/src/main/cpp/whisper.cpp/bindings/",
         "whisper-native/src/main/cpp/whisper.cpp/examples/",

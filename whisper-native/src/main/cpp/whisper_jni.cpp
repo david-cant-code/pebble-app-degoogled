@@ -466,7 +466,7 @@ Java_coredevices_whisper_WhisperJNI_nativeInitFd(JNIEnv *, jclass, jint fd) {
         return 0;
     }
 
-    // The loader-based init (whisper.cpp v1.9.3, src/whisper.cpp,
+    // The loader-based init (whisper.cpp v1.9.5, src/whisper.cpp,
     // whisper_init_with_params_no_state) streams the model through these
     // callbacks, calls close on both of its exit paths and keeps no
     // reference to the context afterwards, so the callback close is a
@@ -484,7 +484,7 @@ Java_coredevices_whisper_WhisperJNI_nativeInitFd(JNIEnv *, jclass, jint fd) {
     // would make init probe for one and log noise on every start.
     cparams.use_gpu = false;
 
-    // The state the engine builds behind init (whisper.cpp v1.9.3,
+    // The state the engine builds behind init (whisper.cpp v1.9.5,
     // src/whisper.cpp, whisper_init_state) is allocated with new and
     // vector reserves, which throw on failure, after the model's weights
     // are loaded; whisper_init_with_params has no handler, so a throw
@@ -582,10 +582,9 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
     // Whisper always evaluates a padded 30 second mel window (encoder
     // context 1500), but dictation clips are a few seconds long. Trimming
     // the encoder context to the real audio length cuts the dominant
-    // encoder cost several-fold on short clips, which is what keeps the
-    // large models inside the watch firmware's transcription deadline. One
-    // encoder position covers 20 ms (WHISPER_SAMPLE_RATE / 50 samples);
-    // the margin leaves the decoder room to attend past the end of speech.
+    // encoder cost several-fold on short clips. One encoder position
+    // covers 20 ms (WHISPER_SAMPLE_RATE / 50 samples); the margin leaves
+    // the decoder room to attend past the end of speech.
     const int wanted_ctx = static_cast<int>(n_samples / (WHISPER_SAMPLE_RATE / 50)) + 64;
     params.audio_ctx = std::min(wanted_ctx, 1500);
 
@@ -661,7 +660,7 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
 // region: timestamps, whole windows, no token cap, no extra no-speech
 // filter. It runs on a state of its own because whisper detects the
 // language at the audio_ctx the state's previous call left, which dictation
-// trims (whisper.cpp v1.9.3, src/whisper.cpp, whisper_full_with_state,
+// trims (whisper.cpp v1.9.5, src/whisper.cpp, whisper_full_with_state,
 // exp_n_audio_ctx). A canceled call replies with the stopped flag alone.
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_coredevices_whisper_WhisperJNI_nativeTranscribeLong(JNIEnv *env, jclass, jlong handle,
@@ -714,12 +713,13 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribeLong(JNIEnv *env, jclass, jl
     params.suppress_blank   = true;
     params.suppress_nst     = true;
     // One pass per window, as for dictation; a runaway window stops at
-    // whisper's own limit (v1.9.3, whisper_full_with_state, n_max).
+    // whisper's own limit (v1.9.5, whisper_full_with_state, n_max).
     params.temperature_inc  = 0.0f;
-    // Polled after each encoder pass and decoder step (whisper_encode_internal,
-    // whisper_decode_internal), never during the recording's mel or a language
-    // detection before the first window. A non-zero return counts as a stop
-    // only if this fired.
+    // Polled after each encoder pass and decoder step (v1.9.5,
+    // whisper_encode_internal, whisper_decode_internal), including a
+    // language detection's (whisper_lang_auto_detect_internal), never
+    // during the recording's mel. A non-zero return counts as a stop only
+    // if this fired.
     params.abort_callback = [](void *data) -> bool {
         auto *c = static_cast<LongFormCall *>(data);
         if (!is_call_cancelled(c->id)) return false;
@@ -733,7 +733,7 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribeLong(JNIEnv *env, jclass, jl
         ScopedPlacement placement(cpu_mask, nice_value);
         rc = whisper_full_with_state(ctx, scoped.state, params, samples, n_samples);
     }
-    // whisper frees the state itself when it returns -7 (v1.9.3,
+    // whisper frees the state itself when it returns -7 (v1.9.5,
     // whisper_full_with_state, the KV cache re-init for a new decoder count).
     if (rc == -7) scoped.state = nullptr;
     if (rc != 0 && call.aborted) return utf8_bytes(env, std::string(1, '\1'));

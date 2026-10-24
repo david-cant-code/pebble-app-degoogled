@@ -19,7 +19,11 @@ import coredevices.whisper.whisperTranscribe
 import kotlinx.coroutines.runBlocking
 import org.junit.Assume
 import org.junit.Test
+import java.io.DataInputStream
 import java.io.File
+import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import kotlin.test.assertEquals
@@ -37,12 +41,13 @@ import kotlin.time.Duration.Companion.milliseconds
  * fresh one, a handle inside one call refuses a second, a call the
  * engine does not answer in time ends its process, the app can end it
  * on its own account, a calling thread's StrictMode policy is restored
- * after a call, and the engine process keeps no descriptor from the models it
- * is handed. The uid gate in front of every transaction has no negative
- * case here: the instrumentation shares the app's uid, and a foreign
- * uid cannot reach a service that is not exported. Uses the installed
- * base-en model and never downloads. Run on its own, against a
- * persistent install with the model:
+ * after a call, the engine process keeps no descriptor from the models it
+ * is handed, and a model whose tensor type is outside ggml's range is
+ * refused without ending the engine process. The uid gate in front of
+ * every transaction has no negative case here: the instrumentation
+ * shares the app's uid, and a foreign uid cannot reach a service that
+ * is not exported. Uses the installed base-en model and never downloads.
+ * Run on its own, against a persistent install with the model:
  *   adb shell am instrument -w \
  *     -e class coredevices.coreapp.transcription.WhisperEngineIsolationTest \
  *     com.anopticlabs.gravel.test/androidx.test.runner.AndroidJUnitRunner
@@ -58,6 +63,9 @@ class WhisperEngineIsolationTest {
         const val THREADS = 4
         const val GOOD_LOADS = 8
         const val FAILED_LOADS = 4
+
+        /** `GGML_TYPE_COUNT` in the pinned ggml (`ggml/include/ggml.h`, `enum ggml_type`); re-check it at a re-pin. */
+        const val GGML_TYPE_COUNT = 43
     }
 
     private fun log(line: String) {
@@ -331,6 +339,97 @@ class WhisperEngineIsolationTest {
             after - before < loads / 2,
             "the engine process went from $before to $after open descriptors over $loads model loads",
         )
+    }
+
+    /**
+     * The model file is a copy of the installed model with only the first
+     * tensor header's type rewritten.
+     */
+    @Test
+    fun aTensorTypeOutsideGgmlsRangeIsRefusedWithoutEndingTheEngine() {
+        val path = modelPath()
+        whisperFree(whisperInit(path))
+        val before = assertNotNull(WhisperEngineClient.runtime(bindIfNeeded = false))
+        val generation = WhisperEngineClient.processGeneration()
+        val head = ByteArray(1 shl 20)
+        DataInputStream(File(path).inputStream()).use { it.readFully(head) }
+        val typeOffset = firstTensorTypeOffset(head).toLong()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val malformed = File(context.cacheDir, "malformed-tensor-type.bin")
+        try {
+            File(path).copyTo(malformed, overwrite = true)
+            for (type in listOf(-1, GGML_TYPE_COUNT, Int.MAX_VALUE, Int.MIN_VALUE)) {
+                RandomAccessFile(malformed, "rw").use {
+                    it.seek(typeOffset)
+                    it.writeInt(Integer.reverseBytes(type)) // the model file is little-endian
+                }
+                val refusal = "whisper_model_load: invalid ttype $type in model file (expected 0 <= ttype < $GGML_TYPE_COUNT)"
+                val logged = engineLogCount(before.pid, refusal)
+                val load = runCatching { whisperInit(malformed.absolutePath) }
+                load.onSuccess { whisperFree(it) }
+                val refused = assertNotNull(load.exceptionOrNull(), "tensor type $type loaded")
+                // An engine process death throws a RuntimeException subclass, which this rejects.
+                assertEquals(RuntimeException::class, refused::class, "tensor type $type: ${refused.message}")
+                // Every loader refusal throws the same exception; this line
+                // is the range check's own.
+                assertTrue(
+                    engineLogsMore(before.pid, refusal, logged),
+                    "tensor type $type was not refused by the range check: ${refused.message}",
+                )
+            }
+        } finally {
+            malformed.delete()
+        }
+        assertEquals(generation, WhisperEngineClient.processGeneration(), "the engine process ended over the malformed model")
+        val handle = whisperInit(path)
+        try {
+            assertEquals(before.pid, assertNotNull(WhisperEngineClient.runtime(bindIfNeeded = false)).pid)
+            val text = whisperTranscribe(handle, clip(), THREADS, "en", 5L)
+            assertTrue(text.lowercase().contains(KEYWORD), "transcription after the refused loads '$text' lost '$KEYWORD'")
+        } finally {
+            whisperFree(handle)
+        }
+    }
+
+    /**
+     * Offset of the first tensor header's type in a ggml whisper model:
+     * past the magic, eleven hyperparameters, the mel filters and the
+     * vocabulary, then the header's dimension count and name length.
+     */
+    private fun firstTensorTypeOffset(model: ByteArray): Int {
+        val buf = ByteBuffer.wrap(model).order(ByteOrder.LITTLE_ENDIAN)
+        buf.position(4 + 11 * 4)
+        val melFilterBytes = buf.int * buf.int * 4
+        buf.position(buf.position() + melFilterBytes)
+        repeat(buf.int) {
+            val tokenBytes = buf.int
+            buf.position(buf.position() + tokenBytes)
+        }
+        val header = buf.position()
+        val dims = buf.int
+        val name = ByteArray(buf.int)
+        buf.position(header + 12 + dims * 4)
+        buf.get(name)
+        val text = name.decodeToString()
+        assertTrue(
+            dims in 1..4 && (text.startsWith("encoder.") || text.startsWith("decoder.")),
+            "no tensor header at byte $header: $dims dimensions, name '$text'",
+        )
+        return header + 8
+    }
+
+    /** How many of process [pid]'s retained whisper error lines contain [line]. */
+    private fun engineLogCount(pid: Int, line: String): Int =
+        shell("logcat -d --pid=$pid -s whisper.cpp:E").lineSequence().count { line in it }
+
+    /** Whether that count for [line] rises above [before] within two seconds. */
+    private fun engineLogsMore(pid: Int, line: String, before: Int): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + 2_000
+        while (true) {
+            if (engineLogCount(pid, line) > before) return true
+            if (SystemClock.elapsedRealtime() >= deadline) return false
+            Thread.sleep(50)
+        }
     }
 
     private fun shell(command: String): String {
