@@ -12,7 +12,6 @@ import coredevices.pebble.firmware.BatteryChargedNotifier
 import coredevices.pebble.firmware.FirmwareUpdateUiTracker
 import coredevices.pebble.services.AppstoreSourceInitializer
 import coredevices.pebble.services.AnalyticsHeartbeatQueue
-import coredevices.pebble.services.MemfaultChunkQueue
 import coredevices.pebble.services.PebbleWebServices
 import coredevices.pebble.weather.WeatherFetcher
 import coredevices.util.AppResumed
@@ -54,7 +53,6 @@ class PebbleAppDelegate(
     private val appstoreSourceInitializer: AppstoreSourceInitializer,
     private val usersDao: UsersDao,
     private val platform: Platform,
-    private val memfaultChunkQueue: MemfaultChunkQueue,
     private val analyticsHeartbeatQueue: AnalyticsHeartbeatQueue,
     private val pebbleWebServices: PebbleWebServices,
     private val batteryChargedNotifier: BatteryChargedNotifier,
@@ -64,7 +62,6 @@ class PebbleAppDelegate(
 
     fun init() {
         logger.d { "init()" }
-        memfaultChunkQueue.startProcessing(GlobalScope)
         analyticsHeartbeatQueue.startProcessing(GlobalScope)
         permissionsRequester.init()
         if (platform == Platform.Android) {
@@ -218,9 +215,6 @@ class PebbleAppDelegate(
             },
             scope.launch {
                 libPebble.requestLockerSync().await()
-            },
-            scope.launch {
-                memfaultChunkQueue.uploadPendingFromDb()
             },
             scope.launch {
                 analyticsHeartbeatQueue.uploadPendingFromDb()

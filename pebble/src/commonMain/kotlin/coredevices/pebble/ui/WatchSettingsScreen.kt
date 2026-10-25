@@ -1885,7 +1885,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                 ),
                 basicSettingsToggleItem(
                     title = "Use Core OTA service",
-                    description = "Check Core Devices service for Core watch firmware updates instead of Memfault (falls back to Memfault on failure)",
+                    description = "No effect in Gravel builds, which set no Core Devices OTA endpoint. With one set, Core watch firmware checks use it and fall back to the PebbleOS GitHub releases when it fails.",
                     topLevelType = TopLevelType.Phone,
                     section = Section.Debug,
                     checked = coreConfig.useEngDashOta,

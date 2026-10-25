@@ -683,13 +683,12 @@ feature being armable.
 
 Upstream's watch-settings debug section (2026-08 sync) gained a "Use Core
 OTA service" toggle that routes firmware checks to a Core Devices OTA
-service. The routing requires a bug-endpoint build config value that this
-fork never sets, a fact the fork's own routing test asserts, so the
-toggle changes nothing on any fork build while its description names a
-firmware source the fork does not use. The toggle stays as upstream
-ships it, except that the setting behind it keeps the fork's off
-default where upstream now defaults it on, so an inert control is not
-shown enabled; hiding it behind the same predicate that makes it functional
+service. The routing requires a bug-endpoint build config value that
+Gravel never sets, a fact BugReportUploadUnplugTest asserts, so the toggle
+changes nothing on any Gravel build. Gravel's description for it says so,
+and the setting behind it keeps Gravel's off default where upstream
+defaulted it on, so an inert control is not shown enabled; hiding it
+behind the same predicate that makes it functional
 remains open as a follow-up, and renaming it would keep an inert control
 under a different label. This entry leaves the file if the toggle is
 hidden behind that predicate or the fork ever sets the endpoint that

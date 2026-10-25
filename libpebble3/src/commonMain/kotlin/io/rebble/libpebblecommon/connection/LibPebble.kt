@@ -244,7 +244,6 @@ interface WebServices {
     suspend fun fetchLocker(): LockerModelWrapper?
     suspend fun removeFromLocker(id: Uuid): Boolean
     suspend fun checkForFirmwareUpdate(watch: WatchInfo, force: Boolean): FirmwareUpdateCheckResult
-    fun uploadMemfaultChunk(chunk: ByteArray, watchInfo: WatchInfo)
     fun uploadAnalyticsHeartbeat(payload: ByteArray, watchInfo: WatchInfo)
 }
 

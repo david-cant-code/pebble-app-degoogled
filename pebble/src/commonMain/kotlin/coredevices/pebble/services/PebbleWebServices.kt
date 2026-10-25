@@ -275,7 +275,6 @@ class RealPebbleWebServices(
     private val httpClient: PebbleHttpClient,
     private val firmwareUpdateCheck: FirmwareUpdateCheck,
     private val bootConfig: BootConfigProvider,
-    private val memfaultChunkQueue: MemfaultChunkQueue,
     private val analyticsHeartbeatQueue: AnalyticsHeartbeatQueue,
     private val appstoreSourceDao: AppstoreSourceDao,
     private val firestoreLocker: FirestoreLocker,
@@ -373,9 +372,6 @@ class RealPebbleWebServices(
 
     override suspend fun checkForFirmwareUpdate(watch: WatchInfo, force: Boolean): FirmwareUpdateCheckResult =
         firmwareUpdateCheck.checkForUpdates(watch, force)
-
-    // This fork drops watch coredump chunks instead of queueing them for Memfault (fork goal: strip telemetry).
-    override fun uploadMemfaultChunk(chunk: ByteArray, watchInfo: WatchInfo) {}
 
     // This fork drops watch diagnostics records instead of queueing them for upload (fork goal: strip telemetry).
     override fun uploadAnalyticsHeartbeat(payload: ByteArray, watchInfo: WatchInfo) {}

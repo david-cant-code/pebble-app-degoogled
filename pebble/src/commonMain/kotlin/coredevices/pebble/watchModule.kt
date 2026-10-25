@@ -37,11 +37,9 @@ import coredevices.pebble.services.AppstoreSourceInitializer
 import coredevices.pebble.services.EngDashOta
 import coredevices.pebble.services.HybridTranscription
 import coredevices.pebble.services.LanguagePackRepository
-import coredevices.pebble.services.Memfault
 import coredevices.pebble.services.AnalyticsHeartbeatQueue
 import coredevices.pebble.services.AnalyticsIngest
 import coredevices.pebble.services.ContactDeveloperApi
-import coredevices.pebble.services.MemfaultChunkQueue
 import coredevices.pebble.services.NullTranscriptionProvider
 import coredevices.pebble.services.PebbleAccountProvider
 import coredevices.pebble.services.PebbleBootConfigService
@@ -70,7 +68,6 @@ import coredevices.pebble.ui.WatchSettingsScreenViewModel
 import coredevices.pebble.weather.OpenWeather25Interceptor
 import coredevices.pebble.weather.WeatherFetcher
 import coredevices.pebble.weather.YahooWeatherInterceptor
-import coredevices.util.CommonBuildKonfig
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.jordond.compass.geocoder.Geocoder
@@ -205,17 +202,13 @@ val watchModule = module {
         PebbleHttpClient(pebbleAccount = get(), httpClient = get(), libPebble = lazy { get() })
     } bind PebbleBootConfigService::class
     factoryOf(::LibPebbleConfig)
-    // Not singleOf: Koin cannot resolve the nullable token parameter, and passing it
-    // here keeps the class testable with explicit token states.
-    single { Memfault(get(), get(), get(), CommonBuildKonfig.MEMFAULT_TOKEN) }
     singleOf(::EngDashOta)
-    singleOf(::MemfaultChunkQueue)
     singleOf(::AnalyticsIngest)
     singleOf(::AnalyticsHeartbeatQueue)
     singleOf(::ContactDeveloperApi)
     factoryOf(::Cohorts)
-    // Fork: Core-watch updates come from the public PebbleOS GitHub releases
-    // (fork builds ship no Memfault token, and cohorts rejects Core hardware).
+    // Gravel: Core-watch updates come from the public PebbleOS GitHub releases
+    // (cohorts rejects Core hardware).
     singleOf(::FirmwareArtifactExpectations)
     singleOf(::PebbleOsChangelogListSource)
     singleOf(::GithubReleases)

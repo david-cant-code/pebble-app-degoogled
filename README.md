@@ -97,12 +97,9 @@ De-google work is completed, all telemetry is removed. What remains is polish an
   than its firmware (any build in recovery), including the one an update
   check would offer from the same data; it marks which are on the
   changelog and links to it. Legacy Pebble watches keep using the Rebble
-  cohorts endpoint and install its offer from the Devices tab. Gravel builds ship no Memfault
-  token and make no Memfault requests; upstream's optional `memfaultToken`
-  Gradle property would route Core watch update checks through
-  `api.memfault.com`, periodically sending the watch serial number (or a
-  MAC-derived identifier), hardware revision, and firmware version in the
-  background.
+  cohorts endpoint and install its offer from the Devices tab. Upstream's
+  Memfault update check and what remained of the firmware-diagnostics relay
+  are removed.
 - **Weather without Play services.** Manual latitude/longitude entry, since
   the stock place search relies on the GMS-backed platform geocoder.
 - **Free on-device dictation.** Voice dictation runs on whisper.cpp,
