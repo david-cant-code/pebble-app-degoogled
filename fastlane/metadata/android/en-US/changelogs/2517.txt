@@ -1,0 +1,1 @@
+Updates the speech engine to whisper.cpp 1.9.5, which fixes CVE-2026-110810, an out-of-bounds read when it loads a speech model file.
