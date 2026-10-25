@@ -2371,6 +2371,39 @@ hold its rules.
   `pebble://show-watches` link the notification also carries, so that
   link opens only the Devices tab.
 
+## Local battery estimate
+
+Upstream's battery page (`BatterySettingsScreen`) is a WebView onto Core's
+bug server, which renders battery analytics from what the
+firmware-diagnostics relay uploads, behind a Core account. With the relay
+gone, `BatterySettingsRoute`, reached from Settings > Battery and from a
+Core watch's Battery Life menu item, shows `LocalBatteryScreen` instead;
+upstream's screen stays in the tree, unreferenced, to keep merges cheap.
+
+- The data is the level the watch reports over Bluetooth's standard
+  Battery Service: `BatteryWatcher` in libpebble3 reads it on connect and
+  subscribes to its notifications, which PebbleOS sends at least on every
+  change of the whole percent (`ble_bas.c` and the battery state services
+  in PebbleOS). The phone sees it only while the watch is connected.
+  `PebbleAppDelegate` passes each connected watch's level to
+  `BatteryHistory.record`, beside upstream's `BatteryChargedNotifier`.
+- `BatteryHistory` stores only changes, per watch serial, as one string in
+  the app's `Settings` (`gravel_battery_history_<serial>`,
+  `epochSeconds:percent` pairs), at most 30 days and 2000 samples. It
+  stays out of `libpebble3.db`, whose schema follows upstream. Nothing
+  leaves the phone.
+- `BatteryEstimator` reads the last 14 days as discharge runs: a rise
+  (charging) ends a run, and so does a gap of more than 24 hours, because
+  the phone did not see what happened in it. Runs shorter than 3 hours are
+  dropped, since whole percents over a few hours read 0 % or 2 % an hour
+  depending on where the rounding fell. The drain rate is the total drop
+  over the total hours of the remaining runs; below 12 hours or 3 percent
+  the page shows none. From the rate it shows the drain per day, how long
+  a full charge lasts, and the time left from the current level, rounded
+  down, and it treats a level as current only while the watch is
+  connected. `BatteryEstimateTest`, `BatteryHistoryTest` and
+  `LocalBatteryTextTest` pin these rules.
+
 ## F-Droid
 
 The fork is in F-Droid's main repository, as `com.anopticlabs.gravel`.
