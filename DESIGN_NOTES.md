@@ -1,18 +1,19 @@
 # Design notes
 
-How the de-Googling is implemented. `README.md` says what the fork is and
+How the de-Googling is implemented. `README.md` says what Gravel is and
 does; `CLAUDE.md` carries the rules for changing it; this file records the
 architecture behind those rules, so that a change touching one of these
 seams starts from the actual wiring rather than a guess.
 
 ## The DI-seam strategy
 
-The fork removes Google Play services, Firebase, and the cloud-backed
-Ring/Index AI features by swapping implementations at the Koin dependency
-injection seam, not by deleting upstream code. Upstream call sites stay
-intact, which keeps upstream merges cheap: a merge brings in new call
-sites against the same interfaces, and the fork's bindings decide what
-those calls actually do. Each seam below is additionally built so that
+Gravel removes Google Play services, Firebase, and the cloud-backed
+Ring/Index AI features mostly by swapping implementations at the Koin
+dependency injection seam rather than deleting upstream code. Upstream
+call sites stay intact, which keeps upstream commits cheap to
+cherry-pick: a pick brings in new call sites against the same
+interfaces, and Gravel's bindings decide what those calls actually do.
+Each seam below is additionally built so that
 accidentally re-enabling the removed functionality fails loudly at build
 time instead of quietly coming back.
 
@@ -20,12 +21,12 @@ The same idea applies to the manifest. Upstream declares four adb-driven
 QA receivers (settings write, dev connection server, QEMU watch attach,
 firmware sideload; all gated on `android.permission.DUMP`, which only
 the system, privileged apps, and the adb shell can hold) for every build
-type. The fork keeps them out of release with
+type. Gravel keeps them out of release with
 `androidApp/src/release/AndroidManifest.xml`, a release-only overlay
 whose `tools:node="remove"` entries drop the four elements from the
 merged manifest; upstream's declarations and classes stay verbatim,
 debug builds keep the receivers for driving an emulator from adb, and
-the release exported-component allowlist is unchanged. The fork adds one
+the release exported-component allowlist is unchanged. Gravel adds one
 receiver of the same kind, declared only in the debug overlay
 `androidApp/src/debug/AndroidManifest.xml`: `SttDebugReceiver`, gated on
 the same permission, sets the four dictation debug hooks and the local
@@ -48,7 +49,7 @@ release build.
 
 Upstream's Ring/Index AI feature module (`experimental`) is
 unplugged from the build (`settings.gradle.kts` + DI wiring) with sources
-left in place so upstream merges stay cheap.
+left in place so upstream commits stay cheap to cherry-pick.
 
 `libindex`, `index-ai`, and `mcp` stay compiled: the watch UI in `pebble`
 compiles against `libindex`, whose Room schema references `index-ai`
@@ -58,7 +59,7 @@ hierarchy types its error kind against an `index-ai` enum
 is dead:
 
 - a no-op `LibIndex` is bound at the Koin seam;
-- fork stubs in `composeApp` replace the `experimental` types the app
+- Gravel's stubs in `composeApp` replace the `experimental` types the app
   wiring touches, under the same fully-qualified names, so re-plugging
   the `experimental` module trips duplicate-class errors;
 - `CoreConfig.enableIndex` has no reachable set-point in a release build
@@ -67,7 +68,7 @@ is dead:
 
 The Ring satellite library `libindex` compiles against
 (`io.github.coredevices.haversine`, a prebuilt AAR with no public source
-that bundles two native libraries per ABI) is replaced by the fork module
+that bundles two native libraries per ABI) is replaced by Gravel's module
 `:haversine-stubs`: inert same-FQN stand-ins for the eight symbols
 `libindex` references, whose satellite classes have private constructors
 and no factory, so no ring object can exist anywhere in the app
@@ -90,7 +91,7 @@ what the tree guarantees).
 ## Firebase
 
 The Firebase SDKs are gone via the same idea at a different seam: the
-fork module `:firebase-stubs` shadows the gitlive `dev.gitlive.firebase.*`
+Gravel's module `:firebase-stubs` shadows the gitlive `dev.gitlive.firebase.*`
 artifacts with inert same-FQN stand-ins (permanently signed out, empty
 never-authoritative store). Consequences:
 
@@ -99,7 +100,7 @@ never-authoritative store). Consequences:
   surface is extended;
 - re-adding the real artifacts trips duplicate classes.
 
-`UsersDao` is additionally rebound at the Koin seam to the fork's
+`UsersDao` is additionally rebound at the Koin seam to Gravel's
 `SignedOutUsersDao`.
 
 The bug report screen's upload path needed both a Core account ID token
@@ -107,16 +108,14 @@ and the bug-reports backend (`bugUrl`, empty in this build), so it is
 dead twice over. The screen stays and gates every backend control on
 `BugApi.canUseService()`: with no backend it is the local log export
 reached from Settings > Get Help > Export logs (zip to the share sheet,
-no upload path), and upstream's screen keeps its behaviour across
-merges.
+no upload path), and upstream's screen keeps its behavior across
+cherry-picks.
 
-## The FCM exception
+## The FCM push stack
 
-The FCM push stack is the one deliberate exception to the seam rule: push
-either registers a device token with Google or does not exist, so
+Push either registers a device token with Google or does not exist, so
 `PushMessaging`, `PushService`, and their call sites were deleted outright
-rather than no-opped. That deletion is not precedent for other strips; the
-seam rule stands everywhere else.
+rather than no-opped.
 
 ## Watchapp permissions (phone-side network and location)
 
@@ -129,7 +128,7 @@ Chromium's stack; the phone-side weather interceptors also egress on the
 app's behalf). Upstream gated none of this and disclosed none of it: the
 appstore capability vocabulary (`location`/`health`/`timeline`) has no
 "network" entry, so an app that used location to call a weather API only
-ever showed "location". This fork adds a per-app, tri-state permission
+ever showed "location". Gravel adds a per-app, tri-state permission
 system over those two capabilities, denied by default.
 
 **Scope.** The grants gate the app's PebbleKit JS. A watchapp's other
@@ -207,7 +206,7 @@ response header, both below, are two more:
    real egress (other apps' local socket servers, hosts on the same
    network segment). Applied and awaited before the app page loads and
    kept in sync with live toggles; on stop, the live-toggle collector is
-   cancelled first and the override is cleared only after the WebView is
+   canceled first and the override is cleared only after the WebView is
    destroyed (the reasons are at `WebViewJsRunner.stop`).
    The override is process-wide, so while it is set it also covers any
    other WebView in the app, such as a page left open for another app. Only
@@ -389,7 +388,7 @@ it.
 2. *Manifest component state.* `PebbleKitComponentState` disables the
    basalt provider, the sender service and the `.pebblekit` provider through
    `PackageManager` while their toggle is off, and applies a component
-   whose call threw again at the next config change. The platform behaviour
+   whose call threw again at the next config change. The platform behavior
    this layer rests on is listed, with AOSP symbols, in that class's KDoc.
 3. *Runtime entry points.* Classic START/STOP receivers are registered only
    while classic is on. The basalt provider's `query` returns null while off
@@ -439,9 +438,9 @@ Upstream's on-device dictation ran on the proprietary Cactus engine: a
 prebuilt 57.7 MB `libcactus_engine.so` checked into git with no source
 in the tree, under a source-available license with commercial revenue
 caps. That is not free software, which blocked the F-Droid goal, and it
-conflicts with distributing this fork's GPLv3 APKs, so the speech stack
-is the second place (after FCM) where the fork replaces upstream code
-outright instead of no-opping it at a seam: dictation is a core watch
+conflicts with distributing Gravel's GPLv3 APKs, so the speech stack
+is replaced outright rather than no-opped at a seam: dictation
+is a core watch
 feature, and its only other backends are cloud services or the
 GMS-backed platform recognizer, both dead ends here.
 
@@ -558,11 +557,11 @@ The replacement is whisper.cpp (MIT), compiled from source:
   each model asks at most once, and the pending offer is held while the
   prompt downloads its target, so a dictation finishing mid-download
   neither replaces nor withdraws it.
-- A self-hosted transcription server is the fork's remote backend, at
+- A self-hosted transcription server is Gravel's remote backend, at
   the seam where upstream's cloud pair sits: `HybridTranscriptionService`
   keeps upstream's three remote modes and their fallback timing, and
   when a server URL is configured `SelfHostedTranscriptionService` takes
-  the remote slot (the cloud pair stays for merge parity and can never
+  the remote slot (the cloud pair stays for cherry-pick parity and can never
   sign in here). One request shape serves whisper.cpp's own server and
   OpenAI-style servers: a multipart POST of the session audio as a
   16 kHz mono WAV with `response_format=json`, the model name when set
@@ -693,7 +692,7 @@ The replacement is whisper.cpp (MIT), compiled from source:
   drops a later result, and after its error dialog starts a new session
   on its own. So each setup is its own job and a new setup supersedes
   the session in flight: the watch has moved on, so the earlier decode
-  is cancelled and nothing more is sent for it (the engine runs one
+  is canceled and nothing more is sent for it (the engine runs one
   decode at a time, and a decode left running would fail the new
   session's own the moment its recording ended; the cancel lands
   between engine passes, so a decode deep in one can still hold the
@@ -702,7 +701,7 @@ The replacement is whisper.cpp (MIT), compiled from source:
   recognizer error one second before the watch's own clock runs out
   while the decode runs on until the next session supersedes it, so the
   speed record (below) still sees how long it really took; a decode
-  cancelled past the deadline records its elapsed time as a lower bound.
+  canceled past the deadline records its elapsed time as a lower bound.
   The late transcript itself goes nowhere and the watch's retry runs as
   a fresh session. A recording the watch has not ended
   30 seconds after the setup is abandoned from the phone side (its
@@ -751,13 +750,13 @@ The replacement is whisper.cpp (MIT), compiled from source:
   override that slows a fast phone's decode, a capture dump that writes
   each dictation's engine input as WAV under the app's private files
   (last 20 kept, excluded from backups and device transfer, deleted when
-  the hook goes off or at start in a build that cannot honour it), a
+  the hook goes off or at start in a build that cannot honor it), a
   substitute-audio hook that stands the bundled test clip (debug assets
   only) in for the watch's audio so an emulated watch, whose microphone
   is silence, still yields a transcript, and a slow-decode hook that
   holds every result for 20 seconds so the deadline report runs on any
   phone. The settings toggles are offered only in debug builds and the
-  code re-checks the build before honouring any flag, because debug and
+  code re-checks the build before honoring any flag, because debug and
   release installs share an application id.
 
 Model weights are never checked in. `ModelCatalog` (util) is every
@@ -825,7 +824,7 @@ Naming: `CactusSTTMode` and `CactusModelPathProvider` keep their
 upstream names. The enum's entry names are persisted inside the
 serialized config on every existing install (a rename is a data
 migration), and both types are referenced across upstream-owned files
-where a rename would cost churn in every future merge. Migration of
+where a rename would cost churn in every future cherry-pick. Migration of
 existing installs rides the incompatible-model sweep in
 `CommonAppDelegate`: previous-engine model directories are deleted, the
 user's local mode is stashed when the selected model is not installed,
@@ -2097,7 +2096,7 @@ in the app's device suite:
   started, and offers no download where the text engine cannot run. A
   download shows as started when requested, since the job reports itself
   only when it runs. A text download that finishes with its model
-  installed, unless the user cancelled it, becomes the Notebook's choice;
+  installed, unless the user canceled it, becomes the Notebook's choice;
   that, a choice and a delete of an installed model make the capture
   drain run, or go round once more. The download job reports the finish
   to `AndroidTextModels` on its success path (`TextDownloadFollower`) and
@@ -2289,8 +2288,8 @@ in the app's device suite:
 
 Upstream's Settings > About linked "What's new in the app" to its hosted
 changelog in an embedded WebView. That page describes upstream's
-releases, not this fork's, and its host (Notion) refuses to render
-inside a WebView at all, so the fork points the item at its own
+releases, not Gravel's, and its host (Notion) refuses to render
+inside a WebView at all, so Gravel points the item at its own
 What's-new popup instead. `WhatsNew.kt` in `:pebble` holds the revision
 counter, the entry list, and the popup composable; the update-triggered
 auto-show wrapper (`WhatsNewDialog`) stays in `:composeApp`. One entry
@@ -2303,20 +2302,20 @@ read.
 
 "What's new in PebbleOS" and "Getting Started & Troubleshooting" keep
 their upstream URLs but open in the external browser: the PebbleOS
-notes share the Notion-in-WebView problem, and the help centre is
+notes share the Notion-in-WebView problem, and the help center is
 Intercom-backed, so loading it in an embedded WebView makes the app's
 own network traffic include Intercom's endpoints, which the app's
 listing does not (and should not need to) disclose. The upstream
 WebView routes (`RoadmapChangelogRoute`, `PebbleOsChangelogRoute`,
 `TroubleshootingRoute`) stay registered in `AppNavHost` but are
-unreachable, keeping the upstream merge surface small.
+unreachable, keeping the upstream cherry-pick surface small.
 
 ## App store search
 
 Both app store feeds (Core Devices and Rebble) keep their search index on
 Algolia, and upstream queries it straight from the phone with per-feed
 search-only keys (`AppstoreSources.kt`), so every store search is a
-request to a third party, one per enabled feed. The fork keeps the
+request to a third party, one per enabled feed. Gravel keeps the
 feature (neither store offers another search API) and narrows what the
 requests carry:
 
@@ -2329,7 +2328,7 @@ requests carry:
   pins that contract.
 - `LockerViewModel` debounces search requests (`STORE_SEARCH_DEBOUNCE`,
   300 ms of quiet) regardless of the caller's cadence, so a caller that
-  asks on every edit (upstream's behaviour, and what an upstream merge
+  asks on every edit (upstream's behavior, and what an upstream pick
   would bring back) still cannot stream prefixes, and emptying the field
   cancels a request still inside the window; `LockerViewModelTest`
   covers both.
@@ -2373,7 +2372,7 @@ hold its rules.
 
 ## F-Droid
 
-The fork is in F-Droid's main repository, as `com.anopticlabs.gravel`.
+Gravel is in F-Droid's main repository, as `com.anopticlabs.gravel`.
 Staying there rests on a split between what the tree guarantees on its
 own and what the build recipe (the app's metadata file in F-Droid's
 `fdroiddata` repository, maintained out of tree) has to supply. The two
@@ -2398,14 +2397,14 @@ What the tree guarantees, and how it is pinned:
   compiled native libraries, and the APK does still ship such libraries
   (the Speex codec from `io.github.coredevices.speex`, Apache-2.0 with
   public source; SQLite from `androidx.sqlite:sqlite-bundled`; androidx
-  graphics-path) next to the two engines built from source. What the
-  fork removed was prebuilt native code with no public source (the Cactus
+  graphics-path) next to the two engines built from source. What
+  Gravel removed was prebuilt native code with no public source (the Cactus
   engine, the Ring satellite AAR), which the policy does reject.
 - The native toolchain is pinned in `whisper-native/build.gradle.kts`,
   `llm-native/build.gradle.kts` and `socketfilter/build.gradle.kts`
-  (`ndkVersion` 28.2.13676358, that is NDK r28c, and CMake 3.22.1), so a
-  build is the same on every machine and the recipe has exact values to
-  provision. `FdroidGuardrailsTest` fails when the modules name different
+  (`ndkVersion` 28.2.13676358, that is NDK r28c, and CMake 3.22.1), so
+  every build uses the same NDK and CMake and the recipe has exact values
+  to provision. `FdroidGuardrailsTest` fails when the modules name different
   values.
 - `versionName` is `git describe --tags --first-parent HEAD` and
   `versionCode` the commit count, both functions of the built commit
@@ -2413,7 +2412,7 @@ What the tree guarantees, and how it is pinned:
   tag name and the values the recipe declares for that tag can be checked
   against the built APK. The first-parent walk keeps upstream's tags,
   reachable through every sync merge's second parent, from describing a
-  fork commit (git describe stops after ten candidate tags, so a non-tag
+  Gravel commit (git describe stops after ten candidate tags, so a non-tag
   build would otherwise report the newest upstream tag); a release tag
   has to sit on master's first-parent line, which tagging the release
   commit on master gives.
@@ -2461,7 +2460,7 @@ What the recipe has to supply (field names as in the fdroiddata format):
   bindings and an example Android app with their own gradle builds and
   toolchain pins, a lockfile-less `package.json`, example apps naming a
   maven host off the allowlist, binary test-fixture models, and sample
-  audio, none of it part of the fork's build; the guardrail test requires
+  audio, none of it part of Gravel's build; the guardrail test requires
   each entry to remove a scanner hit. `rm:`, not
   `scandelete:`: the scanner counts a `scandelete` entry that removed
   nothing as an error, while `rm:` tolerates a path that is already gone.
