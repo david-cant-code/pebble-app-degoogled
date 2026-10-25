@@ -753,6 +753,21 @@ there rather than diverge here. This entry leaves the file when upstream
 disambiguates the match (channel id first, then position-stable matching)
 and the fork syncs it.
 
+## Notification images are read without the album art checks
+
+**Status: open; planned for a branch of its own.**
+
+When a notification carries an image (a messaging photo or a big
+picture), Gravel reads the image the posting app names, with Gravel's
+own access, to cache it for the watch. Album art from media apps is
+checked for where it comes from before it is opened, and for how large
+it is and how long reading it takes while it is read; notification
+images do not get those checks yet. The image reaches only the user's
+own watch, and nothing goes back to the app that posted the
+notification; a slow or very large image can hold up the notifications
+behind it on their way to the watch. This entry leaves the file when
+notification images get the same checks as album art.
+
 ## Notebook background jobs are not scheduled where WorkManager cannot start
 
 **Status: accepted; device defect.**

@@ -96,10 +96,7 @@ private fun NotificationImage.decode(context: android.content.Context): Bitmap? 
             val bitmap = context.contentResolver.openInputStream(source.uri)?.use {
                 BitmapFactory.decodeStream(it, null, options)
             } ?: return null
-            val orientation = context.contentResolver.openInputStream(source.uri)?.use {
-                ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-            } ?: ExifInterface.ORIENTATION_NORMAL
-            bitmap.applyExifOrientation(orientation)
+            bitmap.applyExifOrientation(source.exifOrientation)
         }
     }
 }
