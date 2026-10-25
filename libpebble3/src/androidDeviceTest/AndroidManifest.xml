@@ -2,4 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- For DeniedSessionWebRtcTest, whose cases open inet sockets. Test APK only. -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <application>
+        <!-- For ProviderArtOpenTest. Test APK only, not exported. -->
+        <provider
+            android:name="com.anopticlabs.gravel.music.StalledArtProvider"
+            android:authorities="com.anopticlabs.gravel.music.test.art"
+            android:exported="false" />
+    </application>
 </manifest>

@@ -1,11 +1,12 @@
 package coredevices.pebble.ui
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -87,7 +88,7 @@ internal actual fun rememberPlatformWebViewParams(onRendererGone: () -> Unit): P
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        val uris = WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+        val uris = parseFileChooserResult(result.resultCode, result.data)
         pending.getAndSet(null)?.onReceiveValue(uris)
     }
     return remember(launcher) {
@@ -117,6 +118,15 @@ internal actual fun rememberPlatformWebViewParams(onRendererGone: () -> Unit): P
             }
         )
     }
+}
+
+private fun parseFileChooserResult(resultCode: Int, data: Intent?): Array<Uri>? {
+    if (resultCode != Activity.RESULT_OK || data == null) return null
+    val clip = data.clipData
+    if (clip != null && clip.itemCount > 0) {
+        return Array(clip.itemCount) { clip.getItemAt(it).uri }
+    }
+    return data.data?.let { arrayOf(it) }
 }
 
 internal actual fun persistLocalStorage(webView: NativeWebView) {

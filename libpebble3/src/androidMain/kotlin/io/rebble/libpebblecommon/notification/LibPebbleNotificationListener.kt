@@ -189,8 +189,9 @@ class LibPebbleNotificationListener : NotificationListenerService(), LibPebbleKo
         rankingMap: RankingMap,
         reason: Int
     ) {
+        // Dialers re-post the incoming call notification under the same key without CATEGORY_CALL once answered.
+        notificationCallDetector.handleCallNotificationRemoved(sbn)
         if (sbn.notification.category == Notification.CATEGORY_CALL) {
-            notificationCallDetector.handleCallNotificationRemoved(sbn)
             return
         }
         notificationHandler.handleNotificationRemoved(sbn)

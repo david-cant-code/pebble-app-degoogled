@@ -1,11 +1,8 @@
 package coredevices.pebble.firmware
 
 import com.anopticlabs.gravel.firmware.PebbleOsChangelogListSource
-import com.russhwolf.settings.MapSettings
 import coredevices.analytics.CoreAnalytics
-import coredevices.pebble.Platform
 import coredevices.pebble.services.EngDashOta
-import coredevices.pebble.services.Memfault
 import coredevices.pebble.services.PebbleAccountProvider
 import coredevices.pebble.services.PebbleHttpClient
 import coredevices.util.CoreConfig
@@ -29,8 +26,7 @@ import kotlin.test.fail
 
 /**
  * Pins the fork's doCheck routing: Core watches must use the GitHub checker
- * and never touch cohorts (which rejects Core hardware) or Memfault (no token
- * in fork builds; MemfaultTest pins that separately). Legacy watches must
+ * and never touch cohorts (which rejects Core hardware). Legacy watches must
  * keep using cohorts and never touch GitHub.
  */
 class FirmwareUpdateCheckRoutingTest {
@@ -56,9 +52,6 @@ class FirmwareUpdateCheckRoutingTest {
         override fun updateRingTransferDurationMetric(duration: Duration) = fail("analytics touched: updateRingTransferDurationMetric")
         override fun updateRingLifetimeCollectionCount(serial: String, count: Int) = fail("analytics touched: updateRingLifetimeCollectionCount")
     }
-
-    private fun memfaultNeverContacted() =
-        Memfault(failingClient("Memfault"), MapSettings(), Platform.Android, memfaultToken = null)
 
     // Eng-dash is doubly disabled in fork builds (BUG_URL is never set, and
     // useEngDashOta defaults to false), so the routing must never touch it;
@@ -93,7 +86,6 @@ class FirmwareUpdateCheckRoutingTest {
     fun coreWatchRoutesToGithubReleasesOnly() = runTest {
         val expectations = FirmwareArtifactExpectations()
         val check = FirmwareUpdateCheck(
-            memfault = memfaultNeverContacted(),
             engDashOta = engDashNeverContacted(),
             coreConfig = forkDefaultConfig(),
             cohorts = testCohorts(failingClient("Cohorts"), expectations),
@@ -113,7 +105,6 @@ class FirmwareUpdateCheckRoutingTest {
     fun legacyWatchRoutesToCohortsOnly() = runTest {
         val expectations = FirmwareArtifactExpectations()
         val check = FirmwareUpdateCheck(
-            memfault = memfaultNeverContacted(),
             engDashOta = engDashNeverContacted(),
             coreConfig = forkDefaultConfig(),
             cohorts = testCohorts(jsonRespondingClient(cohortsBody()), expectations),
@@ -140,7 +131,6 @@ class FirmwareUpdateCheckRoutingTest {
         val githubChecks = { github.paths.count { it == CHANGELOG_LIST_PATH } }
         val expectations = FirmwareArtifactExpectations()
         val check = FirmwareUpdateCheck(
-            memfault = memfaultNeverContacted(),
             engDashOta = engDashNeverContacted(),
             coreConfig = forkDefaultConfig(),
             cohorts = testCohorts(failingClient("Cohorts"), expectations),

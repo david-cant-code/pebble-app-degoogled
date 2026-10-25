@@ -10,11 +10,13 @@ import io.rebble.libpebblecommon.database.dao.HealthDao
 import io.rebble.libpebblecommon.database.entity.HealthDataEntity
 import io.rebble.libpebblecommon.database.entity.HRMonitoringInterval
 import io.rebble.libpebblecommon.database.entity.HealthGender
-import io.rebble.libpebblecommon.database.entity.HealthSettingsEntryDao
+import io.rebble.libpebblecommon.database.dao.HealthSettingsEntryRealDao
 import io.rebble.libpebblecommon.database.entity.HealthStatDao
 import io.rebble.libpebblecommon.database.entity.OverlayDataEntity
 import io.rebble.libpebblecommon.database.entity.getWatchSettings
+import io.rebble.libpebblecommon.database.entity.setImperialUnits
 import io.rebble.libpebblecommon.database.entity.setWatchSettings
+import io.rebble.libpebblecommon.database.entity.updateHeartRateZonesFromAge
 import io.rebble.libpebblecommon.datalogging.HealthDataProcessor
 import io.rebble.libpebblecommon.di.LibPebbleCoroutineScope
 import io.rebble.libpebblecommon.services.DailySleep
@@ -41,7 +43,7 @@ import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock.System
 
 class Health(
-    private val healthSettingsDao: HealthSettingsEntryDao,
+    private val healthSettingsDao: HealthSettingsEntryRealDao,
     private val libPebbleCoroutineScope: LibPebbleCoroutineScope,
     private val healthDao: HealthDao,
     private val healthStatDao: HealthStatDao,
@@ -62,6 +64,9 @@ class Health(
     override val healthSettings: Flow<HealthSettings> = healthSettingsDao.getWatchSettings()
 
     fun init() {
+        libPebbleCoroutineScope.launch {
+            healthSettingsDao.updateHeartRateZonesFromAge()
+        }
         startPeriodicStatsUpdate()
     }
 
@@ -71,6 +76,14 @@ class Health(
             healthSettingsDao.setWatchSettings(healthSettings)
             logger.d { "Health settings saved to database - will sync to watch via BlobDB" }
         }
+    }
+
+    override suspend fun updateImperialUnits(imperialUnits: Boolean) {
+        healthSettingsDao.setImperialUnits(imperialUnits)
+    }
+
+    override suspend fun seedImperialUnits(imperialUnits: Boolean) {
+        healthSettingsDao.seedImperialUnitsAtomically(imperialUnits)
     }
 
     override suspend fun getHealthDebugStats(): HealthDebugStats {

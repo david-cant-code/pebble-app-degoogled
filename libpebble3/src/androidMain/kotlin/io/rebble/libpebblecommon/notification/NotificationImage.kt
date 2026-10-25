@@ -6,21 +6,24 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Icon
+import android.media.ExifInterface
 import android.net.Uri
 import android.os.Build
 import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.notification.displayedSize
 import io.rebble.libpebblecommon.util.PrivateLogger
 
 private val logger = Logger.withTag("NotificationImage")
 
 sealed interface NotificationImageSource {
     data class FromBitmap(val bitmap: Bitmap) : NotificationImageSource
-    data class FromUri(val uri: Uri) : NotificationImageSource
+    data class FromUri(val uri: Uri, val exifOrientation: Int) : NotificationImageSource
 }
 
-/** An image attached to a notification, with the dimensions of the original. */
+/** An image attached to a notification, with the dimensions of the original as displayed. */
 data class NotificationImage(
     val source: NotificationImageSource,
     val width: Int,
@@ -53,8 +56,8 @@ data class NotificationAttachment(
  * Pass `includeImage = false` to skip the photo entirely: reading it opens the sender's content
  * URI, which there's no reason to do when it won't be sent.
  *
- * Only the image's dimensions are decoded — the bytes are read later, and only for notifications
- * that survive filtering.
+ * Only the image's dimensions and EXIF orientation are read here; the pixels are decoded later,
+ * and only for notifications that survive filtering.
  */
 fun StatusBarNotification.extractAttachment(
     context: Context,
@@ -95,19 +98,35 @@ private fun StatusBarNotification.bigPicture(context: Context): Bitmap? {
 }
 
 private fun StatusBarNotification.messageBatch(privateLogger: PrivateLogger): List<NotificationCompat.MessagingStyle.Message> {
-    val messages = NotificationCompat.MessagingStyle
+    val style = NotificationCompat.MessagingStyle
         .extractMessagingStyleFromNotification(notification)
-        ?.messages
-    val newest = messages?.lastOrNull()
-    if (newest == null) {
+    if (style == null) {
         logger.v { "${privateLogger.obfuscate(packageName)}: not a MessagingStyle notification" }
         return emptyList()
     }
-    val batch = messages.asReversed().takeWhile {
+    return incomingBatch(style.messages, style.user)
+}
+
+/**
+ * A reply we send is appended to the conversation and the app re-posts the notification unchanged,
+ * so only messages from other people can define what the notification is about.
+ */
+internal fun incomingBatch(
+    messages: List<NotificationCompat.MessagingStyle.Message>,
+    user: Person,
+): List<NotificationCompat.MessagingStyle.Message> {
+    val incoming = messages.filterNot { it.isFromUser(user) }
+    val newest = incoming.lastOrNull() ?: return emptyList()
+    return incoming.asReversed().takeWhile {
         it.person?.key == newest.person?.key &&
                 newest.timestamp - it.timestamp <= ATTACHMENT_BATCH_WINDOW_MS
     }
-    return batch
+}
+
+private fun NotificationCompat.MessagingStyle.Message.isFromUser(user: Person): Boolean {
+    val sender = person ?: return true
+    val senderName = sender.name?.toString() ?: return false
+    return senderName == user.name?.toString()
 }
 
 private fun NotificationCompat.MessagingStyle.Message.isImage() =
@@ -134,5 +153,17 @@ private fun Uri.asNotificationImage(context: Context): NotificationImage? {
         return null
     }
     if (options.outWidth <= 0 || options.outHeight <= 0) return null
-    return NotificationImage(NotificationImageSource.FromUri(this), options.outWidth, options.outHeight)
+    // No image when the orientation cannot be read, so the aspect sent is never the unrotated one.
+    val orientation = exifOrientation(context) ?: return null
+    val (width, height) = displayedSize(options.outWidth, options.outHeight, orientation)
+    return NotificationImage(NotificationImageSource.FromUri(this, orientation), width, height)
+}
+
+private fun Uri.exifOrientation(context: Context): Int? = try {
+    context.contentResolver.openInputStream(this)?.use {
+        ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+    }
+} catch (e: Exception) {
+    logger.d { "couldn't read notification image orientation: ${e::class.simpleName}" }
+    null
 }

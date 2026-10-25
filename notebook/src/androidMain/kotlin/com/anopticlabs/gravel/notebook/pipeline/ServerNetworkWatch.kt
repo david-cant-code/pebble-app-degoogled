@@ -11,6 +11,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import co.touchlab.kermit.Logger
 import com.anopticlabs.gravel.notebook.capture.SERVER_TRY_SPACING_MILLIS
+import com.anopticlabs.gravel.notebook.workManagerOrNull
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -32,8 +33,11 @@ fun interface NetworkWork {
     fun schedule()
 }
 
-class WorkManagerNetworkWork(private val context: Context) : NetworkWork {
+class WorkManagerNetworkWork internal constructor(private val workManager: () -> WorkManager) : NetworkWork {
+    constructor(context: Context) : this({ WorkManager.getInstance(context) })
+
     override fun schedule() {
+        val work = workManagerOrNull(workManager) ?: return
         // Any connected network: the drain applies the Wi-Fi rule itself, since JobScheduler judges a network
         // constraint by the app's default network alone (frameworks/base android16-release,
         // ConnectivityController.maybeRegisterDefaultNetworkCallbackLocked), a VPN included (see AndroidUnmeteredWifi).
@@ -41,7 +45,7 @@ class WorkManagerNetworkWork(private val context: Context) : NetworkWork {
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .setBackoffCriteria(BackoffPolicy.LINEAR, RETRY_MINUTES, TimeUnit.MINUTES)
             .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.KEEP, request)
+        work.enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.KEEP, request)
     }
 
     private companion object {
@@ -51,14 +55,17 @@ class WorkManagerNetworkWork(private val context: Context) : NetworkWork {
 }
 
 /** The work that runs a drain once a long capture's next server try is due, on any connected network; each recorded try replaces it. */
-class WorkManagerServerTryWork(private val context: Context) : NetworkWork {
+class WorkManagerServerTryWork internal constructor(private val workManager: () -> WorkManager) : NetworkWork {
+    constructor(context: Context) : this({ WorkManager.getInstance(context) })
+
     override fun schedule() {
+        val work = workManagerOrNull(workManager) ?: return
         val request = OneTimeWorkRequestBuilder<NetworkWaitWorker>()
             .setInitialDelay(SERVER_TRY_SPACING_MILLIS, TimeUnit.MILLISECONDS)
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .setBackoffCriteria(BackoffPolicy.LINEAR, SERVER_TRY_SPACING_MILLIS, TimeUnit.MILLISECONDS)
             .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
+        work.enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
     }
 
     private companion object {

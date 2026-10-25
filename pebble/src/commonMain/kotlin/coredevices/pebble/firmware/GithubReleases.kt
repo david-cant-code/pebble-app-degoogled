@@ -26,9 +26,8 @@ import kotlin.time.Instant
 
 /**
  * Update checker for Core watches backed by the public PebbleOS GitHub
- * releases (fork builds ship no Memfault token, and cohorts rejects every
- * Core hardware revision, so upstream has no working source for these
- * watches here).
+ * releases (cohorts rejects every Core hardware revision, and Gravel has no
+ * other source for these watches).
  *
  * Offers only versions Core's public changelog names: the highest listed
  * version newer than the running one whose release has a verifiable asset

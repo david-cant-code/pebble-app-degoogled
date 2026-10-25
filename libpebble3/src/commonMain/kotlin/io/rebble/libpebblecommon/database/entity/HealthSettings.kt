@@ -90,6 +90,7 @@ private val json = Json { ignoreUnknownKeys = true }
 //   v4.9.150: added bool activity_tracking_enabled  (2 → 3 bytes)
 private val FW_HRM_MEASUREMENT_INTERVAL = fwSentinel(4, 9, 146)
 private val FW_HRM_ACTIVITY_TRACKING = fwSentinel(4, 9, 150)
+private val FW_HRM_FIVE_MIN = fwSentinel(4, 39, 0)
 
 private fun fwSentinel(major: Int, minor: Int, patch: Int) = FirmwareVersion(
     stringVersion = "v$major.$minor.$patch",
@@ -145,6 +146,34 @@ fun HealthSettingsEntryDao.getWatchSettings(): Flow<HealthSettings> {
     }
 }
 
+/** Writes only the units entry, leaving the other health settings untouched. */
+suspend fun HealthSettingsEntryDao.setImperialUnits(imperialUnits: Boolean) {
+    insertOrReplace(
+        HealthSettingsEntry(
+            id = KEY_UNITS_DISTANCE,
+            value = UnitsDistanceValue(imperialUnits = imperialUnits).encodeToString(),
+            timestamp = Clock.System.now().asMillisecond(),
+        )
+    )
+}
+
+suspend fun HealthSettingsEntryDao.seedImperialUnits(imperialUnits: Boolean) {
+    unitsSeedEntry(getEntry(KEY_UNITS_DISTANCE), imperialUnits)?.let { insertOrReplace(it) }
+}
+
+/**
+ * The units entry to store when [existing] is the stored one: none if one is stored, else one
+ * stamped at the epoch, so HealthSettingsEntryRealDao.handleWrite takes a later-stamped write from
+ * the watch over it.
+ */
+internal fun unitsSeedEntry(existing: HealthSettingsEntry?, imperialUnits: Boolean): HealthSettingsEntry? =
+    if (existing != null) null
+    else HealthSettingsEntry(
+        id = KEY_UNITS_DISTANCE,
+        value = UnitsDistanceValue(imperialUnits = imperialUnits).encodeToString(),
+        timestamp = Instant.fromEpochMilliseconds(0).asMillisecond(),
+    )
+
 suspend fun HealthSettingsEntryDao.setWatchSettings(healthSettings: HealthSettings) {
     val now = Clock.System.now().asMillisecond()
     insertOrReplace(
@@ -185,15 +214,32 @@ suspend fun HealthSettingsEntryDao.setWatchSettings(healthSettings: HealthSettin
     insertOrReplace(
         HealthSettingsEntry(
             id = KEY_HEART_RATE_PREFERENCES,
-            value = HeartRatePreferencesValue(
+            value = HeartRatePreferencesValue.forAge(
+                ageYears = healthSettings.ageYears,
                 restingHr = healthSettings.restingHr,
                 elevatedHr = healthSettings.elevatedHr,
-                maxHr = healthSettings.maxHr,
-                zone1Threshold = healthSettings.hrZone1Threshold,
-                zone2Threshold = healthSettings.hrZone2Threshold,
-                zone3Threshold = healthSettings.hrZone3Threshold,
             ).encodeToString(),
             timestamp = now,
+        )
+    )
+}
+
+/** Re-derives the heart rate zones from the stored age if they don't match it. */
+suspend fun HealthSettingsEntryDao.updateHeartRateZonesFromAge() {
+    val activityPrefs = ActivityPrefsValue.fromString(getEntry(KEY_ACTIVITY_PREFERENCES)?.value) ?: return
+    val current = HeartRatePreferencesValue.fromString(getEntry(KEY_HEART_RATE_PREFERENCES)?.value)
+        ?: HeartRatePreferencesValue()
+    val derived = HeartRatePreferencesValue.forAge(
+        ageYears = activityPrefs.ageYears,
+        restingHr = current.restingHr,
+        elevatedHr = current.elevatedHr,
+    )
+    if (derived == current) return
+    insertOrReplace(
+        HealthSettingsEntry(
+            id = KEY_HEART_RATE_PREFERENCES,
+            value = derived.encodeToString(),
+            timestamp = Clock.System.now().asMillisecond(),
         )
     )
 }
@@ -254,7 +300,9 @@ data class HrmPreferencesValue(
         fun HrmPreferencesValue.asBytes(firmwareVersion: FirmwareVersion): UByteArray =
             HrmPreferencesBlobItem(
                 enabled = enabled,
-                measurementInterval = measurementInterval.value,
+                // Firmware without the five-minute interval gets ten minutes.
+                measurementInterval = measurementInterval.takeIf { it.isSupportedBy(firmwareVersion) }
+                    ?.value ?: HRMonitoringInterval.TenMin.value,
                 hasMeasurementInterval = firmwareVersion >= FW_HRM_MEASUREMENT_INTERVAL,
                 activityTrackingEnabled = activityTrackingEnabled,
                 hasActivityTrackingEnabled = firmwareVersion >= FW_HRM_ACTIVITY_TRACKING,
@@ -274,6 +322,29 @@ data class HeartRatePreferencesValue(
     companion object {
         fun HeartRatePreferencesValue.encodeToString(): String = json.encodeToString(this)
         fun fromString(value: String?): HeartRatePreferencesValue? = value?.let { json.decodeFromString(value) }
+
+        /**
+         * Max HR is 220 - age and the zones start at 50%, 70% and 85% of the heart rate reserve,
+         * as the firmware defaults do for age 30.
+         */
+        fun forAge(
+            ageYears: Int,
+            restingHr: Short = 70,
+            elevatedHr: Short = 100,
+        ): HeartRatePreferencesValue {
+            val maxHr = (220 - ageYears.coerceIn(1, 120)).coerceAtLeast(elevatedHr.toInt())
+            val reserve = (maxHr - restingHr).coerceAtLeast(0)
+            fun threshold(percent: Int) = (restingHr + (reserve * percent + 50) / 100).toShort()
+            return HeartRatePreferencesValue(
+                restingHr = restingHr,
+                elevatedHr = elevatedHr,
+                maxHr = maxHr.toShort(),
+                zone1Threshold = threshold(50),
+                zone2Threshold = threshold(70),
+                zone3Threshold = threshold(85),
+            )
+        }
+
         fun HeartRatePreferencesValue.asBytes(): UByteArray = HeartRatePreferencesBlobItem(
             restingHr = restingHr.toUByte(),
             elevatedHr = elevatedHr.toUByte(),
@@ -351,13 +422,17 @@ enum class HealthGender(
 }
 
 enum class HRMonitoringInterval(val value: Byte) {
+    FiveMin(4),
     TenMin(0),
     ThirtyMin(1),
     OneHour(2),
     Disabled(3),
     ;
 
+    fun isSupportedBy(firmwareVersion: FirmwareVersion): Boolean =
+        this != FiveMin || firmwareVersion >= FW_HRM_FIVE_MIN
+
     companion object {
-        fun fromInt(value: Byte) = entries.first { it.value == value }
+        fun fromInt(value: Byte) = entries.firstOrNull { it.value == value } ?: TenMin
     }
 }

@@ -1,7 +1,6 @@
 package coredevices.pebble.services
 
 import co.touchlab.kermit.Logger
-import coredevices.pebble.services.Memfault.Companion.serialForMemfault
 import coredevices.pebble.services.PebbleHttpClient.Companion.authFor
 import coredevices.util.CommonBuildKonfig
 import io.ktor.client.HttpClient
@@ -21,8 +20,7 @@ import kotlinx.serialization.Serializable
 import kotlin.time.Instant
 
 /**
- * OTA update check against eng-dash (`$BUG_URL/ota/latest`), an alternative to Memfault OTA for
- * Core devices. The release comes from the signed-in account's track rather than the serial.
+ * OTA update check against eng-dash (`$BUG_URL/ota/latest`) for Core devices.
  */
 class EngDashOta(
     private val httpClient: HttpClient,
@@ -37,7 +35,7 @@ class EngDashOta(
         val response = try {
             httpClient.get("$baseUrl/ota/latest") {
                 token?.let { bearerAuth(token) }
-                parameter("device_serial", watch.serialForMemfault())
+                parameter("device_serial", watch.engDashSerial())
                 parameter("hardware_version", watch.platform.revision)
                 if (!watch.runningFwVersion.isRecovery) {
                     parameter(
@@ -109,3 +107,23 @@ data class EngDashLatestResult(
 data class EngDashArtifact(
     val url: String,
 )
+
+private fun WatchInfo.partialMacAddress(): String = btAddress
+    .split(":")
+    // Backwards compatibility to before we fixed the mac address value
+    .reversed()
+    .joinToString("").take(8)
+
+internal fun WatchInfo.engDashSerial(): String = when (serial) {
+    // Hack for prototype watches which all have the same serial: use BT MAC to disambiguate
+    "XXXXXXXXXXXX" -> "XXXX${partialMacAddress()}"
+    else -> serial
+}
+
+internal fun ensureVersionPrefix(version: String): String {
+    return if (version.startsWith("v")) {
+        version
+    } else {
+        "v$version"
+    }
+}

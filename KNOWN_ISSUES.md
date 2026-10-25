@@ -683,13 +683,12 @@ feature being armable.
 
 Upstream's watch-settings debug section (2026-08 sync) gained a "Use Core
 OTA service" toggle that routes firmware checks to a Core Devices OTA
-service. The routing requires a bug-endpoint build config value that this
-fork never sets, a fact the fork's own routing test asserts, so the
-toggle changes nothing on any fork build while its description names a
-firmware source the fork does not use. The toggle stays as upstream
-ships it, except that the setting behind it keeps the fork's off
-default where upstream now defaults it on, so an inert control is not
-shown enabled; hiding it behind the same predicate that makes it functional
+service. The routing requires a bug-endpoint build config value that
+Gravel never sets, a fact BugReportUploadUnplugTest asserts, so the toggle
+changes nothing on any Gravel build. Gravel's description for it says so,
+and the setting behind it keeps Gravel's off default where upstream
+defaulted it on, so an inert control is not shown enabled; hiding it
+behind the same predicate that makes it functional
 remains open as a follow-up, and renaming it would keep an inert control
 under a different label. This entry leaves the file if the toggle is
 hidden behind that predicate or the fork ever sets the endpoint that
@@ -753,6 +752,33 @@ settings UI. Inherited unmodified from upstream and a candidate to fix
 there rather than diverge here. This entry leaves the file when upstream
 disambiguates the match (channel id first, then position-stable matching)
 and the fork syncs it.
+
+## Notification images are read without the album art checks
+
+**Status: open; planned for a branch of its own.**
+
+When a notification carries an image (a messaging photo or a big
+picture), Gravel reads the image the posting app names, with Gravel's
+own access, to cache it for the watch. Album art from media apps is
+checked for where it comes from before it is opened, and for how large
+it is and how long reading it takes while it is read; notification
+images do not get those checks yet. The image reaches only the user's
+own watch, and nothing goes back to the app that posted the
+notification; a slow or very large image can hold up the notifications
+behind it on their way to the watch. This entry leaves the file when
+notification images get the same checks as album art.
+
+## Notebook background jobs are not scheduled where WorkManager cannot start
+
+**Status: accepted; device defect.**
+
+On devices where WorkManager fails as it starts (the failure
+`scheduleBackgroundJob` in MainApplication.kt guards against), the
+Notebook schedules none of its background jobs: automatic backups do
+not run although the setting shows them on, and recordings waiting for
+a charger or a network get no job to start them while Gravel is not
+running. Only Gravel's log says so. This entry leaves the file if the
+Notebook shows the failure or runs those jobs without WorkManager.
 
 ## gradle-wrapper.jar lags the declared Gradle version
 

@@ -3,7 +3,6 @@ package coredevices.pebble.firmware
 import co.touchlab.kermit.Logger
 import coredevices.analytics.CoreAnalytics
 import coredevices.pebble.services.EngDashOta
-import coredevices.pebble.services.Memfault
 import coredevices.util.CommonBuildKonfig
 import coredevices.util.CoreConfigFlow
 import io.rebble.libpebblecommon.connection.FirmwareUpdateCheckResult
@@ -18,7 +17,6 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Instant
 
 class FirmwareUpdateCheck(
-    private val memfault: Memfault,
     private val engDashOta: EngDashOta,
     private val cohorts: Cohorts,
     // Fork: GitHub-releases checker for Core watches; see doCheck.
@@ -30,7 +28,7 @@ class FirmwareUpdateCheck(
     private val logger = Logger.withTag("FirmwareUpdateCheck")
 
     // Fork: which source serves this watch.
-    private enum class Route { UnknownPlatform, Memfault, GithubReleases, Cohorts }
+    private enum class Route { UnknownPlatform, GithubReleases, Cohorts }
 
     private data class CacheKey(
         val platform: WatchHardwarePlatform,
@@ -81,11 +79,9 @@ class FirmwareUpdateCheck(
 
     private fun routeFor(watch: WatchInfo): Route = when {
         watch.platform == UNKNOWN -> Route.UnknownPlatform
-        watch.platform.isCoreDevice() && CommonBuildKonfig.MEMFAULT_TOKEN != null -> Route.Memfault
-        // Fork: fork builds ship no Memfault token and cohorts rejects every
-        // Core hardware revision, so Core watches check the public PebbleOS
-        // GitHub releases instead. Legacy watches keep cohorts, which serves
-        // them fine.
+        // Gravel: cohorts rejects every Core hardware revision, so Core watches
+        // check the public PebbleOS GitHub releases instead. Legacy watches
+        // keep cohorts, which serves them fine.
         watch.platform.isCoreDevice() -> Route.GithubReleases
         else -> Route.Cohorts
     }
@@ -97,7 +93,7 @@ class FirmwareUpdateCheck(
         // never sets, and useEngDashOta additionally needs a runtime opt-in.
         // Kept wired anyway so upstream merges stay cheap. Eng-dash results
         // share the routed cache key, matching upstream's caching.
-        if (route == Route.Memfault || route == Route.GithubReleases) {
+        if (route == Route.GithubReleases) {
             if (engDashOtaEnabled()) {
                 val result = engDashOta.getLatestFirmware(watch)
                 if (result !is FirmwareUpdateCheckResult.UpdateCheckFailed) {
@@ -109,7 +105,6 @@ class FirmwareUpdateCheck(
         }
         return when (route) {
             Route.UnknownPlatform -> FirmwareUpdateCheckResult.UpdateCheckFailed("Unknown platform")
-            Route.Memfault -> memfault.getLatestFirmware(watch)
             Route.GithubReleases -> githubReleases.getLatestFirmware(watch)
             Route.Cohorts -> cohorts.getLatestFirmware(watch)
         }

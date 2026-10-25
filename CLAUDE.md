@@ -13,14 +13,12 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   write, fix, or build iOS code.
 - **De-Google at the DI seam, not by mass deletion.** Swap Firebase/GMS-backed
   implementations for no-op or GMS-free ones at the Koin module level, keeping
-  upstream call sites intact so upstream merges stay cheap. `DESIGN_NOTES.md`
-  maps the existing seams (the `:firebase-stubs` and `:haversine-stubs`
-  modules, the unplugged `experimental` module, the no-op `LibIndex`);
-  extend those seams rather than deleting upstream code. The FCM push stack
-  is the one deliberate exception to the seam rule: push either registers a
-  device token with Google or does not exist, so `PushMessaging`,
-  `PushService`, and their call sites were deleted outright rather than
-  no-opped; do not read that deletion as precedent for other strips. The
+  upstream call sites intact so upstream commits stay cheap to cherry-pick.
+  `DESIGN_NOTES.md` maps the existing seams (the `:firebase-stubs` and
+  `:haversine-stubs` modules, the unplugged `experimental` module, the no-op
+  `LibIndex`); prefer extending those seams to deleting upstream code.
+  Upstream code Gravel did delete outright stays deleted ("Upstream syncs keep
+  Gravel's side" below). The
   google-services plugin and the Firebase SDKs are gone, so no
   `google-services.json` (dummy or real) is needed or consumed.
 - **The speech engine is whisper.cpp, built from source.** Upstream's
@@ -36,9 +34,17 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   (`LlmModelCatalog`).
 - **Distinct branding: the app is Gravel.** applicationId is
   `com.anopticlabs.gravel`; the Kotlin `namespace` and source packages
-  deliberately stay `coredevices.coreapp` so upstream merges stay cheap;
-  only the applicationId and user-facing branding are renamed (asset and
-  color details in `DESIGN_NOTES.md`). adb commands in upstream code
+  deliberately stay `coredevices.coreapp` so upstream commits stay cheap to
+  cherry-pick; only the applicationId and user-facing branding are renamed
+  (asset and color details in `DESIGN_NOTES.md`). Code Gravel adds goes
+  under `com.anopticlabs.gravel.*`, never `coredevices.*` (that root marks
+  code Core Devices wrote): a new module's `namespace`, source packages and
+  JNI symbol names, and the package of a new self-contained file in any
+  module. Additions to an existing file keep that file's package, nothing
+  existing is renamed (`:whisper` and `:whisper-native` predate the rule
+  and stay `coredevices.whisper`), and where the rule would force
+  visibility workarounds or moving upstream code, the code stays where it
+  works. adb commands in upstream code
   comments (the debug receivers' KDocs, for example) still name
   `coredevices.coreapp` as the installed package; substitute
   `com.anopticlabs.gravel`. Nominative references to Pebble watches and
@@ -77,7 +83,7 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
 - **Comments: intent and breakable constraints, up to a ceiling.** New and
   changed code gets a comment where its intent is not obvious from its name,
   and wherever it relies on a constraint someone could break (ordering,
-  threading, a platform behaviour, a difference from upstream). It does not
+  threading, a platform behavior, a difference from upstream). It does not
   get comments that restate the code, repeat a fact stated elsewhere, or
   claim more than a test or a cited source backs. Also banned: comments
   naming a rejected alternative ("X, not Y"), ticket or issue references,
@@ -100,7 +106,11 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
 - **Upstream syncs keep Gravel's side.** A merge or cherry-pick from upstream
   must not bring back what Gravel removed or replaced, including toolchain
   pins, the tag-packed versionCode (both below), Firebase/GMS dependencies,
-  and upstream's `LICENSE-COMMERCIAL`. `README.md`, `CLAUDE.md`,
+  upstream's `LICENSE-COMMERCIAL`, and code Gravel deleted outright, such as
+  the FCM push stack (`PushMessaging`, `PushService` and their call sites; push
+  either registers a device token with Google or does not exist) and the
+  Memfault update check and chunk relay (`Memfault`, `MemfaultChunkQueue`,
+  the Datalogging chunk branch). `README.md`, `CLAUDE.md`,
   `CONTRIBUTING.md`, and `SECURITY.md` are Gravel's own documents: on a
   conflict keep Gravel's version and carry over only upstream changes that
   apply to Gravel.

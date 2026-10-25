@@ -147,7 +147,6 @@ import coredevices.util.CoreConfigHolder
 import coredevices.util.Permission
 import coredevices.util.PermissionRequester
 import coredevices.util.granted
-import coredevices.util.WeatherUnit
 import coredevices.util.emailOrNull
 import coredevices.util.models.CactusSTTMode
 import coredevices.util.transcription.serverHostPort
@@ -169,6 +168,7 @@ import io.rebble.libpebblecommon.database.entity.HealthGender
 import io.rebble.libpebblecommon.js.PKJSApp
 import io.rebble.libpebblecommon.metadata.WatchType
 import io.rebble.libpebblecommon.packets.ProtocolCapsFlag
+import io.rebble.libpebblecommon.services.FirmwareVersion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.Flow
@@ -188,6 +188,7 @@ import kotlin.math.roundToLong
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Instant
 
 enum class TopLevelType(val displayName: String) {
     Phone("Phone"),
@@ -578,6 +579,20 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
             )
         }
     }
+    val anyWatchSupportsFiveMinHrm = remember(watchesCastable) {
+        watchesCastable.any {
+            if (it !is KnownPebbleDevice) return@any false
+            val fw = FirmwareVersion.from(
+                tag = it.runningFwVersion,
+                isRecovery = false,
+                gitHash = "",
+                timestamp = Instant.DISTANT_PAST,
+                isDualSlot = false,
+                isSlot0 = false,
+            ) ?: return@any false
+            HRMonitoringInterval.FiveMin.isSupportedBy(fw)
+        }
+    }
     val watchPrefs = watchPrefs()
     val platformHealthSync: PlatformHealthSync = koinInject()
     val healthSyncTracker: HealthSyncTracker = koinInject()
@@ -673,6 +688,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
             notebookWatchAppItems,
             hasOfflineModels,
             phoneHasModel,
+            anyWatchSupportsFiveMinHrm,
         ) {
             listOfNotNull(
                 basicSettingsActionItem(
@@ -820,6 +836,21 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     },
                     itemText = {
                         stringResource(it.resource)
+                    },
+                ),
+                basicSettingsToggleItem(
+                    id = SettingsIds.HealthImperialUnits,
+                    title = "Imperial Units",
+                    description = "Use miles/feet/inches/lb and Fahrenheit instead of metric units",
+                    keywords = "weather health degrees celsius temperature miles",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.General,
+                    checked = healthSettings.imperialUnits,
+                    onCheckChanged = {
+                        GlobalScope.launch {
+                            libPebble.updateImperialUnits(it)
+                            weatherFetcher.fetchWeather(this)
+                        }
                     },
                 ),
                 basicSettingsActionItem(
@@ -1515,7 +1546,9 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     topLevelType = TopLevelType.Phone,
                     section = Section.Health,
                     selectedItem = healthSettings.hrmMeasurementInterval,
-                    items = HRMonitoringInterval.entries,
+                    items = HRMonitoringInterval.entries.filter {
+                        it != HRMonitoringInterval.FiveMin || anyWatchSupportsFiveMinHrm
+                    },
                     onItemSelected = {
                         libPebble.updateHealthSettings(
                             healthSettings.copy(hrmMeasurementInterval = it)
@@ -1523,6 +1556,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     },
                     itemText = {
                         when (it) {
+                            HRMonitoringInterval.FiveMin -> "Every 5 minutes"
                             HRMonitoringInterval.TenMin -> "Every 10 minutes"
                             HRMonitoringInterval.ThirtyMin -> "Every 30 minutes"
                             HRMonitoringInterval.OneHour -> "Every hour"
@@ -1574,20 +1608,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                             healthSettings.copy(
                                 sleepInsightsEnabled = it
                             )
-                        )
-                    },
-                ),
-                basicSettingsToggleItem(
-                    id = SettingsIds.HealthImperialUnits,
-                    title = "Imperial Units",
-                    description = "Use miles/feet/inches/lb instead of metric units",
-                    topLevelType = TopLevelType.Phone,
-                    section = Section.Health,
-                    checked = healthSettings.imperialUnits,
-                    show = { healthSettings.trackingEnabled },
-                    onCheckChanged = {
-                        libPebble.updateHealthSettings(
-                            healthSettings.copy(imperialUnits = it)
                         )
                     },
                 ),
@@ -1792,24 +1812,6 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     },
                     show = { coreConfig.fetchWeather }
                 ),
-                basicSettingsDropdownItem(
-                    title = "Units",
-                    keywords = "weather degrees",
-                    topLevelType = TopLevelType.Phone,
-                    section = Section.Weather,
-                    items = WeatherUnit.entries,
-                    selectedItem = coreConfig.resolvedWeatherUnits,
-                    onItemSelected = {
-                        coreConfigHolder.update(
-                            coreConfig.copy(
-                                weatherUnits = it,
-                            )
-                        )
-                        GlobalScope.launch { weatherFetcher.fetchWeather(this) }
-                    },
-                    itemText = { it.displayName },
-                    show = { coreConfig.fetchWeather }
-                ),
                 navBarNav?.let { nav -> basicSettingsActionItem(
                     title = "Locations",
                     description = "Configure weather locations",
@@ -1883,7 +1885,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                 ),
                 basicSettingsToggleItem(
                     title = "Use Core OTA service",
-                    description = "Check Core Devices service for Core watch firmware updates instead of Memfault (falls back to Memfault on failure)",
+                    description = "No effect in Gravel builds, which set no Core Devices OTA endpoint. With one set, Core watch firmware checks use it and fall back to the PebbleOS GitHub releases when it fails.",
                     topLevelType = TopLevelType.Phone,
                     section = Section.Debug,
                     checked = coreConfig.useEngDashOta,

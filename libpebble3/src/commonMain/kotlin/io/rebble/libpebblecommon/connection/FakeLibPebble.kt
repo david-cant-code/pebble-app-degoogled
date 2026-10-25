@@ -450,6 +450,10 @@ class FakeLibPebble : LibPebble {
 
     override fun updateHealthSettings(healthSettings: HealthSettings) {}
 
+    override suspend fun updateImperialUnits(imperialUnits: Boolean) {}
+
+    override suspend fun seedImperialUnits(imperialUnits: Boolean) {}
+
     override suspend fun getHealthDebugStats(): HealthDebugStats {
         return HealthDebugStats(
             totalSteps30Days = 0L,
