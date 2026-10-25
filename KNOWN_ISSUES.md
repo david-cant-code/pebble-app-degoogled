@@ -753,6 +753,18 @@ there rather than diverge here. This entry leaves the file when upstream
 disambiguates the match (channel id first, then position-stable matching)
 and the fork syncs it.
 
+## Notebook background jobs are not scheduled where WorkManager cannot start
+
+**Status: accepted; device defect.**
+
+On devices where WorkManager fails as it starts (the failure
+`scheduleBackgroundJob` in MainApplication.kt guards against), the
+Notebook schedules none of its background jobs: automatic backups do
+not run although the setting shows them on, and recordings waiting for
+a charger or a network get no job to start them while Gravel is not
+running. Only Gravel's log says so. This entry leaves the file if the
+Notebook shows the failure or runs those jobs without WorkManager.
+
 ## gradle-wrapper.jar lags the declared Gradle version
 
 **Status: accepted; cosmetic, self-correcting at the next upstream bump.**

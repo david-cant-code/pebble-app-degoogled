@@ -10,6 +10,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.anopticlabs.gravel.notebook.workManagerOrNull
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import java.util.concurrent.TimeUnit
@@ -38,10 +39,11 @@ interface AutoBackupScheduler {
 }
 
 /** [AutoBackupScheduler] on WorkManager: one unique work per slot, each run tagged with its slot. */
-class WorkAutoBackupScheduler(private val context: Context) : AutoBackupScheduler {
-    private val work: WorkManager get() = WorkManager.getInstance(context)
+class WorkAutoBackupScheduler internal constructor(private val workManager: () -> WorkManager) : AutoBackupScheduler {
+    constructor(context: Context) : this({ WorkManager.getInstance(context) })
 
     override fun afterChange(running: String?) {
+        val work = workManagerOrNull(workManager) ?: return
         val slot = changeSlotFor(running)
         val request = OneTimeWorkRequestBuilder<AutoBackupWorker>()
             .setInitialDelay(AutoBackupScheduler.CHANGE_DELAY_MINUTES, TimeUnit.MINUTES)
@@ -52,6 +54,7 @@ class WorkAutoBackupScheduler(private val context: Context) : AutoBackupSchedule
     }
 
     override fun schedulePeriodic() {
+        val work = workManagerOrNull(workManager) ?: return
         val request = PeriodicWorkRequestBuilder<AutoBackupWorker>(AutoBackupScheduler.PERIODIC_HOURS, TimeUnit.HOURS)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, AutoBackupScheduler.BACKOFF_MINUTES, TimeUnit.MINUTES)
             .addTag(SLOT_TAG + AutoBackupRunner.SLOT_PERIODIC)
@@ -60,6 +63,7 @@ class WorkAutoBackupScheduler(private val context: Context) : AutoBackupSchedule
     }
 
     override fun runSoon() {
+        val work = workManagerOrNull(workManager) ?: return
         val request = OneTimeWorkRequestBuilder<AutoBackupWorker>()
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, AutoBackupScheduler.BACKOFF_MINUTES, TimeUnit.MINUTES)
             .addTag(SLOT_TAG + AutoBackupRunner.SLOT_CHECK)
@@ -68,6 +72,7 @@ class WorkAutoBackupScheduler(private val context: Context) : AutoBackupSchedule
     }
 
     override fun cancel() {
+        val work = workManagerOrNull(workManager) ?: return
         for (slot in listOf(AutoBackupRunner.SLOT_CHANGE, AutoBackupRunner.SLOT_NEXT, AutoBackupRunner.SLOT_PERIODIC, AutoBackupRunner.SLOT_CHECK)) {
             work.cancelUniqueWork(WORK_PREFIX + slot)
         }

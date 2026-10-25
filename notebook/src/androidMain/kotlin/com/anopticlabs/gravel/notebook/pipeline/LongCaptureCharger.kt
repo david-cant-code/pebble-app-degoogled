@@ -14,6 +14,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.notebook.workManagerOrNull
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -41,8 +42,11 @@ fun interface ChargingWork {
     fun schedule()
 }
 
-class WorkManagerChargingWork(private val context: Context) : ChargingWork {
+class WorkManagerChargingWork internal constructor(private val workManager: () -> WorkManager) : ChargingWork {
+    constructor(context: Context) : this({ WorkManager.getInstance(context) })
+
     override fun schedule() {
+        val work = workManagerOrNull(workManager) ?: return
         // JobScheduler's charging, not plugged in: android15-release and android16-release
         // JobSchedulerService.BatteryStateTracker.isConsideredCharging also count a held charge of 70% or more under an
         // adaptive charging policy; in android14-release BatteryStateTracker.isCharging is ACTION_CHARGING alone.
@@ -50,7 +54,7 @@ class WorkManagerChargingWork(private val context: Context) : ChargingWork {
             .setConstraints(Constraints.Builder().setRequiresCharging(true).build())
             .setBackoffCriteria(BackoffPolicy.LINEAR, RETRY_MINUTES, TimeUnit.MINUTES)
             .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.KEEP, request)
+        work.enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.KEEP, request)
     }
 
     private companion object {
