@@ -28,9 +28,9 @@ set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING
     "CPU feature floor; must stay in sync with the probe in whisper_cpu.c" FORCE)
 
 # No OpenMP runtime to ship, no RPC surface, no dynamically loaded
-# backends: the engine runs CPU-only inside the app process, and every
-# switch that would add a network daemon, dlopen path, or extra .so stays
-# off. WHISPER_CURL would embed a downloader; model downloads are the
+# backends: the engine runs CPU-only in its own isolated process, and
+# every switch that would add a network daemon, dlopen path, or extra .so
+# stays off. WHISPER_CURL would embed a downloader; model downloads are the
 # Kotlin installer's job, behind its own digest verification.
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 set(GGML_RPC OFF CACHE BOOL "" FORCE)

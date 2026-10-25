@@ -11,7 +11,7 @@ import com.anopticlabs.gravel.models.PinnedModel
  */
 enum class WhisperTier(
     /**
-     * What one long-form transcription adds to the engine process: whisper.cpp v1.9.3's own
+     * What one long-form transcription adds to the engine process: whisper.cpp v1.9.5's own
      * count of the call's state plus a five-minute recording's buffers, with a quarter added.
      * Measured on device; measure again when the engine or the long-form limits change.
      */
@@ -118,15 +118,13 @@ object WhisperModelCatalog {
 
     // Values derived 2026-08-09 (small, base) and 2026-09-01 (tiny) via
     // the three-source procedure above. List order is the order the model
-    // picker shows. No large tier: at the pinned engine revision the
-    // large-v3-turbo q5_0 quant faulted in native inference on the test
-    // device, and its encoder cost cannot meet the watch dictation window
-    // on phone-class CPUs (details in KNOWN_ISSUES); revisit at the next
-    // engine re-pin. The tiny tier is the floor: watch dictation has a
-    // fixed 15 second budget from the firmware, and a phone whose CPU
-    // cannot decode a full window with base inside it still gets a local
-    // option. RAM never recommends tiny; it is a user's or a speed-based
-    // step-down's pick.
+    // picker shows. No large tier: large-v3-turbo q5_0 is too slow for
+    // watch dictation on the test device (details in KNOWN_ISSUES). The
+    // tiny tier is the floor: watch dictation has a fixed 15 second
+    // budget from the firmware, and a phone whose CPU cannot decode a
+    // full window with base inside it still gets a local option. RAM
+    // never recommends tiny; it is a user's or a speed-based step-down's
+    // pick.
     val MODELS: List<WhisperModel> = listOf(
         WhisperModel(
             id = "whisper-small",
