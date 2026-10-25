@@ -10,7 +10,7 @@ import io.rebble.libpebblecommon.database.dao.HealthDao
 import io.rebble.libpebblecommon.database.entity.HealthDataEntity
 import io.rebble.libpebblecommon.database.entity.HRMonitoringInterval
 import io.rebble.libpebblecommon.database.entity.HealthGender
-import io.rebble.libpebblecommon.database.entity.HealthSettingsEntryDao
+import io.rebble.libpebblecommon.database.dao.HealthSettingsEntryRealDao
 import io.rebble.libpebblecommon.database.entity.HealthStatDao
 import io.rebble.libpebblecommon.database.entity.OverlayDataEntity
 import io.rebble.libpebblecommon.database.entity.getWatchSettings
@@ -43,7 +43,7 @@ import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock.System
 
 class Health(
-    private val healthSettingsDao: HealthSettingsEntryDao,
+    private val healthSettingsDao: HealthSettingsEntryRealDao,
     private val libPebbleCoroutineScope: LibPebbleCoroutineScope,
     private val healthDao: HealthDao,
     private val healthStatDao: HealthStatDao,
@@ -80,6 +80,10 @@ class Health(
 
     override suspend fun updateImperialUnits(imperialUnits: Boolean) {
         healthSettingsDao.setImperialUnits(imperialUnits)
+    }
+
+    override suspend fun seedImperialUnits(imperialUnits: Boolean) {
+        healthSettingsDao.seedImperialUnitsAtomically(imperialUnits)
     }
 
     override suspend fun getHealthDebugStats(): HealthDebugStats {

@@ -55,6 +55,23 @@ data class LocationWithData(
 
 private val logger = Logger.withTag("WeatherFetcher")
 
+/**
+ * The one-off move of weather units into the watch's imperial/metric pref: a weather unit the user
+ * picked ([chosen]) overwrites the stored units; with none picked, [localeDefault] is only seeded
+ * where no units are stored. Wind follows that pref on its own; only the UK needs saying out loud.
+ */
+internal suspend fun migrateUnits(
+    chosen: WeatherUnit?,
+    localeDefault: WeatherUnit,
+    overwrite: suspend (imperial: Boolean) -> Unit,
+    seed: suspend (imperial: Boolean) -> Unit,
+    setWindMph: suspend () -> Unit,
+) {
+    val unit = chosen ?: localeDefault
+    if (chosen != null) overwrite(unit == WeatherUnit.Imperial) else seed(unit == WeatherUnit.Imperial)
+    if (unit == WeatherUnit.UkHybrid) setWindMph()
+}
+
 class WeatherFetcher(
     private val systemGeolocation: SystemGeolocation,
     private val coreConfigFlow: CoreConfigFlow,
@@ -77,18 +94,15 @@ class WeatherFetcher(
         fetchIfNotFetchedYet()
     }
 
-    /**
-     * Weather units are now the watch's imperial/metric pref. Seed it once from whatever the
-     * phone was using, so the two sides agree and nobody's units change under them. Wind
-     * follows that pref on its own; only the UK needs saying out loud.
-     */
     private suspend fun migrateUnitsToWatchPref() {
         if (settings.getBoolean(SETTINGS_KEY_MIGRATED_UNITS, false)) return
-        val previous = coreConfigFlow.value.weatherUnits ?: deviceDefaultWeatherUnit()
-        libPebble.updateImperialUnits(previous == WeatherUnit.Imperial)
-        if (previous == WeatherUnit.UkHybrid) {
-            libPebble.setWatchPref(WatchPreference(EnumWatchPref.WindSpeed, WindUnits.Mph))
-        }
+        migrateUnits(
+            chosen = coreConfigFlow.value.weatherUnits,
+            localeDefault = deviceDefaultWeatherUnit(),
+            overwrite = libPebble::updateImperialUnits,
+            seed = libPebble::seedImperialUnits,
+            setWindMph = { libPebble.setWatchPref(WatchPreference(EnumWatchPref.WindSpeed, WindUnits.Mph)) },
+        )
         settings.putBoolean(SETTINGS_KEY_MIGRATED_UNITS, true)
     }
 

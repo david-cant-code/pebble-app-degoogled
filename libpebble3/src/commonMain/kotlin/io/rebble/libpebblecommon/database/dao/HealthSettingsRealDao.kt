@@ -20,6 +20,7 @@ import io.rebble.libpebblecommon.database.entity.HrmPreferencesBlobItem
 import io.rebble.libpebblecommon.database.entity.HrmPreferencesValue
 import io.rebble.libpebblecommon.database.entity.HrmPreferencesValue.Companion.encodeToString
 import io.rebble.libpebblecommon.database.entity.UnitsDistanceValue
+import io.rebble.libpebblecommon.database.entity.seedImperialUnits
 import io.rebble.libpebblecommon.database.entity.UnitsDistanceValue.Companion.encodeToString
 import io.rebble.libpebblecommon.database.entity.updateHeartRateZonesFromAge
 import io.rebble.libpebblecommon.packets.blobdb.BlobResponse
@@ -29,6 +30,12 @@ import kotlin.time.Instant
 
 @Dao
 interface HealthSettingsEntryRealDao : HealthSettingsEntryDao {
+    /** [seedImperialUnits] in one transaction, so a watch write cannot land between its check and its insert. */
+    @Transaction
+    suspend fun seedImperialUnitsAtomically(imperialUnits: Boolean) {
+        seedImperialUnits(imperialUnits)
+    }
+
     @Transaction
     override suspend fun handleWrite(write: DbWrite, transport: String, params: ValueParams): BlobResponse.BlobStatus {
         val key = write.key.toByteArray().decodeToString().trimEnd('\u0000')

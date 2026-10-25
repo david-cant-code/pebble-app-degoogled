@@ -157,6 +157,23 @@ suspend fun HealthSettingsEntryDao.setImperialUnits(imperialUnits: Boolean) {
     )
 }
 
+suspend fun HealthSettingsEntryDao.seedImperialUnits(imperialUnits: Boolean) {
+    unitsSeedEntry(getEntry(KEY_UNITS_DISTANCE), imperialUnits)?.let { insertOrReplace(it) }
+}
+
+/**
+ * The units entry to store when [existing] is the stored one: none if one is stored, else one
+ * stamped at the epoch, so HealthSettingsEntryRealDao.handleWrite takes a later-stamped write from
+ * the watch over it.
+ */
+internal fun unitsSeedEntry(existing: HealthSettingsEntry?, imperialUnits: Boolean): HealthSettingsEntry? =
+    if (existing != null) null
+    else HealthSettingsEntry(
+        id = KEY_UNITS_DISTANCE,
+        value = UnitsDistanceValue(imperialUnits = imperialUnits).encodeToString(),
+        timestamp = Instant.fromEpochMilliseconds(0).asMillisecond(),
+    )
+
 suspend fun HealthSettingsEntryDao.setWatchSettings(healthSettings: HealthSettings) {
     val now = Clock.System.now().asMillisecond()
     insertOrReplace(

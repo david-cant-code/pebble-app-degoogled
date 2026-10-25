@@ -138,6 +138,8 @@ interface HealthApi {
     val healthSettings: Flow<HealthSettings>
     fun updateHealthSettings(healthSettings: HealthSettings)
     suspend fun updateImperialUnits(imperialUnits: Boolean)
+    /** Stores the units only when none are stored; see unitsSeedEntry. */
+    suspend fun seedImperialUnits(imperialUnits: Boolean)
     suspend fun getHealthDebugStats(): HealthDebugStats
     fun requestHealthData(fullSync: Boolean = false)
     fun sendHealthAveragesToWatch()
