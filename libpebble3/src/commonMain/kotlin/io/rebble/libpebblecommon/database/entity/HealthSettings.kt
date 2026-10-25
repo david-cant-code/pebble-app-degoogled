@@ -283,7 +283,9 @@ data class HrmPreferencesValue(
         fun HrmPreferencesValue.asBytes(firmwareVersion: FirmwareVersion): UByteArray =
             HrmPreferencesBlobItem(
                 enabled = enabled,
-                measurementInterval = measurementInterval.value,
+                // Firmware without the five-minute interval gets ten minutes.
+                measurementInterval = measurementInterval.takeIf { it.isSupportedBy(firmwareVersion) }
+                    ?.value ?: HRMonitoringInterval.TenMin.value,
                 hasMeasurementInterval = firmwareVersion >= FW_HRM_MEASUREMENT_INTERVAL,
                 activityTrackingEnabled = activityTrackingEnabled,
                 hasActivityTrackingEnabled = firmwareVersion >= FW_HRM_ACTIVITY_TRACKING,

@@ -1,5 +1,6 @@
 package io.rebble.libpebblecommon.database.entity
 
+import io.rebble.libpebblecommon.database.entity.HrmPreferencesValue.Companion.asBytes
 import io.rebble.libpebblecommon.services.FirmwareVersion
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -26,6 +27,15 @@ class HrmPreferencesTest {
         assertTrue(HRMonitoringInterval.FiveMin.isSupportedBy(fw(39, 0)))
         assertFalse(HRMonitoringInterval.FiveMin.isSupportedBy(fw(38, 2)))
         assertTrue(HRMonitoringInterval.TenMin.isSupportedBy(fw(38, 2)))
+    }
+
+    @Test
+    fun fiveMinIsSentAsTenMinToOlderFirmware() {
+        val fiveMin = HrmPreferencesValue(measurementInterval = HRMonitoringInterval.FiveMin)
+        assertEquals(HRMonitoringInterval.TenMin.value.toUByte(), fiveMin.asBytes(fw(38, 2))[1])
+        assertEquals(HRMonitoringInterval.FiveMin.value.toUByte(), fiveMin.asBytes(fw(39, 0))[1])
+        val thirtyMin = HrmPreferencesValue(measurementInterval = HRMonitoringInterval.ThirtyMin)
+        assertEquals(HRMonitoringInterval.ThirtyMin.value.toUByte(), thirtyMin.asBytes(fw(38, 2))[1])
     }
 
     @Test
