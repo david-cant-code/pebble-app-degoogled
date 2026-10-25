@@ -12,6 +12,11 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import androidx.core.net.toUri
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.music.ArtUriReader
+import com.anopticlabs.gravel.music.ProviderArtOpen
+import com.anopticlabs.gravel.music.albumArtSampleSize
+import com.anopticlabs.gravel.music.ownProviderAuthorities
+import com.anopticlabs.gravel.music.readArtUri
 import io.rebble.libpebblecommon.WatchConfig
 import io.rebble.libpebblecommon.WatchConfigFlow
 import io.rebble.libpebblecommon.connection.AppContext
@@ -147,6 +152,8 @@ class AndroidSystemMusicControl(
 ) : SystemMusicControl {
     private val logger = Logger.withTag("AndroidSystemMusicControl")
     private val context = appContext.context
+    private val ownProviderAuthorities: Set<String> by lazy { ownProviderAuthorities(context) }
+    private val artUriReader = ArtUriReader(libPebbleCoroutineScope, Dispatchers.IO)
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val mediaSessionManager =
         context.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
@@ -428,7 +435,7 @@ class AndroidSystemMusicControl(
                 logger.d { "Album art request no longer matches the current track" }
                 return@withContext null
             }
-            val bitmap = metadata.albumArtBitmap()
+            val bitmap = metadata.albumArtBitmap(width, height)
             if (bitmap == null) {
                 logger.d { "No album art bitmap on current metadata" }
                 return@withContext null
@@ -437,18 +444,36 @@ class AndroidSystemMusicControl(
             bitmap.encodeForWatch(width, height)
         }
 
-    private fun MediaMetadata.albumArtBitmap(): Bitmap? =
+    private suspend fun MediaMetadata.albumArtBitmap(width: Int, height: Int): Bitmap? =
         ALBUM_ART_BITMAP_KEYS.firstNotNullOfOrNull { getBitmap(it) }
-            ?: ALBUM_ART_URI_KEYS.firstNotNullOfOrNull { decodeArtUri(getString(it)) }
+            ?: ALBUM_ART_URI_KEYS.firstNotNullOfOrNull { decodeArtUri(getString(it), width, height) }
 
-    private fun decodeArtUri(uri: String?): Bitmap? {
+    // The URI comes from another app. The bounds and the decode read the same bytes, so the size
+    // checked is the size decoded.
+    private suspend fun decodeArtUri(uri: String?, width: Int, height: Int): Bitmap? {
         if (uri.isNullOrEmpty()) return null
+        val providerOpen = ProviderArtOpen(context.contentResolver)
+        val bytes = artUriReader.readArtUri(
+            uri.toUri(),
+            ownProviderAuthorities,
+            open = providerOpen::open,
+            abandon = providerOpen::abandon,
+        )
+        if (bytes == null) {
+            logger.d { "No album art bytes from uri: refused, unreadable, too large, or no answer in time" }
+            return null
+        }
         return try {
-            context.contentResolver.openInputStream(uri.toUri())
-                ?.use { BitmapFactory.decodeStream(it) }
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            val sample = albumArtSampleSize(bounds.outWidth, bounds.outHeight, width, height)
+            if (sample == null) {
+                logger.d { "Album art from uri has no size or too many pixels" }
+                return null
+            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
         } catch (e: Exception) {
-            // Remote schemes we can't open, and providers that refuse us.
-            logger.d(e) { "Couldn't read album art uri" }
+            logger.d { "Couldn't decode album art from uri: ${e::class.simpleName}" }
             null
         }
     }
