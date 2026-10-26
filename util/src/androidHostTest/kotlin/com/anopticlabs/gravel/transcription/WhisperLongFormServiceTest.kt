@@ -1,5 +1,8 @@
 package com.anopticlabs.gravel.transcription
 
+import co.touchlab.kermit.LogWriter
+import co.touchlab.kermit.Logger
+import co.touchlab.kermit.Severity
 import com.anopticlabs.gravel.whisper.WhisperEngineTimeoutException
 import com.anopticlabs.gravel.whisper.WhisperLongForm
 import com.anopticlabs.gravel.whisper.WhisperLongFormResult
@@ -21,23 +24,32 @@ import coredevices.whisper.TranscribeStats
 import coredevices.whisper.WhisperEngineUnavailableException
 import io.rebble.libpebblecommon.voice.DICTATION_DEADLINE
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.CoroutineContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -97,6 +109,8 @@ class WhisperLongFormServiceTest {
 
         /** While set, a model load blocks here. */
         @Volatile var initGate: CountDownLatch? = null
+        val firstLoader = AtomicReference<Thread>()
+        val supportedCalls = AtomicInteger()
 
         /** Set: every model load fails with it, as a model the engine cannot read does. */
         @Volatile var initFailure: Throwable? = null
@@ -105,12 +119,23 @@ class WhisperLongFormServiceTest {
         /** Set: every call answers "stopped" at once, though nothing asked it to stop. */
         @Volatile var stopsUnasked = false
 
+        /** Runs inside every warm-up call. */
+        @Volatile var onWarmUp: (() -> Unit)? = null
+
         /** Set: the next dictation runs this long, then fails with it. */
         @Volatile var dictationFailure: Pair<Long, Throwable>? = null
 
+        /** Set: the next dictation blocks here, as a decode that ignores its abort, then fails. */
+        @Volatile var dictationWedge: CountDownLatch? = null
+
         val engine = object : WhisperEngine {
-            override fun supported(): Boolean = true
+            override fun supported(): Boolean {
+                supportedCalls.incrementAndGet()
+                return true
+            }
+
             override fun init(modelPath: String): Long {
+                firstLoader.compareAndSet(null, Thread.currentThread())
                 initAttempts.incrementAndGet()
                 initGate?.await(20, TimeUnit.SECONDS)
                 initFailure?.let { throw it }
@@ -126,11 +151,19 @@ class WhisperLongFormServiceTest {
                 placement: EnginePlacement,
                 stats: TranscribeStats?,
             ): String {
-                if (pcm.all { it == 0f }) return ""
+                if (pcm.all { it == 0f }) {
+                    onWarmUp?.invoke()
+                    return ""
+                }
                 dictationFailure?.let { (work, failure) ->
                     dictationFailure = null
                     Thread.sleep(work)
                     throw failure
+                }
+                dictationWedge?.let { wedge ->
+                    dictationWedge = null
+                    wedge.await(20, TimeUnit.SECONDS)
+                    throw RuntimeException("never answered")
                 }
                 dictations++
                 return "hello world"
@@ -193,6 +226,8 @@ class WhisperLongFormServiceTest {
         unwindBound: Duration = 10.seconds,
         holdWait: Duration = 5.seconds,
         provider: FakeModelProvider = FakeModelProvider(),
+        dispatcher: CoroutineDispatcher = Dispatchers.Default,
+        ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     ) = WhisperTranscriptionService(
         coreConfigFlow = CoreConfigFlow(config),
         modelProvider = provider,
@@ -203,11 +238,13 @@ class WhisperLongFormServiceTest {
         dictationHoldBound = holdBound,
         longFormHoldWait = holdWait,
         longFormUnwindBound = unwindBound,
+        dispatcher = dispatcher,
+        ioDispatcher = ioDispatcher,
     )
 
-    private suspend fun awaitUntil(what: String, condition: () -> Boolean) {
+    private suspend fun awaitUntil(what: String, within: Duration = 30.seconds, condition: () -> Boolean) {
         try {
-            withTimeout(30.seconds) { while (!condition()) delay(5) }
+            withTimeout(within) { while (!condition()) delay(5) }
         } catch (e: Exception) {
             throw AssertionError("Timed out waiting for: $what", e)
         }
@@ -379,6 +416,240 @@ class WhisperLongFormServiceTest {
         }
         assertEquals(WhisperTranscriptionService.MAX_LONG_FORM_RETRIES + 1, fake.calls.get())
         assertTrue(fake.endedFor.orEmpty().contains("nothing requested"), "unexpected reason: ${fake.endedFor}")
+    }
+
+    /** A load job that checked the handle before an unasked stop lost the model does not stand in for a new load. */
+    @Test
+    fun aLoadThatSawTheModelBeforeAStopNothingRequestedCostsNoRetry() =
+        aLoadThatSawTheModelBeforeItWasLostCostsNoRetry { stopsUnasked = true }
+
+    /** As above, for an engine process lost under the call. */
+    @Test
+    fun aLoadThatSawTheModelBeforeTheEngineWasLostCostsNoRetry() =
+        aLoadThatSawTheModelBeforeItWasLostCostsNoRetry { failure = WhisperEngineUnavailableException("engine process died") }
+
+    private fun aLoadThatSawTheModelBeforeItWasLostCostsNoRetry(loss: WindowEngine.() -> Unit) = runBlocking<Unit>(Dispatchers.Default) {
+        val fake = WindowEngine().apply(loss)
+        withSecondLoadHeld(fake) {
+            val transcription = async(loop) { runCatching { service.transcribeLongForm(fake.hear(recording(minutes = 1))) } }
+            startSecondLoad()
+            fake.initGate?.countDown()
+            awaitUntil("a second engine call while the second load job is held", within = 15.seconds) { fake.calls.get() >= 2 }
+            assertTrue(order.held.get(), "the second load job was never held after its check")
+            order.release.countDown()
+            val result = withTimeout(30.seconds) { transcription.await() }
+            assertIs<TranscriptionException.TranscriptionServiceUnavailable>(result.exceptionOrNull())
+            assertEquals(WhisperTranscriptionService.MAX_LONG_FORM_RETRIES + 1, fake.calls.get())
+            assertEquals(WhisperTranscriptionService.MAX_LONG_FORM_RETRIES + 1, fake.inits.get(), "one load per engine call")
+        }
+    }
+
+    /** A dictation after one that lost the engine loads the model again while a job that checked before the loss is held. */
+    @Test
+    fun aDictationAfterALostEngineDoesNotWaitOnALoadThatSawTheModel() = runBlocking<Unit>(Dispatchers.Default) {
+        val fake = WindowEngine().apply { dictationFailure = 0L to WhisperEngineUnavailableException("engine process died") }
+        withSecondLoadHeld(fake) {
+            val first = async(loop) { dictate() }
+            startSecondLoad()
+            fake.initGate?.countDown()
+            assertIs<TranscriptionException.TranscriptionServiceUnavailable>(withTimeout(30.seconds) { first.await() }.exceptionOrNull())
+            assertTrue(order.held.get(), "the second load job was never held after its check")
+            val second = withTimeout(15.seconds) { async(loop) { dictate() }.await() }
+            assertEquals("hello world", second.getOrNull(), "the second dictation failed: ${second.exceptionOrNull()}")
+            assertEquals(2, fake.inits.get(), "the lost model was not loaded again")
+        }
+    }
+
+    /** As above, after a Notebook call that ran past its deadline. */
+    @Test
+    fun aDictationAfterACallPastItsDeadlineDoesNotWaitOnALoadThatSawTheModel() = runBlocking<Unit>(Dispatchers.Default) {
+        val fake = WindowEngine().apply { failure = WhisperEngineTimeoutException("did not answer in time") }
+        withSecondLoadHeld(fake) {
+            val transcription = async(loop) { runCatching { service.transcribeLongForm(fake.hear(recording(minutes = 1))) } }
+            startSecondLoad()
+            fake.initGate?.countDown()
+            assertIs<LongFormTimeoutException>(withTimeout(30.seconds) { transcription.await() }.exceptionOrNull())
+            assertTrue(order.held.get(), "the second load job was never held after its check")
+            val second = withTimeout(15.seconds) { async(loop) { dictate() }.await() }
+            assertEquals("hello world", second.getOrNull(), "the second dictation failed: ${second.exceptionOrNull()}")
+            assertEquals(2, fake.inits.get(), "the lost model was not loaded again")
+        }
+    }
+
+    /** As above, after a dictation whose decode ignored its abort past the unwind bound. */
+    @Test
+    fun aDictationAfterAWedgedDecodeDoesNotWaitOnALoadThatSawTheModel() = runBlocking<Unit>(Dispatchers.Default) {
+        val wedge = CountDownLatch(1)
+        val fake = WindowEngine().apply { dictationWedge = wedge }
+        // The bound also covers the startup load's warm-up, which withSecondLoadHeld holds at the engine.
+        withSecondLoadHeld(fake, unwindBound = 5.seconds) {
+            try {
+                val first = async(loop) { runCatching { service.transcribeLocal(realPcmBytes(), sampleRate = 16_000, timeout = 100.milliseconds) } }
+                startSecondLoad()
+                fake.initGate?.countDown()
+                assertIs<TimeoutCancellationException>(withTimeout(30.seconds) { first.await() }.exceptionOrNull())
+                assertTrue(fake.endedFor.orEmpty().contains("ignored its abort"), "the decode was not abandoned: ${fake.endedFor}")
+                assertTrue(order.held.get(), "the second load job was never held after its check")
+                val second = withTimeout(15.seconds) { async(loop) { dictate() }.await() }
+                assertEquals("hello world", second.getOrNull(), "the second dictation failed: ${second.exceptionOrNull()}")
+                assertEquals(2, fake.inits.get(), "the lost model was not loaded again")
+            } finally {
+                wedge.countDown()
+            }
+        }
+    }
+
+    /**
+     * The config watcher's load job is recorded before it runs: with the watcher held after starting it until a
+     * dictation has lost the engine, the next dictation loads the model again.
+     */
+    @Test
+    fun aLoadJobStartedBeforeALossIsNotWaitedOnAfterIt() = runBlocking<Unit>(Dispatchers.Default) {
+        val fake = WindowEngine().apply { dictationFailure = 0L to WhisperEngineUnavailableException("engine process died") }
+        val io = HoldingDispatcher()
+        val dictations = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        try {
+            withSecondLoadHeld(fake, ioDispatcher = io) {
+                val first = async(dictations) { dictate() }
+                // On a thread of its own the first dictation is waiting on the startup load once this returns.
+                withContext(dictations) {}
+                io.holdNextDispatchFrom(withContext(loop) { Thread.currentThread() })
+                startSecondLoad()
+                assertTrue(io.holding, "the config watcher was not held at the second job's start")
+                fake.initGate?.countDown()
+                assertIs<TranscriptionException.TranscriptionServiceUnavailable>(withTimeout(30.seconds) { first.await() }.exceptionOrNull())
+                assertTrue(order.held.get(), "the second load job was never held after its check")
+                assertTrue(io.holding, "the config watcher was let go before the first dictation lost the engine")
+                io.release()
+                withContext(loop) {}
+                val second = withTimeout(15.seconds) { async(dictations) { dictate() }.await() }
+                assertEquals("hello world", second.getOrNull(), "the second dictation failed: ${second.exceptionOrNull()}")
+            }
+        } finally {
+            io.close()
+            dictations.close()
+        }
+    }
+
+    /**
+     * A service whose startup load waits at the engine. [startSecondLoad] changes the config, so the config watcher
+     * starts a second load job, which finds the model loaded once the gate opens and is then held ([SecondLoadOrder]).
+     * The service and its config watcher run on [loop], one thread, so an operation started there before
+     * [startSecondLoad] that reaches its wait without suspending first is waiting on the startup load before the
+     * second job exists.
+     */
+    private inner class SecondLoad(
+        val fake: WindowEngine,
+        val service: WhisperTranscriptionService,
+        val loop: CoroutineDispatcher,
+        val order: SecondLoadOrder,
+    ) {
+        suspend fun startSecondLoad() {
+            val checks = fake.supportedCalls.get()
+            config.value = config.value.copy(sttConfig = config.value.sttConfig.copy(spokenLanguage = "en"))
+            // The second job asks whether the engine is supported once it is past the config watcher's check.
+            awaitUntil("the second load job started") { fake.supportedCalls.get() > checks }
+        }
+
+        suspend fun dictate() = runCatching { service.transcribeLocal(realPcmBytes(), sampleRate = 16_000) }
+    }
+
+    private suspend fun withSecondLoadHeld(
+        fake: WindowEngine,
+        ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+        unwindBound: Duration = 10.seconds,
+        test: suspend SecondLoad.() -> Unit,
+    ) {
+        val order = SecondLoadOrder(fake)
+        val writersBefore = Logger.config.logWriterList
+        val loop = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        fake.initGate = CountDownLatch(1)
+        fake.onWarmUp = order::firstWarmUp
+        Logger.addLogWriter(order)
+        try {
+            val service = serviceFor(fake, unwindBound = unwindBound, dispatcher = loop, ioDispatcher = ioDispatcher)
+            awaitUntil("the startup load reached the engine") { fake.initAttempts.get() == 1 }
+            SecondLoad(fake, service, loop, order).test()
+        } finally {
+            fake.initGate?.countDown()
+            order.releaseAll()
+            Logger.setLogWriters(writersBefore)
+            loop.close()
+        }
+    }
+
+    /**
+     * Orders the startup load (the fake's first loader thread) and the second load job: the startup load waits at its
+     * warm-up until the second job, having found the model loaded, reaches its own; the startup load's warm-up then
+     * holds the engine until the second is turned away, and the second is held there until [release].
+     */
+    private class SecondLoadOrder(private val fake: WindowEngine) : LogWriter() {
+        val held = AtomicBoolean()
+        val release = CountDownLatch(1)
+        private val secondAtWarmUp = CountDownLatch(1)
+        private val firstInWarmUp = CountDownLatch(1)
+        private val secondTurnedAway = CountDownLatch(1)
+        @Volatile private var second: Thread? = null
+
+        fun firstWarmUp() {
+            if (firstInWarmUp.count == 0L) return
+            firstInWarmUp.countDown()
+            secondTurnedAway.await(10, TimeUnit.SECONDS)
+        }
+
+        override fun log(severity: Severity, message: String, tag: String, throwable: Throwable?) {
+            if (tag != "WhisperTranscriptionService") return
+            val first = (fake.firstLoader.get() ?: return) == Thread.currentThread()
+            when {
+                message.startsWith("Warming up") && first -> secondAtWarmUp.await(10, TimeUnit.SECONDS)
+                message.startsWith("Warming up") && secondAtWarmUp.count > 0 -> {
+                    second = Thread.currentThread()
+                    secondAtWarmUp.countDown()
+                    firstInWarmUp.await(10, TimeUnit.SECONDS)
+                }
+                message.startsWith("Skipping warmup") && second == Thread.currentThread() && held.compareAndSet(false, true) -> {
+                    secondTurnedAway.countDown()
+                    release.await(20, TimeUnit.SECONDS)
+                }
+            }
+        }
+
+        fun releaseAll() {
+            listOf(release, secondAtWarmUp, firstInWarmUp, secondTurnedAway).forEach { it.countDown() }
+        }
+    }
+
+    /** Runs blocks on its own threads; the next dispatch from the thread [holdNextDispatchFrom] names then waits there for [release]. */
+    private class HoldingDispatcher : CoroutineDispatcher(), AutoCloseable {
+        private val threads = Executors.newCachedThreadPool()
+        private val released = CountDownLatch(1)
+        @Volatile private var holdFrom: Thread? = null
+        @Volatile var holding = false
+            private set
+
+        fun holdNextDispatchFrom(thread: Thread) {
+            holdFrom = thread
+        }
+
+        fun release() = released.countDown()
+
+        override fun dispatch(context: CoroutineContext, block: Runnable) {
+            val hold = holdFrom == Thread.currentThread()
+            if (hold) {
+                holdFrom = null
+                holding = true
+            }
+            threads.execute(block)
+            if (hold) {
+                released.await(20, TimeUnit.SECONDS)
+                holding = false
+            }
+        }
+
+        override fun close() {
+            released.countDown()
+            threads.shutdown()
+        }
     }
 
     /** A model that fails to load for a reason a reload does not change is not reloaded again and again. */
