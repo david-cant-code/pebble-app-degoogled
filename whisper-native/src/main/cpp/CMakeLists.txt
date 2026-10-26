@@ -32,10 +32,14 @@ set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING
 # every switch that would add a network daemon, dlopen path, or extra .so
 # stays off. WHISPER_CURL would embed a downloader; model downloads are the
 # Kotlin installer's job, behind its own digest verification.
+# GGML_CPU_KLEIDIAI would download KleidiAI's sources from github.com at
+# configure time (whisper.cpp v1.9.5: ggml/src/ggml-cpu/CMakeLists.txt,
+# FetchContent_Declare(kleidiai)).
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 set(GGML_RPC OFF CACHE BOOL "" FORCE)
 set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
 set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
+set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "" FORCE)
 set(GGML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
