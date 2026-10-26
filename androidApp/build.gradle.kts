@@ -588,9 +588,9 @@ tasks.configureEach {
     if (name == "preBuild") dependsOn(verifyReleaseVersionFile)
 }
 
-// Fork: FdroidGuardrailsTest and ExcludedAssetSentinelTest read the git-tracked
-// tree (build files, tracked binaries, sources) through git rather than
-// through declared task inputs, so Gradle cannot tell when their verdict is
+// Fork: the tree-reading sentinels (the tests that use TrackedTree) read the
+// git-tracked tree (build files, tracked binaries, sources) through git rather
+// than through declared task inputs, so Gradle cannot tell when their verdict is
 // stale. Left tracked, an unchanged test classpath would let the unit test
 // task be skipped as up-to-date or restored from the build cache while the
 // tree they judge had changed, which is the silent-skip shape the guardrails
