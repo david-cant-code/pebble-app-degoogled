@@ -45,6 +45,12 @@ set(LLAMA_BUILD_IS_DEV OFF CACHE BOOL "" FORCE)
 # CMake's Debug config carries no optimization level; unoptimized ggml is slower by an order of magnitude.
 add_compile_options($<$<CONFIG:Debug>:-O3>)
 
+# Relative paths in the output; see VerifyNativeLibPaths in androidApp/build.gradle.kts.
+add_compile_options(
+    "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=src"
+    "-ffile-prefix-map=${CMAKE_BINARY_DIR}=build"
+    "-ffile-prefix-map=${CMAKE_ANDROID_NDK}=ndk")
+
 add_subdirectory(llama.cpp)
 
 # CPU capability probe, a baseline-arch library (llm_cpu.c).

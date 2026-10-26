@@ -50,6 +50,12 @@ set(WHISPER_CURL OFF CACHE BOOL "" FORCE)
 # Release keeps its own flags.
 add_compile_options($<$<CONFIG:Debug>:-O3>)
 
+# Relative paths in the output; see VerifyNativeLibPaths in androidApp/build.gradle.kts.
+add_compile_options(
+    "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=src"
+    "-ffile-prefix-map=${CMAKE_BINARY_DIR}=build"
+    "-ffile-prefix-map=${CMAKE_ANDROID_NDK}=ndk")
+
 add_subdirectory(whisper.cpp)
 
 # CPU capability probe. A separate baseline-arch library so the check can

@@ -2406,6 +2406,17 @@ What the tree guarantees, and how it is pinned:
   every build uses the same NDK and CMake and the recipe has exact values
   to provision. `FdroidGuardrailsTest` fails when the modules name different
   values.
+- Native libraries built from source name neither the checkout nor the
+  SDK by absolute path: each native module's `CMakeLists.txt` maps its
+  source, build and NDK directories to relative names
+  (`-ffile-prefix-map`). `VerifyNativeLibPaths` in
+  `androidApp/build.gradle.kts` fails a build whose merged native
+  libraries, read before stripping, name the checkout as a whole path,
+  whose libraries built here name the SDK or a home directory, or that
+  hold a library listed neither as built here nor as a dependency's.
+  `NativeLibPathsSentinelTest` checks the mappings in the CMake builds
+  the Gradle files declare, and the check's registration and its list
+  of libraries built here.
 - `versionName` is `git describe --tags --first-parent HEAD` and
   `versionCode` the commit count, both functions of the built commit
   (`androidApp/build.gradle.kts`), so a tag checkout reports exactly the
