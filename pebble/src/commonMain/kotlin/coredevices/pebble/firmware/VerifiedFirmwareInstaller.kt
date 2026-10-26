@@ -1,9 +1,9 @@
 package coredevices.pebble.firmware
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.network.readBody
 import io.ktor.client.HttpClient
 import io.ktor.client.request.prepareGet
-import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.contentLength
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.readAvailable
@@ -246,36 +246,37 @@ class VerifiedFirmwareInstaller(
                     throw InstallFailure("download failed (${response.status.value})")
                 }
                 val total = expected.sizeBytes ?: response.contentLength()
-                val channel = response.bodyAsChannel()
-                SystemFileSystem.sink(path).buffered().use { fileSink ->
-                    val buffer = ByteArray(DOWNLOAD_CHUNK_BYTES)
-                    while (true) {
-                        // An infinite timeout must bypass withTimeoutOrNull
-                        // entirely, not just never expire: Duration.INFINITE
-                        // still schedules a Long.MAX_VALUE timer, and the
-                        // kotlinx-coroutines-test scheduler fast-forwards
-                        // virtual time to the next scheduled event whenever
-                        // the test dispatcher idles while MockEngine's body
-                        // writer is still delivering chunks on a real
-                        // dispatcher. That fired the stall branch spuriously
-                        // in the very tests that pass INFINITE to disable it.
-                        val read = if (readStallTimeout.isInfinite()) {
-                            channel.readAvailable(buffer, 0, buffer.size)
-                        } else {
-                            withTimeoutOrNull(readStallTimeout) {
+                response.readBody { channel ->
+                    SystemFileSystem.sink(path).buffered().use { fileSink ->
+                        val buffer = ByteArray(DOWNLOAD_CHUNK_BYTES)
+                        while (true) {
+                            // An infinite timeout must bypass withTimeoutOrNull
+                            // entirely, not just never expire: Duration.INFINITE
+                            // still schedules a Long.MAX_VALUE timer, and the
+                            // kotlinx-coroutines-test scheduler fast-forwards
+                            // virtual time to the next scheduled event whenever
+                            // the test dispatcher idles while MockEngine's body
+                            // writer is still delivering chunks on a real
+                            // dispatcher. That fired the stall branch spuriously
+                            // in the very tests that pass INFINITE to disable it.
+                            val read = if (readStallTimeout.isInfinite()) {
                                 channel.readAvailable(buffer, 0, buffer.size)
-                            } ?: throw InstallFailure("download stalled")
+                            } else {
+                                withTimeoutOrNull(readStallTimeout) {
+                                    channel.readAvailable(buffer, 0, buffer.size)
+                                } ?: throw InstallFailure("download stalled")
+                            }
+                            if (read == -1) break
+                            if (read == 0) continue
+                            received += read
+                            if (received > sizeCap) {
+                                throw InstallFailure("download larger than expected")
+                            }
+                            fileSink.write(buffer, startIndex = 0, endIndex = read)
+                            hashBuffer.write(buffer, 0, read)
+                            hashingSink.write(hashBuffer, hashBuffer.size)
+                            onProgress(total?.let { (received.toDouble() / it).toFloat() })
                         }
-                        if (read == -1) break
-                        if (read == 0) continue
-                        received += read
-                        if (received > sizeCap) {
-                            throw InstallFailure("download larger than expected")
-                        }
-                        fileSink.write(buffer, startIndex = 0, endIndex = read)
-                        hashBuffer.write(buffer, 0, read)
-                        hashingSink.write(hashBuffer, hashBuffer.size)
-                        onProgress(total?.let { (received.toDouble() / it).toFloat() })
                     }
                 }
             }

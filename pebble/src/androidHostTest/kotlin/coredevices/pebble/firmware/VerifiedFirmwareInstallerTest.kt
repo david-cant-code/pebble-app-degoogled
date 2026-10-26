@@ -1,5 +1,6 @@
 package coredevices.pebble.firmware
 
+import com.anopticlabs.gravel.network.EndlessResponse
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandleScope
@@ -302,6 +303,24 @@ class VerifiedFirmwareInstallerTest {
         val state = assertIs<ForkFirmwareInstallState.Failed>(installer.stateValueFor("watch1"))
         assertContains(state.reason, "larger than expected")
         assertTrue(forkFilesLeft().isEmpty())
+    }
+
+    @Test
+    fun anEndlessOversizeStreamLeavesNoCopierRunning() = runTest {
+        record(singleSlotPbz(), size = 10L)
+        val server = EndlessResponse()
+        val installer = VerifiedFirmwareInstaller(
+            httpClient = server.client,
+            expectations = expectations,
+            downloadDirectory = { tempDir },
+            watchUpdateStates = { watchStates },
+            scope = backgroundScope,
+            readStallTimeout = Duration.INFINITE,
+        )
+        installer.runInstall(target(), update())
+        val state = assertIs<ForkFirmwareInstallState.Failed>(installer.stateValueFor("watch1"))
+        assertContains(state.reason, "larger than expected")
+        server.assertNoCopierLeft()
     }
 
     @Test

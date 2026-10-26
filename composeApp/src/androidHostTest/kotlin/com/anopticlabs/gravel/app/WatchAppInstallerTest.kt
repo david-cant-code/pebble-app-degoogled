@@ -1,5 +1,6 @@
 package com.anopticlabs.gravel.app
 
+import com.anopticlabs.gravel.network.EndlessResponse
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandleScope
@@ -71,6 +72,14 @@ class WatchAppInstallerTest {
         assertEquals(1, sideloaded.size)
         assertContentEquals(pbw, sideloaded.single())
         assertTrue(nothingStaged())
+    }
+
+    @Test
+    fun anEndlessBodyFailsTheCheckAndLeavesNoCopierRunning() = runBlocking {
+        val server = EndlessResponse()
+        val installer = WatchAppInstaller(server.client, stagingDir, sideload = { true }, downloadLimit = 10.seconds)
+        assertEquals(WatchAppInstallResult.CHECK_FAILED, installer.install(release()))
+        server.assertNoCopierLeft()
     }
 
     @Test
