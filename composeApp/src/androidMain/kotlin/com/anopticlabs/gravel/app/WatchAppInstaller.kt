@@ -1,8 +1,8 @@
 package com.anopticlabs.gravel.app
 
+import com.anopticlabs.gravel.network.readBody
 import io.ktor.client.HttpClient
 import io.ktor.client.request.prepareGet
-import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.readAvailable
 import java.io.ByteArrayOutputStream
@@ -74,15 +74,16 @@ class WatchAppInstaller(
     private suspend fun download(release: WatchAppRelease): ByteArray? =
         httpClient.prepareGet(release.url).execute { response ->
             if (!response.status.isSuccess()) return@execute null
-            val channel = response.bodyAsChannel()
-            val body = ByteArrayOutputStream()
-            val buffer = ByteArray(16 * 1024)
-            while (body.size() <= release.sizeBytes) {
-                val read = channel.readAvailable(buffer, 0, buffer.size)
-                if (read == -1) break
-                body.write(buffer, 0, read)
+            response.readBody { channel ->
+                val body = ByteArrayOutputStream()
+                val buffer = ByteArray(16 * 1024)
+                while (body.size() <= release.sizeBytes) {
+                    val read = channel.readAvailable(buffer, 0, buffer.size)
+                    if (read == -1) break
+                    body.write(buffer, 0, read)
+                }
+                body.toByteArray()
             }
-            body.toByteArray()
         }
 
     private fun sha256Hex(bytes: ByteArray): String =

@@ -519,6 +519,87 @@ abstract class VerifyApkContents : DefaultTask() {
     }
 }
 
+/**
+ * Gravel: fails if a merged native library (every ABI, before stripping) names this checkout by absolute path, if a
+ * library built here ([builtHere], each required) names the SDK or a home directory ([machinePaths]), or if a library
+ * is named in neither [builtHere] nor [dependencies]. Dependencies' prebuilt libraries can name their builders'
+ * machines, so only [builtHere] is checked for [machinePaths]. -ffile-prefix-map in the native modules' CMakeLists.txt
+ * remaps paths in debug info and in __FILE__ (clang release/19.x clang/include/clang/Driver/Options.td
+ * ffile_prefix_map_EQ); the check reads the libraries before stripping because the linker hashes the whole output,
+ * debug info included, into the build ID (lld release/19.x lld/ELF/Writer.cpp writeBuildId). Wired like
+ * VerifyApkContents, as a listener on AGP 9.3.1 SingleArtifact.MERGED_NATIVE_LIBS ("not yet been stripped").
+ */
+abstract class VerifyNativeLibPaths : DefaultTask() {
+
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val nativeLibs: DirectoryProperty
+
+    @get:Input
+    abstract val checkoutPaths: SetProperty<String>
+
+    @get:Input
+    abstract val machinePaths: SetProperty<String>
+
+    @get:Input
+    abstract val builtHere: SetProperty<String>
+
+    @get:Input
+    abstract val dependencies: SetProperty<String>
+
+    @TaskAction
+    fun verify() {
+        val checkout = needles(checkoutPaths.get())
+        val machine = needles(machinePaths.get())
+        if (checkout.isEmpty() || machine.isEmpty()) throw GradleException("Native library path check has no path to look for")
+        // Every build first finds each needle in a planted sample, so a broken match fails here.
+        for ((path, needle) in checkout + machine) {
+            if (!names("\u0000$needle/x\u0000", needle)) throw GradleException("Native library path check cannot find $path")
+        }
+        val dir = nativeLibs.get().asFile
+        val libs = dir.walkTopDown().filter { it.isFile && it.extension == "so" }.toList()
+        val found = libs.map { it.name }.toSet()
+        val problems = mutableListOf<String>()
+        val missing = builtHere.get() - found
+        if (missing.isNotEmpty()) problems += "libraries built here are missing: ${missing.sorted()}"
+        val unknown = found - builtHere.get() - dependencies.get()
+        if (unknown.isNotEmpty()) problems += "libraries named neither built here nor a dependency's: ${unknown.sorted()}"
+        for (lib in libs) {
+            val text = latin1(lib.readBytes())
+            val paths = if (lib.name in builtHere.get()) checkout + machine else checkout
+            for ((path, needle) in paths) {
+                if (names(text, needle)) problems += "${lib.relativeTo(dir)} names $path"
+            }
+        }
+        if (problems.isNotEmpty()) {
+            throw GradleException("Native library path check failed:\n" + problems.joinToString("\n") { "  $it" })
+        }
+        logger.lifecycle("Native library paths verified: ${libs.size} libraries")
+    }
+
+    // ISO-8859-1 maps bytes to chars one to one, so a byte search becomes a string search.
+    private fun latin1(bytes: ByteArray) = String(bytes, Charsets.ISO_8859_1)
+
+    /** Each path (without a trailing slash; the filesystem root dropped) to its UTF-8 bytes as a search string. */
+    private fun needles(paths: Set<String>) =
+        paths.map { it.trimEnd('/') }.filter { it.isNotEmpty() }.associateWith { latin1(it.toByteArray(Charsets.UTF_8)) }.toList()
+
+    /** Whether [text] holds [needle] as a whole path: not the tail of a longer name, and followed by '/' or NUL. */
+    private fun names(text: String, needle: String): Boolean {
+        var at = text.indexOf(needle)
+        while (at >= 0) {
+            val before = text.getOrElse(at - 1) { '\u0000' }
+            val after = text.getOrElse(at + needle.length) { '\u0000' }
+            if (!before.inName() && (after == '/' || after == '\u0000')) return true
+            at = text.indexOf(needle, at + 1)
+        }
+        return false
+    }
+
+    // Bytes from 0x80 up are parts of UTF-8 names.
+    private fun Char.inName() = code >= 0x80 || isLetterOrDigit() || this in "._~+-/"
+}
+
 // Fork: F-Droid's update checker reads the versionCode of a tagged release from
 // androidApp/version.properties (the recipe's UpdateCheckData names that file);
 // it cannot count commits the way the build does. The file is bumped in the
@@ -588,9 +669,9 @@ tasks.configureEach {
     if (name == "preBuild") dependsOn(verifyReleaseVersionFile)
 }
 
-// Fork: FdroidGuardrailsTest and ExcludedAssetSentinelTest read the git-tracked
-// tree (build files, tracked binaries, sources) through git rather than
-// through declared task inputs, so Gradle cannot tell when their verdict is
+// Fork: the tree-reading sentinels (the tests that use TrackedTree) read the
+// git-tracked tree (build files, tracked binaries, sources) through git rather
+// than through declared task inputs, so Gradle cannot tell when their verdict is
 // stale. Left tracked, an unchanged test classpath would let the unit test
 // task be skipped as up-to-date or restored from the build cache while the
 // tree they judge had changed, which is the silent-skip shape the guardrails
@@ -662,6 +743,30 @@ androidComponents {
         variant.artifacts.use(verifyIsolated)
             .wiredWith(VerifyIsolatedServices::mergedManifest)
             .toListenTo(com.android.build.api.artifact.SingleArtifact.MERGED_MANIFEST)
+    }
+
+    // Gravel: every variant runs VerifyNativeLibPaths on its merged native libraries.
+    onVariants { variant ->
+        val verifyPaths = tasks.register<VerifyNativeLibPaths>(
+            "verify${variant.name.replaceFirstChar { it.uppercase() }}NativeLibPaths",
+        ) {
+            group = "verification"
+            description = "Fails if a merged native library names the checkout, or one built here the SDK or a home directory."
+            checkoutPaths.set(setOf(rootDir.absolutePath, rootDir.canonicalPath))
+            val homes = listOf(File(System.getProperty("user.home")), gradle.gradleUserHomeDir)
+            machinePaths.set(
+                sdkComponents.sdkDirectory.map { sdk ->
+                    (homes + sdk.asFile).flatMap { listOf(it.absolutePath, it.canonicalPath) }.toSet()
+                },
+            )
+            builtHere.set(
+                setOf("libwhisperjni.so", "libwhispercpu.so", "libllmjni.so", "libllmcpu.so", "libgravelsocketfilter.so"),
+            )
+            dependencies.set(setOf("libsqliteJni.so", "libspeex_codec.so", "libandroidx.graphics.path.so"))
+        }
+        variant.artifacts.use(verifyPaths)
+            .wiredWith(VerifyNativeLibPaths::nativeLibs)
+            .toListenTo(com.android.build.api.artifact.SingleArtifact.MERGED_NATIVE_LIBS)
     }
 
     // Fork: release builds fail unless every exported component is allowlisted

@@ -1,13 +1,13 @@
 package com.anopticlabs.gravel.firmware
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.network.readBody
 import coredevices.pebble.firmware.GithubReleases
 import coredevices.pebble.firmware.ReleaseTagVersion
 import io.ktor.client.HttpClient
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.prepareGet
-import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.isSuccess
@@ -57,7 +57,7 @@ class PebbleOsChangelogListSource(private val httpClient: HttpClient) {
                     ChangelogListResult.Unreadable
                 }
                 else -> {
-                    val body = response.bodyAsChannel().readRemaining(MAX_LIST_BYTES + 1L).readByteArray()
+                    val body = response.readBody { it.readRemaining(MAX_LIST_BYTES + 1L).readByteArray() }
                     val list = if (body.size > MAX_LIST_BYTES) null else parsePebbleOsChangelogList(body.decodeToString())
                     if (list == null) {
                         logger.w { "Changelog list is malformed or too large (${body.size} bytes read)" }

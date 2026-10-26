@@ -4,10 +4,10 @@ import co.touchlab.kermit.Logger
 import com.anopticlabs.gravel.models.ModelCatalog
 import com.anopticlabs.gravel.models.ModelStorageException
 import com.anopticlabs.gravel.models.PinnedModel
+import com.anopticlabs.gravel.network.readBody
 import io.ktor.client.HttpClient
 import io.ktor.client.request.header
 import io.ktor.client.request.prepareGet
-import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.utils.io.readAvailable
@@ -307,63 +307,64 @@ class ModelFileInstaller(
                 else -> throw HttpStatusException(response.status.value, url)
             }
 
-            val channel = response.bodyAsChannel()
-            var lastLoggedPct = -1
-            val output = try {
-                openPartial(partial, resumed)
-            } catch (e: IOException) {
-                throw ModelStorageException("Cannot write the partial for ${model.id}", e)
-            }
-            val copied = runCatching {
-                val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
-                while (true) {
-                    // An infinite timeout must bypass withTimeoutOrNull
-                    // entirely, not just never expire: INFINITE still
-                    // schedules a Long.MAX_VALUE timer that a virtual
-                    // clock fast-forwards to whenever the test
-                    // dispatcher idles mid-transfer.
-                    val read = if (readStallTimeout.isInfinite()) {
-                        channel.readAvailable(buffer, 0, buffer.size)
-                    } else {
-                        withTimeoutOrNull(readStallTimeout) {
+            response.readBody { channel ->
+                var lastLoggedPct = -1
+                val output = try {
+                    openPartial(partial, resumed)
+                } catch (e: IOException) {
+                    throw ModelStorageException("Cannot write the partial for ${model.id}", e)
+                }
+                val copied = runCatching {
+                    val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
+                    while (true) {
+                        // An infinite timeout must bypass withTimeoutOrNull
+                        // entirely, not just never expire: INFINITE still
+                        // schedules a Long.MAX_VALUE timer that a virtual
+                        // clock fast-forwards to whenever the test
+                        // dispatcher idles mid-transfer.
+                        val read = if (readStallTimeout.isInfinite()) {
                             channel.readAvailable(buffer, 0, buffer.size)
-                        } ?: throw StallException(url)
-                    }
-                    if (read == -1) break
-                    if (read == 0) continue
-                    if (progress.offset + read > model.sizeBytes) {
-                        // Complete-but-wrong, not stopped-early: no
-                        // resume can fix an oversize stream.
-                        partial.delete()
-                        throw SecurityException(
-                            "Download for ${model.id} exceeded the pinned ${model.sizeBytes} bytes; aborting",
-                        )
-                    }
-                    try {
-                        output.write(buffer, 0, read)
-                    } catch (e: IOException) {
-                        throw ModelStorageException("Cannot write the partial for ${model.id}", e)
-                    }
-                    digest.update(buffer, 0, read)
-                    progress.offset += read
-                    val pct = (progress.offset * 100 / model.sizeBytes).toInt()
-                    if (pct / 10 > lastLoggedPct / 10) {
-                        lastLoggedPct = pct
-                        logger.d { "Download progress: $pct% (${progress.offset} / ${model.sizeBytes})" }
+                        } else {
+                            withTimeoutOrNull(readStallTimeout) {
+                                channel.readAvailable(buffer, 0, buffer.size)
+                            } ?: throw StallException(url)
+                        }
+                        if (read == -1) break
+                        if (read == 0) continue
+                        if (progress.offset + read > model.sizeBytes) {
+                            // Complete-but-wrong, not stopped-early: no
+                            // resume can fix an oversize stream.
+                            partial.delete()
+                            throw SecurityException(
+                                "Download for ${model.id} exceeded the pinned ${model.sizeBytes} bytes; aborting",
+                            )
+                        }
+                        try {
+                            output.write(buffer, 0, read)
+                        } catch (e: IOException) {
+                            throw ModelStorageException("Cannot write the partial for ${model.id}", e)
+                        }
+                        digest.update(buffer, 0, read)
+                        progress.offset += read
+                        val pct = (progress.offset * 100 / model.sizeBytes).toInt()
+                        if (pct / 10 > lastLoggedPct / 10) {
+                            lastLoggedPct = pct
+                            logger.d { "Download progress: $pct% (${progress.offset} / ${model.sizeBytes})" }
+                        }
                     }
                 }
+                // A close that fails is a disk failure like a failed write,
+                // unless the copy had already failed for its own reason.
+                val closeFailure = runCatching { output.close() }.exceptionOrNull()
+                copied.getOrThrow()
+                if (closeFailure != null) throw ModelStorageException("Cannot write the partial for ${model.id}", closeFailure)
+                if (progress.offset < model.sizeBytes) {
+                    throw ShortBodyException(
+                        "Download for ${model.id} ended at ${progress.offset} of ${model.sizeBytes} bytes",
+                    )
+                }
+                Outcome.Done
             }
-            // A close that fails is a disk failure like a failed write,
-            // unless the copy had already failed for its own reason.
-            val closeFailure = runCatching { output.close() }.exceptionOrNull()
-            copied.getOrThrow()
-            if (closeFailure != null) throw ModelStorageException("Cannot write the partial for ${model.id}", closeFailure)
-            if (progress.offset < model.sizeBytes) {
-                throw ShortBodyException(
-                    "Download for ${model.id} ended at ${progress.offset} of ${model.sizeBytes} bytes",
-                )
-            }
-            Outcome.Done
         }
     }
 

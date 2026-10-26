@@ -4,6 +4,7 @@ import com.anopticlabs.gravel.models.ChatFormat
 import com.anopticlabs.gravel.models.LlmModel
 import com.anopticlabs.gravel.models.LlmModelCatalog
 import com.anopticlabs.gravel.models.ModelStorageException
+import com.anopticlabs.gravel.network.EndlessResponse
 import coredevices.util.models.WhisperModel
 import coredevices.util.models.WhisperModelCatalog
 import coredevices.util.models.WhisperTier
@@ -228,6 +229,15 @@ class ModelFileInstallerTest {
         assertTrue(e.message.orEmpty().contains("exceeded the pinned"), "unexpected failure: $e")
         assertFalse(partialFile.exists(), "an oversize stream is wrong bytes, not a resumable stop")
         assertFalse(installedFile.exists())
+    }
+
+    @Test
+    fun anEndlessOversizeStreamLeavesNoCopierRunning() = runTest {
+        val server = EndlessResponse()
+        assertFailsWith<SecurityException> {
+            ModelFileInstaller(server.client, modelsDir, readStallTimeout = Duration.INFINITE).install(model)
+        }
+        server.assertNoCopierLeft()
     }
 
     @Test

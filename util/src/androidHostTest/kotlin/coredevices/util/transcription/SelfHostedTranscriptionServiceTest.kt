@@ -1,5 +1,6 @@
 package coredevices.util.transcription
 
+import com.anopticlabs.gravel.network.EndlessResponse
 import com.anopticlabs.gravel.network.NotOnAllowedNetworkException
 import com.russhwolf.settings.MapSettings
 import coredevices.util.CoreConfig
@@ -17,20 +18,25 @@ import io.ktor.client.request.HttpResponseData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -76,6 +82,7 @@ class SelfHostedTranscriptionServiceTest {
         val wifi: FakeUnmeteredWifi = FakeUnmeteredWifi(),
         val clock: TestTimeSource = TestTimeSource(),
         recordingLimit: Duration = SelfHostedTranscriptionService.RECORDING_REQUEST_LIMIT,
+        client: HttpClient? = null,
         handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
     ) {
         val requests = ArrayList<HttpRequestData>()
@@ -99,7 +106,7 @@ class SelfHostedTranscriptionServiceTest {
                 hostPorts += hostPort
                 wifiOnlyClients += wifiOnly
                 answerWaits += answerWait
-                HttpClient(MockEngine { request ->
+                client ?: HttpClient(MockEngine { request ->
                     requests += request
                     requestWaits += answerWait
                     bodies += request.body.toByteArray().decodeToString()
@@ -247,6 +254,42 @@ class SelfHostedTranscriptionServiceTest {
         val padding = " ".repeat(SelfHostedTranscriptionService.MAX_REPLY_BYTES - jsonOk("ok").length)
         val atTheBound = Harness { respond(jsonOk("ok") + padding, HttpStatusCode.OK) }
         assertEquals("ok", atTheBound.transcribe().text)
+    }
+
+    @Test
+    fun aDictationCanceledWhileTheReplyArrivesLeavesNoCopierRunning(): Unit = runBlocking {
+        val flood = CompletableDeferred<Unit>()
+        val server = EndlessResponse(opening = {
+            writeFully(ByteArray(10))
+            flush()
+            flood.await()
+        })
+        val h = Harness(client = server.client) { error("the reply comes from the endless response") }
+        val readerThread = Executors.newSingleThreadExecutor()
+        val holdReader = CountDownLatch(1)
+        try {
+            val dictation = launch(readerThread.asCoroutineDispatcher()) { h.transcribe() }
+            // The copier exists once the reply is being read; the reader then waits for more than the opening bytes.
+            withTimeout(10.seconds) { while (server.client.coroutineContext.job.children.none()) delay(5) }
+            // This holds the reader only because execute runs its block on the caller's dispatcher (ktor 3.5.1:
+            // HttpStatement.kt execute; DispatcherSwitching.jvm.kt useEngineDispatcher, "false" by default).
+            val readerHeld = CountDownLatch(1)
+            readerThread.execute {
+                readerHeld.countDown()
+                holdReader.await()
+            }
+            assertTrue(readerHeld.await(10, TimeUnit.SECONDS), "the reader never let go of its thread")
+            // The copier fills its buffer while the reader cannot run.
+            flood.complete(Unit)
+            Thread.sleep(500)
+            dictation.cancel()
+            holdReader.countDown()
+            withTimeout(10.seconds) { dictation.join() }
+            server.assertNoCopierLeft()
+        } finally {
+            holdReader.countDown()
+            readerThread.shutdown()
+        }
     }
 
     @Test

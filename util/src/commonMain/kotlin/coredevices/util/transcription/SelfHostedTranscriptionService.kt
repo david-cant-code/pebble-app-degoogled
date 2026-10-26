@@ -3,6 +3,7 @@ package coredevices.util.transcription
 import co.touchlab.kermit.Logger
 import com.anopticlabs.gravel.network.NotOnAllowedNetworkException
 import com.anopticlabs.gravel.network.UnmeteredWifi
+import com.anopticlabs.gravel.network.readBody
 import coredevices.util.AudioEncoding
 import coredevices.util.CoreConfigFlow
 import coredevices.util.writeWavHeader
@@ -13,7 +14,6 @@ import io.ktor.client.request.forms.formData
 import io.ktor.client.request.prepareRequest
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
-import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
@@ -318,10 +318,8 @@ class SelfHostedTranscriptionService(
         if (declared != null && declared > MAX_REPLY_BYTES) {
             throw TranscriptionException.TranscriptionServiceError("Server reply too large ($declared bytes)", modelUsed = MODEL)
         }
-        val channel = response.bodyAsChannel()
-        val bytes = channel.readRemaining((MAX_REPLY_BYTES + 1).toLong()).readByteArray()
+        val bytes = response.readBody { it.readRemaining((MAX_REPLY_BYTES + 1).toLong()).readByteArray() }
         if (bytes.size > MAX_REPLY_BYTES) {
-            channel.cancel(null)
             throw TranscriptionException.TranscriptionServiceError("Server reply too large", modelUsed = MODEL)
         }
         return bytes.decodeToString()

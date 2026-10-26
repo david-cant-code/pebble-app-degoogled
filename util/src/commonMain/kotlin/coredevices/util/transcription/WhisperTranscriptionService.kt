@@ -32,6 +32,7 @@ import io.rebble.libpebblecommon.voice.PEBBLE_FW_RECORDING_CAP
 import io.rebble.libpebblecommon.voice.PEBBLE_FW_TRANSCRIPTION_TIMEOUT
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -453,12 +454,15 @@ class WhisperTranscriptionService internal constructor(
 
     private val transcriptionMutex = Mutex()
 
-    // Volatile: these are written by init jobs on the IO dispatcher and read
-    // by the config observer, earlyInit/ensureInit gates, and the public
-    // ready-state accessors on other threads. The gates are advisory (the
-    // authoritative re-check happens under modelMutex in initIfNeeded), but
-    // without a happens-before edge they could act on arbitrarily stale
-    // values.
+    // Volatile: these are written on several threads (init jobs on the IO
+    // dispatcher, the loss sites through forgetModelLostInCallLocked,
+    // modelDeleted, and for initJob startInitJob) and read by the config
+    // observer, earlyInit/ensureInit gates, and the public ready-state
+    // accessors. A gate's decision to start a job is advisory (initIfNeeded
+    // re-checks under modelMutex); which job ensureInit joins is not
+    // re-checked, so its reads follow the order forgetModelLostInCallLocked
+    // states. Without a happens-before edge the gates could act on
+    // arbitrarily stale values.
     @kotlin.concurrent.Volatile
     private var modelHandle: Long = 0L
 
@@ -545,7 +549,7 @@ class WhisperTranscriptionService internal constructor(
         sttConfig.onEach {
             logger.i { "STT config changed: $it" }
             if (it.modelName != lastInitedModel) {
-                initJob = performInit()
+                startInitJob()
             }
             val captureDumpOn = debugCaptureDumpApplies(it.debugCaptureDump, debugBuild())
             if (captureDumpShouldClear(captureDumpWasOn, captureDumpOn)) {
@@ -612,9 +616,7 @@ class WhisperTranscriptionService internal constructor(
             "Whisper engine ignored cancellation for $unwindBound; " +
                 "abandoning the native context and ending the engine process"
         }
-        modelHandle = 0L
-        lastInitedModel = null
-        engineUnavailable = true
+        forgetModelLostInCallLocked()
         engine.endProcess("a decode ignored its abort for $unwindBound")
     }
 
@@ -740,7 +742,7 @@ class WhisperTranscriptionService internal constructor(
     private fun onEngineProcessDeath(generation: Long) {
         logger.w { "Whisper engine process (generation $generation) died" }
         setOf(handleModel, sttConfig.value.modelName).filterNotNull().forEach(modelProvider::forgetLoadVerification)
-        performInit(lostGeneration = generation)
+        performInit(lostGeneration = generation, start = CoroutineStart.DEFAULT)
     }
 
     /**
@@ -758,6 +760,18 @@ class WhisperTranscriptionService internal constructor(
         lastInitedModel = null
         handleGeneration = 0L
         return true
+    }
+
+    /**
+     * Forgets a model an engine call lost, under [modelMutex]; a death report forgets through [forgetLostHandleLocked].
+     * [initJob] may name a load job that checked the handle before the loss; it is cleared too, ahead of the handle,
+     * which ensureInit reads first.
+     */
+    private fun forgetModelLostInCallLocked() {
+        initJob = null
+        modelHandle = 0L
+        lastInitedModel = null
+        engineUnavailable = true
     }
 
     /**
@@ -877,8 +891,8 @@ class WhisperTranscriptionService internal constructor(
      * it is the reload after an engine process death (see
      * [onEngineProcessDeath]).
      */
-    private fun performInit(lostGeneration: Long? = null): Job {
-        return scope.launch(ioDispatcher) {
+    private fun performInit(lostGeneration: Long?, start: CoroutineStart): Job {
+        return scope.launch(ioDispatcher, start) {
             // Set once a cold load starts. The coldpath line is written
             // from the finally so a load that fails part-way still reports
             // the terms it paid; a job that found the model resident
@@ -920,6 +934,17 @@ class WhisperTranscriptionService internal constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Starts a load job and records it as [initJob] before it runs, so a loss after its check clears it. The gates
+     * treat it as running until isCompleted, false while New (kotlinx-coroutines 1.11.0 Job.kt, Job states table).
+     */
+    private fun startInitJob(): Job {
+        val job = performInit(lostGeneration = null, start = CoroutineStart.LAZY)
+        initJob = job
+        job.start()
+        return job
     }
 
     /**
@@ -970,11 +995,11 @@ class WhisperTranscriptionService internal constructor(
     fun earlyInit(localFirst: Boolean = sttConfig.value.mode.localComesFirst()) {
         if (localFirst) dictationHold.raise()
         if (initJob == null || modelHandle == 0L || lastInitedModel != sttConfig.value.modelName) {
-            if (initJob?.isActive == true) {
+            if (initJob?.isCompleted == false) {
                 logger.d { "Whisper STT model initialization already in progress" }
                 return
             }
-            initJob = performInit()
+            startInitJob()
         } else {
             // The warm-up can find the engine process gone; the death
             // report reloads, and this launch has no handler to fail into.
@@ -998,14 +1023,18 @@ class WhisperTranscriptionService internal constructor(
      * `initWaitMs`.
      */
     private suspend fun ensureInit(initTimeout: Duration): Long {
-        if (initJob == null || modelHandle == 0L || lastInitedModel != sttConfig.value.modelName) {
-            if (initJob?.isActive != true) {
-                initJob = performInit()
+        // The handle and model before initJob (see forgetModelLostInCallLocked); the job read or started is the one
+        // joined.
+        val needsLoad = modelHandle == 0L || lastInitedModel != sttConfig.value.modelName
+        var job = initJob
+        if (job == null || needsLoad) {
+            if (job == null || job.isCompleted) {
+                job = startInitJob()
             }
         }
         val waitStarted = TimeSource.Monotonic.markNow()
         try {
-            withTimeout(initTimeout) { initJob?.join() }
+            withTimeout(initTimeout) { job?.join() }
         } catch (e: TimeoutCancellationException) {
             // A wait that hit its ceiling never reaches the engine line, so
             // the ceiling is reported here.
@@ -1112,9 +1141,7 @@ class WhisperTranscriptionService internal constructor(
             // arrived yet. The reload itself is the death report's job
             // (onEngineProcessDeath), which matches the generation this
             // leaves in place.
-            modelHandle = 0L
-            lastInitedModel = null
-            engineUnavailable = true
+            forgetModelLostInCallLocked()
             val unavailable = TranscriptionException.TranscriptionServiceUnavailable(modelUsed = model)
             analytics.logTranscriptionFailure("whisper", transcriptionFailureReason(unavailable), e.message)
             throw unavailable
@@ -1309,9 +1336,7 @@ class WhisperTranscriptionService internal constructor(
             }
             // Stopped although nothing asked it to: not an answer this process takes.
             outcome = "error:unrequested-stop"
-            modelHandle = 0L
-            lastInitedModel = null
-            engineUnavailable = true
+            forgetModelLostInCallLocked()
             engine.endProcess("a long-form call reported a stop nothing requested")
             return LongFormStep.EngineLost
         } catch (e: CancellationException) {
@@ -1320,16 +1345,12 @@ class WhisperTranscriptionService internal constructor(
         } catch (e: WhisperEngineTimeoutException) {
             // Past its deadline this call would be past it again: no retry.
             outcome = "error:timeout"
-            modelHandle = 0L
-            lastInitedModel = null
-            engineUnavailable = true
+            forgetModelLostInCallLocked()
             throw LongFormTimeoutException(modelUsed = model)
         } catch (e: WhisperEngineUnavailableException) {
             outcome = "error:${transcriptionFailureReason(e)}"
             // As in runLocalTranscribe: the handle went with its process.
-            modelHandle = 0L
-            lastInitedModel = null
-            engineUnavailable = true
+            forgetModelLostInCallLocked()
             return LongFormStep.EngineLost
         } catch (e: WhisperMemoryException) {
             outcome = "error:memory"

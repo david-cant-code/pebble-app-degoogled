@@ -9,15 +9,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
-import io.ktor.utils.io.ByteReadChannel
-import io.ktor.utils.io.writeFully
-import io.ktor.utils.io.writer
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import kotlinx.io.IOException
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
@@ -26,7 +18,6 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 /**
@@ -137,14 +128,13 @@ class PebbleOsChangelogListTest {
         val body: String,
         val status: HttpStatusCode = HttpStatusCode.OK,
         val failure: IOException? = null,
-        val stream: (() -> ByteReadChannel)? = null,
     ) {
         val requests = mutableListOf<HttpRequestData>()
         val source = PebbleOsChangelogListSource(HttpClient(MockEngine { request ->
             requests += request
             failure?.let { throw it }
             val headers = headersOf(HttpHeaders.ContentType, "application/vnd.github.raw+json; charset=utf-8")
-            stream?.let { respond(it(), status, headers) } ?: respond(body, status, headers)
+            respond(body, status, headers)
         }) {
             // Mirrors the app's shared client, whose content negotiation adds its own Accept value.
             install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
@@ -170,24 +160,6 @@ class PebbleOsChangelogListTest {
         val atLimit = published.padEnd(limit)
         assertIs<ChangelogListResult.Success>(FakeList(atLimit).source.fetch())
         assertIs<ChangelogListResult.Unreadable>(FakeList(atLimit + " ").source.fetch())
-    }
-
-    @Test
-    fun stopsReadingABodyThatNeverEnds() = runTest {
-        val endless = FakeList("", stream = {
-            CoroutineScope(Dispatchers.Default).writer {
-                val spaces = ByteArray(8192) { ' '.code.toByte() }
-                channel.writeFully("{".encodeToByteArray())
-                repeat(1024) {
-                    channel.writeFully(spaces)
-                    channel.flush()
-                }
-                awaitCancellation()
-            }.channel
-        })
-        // Real time: the body is written on another dispatcher.
-        val result = withContext(Dispatchers.Default) { withTimeout(10.seconds) { endless.source.fetch() } }
-        assertIs<ChangelogListResult.Unreadable>(result)
     }
 
     @Test

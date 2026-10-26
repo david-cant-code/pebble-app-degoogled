@@ -9,8 +9,7 @@ import kotlin.test.fail
  * the superproject plus every tracked path of each checked-out submodule,
  * relative to the repository root.
  *
- * Shared by the tree-reading sentinels in this source set
- * ([FdroidGuardrailsTest], [ExcludedAssetSentinelTest]) so they agree on
+ * Shared by the tree-reading sentinels in this source set so they agree on
  * what "the tree" is. Reading through git rather than walking the disk keeps
  * build outputs, IDE files, and untracked scratch out of the picture, which
  * is also what an F-Droid clone contains.
