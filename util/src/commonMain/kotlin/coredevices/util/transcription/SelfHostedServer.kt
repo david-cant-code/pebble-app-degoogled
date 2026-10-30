@@ -4,11 +4,13 @@ import com.russhwolf.settings.Settings
 import coredevices.util.security.EncryptedStringSetting
 import coredevices.util.security.SecretCipher
 import io.ktor.client.HttpClient
+import io.ktor.client.network.sockets.ConnectTimeoutException
 import io.ktor.http.URLProtocol
 import io.ktor.http.Url
 import kotlinx.io.IOException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlin.time.Duration
 
 /** Why a self-hosted server URL was rejected. */
 enum class ServerUrlProblem { Empty, Malformed, NotHttps, NoHost, HasCredentials }
@@ -43,7 +45,9 @@ fun validateServerUrl(raw: String): ServerUrlProblem? {
 fun serverHostPort(raw: String): String? {
     if (validateServerUrl(raw) != null) return null
     val url = Url(raw.trim())
-    return "${url.host.lowercase()}:${url.port}"
+    // ASCII letters only: lowercasing others can give two different names one key.
+    val host = buildString { for (c in url.host) append(if (c in 'A'..'Z') c + 32 else c) }
+    return "$host:${url.port}"
 }
 
 /** The JSON both server families answer with; anything without `text` is a service error. */
@@ -106,7 +110,41 @@ fun ServerCertificateRefusal.describe(): String =
  * logs" ships must not, so this stands in as the cause of the reported
  * network error.
  */
-class ServerUnreachableException(reason: String) : IOException(reason)
+class ServerUnreachableException(reason: String, val failure: TransportFailure = TransportFailure.NOT_CONNECTED) : IOException(reason)
+
+/** Gravel: what a transport failure was, read off its cause chain ([transportFailure]). */
+enum class TransportFailure {
+    /** The name did not resolve, the connection was refused or unroutable, or the connect timed out. */
+    NOT_CONNECTED,
+
+    /** The server's certificate was refused ([ServerCertificateRefusal]) or is not for the host dialled. */
+    CERTIFICATE,
+
+    /** A read or write timed out on a connection that was made. */
+    TIMED_OUT,
+
+    /** Anything else after connecting: a reset, a closed socket, an early end of stream. */
+    LOST,
+}
+
+internal fun transportFailure(failure: Throwable): TransportFailure {
+    val chain = generateSequence(failure) { it.cause }.take(MAX_CAUSE_DEPTH).toList()
+    return when {
+        chain.any { it is ServerCertificateRefusal || it::class.simpleName == "SSLPeerUnverifiedException" } -> TransportFailure.CERTIFICATE
+        chain.any(::failedToConnect) -> TransportFailure.NOT_CONNECTED
+        chain.any { it::class.simpleName.orEmpty().contains("Timeout") } -> TransportFailure.TIMED_OUT
+        else -> TransportFailure.LOST
+    }
+}
+
+// By class alone: Ktor's OkHttp engine turns a connect timeout (a socket timeout whose message mentions
+// connect) into its ConnectTimeoutException (ktor-client-okhttp 3.5.1, OkUtilsKt.mapOkHttpException), and
+// its other timeout messages carry the URL.
+// That class is checked by type because the release build's R8 pass renames Ktor's classes; the names
+// are java.net classes, which the platform supplies under those names.
+private fun failedToConnect(cause: Throwable): Boolean = cause is ConnectTimeoutException || cause::class.simpleName in CONNECT_FAILURES
+
+internal val CONNECT_FAILURES = setOf("UnknownHostException", "NoRouteToHostException", "ConnectException")
 
 /**
  * How far a cause chain is read. A cycle longer than a self-cause is legal
@@ -142,26 +180,80 @@ fun formatFingerprint(sha256: ByteArray): String =
 /**
  * What the app remembers about the user's server besides its URL and
  * model: the bearer token, encrypted at rest through the keystore-backed
- * setting, and the certificate fingerprint pinned by trust on first use,
- * keyed by `host:port`.
+ * setting together with the `host:port` it was saved for (Gravel), the
+ * certificate fingerprint pinned by trust on first use, keyed by
+ * `host:port`, and (Gravel) the one `host:port` whose replies announced a
+ * separate dictation lane.
  */
 class SelfHostedServerStore(private val settings: Settings, cipher: SecretCipher) {
     private companion object {
-        const val TOKEN_KEY = "stt_server_token"
+        const val UNBOUND_TOKEN_KEY = "stt_server_token"
+        const val TOKEN_KEY = "stt_server_token_bound"
         const val PIN_PREFIX = "stt_server_pin_"
+        const val LANE_KEY = "stt_server_dictation_lane"
     }
 
-    private val tokenSetting = EncryptedStringSetting(settings, cipher, TOKEN_KEY)
+    private val unboundToken = EncryptedStringSetting(settings, cipher, UNBOUND_TOKEN_KEY)
 
-    fun token(): String? = tokenSetting.get()?.takeIf { it.isNotBlank() }
+    // Gravel: the address, a line break, the token, as one value, so one read gives a token and whose it is.
+    private val boundToken = EncryptedStringSetting(settings, cipher, TOKEN_KEY)
 
-    fun setToken(value: String?) = tokenSetting.set(value?.trim()?.takeIf { it.isNotBlank() })
+    /** Gravel: the token saved for [hostPort]; null for any other address. */
+    fun tokenFor(hostPort: String?): String? {
+        val saved = boundToken.get() ?: return null
+        val at = saved.indexOf('\n')
+        return if (hostPort != null && at > 0 && saved.substring(0, at) == hostPort) saved.substring(at + 1) else null
+    }
+
+    /** Gravel: saves [value] as the token of [hostPort], or removes the saved token without either; a token stored without an address goes too. */
+    fun setToken(hostPort: String?, value: String?) {
+        val token = value?.trim()?.takeIf { it.isNotBlank() }
+        boundToken.set(if (hostPort != null && token != null) "$hostPort\n$token" else null)
+        settings.remove(UNBOUND_TOKEN_KEY)
+    }
+
+    /**
+     * Gravel: a token stored without an address, by a build from before tokens carried one, becomes [hostPort]'s, the
+     * configured server's, in place of a saved one, or is removed without a server. One that cannot be read or stored
+     * for the moment is kept for a later call.
+     */
+    fun adoptUnboundToken(hostPort: String?) {
+        if (!settings.hasKey(UNBOUND_TOKEN_KEY)) return
+        if (hostPort != null) {
+            val token = unboundToken.get()?.trim() ?: return
+            if (token.isNotEmpty()) {
+                boundToken.set("$hostPort\n$token")
+                if (!settings.hasKey(TOKEN_KEY)) return
+            }
+        }
+        settings.remove(UNBOUND_TOKEN_KEY)
+    }
+
+    /** Gravel: the saved token with its address as stored (encrypted), so one that cannot be decrypted for a moment still reads the same; null when none is saved for an address. */
+    fun storedToken(): String? = settings.getStringOrNull(TOKEN_KEY)
 
     fun pinnedFingerprint(hostPort: String): String? = settings.getStringOrNull(PIN_PREFIX + hostPort)
 
     fun trust(hostPort: String, fingerprint: String) = settings.putString(PIN_PREFIX + hostPort, fingerprint)
 
     fun forget(hostPort: String) = settings.remove(PIN_PREFIX + hostPort)
+
+    /** Gravel: whether the last successful reply came from [hostPort] and said dictation has a lane of its own there. */
+    fun hasDictationLane(hostPort: String): Boolean = settings.getStringOrNull(LANE_KEY) == hostPort
+
+    /** Gravel: what a successful reply from [hostPort] said; one address is kept, so any other reads as no lane. */
+    fun rememberDictationLane(hostPort: String, separate: Boolean) {
+        val stored = settings.getStringOrNull(LANE_KEY)
+        when {
+            separate && stored != hostPort -> settings.putString(LANE_KEY, hostPort)
+            !separate && stored != null -> settings.remove(LANE_KEY)
+        }
+    }
+
+    /** Gravel: forgets a lane announced by any address but [hostPort], the server being saved. */
+    fun keepDictationLaneOnlyFor(hostPort: String?) {
+        if (settings.getStringOrNull(LANE_KEY) != hostPort) settings.remove(LANE_KEY)
+    }
 }
 
 /**
@@ -193,3 +285,11 @@ expect suspend fun probeServerCertificate(host: String, port: Int): ServerCertif
  * effect without a new client.
  */
 expect fun selfHostedHttpClient(hostPort: String, pinnedFingerprint: () -> String?): HttpClient
+
+/**
+ * Gravel: builds the server client; [wifiOnly] asks for one held to the Wi-Fi-only rule, and
+ * [answerWait] is how long a request may go without a byte from the server.
+ */
+fun interface SelfHostedClientFactory {
+    fun create(hostPort: String, pinnedFingerprint: () -> String?, wifiOnly: Boolean, answerWait: Duration): HttpClient
+}

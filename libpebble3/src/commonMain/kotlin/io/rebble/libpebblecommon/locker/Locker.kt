@@ -1,6 +1,8 @@
 package io.rebble.libpebblecommon.locker
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.watchapp.isRegularFile
+import com.anopticlabs.gravel.watchapp.sha256Hex
 import com.russhwolf.settings.Settings
 import com.russhwolf.settings.set
 import io.ktor.client.HttpClient
@@ -32,6 +34,8 @@ import io.rebble.libpebblecommon.disk.pbw.toLockerEntry
 import io.rebble.libpebblecommon.metadata.WatchType
 import io.rebble.libpebblecommon.web.LockerModelWrapper
 import io.rebble.libpebblecommon.web.WebSyncManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -49,6 +53,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.IOException
 import kotlinx.io.Source
@@ -211,6 +216,23 @@ class Locker(
     }
 
     suspend fun getApp(uuid: Uuid): LockerEntry? = lockerEntryDao.getEntry(uuid)
+
+    // Gravel
+    override suspend fun cachedPbwSha256(id: Uuid): String? = withContext(Dispatchers.IO) {
+        getApp(id)?.let { lockerPBWCache.cachedPbwFile(id, it.version) }?.let { sha256Hex(it) }
+    }
+
+    // Gravel
+    override suspend fun sideloadAppWithoutLaunch(pbwPath: Path, id: Uuid): Boolean =
+        try {
+            val pbwApp = PbwApp(pbwPath)
+            Uuid.parse(pbwApp.info.uuid) == id && sideloadApp(pbwApp = pbwApp, loadOnWatch = false)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.e(e) { "Error while sideloading app without launch" }
+            false
+        }
 
     suspend fun update(locker: LockerModelWrapper) {
         logger.d("update: ${locker.locker.applications.size}")
@@ -674,6 +696,9 @@ abstract class LockerPBWCache(private val context: AppContext) {
                 SystemFileSystem.metadataOrNull(path)?.isRegularFile == true
         }
     }
+
+    /** Gravel: the PBW cached for [appId] at [version], or null; like [cachedPbwPaths], never fetches. Reads the disk. */
+    fun cachedPbwFile(appId: Uuid, version: String): Path? = pathForApp(appId, version).takeIf(::isRegularFile)
 
     protected fun pkjsPathForApp(appId: Uuid): Path {
         SystemFileSystem.createDirectories(pkjsCacheDir, false)

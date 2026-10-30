@@ -1,6 +1,9 @@
 package coredevices.util.transcription
 
 import coredevices.analytics.CoreAnalytics
+import com.anopticlabs.gravel.network.UnmeteredWifi
+import kotlinx.coroutines.flow.MutableStateFlow
+import com.anopticlabs.gravel.whisper.WhisperLongFormResult
 import coredevices.whisper.EnginePlacement
 import coredevices.whisper.TranscribeStats
 import java.util.concurrent.CopyOnWriteArrayList
@@ -17,6 +20,19 @@ internal object NoopAnalytics : CoreAnalytics {
     override fun updateLastConnectedSerial(serial: String?) {}
     override fun updateRingTransferDurationMetric(duration: Duration) {}
     override fun updateRingLifetimeCollectionCount(serial: String, count: Int) {}
+}
+
+/** The Wi-Fi-only rule's verdict, which a test switches on and off. */
+internal class FakeUnmeteredWifi(usable: Boolean = true) : UnmeteredWifi {
+    override val usable = MutableStateFlow(usable)
+}
+
+/** Analytics that keep each event's name and parameters. */
+internal class EventRecordingAnalytics : CoreAnalytics by NoopAnalytics {
+    val events = CopyOnWriteArrayList<Pair<String, Map<String, Any>?>>()
+    override fun logEvent(name: String, parameters: Map<String, Any>?) {
+        events += name to parameters
+    }
 }
 
 /**
@@ -85,6 +101,14 @@ internal class FakeWhisperEngine(@Volatile var reply: String = "hello world") {
             }
             return reply
         }
+        override fun transcribeLongForm(
+            handle: Long,
+            pcm16: ByteArray,
+            threads: Int,
+            language: String?,
+            callId: Long,
+            placement: EnginePlacement,
+        ): WhisperLongFormResult = error("long-form is not modeled by this fake")
         override fun cancel(callId: Long) {}
         override fun free(handle: Long) {}
     }

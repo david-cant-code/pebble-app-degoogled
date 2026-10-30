@@ -1,5 +1,6 @@
 package coredevices.util.transcription
 
+import com.anopticlabs.gravel.whisper.WhisperLongFormResult
 import coredevices.analytics.CoreAnalytics
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigFlow
@@ -15,6 +16,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.Duration
@@ -64,6 +66,9 @@ class WhisperHandleLifecycleTest {
         @Volatile
         var freedWhileTranscribing = false
 
+        @Volatile
+        var freeFails = false
+
         val engine = object : WhisperEngine {
             override fun supported(): Boolean = true
 
@@ -97,20 +102,32 @@ class WhisperHandleLifecycleTest {
                 return "hello world"
             }
 
+            override fun transcribeLongForm(
+                handle: Long,
+                pcm16: ByteArray,
+                threads: Int,
+                language: String?,
+                callId: Long,
+                placement: coredevices.whisper.EnginePlacement,
+            ): WhisperLongFormResult = error("long-form is not modeled by this fake")
             override fun cancel(callId: Long) {}
 
             override fun free(handle: Long) {
                 if (inRealTranscribe) freedWhileTranscribing = true
                 synchronized(lock) { freeCount++ }
+                if (freeFails) throw IllegalStateException("free failed")
             }
         }
     }
 
     private class FakeProvider : CactusModelPathProvider {
+        /** Models deleted from the phone. */
+        val deleted: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
         override suspend fun getSTTModelPath(): String = error("unused in these tests")
         override suspend fun getLMModelPath(): String = error("unused in these tests")
         override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = "/fake/$modelId"
-        override fun isModelDownloaded(modelName: String): Boolean = true
+        override fun isModelDownloaded(modelName: String): Boolean = modelName !in deleted
         override fun getDownloadedModels(): List<String> = emptyList()
         override fun getIncompatibleModels(): List<String> = emptyList()
         override fun deleteModel(modelName: String) {}
@@ -131,10 +148,14 @@ class WhisperHandleLifecycleTest {
         sttConfig = STTConfig(mode = CactusSTTMode.LocalOnly, modelName = modelName),
     )
 
-    private fun serviceFor(fake: FakeEngine, config: MutableStateFlow<CoreConfig>) =
+    private fun serviceFor(
+        fake: FakeEngine,
+        config: MutableStateFlow<CoreConfig>,
+        provider: FakeProvider = FakeProvider(),
+    ) =
         WhisperTranscriptionService(
             coreConfigFlow = CoreConfigFlow(config),
-            modelProvider = FakeProvider(),
+            modelProvider = provider,
             analytics = NoopAnalytics,
             inferenceBoost = NoOpInferenceBoost(),
             engine = fake.engine,
@@ -240,5 +261,135 @@ class WhisperHandleLifecycleTest {
         awaitUntil("re-init of model-b") { fake.initedPaths.contains("/fake/model-b") }
         awaitUntil("warm-up of model-b's fresh handle") { 2L in fake.warmedUpHandles }
         assertTrue(fake.freedWhileTranscribing.not())
+    }
+
+    /** Gravel: a delete frees the loaded copy behind the call inside the engine; later calls find no model. */
+    @Test
+    fun deletedModelIsFreedAfterTheInFlightTranscription() = runBlocking(Dispatchers.Default) {
+        val fake = FakeEngine()
+        val provider = FakeProvider()
+        val service = serviceFor(fake, MutableStateFlow(configFor("model-a")), provider)
+        awaitUntil("initial init of model-a") { service.isModelReady }
+
+        val result = async { service.transcribeLocal(realPcmBytes(), sampleRate = 16_000) }
+        awaitUntil("transcription inside the engine") { fake.inRealTranscribe }
+
+        provider.deleted += "model-a"
+        service.modelDeleted("model-a")
+        delay(300)
+        assertEquals(0, fake.freeCount, "a delete freed the native context while a transcription was inside the engine")
+        assertTrue(service.isModelReady)
+        assertFalse(service.isLocalAvailable(), "a deleted model still loaded was offered for local dictation")
+
+        fake.transcribeGate.countDown()
+        assertEquals("hello world", result.await())
+        awaitUntil("the deleted model's copy freed") { fake.freeCount == 1 }
+        assertFalse(fake.freedWhileTranscribing)
+        assertFalse(service.isModelReady)
+        assertFalse(service.isLocalAvailable())
+        assertFailsWith<TranscriptionException.TranscriptionRequiresDownload> {
+            service.transcribeLocal(realPcmBytes(), sampleRate = 16_000)
+        }
+        assertFailsWith<TranscriptionException.TranscriptionRequiresDownload> {
+            service.transcribeLongForm(realPcmBytes())
+        }
+        assertEquals(1, fake.initCount)
+    }
+
+    @Test
+    fun deletingAModelThatIsNotLoadedLeavesTheLoadedOne() = runBlocking(Dispatchers.Default) {
+        val fake = FakeEngine()
+        val provider = FakeProvider()
+        val service = serviceFor(fake, MutableStateFlow(configFor("model-a")), provider)
+        awaitUntil("initial init of model-a") { service.isModelReady }
+
+        provider.deleted += "model-b"
+        service.modelDeleted("model-b")
+        delay(300)
+        assertTrue(service.isModelReady)
+        assertEquals(0, fake.freeCount)
+    }
+
+    /** Gravel: a model can be loaded without being the selected one, while the selected one is not installed. */
+    @Test
+    fun deletedModelThatIsLoadedButNotSelectedIsFreed() = runBlocking(Dispatchers.Default) {
+        val fake = FakeEngine()
+        val provider = FakeProvider()
+        provider.deleted += "model-b"
+        val config = MutableStateFlow(configFor("model-a"))
+        val service = serviceFor(fake, config, provider)
+        awaitUntil("initial init of model-a") { service.isModelReady }
+        config.value = configFor("model-b")
+        delay(300)
+        assertEquals("model-a", service.lastModelUsed)
+        assertTrue(service.isLocalAvailable())
+
+        provider.deleted += "model-a"
+        service.modelDeleted("model-a")
+        awaitUntil("the deleted model's copy freed") { fake.freeCount == 1 }
+        assertFalse(service.isModelReady)
+        assertEquals(null, service.lastModelUsed)
+    }
+
+    @Test
+    fun aModelOnThePhoneAgainWhenTheDeleteIsHandledStaysLoaded() = runBlocking(Dispatchers.Default) {
+        val fake = FakeEngine()
+        val service = serviceFor(fake, MutableStateFlow(configFor("model-a")))
+        awaitUntil("initial init of model-a") { service.isModelReady }
+
+        service.modelDeleted("model-a")
+        delay(300)
+        assertTrue(service.isModelReady)
+        assertEquals(0, fake.freeCount)
+    }
+
+    /**
+     * Gravel: the model list deletes the selected model and selects another in one step. Both jobs wait behind
+     * the call inside the engine, in either order.
+     */
+    @Test
+    fun deleteAndSwitchFreeOnceInEitherOrder() = runBlocking(Dispatchers.Default) {
+        for (deleteFirst in listOf(true, false)) {
+            val fake = FakeEngine()
+            val provider = FakeProvider()
+            val config = MutableStateFlow(configFor("model-a"))
+            val service = serviceFor(fake, config, provider)
+            awaitUntil("initial init of model-a") { service.isModelReady }
+            val result = async { service.transcribeLocal(realPcmBytes(), sampleRate = 16_000) }
+            awaitUntil("transcription inside the engine") { fake.inRealTranscribe }
+
+            provider.deleted += "model-a"
+            if (deleteFirst) service.modelDeleted("model-a") else config.value = configFor("model-b")
+            delay(300)
+            if (deleteFirst) config.value = configFor("model-b") else service.modelDeleted("model-a")
+            delay(300)
+            assertEquals(0, fake.freeCount, "deleteFirst=$deleteFirst")
+
+            fake.transcribeGate.countDown()
+            assertEquals("hello world", result.await())
+            awaitUntil("init of model-b, deleteFirst=$deleteFirst") { service.isModelReady && service.lastModelUsed == "model-b" }
+            delay(300)
+            assertEquals(1, fake.freeCount, "deleteFirst=$deleteFirst")
+            assertEquals(listOf("/fake/model-a", "/fake/model-b"), fake.initedPaths, "deleteFirst=$deleteFirst")
+            assertTrue(service.isModelReady, "deleteFirst=$deleteFirst")
+        }
+    }
+
+    /** Gravel: nothing handles a failure of the delete's own job, which would end the service's scope. */
+    @Test
+    fun aFreeThatFailsLeavesTheServiceWorking() = runBlocking(Dispatchers.Default) {
+        val fake = FakeEngine()
+        val provider = FakeProvider()
+        val config = MutableStateFlow(configFor("model-a"))
+        val service = serviceFor(fake, config, provider)
+        awaitUntil("initial init of model-a") { service.isModelReady }
+
+        fake.freeFails = true
+        provider.deleted += "model-a"
+        service.modelDeleted("model-a")
+        awaitUntil("the handle dropped") { fake.freeCount == 1 && !service.isModelReady }
+        fake.freeFails = false
+        config.value = configFor("model-b")
+        awaitUntil("init of model-b") { service.isModelReady && service.lastModelUsed == "model-b" }
     }
 }

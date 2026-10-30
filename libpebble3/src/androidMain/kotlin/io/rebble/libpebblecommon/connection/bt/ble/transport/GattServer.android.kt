@@ -26,6 +26,7 @@ import io.rebble.libpebblecommon.connection.bt.ble.pebble.LEConstants.UUIDs.PPOG
 import io.rebble.libpebblecommon.di.LibPebbleCoroutineScope
 import io.rebble.libpebblecommon.web.withTimeoutOr
 import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -180,6 +181,26 @@ class GattServerCallback(
 //        logger.d("/onDescriptorWriteRequest")
     }
 
+    private val _connectionUpdates = MutableSharedFlow<ServerConnectionUpdate>(extraBufferCapacity = 16)
+    val connectionUpdates = _connectionUpdates.asSharedFlow()
+
+    /**
+     * Gravel: overrides a hidden callback, so it has no `override` and needs its keep rule in
+     * consumer-rules.pro (packages/modules/Bluetooth on android15-release, android16-release and main,
+     * framework/java/android/bluetooth/BluetoothGattServerCallback.java, onConnectionUpdated;
+     * BluetoothGattServer.java calls it from its binder stub's onConnectionUpdated).
+     */
+    fun onConnectionUpdated(device: BluetoothDevice, interval: Int, latency: Int, timeout: Int, status: Int) {
+        _connectionUpdates.tryEmit(
+            ServerConnectionUpdate(
+                deviceId = device.address.asPebbleBleIdentifier(),
+                interval = interval,
+                latency = latency,
+                succeeded = status == GATT_SUCCESS,
+            )
+        )
+    }
+
     override fun onNotificationSent(device: BluetoothDevice, status: Int) {
 //        logger.d("onNotificationSent: ${device.address}")
         val device = registeredDevices[device.address]
@@ -221,6 +242,8 @@ actual class GattServer(
     }
 
 //    actual val connectionState = callback.connectionState.filterNotNull()
+
+    actual val connectionUpdates: Flow<ServerConnectionUpdate> = callback.connectionUpdates
 
     actual suspend fun removeServices() {
         logger.d("removeServices")

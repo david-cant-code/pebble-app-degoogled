@@ -10,7 +10,7 @@ actual suspend fun getFreeMemoryMB(): Long {
 
 actual val PLATFORM_MIN_TRANSCRIPTION_MEMORY_MB: Long = 20
 
-// Policy and bound live in tieredThreadCount; this actual only supplies the
+// Policy and bound live in threadCountFor; this actual only supplies the
 // platform inputs. The affinity mask is the engine process's when one is
 // bound, since that is where the decode runs, and this process's before
 // the first bind (on the phone measured the two processes sit in the same
@@ -26,11 +26,8 @@ actual val PLATFORM_MIN_TRANSCRIPTION_MEMORY_MB: Long = 20
 // bionic, android16-release, `libc/bionic/sysinfo.cpp`,
 // `get_nprocs_conf`): every CPU the kernel could bring up, whether
 // online or not, and never the affinity mask.
-actual fun transcriptionThreadCount(): Int {
-    val allowed = engineProcessCpuIds() ?: readAllowedCpuIds()
-    return if (allowed.isNullOrEmpty()) {
-        engineThreadCount(allowedCpus = null, possibleCpus = Runtime.getRuntime().availableProcessors())
-    } else {
-        tieredThreadCount(allowed, cpuMaxFrequenciesKHz())
-    }
-}
+actual fun transcriptionThreadCount(): Int = threadCountFor(
+    allowedCpuIds = engineProcessCpuIds() ?: readAllowedCpuIds(),
+    maxFreqKHzByCpu = cpuMaxFrequenciesKHz(),
+    possibleCpus = Runtime.getRuntime().availableProcessors(),
+)

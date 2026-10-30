@@ -1,13 +1,23 @@
 package coredevices.util.models
 
+import com.anopticlabs.gravel.models.ModelRole
+import com.anopticlabs.gravel.models.PinnedModel
+
 /**
  * Whisper size tiers in the catalog, largest first. Each tier is one
  * architecture, so the multilingual and English-only entries of a tier
  * cost the same to run; [cheaper] walks toward the floor, which is how
  * the speed-based recommendation steps down.
  */
-enum class WhisperTier {
-    Small, Base, Tiny;
+enum class WhisperTier(
+    /**
+     * What one long-form transcription adds to the engine process: whisper.cpp v1.9.5's own
+     * count of the call's state plus a five-minute recording's buffers, with a quarter added.
+     * Measured on device; measure again when the engine or the long-form limits change.
+     */
+    val longFormBytes: Long,
+) {
+    Small(340L shl 20), Base(250L shl 20), Tiny(225L shl 20);
 
     /** The next tier down, or null at the floor. */
     fun cheaper(): WhisperTier? = entries.getOrNull(ordinal + 1)
@@ -35,22 +45,26 @@ enum class WhisperTier {
  * @param commit the immutable commit of that repository the URL resolves.
  */
 data class WhisperModel(
-    val id: String,
+    override val id: String,
     val tier: WhisperTier,
-    val displayName: String,
-    val fileName: String,
-    val sha256: String,
-    val sizeBytes: Long,
-    val minRamBytes: Long,
+    override val displayName: String,
+    override val fileName: String,
+    override val sha256: String,
+    override val sizeBytes: Long,
+    override val minRamBytes: Long,
     val multilingual: Boolean,
-    val repo: String = WhisperModelCatalog.HF_REPO,
-    val commit: String = WhisperModelCatalog.HF_REPO_COMMIT,
-)
+    override val repo: String = WhisperModelCatalog.HF_REPO,
+    override val commit: String = WhisperModelCatalog.HF_REPO_COMMIT,
+    override val license: String = "MIT",
+) : PinnedModel {
+    override val role: ModelRole get() = ModelRole.Speech
+}
 
 /**
  * Hardcoded catalog and integrity pins for the on-device whisper models.
- * Single source of truth: the settings UI lists it, the installer
- * downloads from it, and the incompatible-model sweep is defined by it.
+ * Single source of truth for speech models: the settings UI lists it,
+ * and the installer and the incompatible-model sweep read it through
+ * `ModelCatalog` together with the text models.
  *
  * Every entry is served from one immutable commit of the
  * huggingface.co/ggerganov/whisper.cpp repository (the whisper.cpp
@@ -71,7 +85,9 @@ data class WhisperModel(
  *  3. Independent bytes: download that URL fresh, `sha256sum` it and
  *     byte-count it locally; this pair goes into the table, with 1 and 2
  *     as cross-checks.
- * When a change invalidates existing installs, also bump [GENERATION].
+ * When a change retires a model's id, also bump [GENERATION]. A re-pin
+ * that keeps an id is not announced: the startup sweep deletes the old
+ * install as a torn one and keeps the speech mode.
  */
 object WhisperModelCatalog {
     /**
@@ -80,7 +96,7 @@ object WhisperModelCatalog {
      * engine swap. The stored last-notified value on migrated devices is a
      * Cactus tag ("v2.0.1") or absent, so any non-colliding value fires
      * the migration notification exactly once; bump this string whenever a
-     * catalog change forces reinstalls.
+     * catalog change retires a model's id.
      */
     const val GENERATION = "whisper-1"
 
@@ -102,15 +118,13 @@ object WhisperModelCatalog {
 
     // Values derived 2026-08-09 (small, base) and 2026-09-01 (tiny) via
     // the three-source procedure above. List order is the order the model
-    // picker shows. No large tier: at the pinned engine revision the
-    // large-v3-turbo q5_0 quant faulted in native inference on the test
-    // device, and its encoder cost cannot meet the watch dictation window
-    // on phone-class CPUs (details in KNOWN_ISSUES); revisit at the next
-    // engine re-pin. The tiny tier is the floor: watch dictation has a
-    // fixed 15 second budget from the firmware, and a phone whose CPU
-    // cannot decode a full window with base inside it still gets a local
-    // option. RAM never recommends tiny; it is a user's or a speed-based
-    // step-down's pick.
+    // picker shows. No large tier: large-v3-turbo q5_0 is too slow for
+    // watch dictation on the test device (details in KNOWN_ISSUES). The
+    // tiny tier is the floor: watch dictation has a fixed 15 second
+    // budget from the firmware, and a phone whose CPU cannot decode a
+    // full window with base inside it still gets a local option. RAM
+    // never recommends tiny; it is a user's or a speed-based step-down's
+    // pick.
     val MODELS: List<WhisperModel> = listOf(
         WhisperModel(
             id = "whisper-small",
@@ -178,8 +192,12 @@ object WhisperModelCatalog {
 
     fun byId(id: String): WhisperModel? = MODELS.firstOrNull { it.id == id }
 
-    fun urlFor(model: WhisperModel): String =
-        "https://huggingface.co/${model.repo}/resolve/${model.commit}/${model.fileName}"
+    /**
+     * What replaces a selected model that is gone: [recommended] when it
+     * is in [installed], else the first of [MODELS] that is, else none.
+     */
+    fun selectionAmong(installed: Collection<String>, recommended: String): String? =
+        recommended.takeIf { it in installed } ?: MODELS.firstOrNull { it.id in installed }?.id
 
     /**
      * The entry one tier cheaper than [model] with the same language

@@ -7,15 +7,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -72,12 +69,9 @@ import coredevices.pebble.ui.PreviewWrapper
 import coredevices.pebble.ui.WHATS_NEW_VERSION
 import coredevices.ui.PebbleElevatedButton
 import coredevices.ui.SignInButtons
-import coredevices.coreapp.di.indexOnboardingAvailable
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigHolder
-import coredevices.util.DeviceChoice
 import coredevices.util.DoneInitialOnboarding
-import coredevices.util.recordOnboardingDeviceChoice
 import coredevices.util.Permission
 import coredevices.util.PermissionRequester
 import coredevices.util.name
@@ -98,7 +92,6 @@ enum class OnboardingStage {
     Welcome,
     DeviceSelection,
     Permissions,
-    RingPermission,
     // Fork: the user's one-time choice for whether watchfaces/apps may reach the
     // internet and location by default. Runs as the last stage of the fork's flow:
     // Permissions routes here and onDone goes straight to Done, skipping the SignIn
@@ -106,9 +99,14 @@ enum class OnboardingStage {
     // merges). Existing installs, which never re-run onboarding, keep the
     // deny-by-default baseline.
     WatchappPrivacy,
-    RingSetup,
     SignIn,
     Done,
+}
+
+enum class DeviceChoice {
+    Watch,
+    Index01,
+    Both,
 }
 
 class OnboardingViewModel(private val config: CoreConfigHolder) : ViewModel() {
@@ -116,6 +114,9 @@ class OnboardingViewModel(private val config: CoreConfigHolder) : ViewModel() {
     val deviceChoice = mutableStateOf<DeviceChoice?>(null)
     val requestedPermissions = mutableStateOf(emptySet<Permission>())
     val coreConfig = config.config
+    fun setIndexEnabled(enabled: Boolean) {
+        config.update(config.config.value.copy(enableIndex = enabled))
+    }
 
     // Fork: stamp the current changelog revision as seen (see WhatsNewDialog). Called on
     // onboarding exit so a fresh install is not shown the update dialog for changes it was
@@ -123,33 +124,9 @@ class OnboardingViewModel(private val config: CoreConfigHolder) : ViewModel() {
     fun markWhatsNewSeen() {
         config.update(config.config.value.copy(lastSeenWhatsNewVersion = WHATS_NEW_VERSION))
     }
-
-    fun enableIndexFeed() = config.enableIndexFeed()
 }
 
 private val logger = Logger.withTag("OnboardingScreen")
-
-/** Centred getting-started column, shared by the watch and ring steps.
- *  The min height is the viewport: a scrollable column otherwise measures
- *  with infinite height, and Arrangement.Center then leaves short content
- *  at the top. Taller steps still scroll. */
-@Composable
-fun OnboardingStageContent(
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .verticalScroll(rememberScrollState())
-                .heightIn(min = maxHeight)
-                .padding(20.dp)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-            content = content,
-        )
-    }
-}
 
 @Preview
 @Composable
@@ -197,7 +174,11 @@ fun OnboardingScreen(
         Box(modifier = Modifier.padding(windowInsets).fillMaxSize()) {
             when (viewModel.stage.value) {
                 OnboardingStage.Welcome -> {
-                    OnboardingStageContent {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
                         Image(
                             painter = painterResource(Res.drawable.gravel_logo),
                             contentDescription = "Gravel logo",
@@ -216,19 +197,17 @@ fun OnboardingScreen(
                 }
 
                 OnboardingStage.DeviceSelection -> {
-                    OnboardingStageContent {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
                         Text(
                             text = "I have a:",
                             fontSize = 28.sp,
                             fontWeight = FontWeight.Bold,
                         )
                         Spacer(modifier = Modifier.height(30.dp))
-                        val choices = visibleDeviceChoices(indexOnboardingAvailable())
-                        fun select(choice: DeviceChoice) {
-                            settings.recordOnboardingDeviceChoice(choice, viewModel::enableIndexFeed)
-                            viewModel.deviceChoice.value = choice
-                            viewModel.stage.value = stageAfterDeviceChoice(choice)
-                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
@@ -236,24 +215,41 @@ fun OnboardingScreen(
                             DeviceChoiceCard(
                                 label = "Watch",
                                 icon = Icons.Default.Watch,
-                                onClick = { select(DeviceChoice.Watch) },
+                                onClick = {
+                                    viewModel.deviceChoice.value = DeviceChoice.Watch
+                                    viewModel.stage.value = OnboardingStage.Permissions
+                                },
                             )
-                            if (DeviceChoice.Index01 in choices) {
-                                DeviceChoiceCard(
-                                    label = "Index 01",
-                                    icon = Icons.Default.RadioButtonUnchecked,
-                                    onClick = { select(DeviceChoice.Index01) },
-                                )
-                            }
-                        }
-                        if (DeviceChoice.Both in choices) {
-                            Spacer(modifier = Modifier.height(20.dp))
+                            // Fork: the Index 01 (Ring) feature modules are
+                            // Firebase-backed and unplugged from this build,
+                            // so the choices that would enable them are
+                            // stamped out instead of removed, keeping the
+                            // upstream layout recognizable and honest about
+                            // why the device class is unavailable.
                             DeviceChoiceCard(
-                                label = "Both",
-                                icon = Icons.Default.Devices,
-                                onClick = { select(DeviceChoice.Both) },
+                                label = "Index 01",
+                                icon = Icons.Default.RadioButtonUnchecked,
+                                onClick = {
+                                    viewModel.setIndexEnabled(true)
+                                    viewModel.deviceChoice.value = DeviceChoice.Index01
+                                    viewModel.stage.value = OnboardingStage.Permissions
+                                },
+                                enabled = false,
+                                disabledStamp = "Requires\nGoogle Firebase",
                             )
                         }
+                        Spacer(modifier = Modifier.height(20.dp))
+                        DeviceChoiceCard(
+                            label = "Both",
+                            icon = Icons.Default.Devices,
+                            onClick = {
+                                viewModel.setIndexEnabled(true)
+                                viewModel.deviceChoice.value = DeviceChoice.Both
+                                viewModel.stage.value = OnboardingStage.Permissions
+                            },
+                            enabled = false,
+                            disabledStamp = "Requires\nGoogle Firebase",
+                        )
                     }
                 }
 
@@ -269,10 +265,9 @@ fun OnboardingScreen(
                             // Fork: Core-account sign-in is removed with the
                             // Firebase strip, so onboarding skips the SignIn
                             // stage; the stage and its UI stay compiled for
-                            // cheap upstream merges. Watch and Both go through
-                            // the watchapp privacy choice. Index 01 does not
-                            // enter this stage.
-                            viewModel.stage.value = stageAfterPermissions(viewModel.deviceChoice.value)
+                            // cheap upstream merges. Route through the watchapp
+                            // privacy choice before finishing.
+                            viewModel.stage.value = OnboardingStage.WatchappPrivacy
                         } else {
                             val warnBeforeFullScreenRequest = permissionToRequest.requestIsFullScreen()
                             LaunchedEffect(permissionToRequest) {
@@ -320,30 +315,19 @@ fun OnboardingScreen(
                     }
                 }
 
-                OnboardingStage.RingPermission -> {
-                    RingPermissionStage(
-                        onGranted = { viewModel.stage.value = OnboardingStage.RingSetup },
-                        onSkip = { viewModel.stage.value = OnboardingStage.Done },
-                    )
-                }
-
                 OnboardingStage.WatchappPrivacy -> {
                     WatchappPrivacyStage(
-                        onDone = {
-                            viewModel.stage.value = stageAfterWatchPrivacy(viewModel.deviceChoice.value)
-                        },
-                    )
-                }
-
-                OnboardingStage.RingSetup -> {
-                    RingSetupStage(
                         onDone = { viewModel.stage.value = OnboardingStage.Done },
                     )
                 }
 
                 OnboardingStage.SignIn -> {
                     val coreConfig by viewModel.coreConfig.collectAsState()
-                    OnboardingStageContent {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
                         Text(
                             text = "Sign In",
                             fontSize = 35.sp,
@@ -369,13 +353,13 @@ fun OnboardingScreen(
                 }
 
                 OnboardingStage.Done -> {
-                    OnboardingStageContent {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
                         PebbleElevatedButton(
-                            text = if (viewModel.deviceChoice.value == DeviceChoice.Index01) {
-                                "Continue"
-                            } else {
-                                "Connect a Pebble!"
-                            },
+                            text = "Connect a Pebble!",
                             onClick = ::exitOnboarding,
                             primaryColor = true,
                         )
@@ -405,7 +389,11 @@ private fun WatchappPrivacyStage(onDone: () -> Unit) {
     var saved by remember { mutableStateOf(false) }
 
     if (saved) {
-        OnboardingStageContent {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
             Text(
                 text = "You're all set",
                 fontSize = 28.sp,
@@ -429,7 +417,11 @@ private fun WatchappPrivacyStage(onDone: () -> Unit) {
         return
     }
 
-    OnboardingStageContent {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
         Text(
             text = "Privacy",
             fontSize = 28.sp,

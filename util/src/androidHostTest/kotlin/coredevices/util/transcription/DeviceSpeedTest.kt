@@ -1,21 +1,27 @@
 package coredevices.util.transcription
 
+import com.anopticlabs.gravel.models.InferenceExclusion
 import com.russhwolf.settings.MapSettings
 import com.russhwolf.settings.Settings
 import coredevices.util.models.WhisperTier
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Pins the speed estimator's caching contract and the calibration math
@@ -125,6 +131,25 @@ class DeviceSpeedTest {
         assertNotNull(estimator.measure())
         assertNotNull(counted)
         assertNotEquals(caller, counted)
+    }
+
+    /** A probe timed under a text generation would cache a slow score. */
+    @Test
+    fun theProbeWaitsForATextGenerationToFinish() = runBlocking(Dispatchers.Default) {
+        val exclusion = InferenceExclusion()
+        val generating = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val generation = launch { exclusion.withLock { generating.complete(Unit); finish.await() } }
+        generating.await()
+        val probed = AtomicBoolean(false)
+        val estimator = DeviceSpeedEstimator(MapSettings(), threadCount = { 2 }, probe = { probed.set(true); 100_000_000L }, supported = { true }, exclusion = exclusion)
+        val measuring = async { estimator.measure() }
+        delay(200)
+        assertFalse(probed.get(), "the probe ran beside a generation")
+        finish.complete(Unit)
+        assertNotNull(measuring.await())
+        assertTrue(probed.get())
+        generation.join()
     }
 
     @Test

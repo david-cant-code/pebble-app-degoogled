@@ -2,6 +2,8 @@ package coredevices.coreapp.model
 
 import android.content.Context
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.models.ModelCatalog
+import com.anopticlabs.gravel.models.PinnedModel
 import coredevices.util.Platform
 import coredevices.util.models.WhisperModel
 import coredevices.util.models.WhisperModelCatalog
@@ -17,8 +19,9 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Fork-owned model provider for the whisper engine: resolves, downloads,
- * and verifies the on-device speech models from [WhisperModelCatalog].
+ * Gravel's model provider: resolves, downloads, and verifies the
+ * on-device models of [ModelCatalog], the speech models for the whisper
+ * engine and the text models for the Notebook's llama.cpp engine.
  * Successor to the Cactus-era provider behind the same
  * [CactusModelPathProvider] interface (the interface keeps its upstream
  * name to bound merge cost; see the interface's own KDoc).
@@ -35,8 +38,8 @@ import java.util.concurrent.ConcurrentHashMap
  * reported by [getIncompatibleModels]; that is what makes the Cactus-era
  * model directories sweepable by the app delegate's migration pass.
  *
- * There is no language model in this fork: the engine consumes STT models
- * only, so [getLMModelPath] fails loudly instead of pretending.
+ * Speech-facing methods see speech models only; text models are reached
+ * by id through [getModelPath], and [getLMModelPath] fails loudly.
  */
 class WhisperModelProvider(
     private val context: Context,
@@ -64,7 +67,7 @@ class WhisperModelProvider(
         // shape logic stays under JVM tests with temp dirs; a regression
         // here either forces pointless multi-hundred-MB re-downloads or
         // lets the migration sweep miss stale engine models.
-        internal fun isInstalledShapeIn(modelsDir: File, model: WhisperModel): Boolean =
+        internal fun isInstalledShapeIn(modelsDir: File, model: PinnedModel): Boolean =
             modelsDir.resolve(model.id).resolve(model.fileName)
                 .let { it.isFile && it.length() == model.sizeBytes }
 
@@ -78,9 +81,15 @@ class WhisperModelProvider(
         internal fun incompatibleIn(modelsDir: File): List<String> =
             modelDirNamesIn(modelsDir)
                 .filter { name ->
-                    val model = WhisperModelCatalog.byId(name)
+                    val model = ModelCatalog.byId(name)
                     model == null || !isInstalledShapeIn(modelsDir, model)
                 }
+
+        /** The migration restore makes the first match the dictation model, so a text model never counts. */
+        internal fun speechModelInstalledIn(modelsDir: File, name: String): Boolean {
+            val model = WhisperModelCatalog.byId(name) ?: return false
+            return isInstalledShapeIn(modelsDir, model)
+        }
 
         /**
          * Directory names under modelsDir that can be models: everything
@@ -125,7 +134,7 @@ class WhisperModelProvider(
         internal suspend fun resolveVerifiedModelPath(
             installer: ModelFileInstaller,
             loadVerified: MutableMap<String, Boolean>,
-            model: WhisperModel,
+            model: PinnedModel,
             allowReinstall: Boolean = true,
         ): String {
             if (!installer.isInstalled(model)) {
@@ -181,7 +190,7 @@ class WhisperModelProvider(
      * against.
      */
     override suspend fun getModelPath(modelId: String, allowReinstall: Boolean): String = withContext(Dispatchers.IO) {
-        val model = WhisperModelCatalog.byId(modelId)
+        val model = ModelCatalog.byId(modelId)
             ?: throw IllegalStateException("No catalog entry for model '$modelId'; refusing to download")
         mutexFor(model.id).withLock {
             resolveVerifiedModelPath(installer, loadVerified, model, allowReinstall)
@@ -192,18 +201,19 @@ class WhisperModelProvider(
         loadVerified.remove(modelId)
     }
 
-    override suspend fun getSTTModelPath(): String =
-        getModelPath(configuredModelId() ?: recommendedDefault().id)
+    override suspend fun getSTTModelPath(): String {
+        val id = configuredModelId() ?: recommendedDefault().id
+        WhisperModelCatalog.byId(id)
+            ?: throw IllegalStateException("'$id' is not a speech model; refusing to resolve it for dictation")
+        return getModelPath(id)
+    }
 
     override suspend fun getLMModelPath(): String =
         throw UnsupportedOperationException(
-            "This fork bundles no language model; only STT models exist",
+            "Upstream's single language model does not exist here; text models are resolved by id",
         )
 
-    override fun isModelDownloaded(modelName: String): Boolean {
-        val model = WhisperModelCatalog.byId(modelName) ?: return false
-        return isInstalledShapeIn(modelsDir, model)
-    }
+    override fun isModelDownloaded(modelName: String): Boolean = speechModelInstalledIn(modelsDir, modelName)
 
     // Raw directory view (minus staging): includes stale
     // engine models on purpose so they stay visible to the sweep and
@@ -211,6 +221,21 @@ class WhisperModelProvider(
     override fun getDownloadedModels(): List<String> = modelDirNamesIn(modelsDir)
 
     override fun getIncompatibleModels(): List<String> = incompatibleIn(modelsDir)
+
+    override fun pruneOrphanedStaging() {
+        installer.pruneOrphanedStaging()
+    }
+
+    override fun partialDownloadBytes(modelId: String): Long =
+        ModelCatalog.byId(modelId)?.let(installer::partialBytes) ?: 0L
+
+    // Under the model's lock, so it waits for an install of the model to stop writing.
+    override suspend fun discardPartialDownload(modelId: String) {
+        val model = ModelCatalog.byId(modelId) ?: return
+        withContext(Dispatchers.IO) {
+            mutexFor(model.id).withLock { installer.discardPartial(model) }
+        }
+    }
 
     override fun deleteModel(modelName: String) {
         if (!isSafeModelDirName(modelName)) {

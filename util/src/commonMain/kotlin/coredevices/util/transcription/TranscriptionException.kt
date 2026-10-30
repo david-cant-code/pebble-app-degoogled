@@ -17,6 +17,8 @@ sealed class TranscriptionException(message: String?, cause: Throwable?, val mod
         override val errorType = RecordingEntryErrorType.transcription_failed
     }
     class NotEnoughMemory(modelUsed: String? = null): TranscriptionServiceUnavailable(modelUsed)
+    /** Gravel: the self-hosted server's Wi-Fi-only rule keeps audio off the current network. */
+    class ServerNotAllowedOnNetwork(modelUsed: String? = null): TranscriptionServiceUnavailable(modelUsed)
     class TranscriptionServiceError(message: String, cause: Throwable? = null, modelUsed: String? = null): TranscriptionException(message, cause, modelUsed) {
         override val errorType = RecordingEntryErrorType.transcription_failed
     }

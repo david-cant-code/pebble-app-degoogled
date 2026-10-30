@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.22)
 project(gravel_socketfilter LANGUAGES C)
 
+# Relative paths in the output; see VerifyNativeLibPaths in androidApp/build.gradle.kts.
+add_compile_options(
+    "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=src"
+    "-ffile-prefix-map=${CMAKE_BINARY_DIR}=build"
+    "-ffile-prefix-map=${CMAKE_ANDROID_NDK}=ndk")
+
 add_library(gravelsocketfilter SHARED socket_filter.c)
 target_compile_options(gravelsocketfilter PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(gravelsocketfilter PRIVATE android)

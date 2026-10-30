@@ -8,3 +8,11 @@
 [submodule "whisper-native/src/main/cpp/whisper.cpp"]
 	path = whisper-native/src/main/cpp/whisper.cpp
 	url = https://github.com/ggml-org/whisper.cpp.git
+# The Notebook's text engine, built from source the same way; pinned to an
+# upstream semver release tag so its bundled ggml is a released version.
+# Vetted before adoption: MIT license, active upstream, current stable tag,
+# no reachable advisory for a build that loads pinned models and compiles
+# neither server, RPC, tools nor examples.
+[submodule "llm-native/src/main/cpp/llama.cpp"]
+	path = llm-native/src/main/cpp/llama.cpp
+	url = https://github.com/ggml-org/llama.cpp.git

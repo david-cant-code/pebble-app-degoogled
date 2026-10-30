@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.PowerManager
 import android.os.StrictMode
 import androidx.annotation.RequiresApi
+import androidx.work.Configuration
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
@@ -30,11 +31,19 @@ import com.anopticlabs.gravel.pkjs.webViewMajorVersion
 import com.anopticlabs.gravel.socketfilter.InstallResult
 import com.anopticlabs.gravel.socketfilter.UdpSocketFilter
 import coredevices.ExperimentalDevices
+import com.anopticlabs.gravel.app.notebookEnginesModule
+import com.anopticlabs.gravel.app.notebookTabModule
+import com.anopticlabs.gravel.app.notebookWatchAppModule
+import com.anopticlabs.gravel.app.textModelsModule
+import com.anopticlabs.gravel.network.AndroidUnmeteredWifi
+import com.anopticlabs.gravel.transcription.adoptUnboundServerToken
+import com.anopticlabs.gravel.transcription.settleServerOnMobileData
+import com.anopticlabs.gravel.notebook.AppVisibility
+import com.anopticlabs.gravel.notebook.alarms.NotebookStartup
+import com.anopticlabs.gravel.notebook.notebookModule
 import coredevices.coreapp.di.androidDefaultModule
 import coredevices.coreapp.di.apiModule
-import coredevices.coreapp.di.openRingModules
 import coredevices.coreapp.di.ringStubsModule
-import coredevices.coreapp.di.startGravelRing
 import coredevices.coreapp.di.utilModule
 import coredevices.coreapp.util.FileLogWriter
 import coredevices.coreapp.util.FirebaseResidueCleanup
@@ -44,9 +53,11 @@ import coredevices.pebble.PebbleAppDelegate
 import coredevices.pebble.watchModule
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigHolder
+import com.anopticlabs.gravel.llm.LlmEngineClient
 import coredevices.whisper.WhisperEngineClient
 import coredevices.whisper.runningInIsolatedProcess
 import io.rebble.libpebblecommon.connection.AppContext
+import org.koin.android.ext.android.get
 import org.koin.android.ext.android.inject
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.context.startKoin
@@ -56,7 +67,7 @@ import kotlin.time.toJavaDuration
 
 private val logger = Logger.withTag("MainApplication")
 
-class MainApplication : Application(), SingletonImageLoader.Factory {
+class MainApplication : Application(), SingletonImageLoader.Factory, Configuration.Provider {
     private val pebbleAppDelegate: PebbleAppDelegate by inject()
     private val commonAppDelegate: CommonAppDelegate by inject()
     private val experimentalDevices: ExperimentalDevices by inject()
@@ -64,47 +75,63 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     private val coreConfigHolder: CoreConfigHolder by inject()
     private val pebbleBackgroundManager: PebbleBackgroundManager by inject()
 
-    // Gravel: set once in attachBaseContext; null in the speech engine's isolated process.
+    // Gravel: set once in attachBaseContext; null in the engines' isolated processes.
     private var udpFilterResult: InstallResult? = null
 
     // Gravel: a socket that exists before the filter is outside it, so nothing may precede this
     // install in the process: no WebView, no Koin start, no network client. attachBaseContext
     // runs before every content provider and library initializer (android16-release,
-    // ActivityThread.handleBindApplication). The isolated engine process gets no filter.
+    // ActivityThread.handleBindApplication). The isolated engine processes get no filter.
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
         if (runningInIsolatedProcess()) return
         udpFilterResult = UdpSocketFilter.install()
     }
 
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder().build()
+
     override fun onCreate() {
         super.onCreate()
-        // Fork: the speech engine's isolated process instantiates this class
-        // too, and nothing below may run there; see runningInIsolatedProcess.
+        // Fork: the engines' isolated processes instantiate this class too,
+        // and nothing below may run there; see runningInIsolatedProcess.
         if (runningInIsolatedProcess()) return
-        // Fork: the engine client needs the application context to bind the
-        // engine process; attached before the DI graph exists so no engine
+        // Fork: the engine clients need the application context to bind the
+        // engine processes; attached before the DI graph exists so no engine
         // call can precede it.
         WhisperEngineClient.attach(this)
-        val koinApp = startKoin {
+        LlmEngineClient.attach(this)
+        startKoin {
             modules(
-                buildList {
-                    add(module { androidContext(this@MainApplication) })
-                    add(androidDefaultModule)
-                    add(ringStubsModule)
-                    add(apiModule)
-                    add(utilModule)
-                    add(watchModule)
+                module {
+                    androidContext(this@MainApplication)
                 },
+                androidDefaultModule,
+                ringStubsModule,
+                apiModule,
+                utilModule,
+                watchModule,
+                notebookModule,
+                notebookEnginesModule,
+                notebookTabModule,
+                notebookWatchAppModule,
+                textModelsModule,
             )
         }
-        // Open ring replaces NoOpLibIndex. The stub list is empty.
-        koinApp.koin.loadModules(openRingModules(), allowOverride = true)
-        startGravelRing()
+        // Gravel: registered before any activity starts, so the Notebook's notification gates count every one.
+        registerActivityLifecycleCallbacks(get<AppVisibility>())
         initLogging()
         logUdpFilterResult()
         // Gravel: kept across process starts; see udpFilterEnforcement.
         recordUdpFilterInstall(udpFilterResult, noBackupFilesDir)
+        // Gravel: the self-hosted server's Wi-Fi-only rule; ahead of pebbleAppDelegate.init, which starts libPebble,
+        // and of the Notebook's first run, which may send to the server.
+        get<AndroidUnmeteredWifi>().start()
+        settleServerOnMobileData(coreConfigHolder, get())
+        // Gravel: ahead of the first request, which goes out without a token an earlier build stored until this has run.
+        adoptUnboundServerToken(coreConfigHolder, get())
+        // Gravel: a force stop drops the Notebook's alarms; the sweep re-arms them from the stores.
+        get<NotebookStartup>().start()
         // Fork: installs upgraded from pre-strip builds still hold the
         // Firebase SDKs' persisted refresh token and Firestore cache, and the
         // strip removed every code path that could clear them; see
@@ -204,7 +231,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     }
 
     // Fork: the platform delivers these to every process of the app, the
-    // speech engine's isolated process included, where onCreate returned
+    // engines' isolated processes included, where onCreate returned
     // before the DI graph was built; an injected member resolved there
     // throws, and that process has no file to write anyway.
     override fun onLowMemory() {
@@ -263,9 +290,14 @@ fun scheduleBackgroundJob(appContext: AppContext, coreConfig: CoreConfig) {
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
     ).build()
-    WorkManager.getInstance(appContext.context).enqueueUniquePeriodicWork(
-        uniqueWorkName = "core_refresh",
-        existingPeriodicWorkPolicy = ExistingPeriodicWorkPolicy.UPDATE,
-        request = workRequest,
-    )
+    try {
+        WorkManager.getInstance(appContext.context).enqueueUniquePeriodicWork(
+            uniqueWorkName = "core_refresh",
+            existingPeriodicWorkPolicy = ExistingPeriodicWorkPolicy.UPDATE,
+            request = workRequest,
+        )
+    } catch (e: Throwable) {
+        // Broken OEM builds throw NoSuchMethodError from WorkManager init; sync just won't run.
+        logger.e(e) { "Failed to schedule background job" }
+    }
 }

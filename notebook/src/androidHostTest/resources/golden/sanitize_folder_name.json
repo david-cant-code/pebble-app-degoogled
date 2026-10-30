@@ -1,0 +1,38 @@
+[
+  {
+    "in": "work",
+    "out": "work"
+  },
+  {
+    "in": "  My Folder  ",
+    "out": "  My Folder  "
+  },
+  {
+    "in": "ctrl\u0000name",
+    "out": "ctrlname"
+  },
+  {
+    "in": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "out": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+    "in": "multi   space   folder",
+    "out": "multi   space   folder"
+  },
+  {
+    "in": "tab\tfolder",
+    "out": "tabfolder"
+  },
+  {
+    "in": "line1\nline2",
+    "out": "line1line2"
+  },
+  {
+    "in": "café",
+    "out": "café"
+  },
+  {
+    "in": "",
+    "out": ""
+  }
+]

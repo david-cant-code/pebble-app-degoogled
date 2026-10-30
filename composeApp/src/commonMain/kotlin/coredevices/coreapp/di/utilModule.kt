@@ -2,6 +2,8 @@ package coredevices.coreapp.di
 
 import AppUpdateTracker
 import NextBugReportContext
+import com.anopticlabs.gravel.models.InferenceExclusion
+import com.anopticlabs.gravel.transcription.ServerDictationHold
 import com.russhwolf.settings.Settings
 import coredevices.CoreBackgroundSync
 import coredevices.EnableExperimentalDevices
@@ -82,7 +84,6 @@ val utilModule = module {
     single { get<CoreDatabase>().appstoreCollectionDao() }
     single { get<CoreDatabase>().weatherLocationDao() }
     single { get<CoreDatabase>().heartsDao() }
-    single { get<CoreDatabase>().memfaultChunkDao() }
     single { get<CoreDatabase>().analyticsHeartbeatDao() }
     single { UserConfigDao { get() } }
     single { CoreConfigHolder(defaultValue = CoreConfig(), get(), get()) }
@@ -90,13 +91,17 @@ val utilModule = module {
     // The speed probe runs on the thread count a dictation would get at
     // that moment, so its score and the decode it predicts share one
     // threading policy.
+    single { InferenceExclusion() }
     single {
         DeviceSpeedEstimator(
             settings = get(),
             threadCount = { dictationThreadCount(get<CoreConfigHolder>().config.value.sttConfig) },
+            exclusion = get(),
         )
     }
-    single { ModelManager(get(), get(), getOrNull(), get()) }
+    single {
+        ModelManager(get(), get(), getOrNull(), get(), onDeleted = { get<WhisperTranscriptionService>().modelDeleted(it) })
+    }
     single { DictationSpeedTracker(get()) }
     singleOf(::OAuthRedirectHandler)
     singleOf(::WisprFlowAuth)
@@ -121,12 +126,13 @@ val utilModule = module {
     }
     singleOf(::PlatformSpeechRecognizer)
     single {
-        HybridTranscriptionService(get(), get(), get(), get(), get(), get(), selfHosted = get())
+        HybridTranscriptionService(get(), get(), get(), get(), get(), get(), selfHosted = get(), serverDictation = get())
     } bind TranscriptionService::class
+    single { ServerDictationHold() }
     // Fork: the self-hosted transcription server and what it remembers
     // (encrypted bearer token, pinned certificate).
     single { SelfHostedServerStore(get(), get()) }
-    single { SelfHostedTranscriptionService(get(), get()) }
+    single { SelfHostedTranscriptionService(get(), get(), get(), get()) }
     singleOf(::WisprFlowRESTTranscriptionService)
     singleOf(::KirinkiTranscriptionService)
     // Fork: permanently signed out. UsersDaoImpl's auth-restoration observer

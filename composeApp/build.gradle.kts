@@ -11,11 +11,6 @@ plugins {
     alias(libs.plugins.kotlinx.atomicfu)
 }
 
-val gravelRing = providers.gradleProperty("gravel.ring").orElse("stub").get()
-if (gravelRing != "stub" && gravelRing != "open") {
-    error("gravel.ring must be stub or open (was '$gravelRing')")
-}
-
 kotlin {
     val xcodeExists = providers.exec {
         isIgnoreExitValue = true
@@ -172,6 +167,13 @@ kotlin {
             }
         }
         androidMain.dependencies {
+            // Gravel: the Notebook's Koin module and its required-permission
+            // contribution are registered from the Android app graph; the
+            // module has no iOS target, so it stays out of commonMain.
+            implementation(project(":notebook"))
+            // Gravel: the Application class attaches the text engine's client;
+            // Android only, like the Notebook it serves.
+            implementation(project(":llm"))
             // Gravel: the Application class installs the UDP socket filter at process start.
             implementation(project(":socketfilter"))
             implementation(compose.preview)
@@ -247,8 +249,6 @@ kotlin {
             implementation(libs.kmpio)
             implementation(project(":libpebble3"))
             implementation(project(":libindex"))
-            // Substituted to :haversine-stubs or :haversine-open by gravel.ring.
-            implementation(libs.coredevices.haversine)
             // Fork: health-kmp's Android artifact hard-depends on the Google
             // Fit backend even though only the Health Connect path is used.
             // The GMS artifacts are excluded so the APK stays GMS-free;
@@ -260,18 +260,6 @@ kotlin {
                 exclude(group = "com.google.android.gms", module = "play-services-auth")
                 exclude(group = "com.google.android.gms", module = "play-services-fitness")
             }
-        }
-        getByName("commonMain").kotlin.srcDir(
-            if (gravelRing == "open") "src/openRing/kotlin" else "src/closedRing/kotlin",
-        )
-        if (gravelRing == "open") {
-            getByName("androidMain").kotlin.srcDir("src/openRingAndroid/kotlin")
-            // java.util.zip is JVM-only, so the writer is not in commonMain.
-            getByName("androidMain").kotlin.srcDir("src/openRingJvm/kotlin")
-            getByName("iosMain").kotlin.srcDir("src/openRingIos/kotlin")
-            getByName("androidHostTest").kotlin.srcDir("src/openRingHostTest/kotlin")
-        } else {
-            getByName("androidHostTest").kotlin.srcDir("src/closedRingHostTest/kotlin")
         }
     }
 }

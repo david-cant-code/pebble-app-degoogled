@@ -8,9 +8,9 @@
 //    decoded in Kotlin. Engine output can contain byte sequences that are
 //    not valid modified UTF-8, and NewStringUTF aborts the whole process
 //    under CheckJNI when handed those, so it is never used here.
-//  - nativeTranscribe returns null on failure and records a reason for
-//    nativeGetLastError; an empty array is a valid result meaning "no
-//    speech found".
+//  - nativeTranscribe and nativeTranscribeLong return null on failure
+//    and record a reason for nativeGetLastError; an empty array from
+//    nativeTranscribe is a valid result meaning "no speech found".
 //  - nativeInitFd takes the model as an open file descriptor that the
 //    Kotlin side has detached from its owner; the shim owns it from that
 //    call on and closes it exactly once, on every path. The engine never
@@ -30,6 +30,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -373,6 +374,67 @@ int64_t run_benchmark(int n_threads) {
     return samples[samples.size() / 2];
 }
 
+// The language code of one call, held until the call returns. Language
+// codes are ASCII (ISO 639-1), so modified UTF-8 is safe on this input
+// path. Null means in-engine detection.
+//
+// whisper_full does not validate an explicitly requested language: an
+// unknown code yields lang_id -1, and whisper_token_lang(ctx, -1) puts
+// a second SOT token into the decoder prompt on multilingual models,
+// silently degrading output with rc == 0. The Kotlin layer normalizes
+// the legacy Java locale codes it knows about; this is the backstop
+// for everything else the ~190-entry language picker can produce that
+// whisper's ~100-entry map does not know. It falls back to in-engine
+// detection, which is what the caller gets for a null language anyway.
+class ScopedLanguage {
+public:
+    ScopedLanguage(JNIEnv *env, jstring language) : env_(env), language_(language) {
+        if (language_ == nullptr) return;
+        chars_ = env_->GetStringUTFChars(language_, nullptr);
+        if (chars_ == nullptr) {
+            // A failed copy leaves an OutOfMemoryError pending; the call
+            // goes on with in-engine detection and must not carry it.
+            env_->ExceptionClear();
+        } else if (whisper_lang_id(chars_) == -1) {
+            __android_log_print(ANDROID_LOG_WARN, kLogTag,
+                                "unknown language '%s', falling back to in-engine detection", chars_);
+            env_->ReleaseStringUTFChars(language_, chars_);
+            chars_ = nullptr;
+        }
+    }
+
+    ~ScopedLanguage() {
+        if (chars_ != nullptr) env_->ReleaseStringUTFChars(language_, chars_);
+    }
+
+    const char *get() const { return chars_; }
+
+    ScopedLanguage(const ScopedLanguage &) = delete;
+    ScopedLanguage &operator=(const ScopedLanguage &) = delete;
+
+private:
+    JNIEnv *env_;
+    jstring language_;
+    const char *chars_ = nullptr;
+};
+
+// Long-form bounds and layout, shared with WhisperLongForm (pinned by
+// WhisperShimConstantsTest).
+constexpr int kMaxLongFormCallSamples = 5 * 60 * WHISPER_SAMPLE_RATE;
+constexpr size_t kMaxLongFormReplyBytes = 256u * 1024u;
+constexpr size_t kLongFormReplyHeaderBytes = 1;
+constexpr size_t kLongFormSegmentHeaderBytes = 8 + 8 + 4;
+
+void append_le(std::string &out, uint64_t value, int n_bytes) {
+    for (int i = 0; i < n_bytes; ++i) out.push_back(static_cast<char>((value >> (8 * i)) & 0xFF));
+}
+
+// One long-form call's abort key and whether whisper's abort callback fired for it.
+struct LongFormCall {
+    int64_t id;
+    std::atomic<bool> aborted{false};
+};
+
 // UTF-8 bytes out, exactly as produced; the Kotlin side decodes. Returns
 // null only on allocation failure (a pending OutOfMemoryError).
 jbyteArray utf8_bytes(JNIEnv *env, const std::string &s) {
@@ -404,7 +466,7 @@ Java_coredevices_whisper_WhisperJNI_nativeInitFd(JNIEnv *, jclass, jint fd) {
         return 0;
     }
 
-    // The loader-based init (whisper.cpp v1.9.3, src/whisper.cpp,
+    // The loader-based init (whisper.cpp v1.9.5, src/whisper.cpp,
     // whisper_init_with_params_no_state) streams the model through these
     // callbacks, calls close on both of its exit paths and keeps no
     // reference to the context afterwards, so the callback close is a
@@ -422,7 +484,7 @@ Java_coredevices_whisper_WhisperJNI_nativeInitFd(JNIEnv *, jclass, jint fd) {
     // would make init probe for one and log noise on every start.
     cparams.use_gpu = false;
 
-    // The state the engine builds behind init (whisper.cpp v1.9.3,
+    // The state the engine builds behind init (whisper.cpp v1.9.5,
     // src/whisper.cpp, whisper_init_state) is allocated with new and
     // vector reserves, which throw on failure, after the model's weights
     // are loaded; whisper_init_with_params has no handler, so a throw
@@ -503,28 +565,11 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
     const int n_samples = static_cast<int>(n_pinned);
     report_input(n_samples);
 
-    // Language codes are ASCII (ISO 639-1), so modified UTF-8 is safe on
-    // this input path too. Null means in-engine language detection.
-    const char *lang = (language != nullptr) ? env->GetStringUTFChars(language, nullptr) : nullptr;
-
-    // whisper_full does not validate an explicitly requested language: an
-    // unknown code yields lang_id -1, and whisper_token_lang(ctx, -1) puts
-    // a second SOT token into the decoder prompt on multilingual models,
-    // silently degrading output with rc == 0. The Kotlin layer normalizes
-    // the legacy Java locale codes it knows about; this is the backstop
-    // for everything else the ~190-entry language picker can produce that
-    // whisper's ~100-entry map does not know. Fall back to in-engine
-    // detection, which is what the caller gets for a null language anyway.
-    if (lang != nullptr && whisper_lang_id(lang) == -1) {
-        __android_log_print(ANDROID_LOG_WARN, kLogTag,
-                            "unknown language '%s', falling back to in-engine detection", lang);
-        env->ReleaseStringUTFChars(language, lang);
-        lang = nullptr;
-    }
+    ScopedLanguage lang(env, language);
 
     whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     params.n_threads       = n_threads > 0 ? n_threads : kDefaultThreads;
-    params.language        = lang;
+    params.language        = lang.get();
     params.translate       = false;
     params.no_timestamps   = true;  // dictation wants plain text
     params.print_progress  = false;
@@ -537,10 +582,9 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
     // Whisper always evaluates a padded 30 second mel window (encoder
     // context 1500), but dictation clips are a few seconds long. Trimming
     // the encoder context to the real audio length cuts the dominant
-    // encoder cost several-fold on short clips, which is what keeps the
-    // large models inside the watch firmware's transcription deadline. One
-    // encoder position covers 20 ms (WHISPER_SAMPLE_RATE / 50 samples);
-    // the margin leaves the decoder room to attend past the end of speech.
+    // encoder cost several-fold on short clips. One encoder position
+    // covers 20 ms (WHISPER_SAMPLE_RATE / 50 samples); the margin leaves
+    // the decoder room to attend past the end of speech.
     const int wanted_ctx = static_cast<int>(n_samples / (WHISPER_SAMPLE_RATE / 50)) + 64;
     params.audio_ctx = std::min(wanted_ctx, 1500);
 
@@ -588,9 +632,6 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
     clear_call_cancel(this_call);
 
     env->ReleaseFloatArrayElements(pcm, pinned, JNI_ABORT); // read-only, never copy back
-    if (lang != nullptr) {
-        env->ReleaseStringUTFChars(language, lang);
-    }
 
     if (rc != 0) {
         if (was_cancelled) {
@@ -613,6 +654,114 @@ Java_coredevices_whisper_WhisperJNI_nativeTranscribe(JNIEnv *env, jclass, jlong 
         }
     }
     return utf8_bytes(env, text);
+}
+
+// Long-form transcription of one recording, read in place from the mapped
+// region: timestamps, whole windows, no token cap, no extra no-speech
+// filter. It runs on a state of its own because whisper detects the
+// language at the audio_ctx the state's previous call left, which dictation
+// trims (whisper.cpp v1.9.5, src/whisper.cpp, whisper_full_with_state,
+// exp_n_audio_ctx). A canceled call replies with the stopped flag alone.
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_coredevices_whisper_WhisperJNI_nativeTranscribeLong(JNIEnv *env, jclass, jlong handle,
+                                                         jobject pcm, jint n_samples, jint n_threads,
+                                                         jstring language, jlong call_id,
+                                                         jlong cpu_mask, jint nice_value) {
+    LongFormCall call{call_id};
+    struct ClearCancel {
+        int64_t id;
+        ~ClearCancel() { clear_call_cancel(id); }
+    } clear_cancel{call.id};
+
+    auto *ctx = reinterpret_cast<whisper_context *>(handle);
+    if (ctx == nullptr) {
+        set_last_error("long-form transcription called with a null engine handle");
+        return nullptr;
+    }
+    if (n_samples <= 0 || n_samples > kMaxLongFormCallSamples) {
+        set_last_error("long-form audio of " + std::to_string(n_samples) + " samples is outside 1.."
+                       + std::to_string(kMaxLongFormCallSamples));
+        return nullptr;
+    }
+    const auto *samples = static_cast<const float *>(env->GetDirectBufferAddress(pcm));
+    const jlong capacity = env->GetDirectBufferCapacity(pcm);
+    if (samples == nullptr || capacity < static_cast<jlong>(n_samples) * static_cast<jlong>(sizeof(float))) {
+        set_last_error("long-form audio buffer is not a direct buffer holding " + std::to_string(n_samples) + " samples");
+        return nullptr;
+    }
+
+    struct ScopedState {
+        whisper_state *state;
+        ~ScopedState() { if (state != nullptr) whisper_free_state(state); }
+    } scoped{whisper_init_state(ctx)};
+    if (scoped.state == nullptr) {
+        set_last_error("no engine state could be allocated for long-form transcription");
+        return nullptr;
+    }
+
+    ScopedLanguage lang(env, language);
+
+    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    params.n_threads        = n_threads > 0 ? n_threads : kDefaultThreads;
+    params.language         = lang.get();
+    params.translate        = false;
+    params.no_timestamps    = false;
+    params.print_progress   = false;
+    params.print_realtime   = false;
+    params.print_special    = false;
+    params.print_timestamps = false;
+    params.suppress_blank   = true;
+    params.suppress_nst     = true;
+    // One pass per window, as for dictation; a runaway window stops at
+    // whisper's own limit (v1.9.5, whisper_full_with_state, n_max).
+    params.temperature_inc  = 0.0f;
+    // Polled after each encoder pass and decoder step (v1.9.5,
+    // whisper_encode_internal, whisper_decode_internal), including a
+    // language detection's (whisper_lang_auto_detect_internal), never
+    // during the recording's mel. A non-zero return counts as a stop only
+    // if this fired.
+    params.abort_callback = [](void *data) -> bool {
+        auto *c = static_cast<LongFormCall *>(data);
+        if (!is_call_cancelled(c->id)) return false;
+        c->aborted = true;
+        return true;
+    };
+    params.abort_callback_user_data = &call;
+
+    int rc;
+    {
+        ScopedPlacement placement(cpu_mask, nice_value);
+        rc = whisper_full_with_state(ctx, scoped.state, params, samples, n_samples);
+    }
+    // whisper frees the state itself when it returns -7 (v1.9.5,
+    // whisper_full_with_state, the KV cache re-init for a new decoder count).
+    if (rc == -7) scoped.state = nullptr;
+    if (rc != 0 && call.aborted) return utf8_bytes(env, std::string(1, '\1'));
+    if (rc != 0) {
+        set_last_error("whisper_full failed with code " + std::to_string(rc));
+        return nullptr;
+    }
+
+    whisper_state *state = scoped.state;
+    // A window whose first token is not a timestamp can start a segment
+    // before the audio (its tid defaults to 0, same function).
+    const int64_t audio_end = (static_cast<int64_t>(n_samples) + WHISPER_SAMPLE_RATE / 100 - 1) / (WHISPER_SAMPLE_RATE / 100);
+    const auto packed_time = [audio_end](int64_t t) { return static_cast<uint64_t>(std::clamp<int64_t>(t, 0, audio_end)); };
+    std::string packed(kLongFormReplyHeaderBytes, '\0');
+    const int n_segments = whisper_full_n_segments_from_state(state);
+    for (int i = 0; i < n_segments; ++i) {
+        const char *segment = whisper_full_get_segment_text_from_state(state, i);
+        const size_t length = segment != nullptr ? strlen(segment) : 0;
+        if (packed.size() + kLongFormSegmentHeaderBytes + length > kMaxLongFormReplyBytes) {
+            set_last_error("long-form transcript passes " + std::to_string(kMaxLongFormReplyBytes) + " bytes");
+            return nullptr;
+        }
+        append_le(packed, packed_time(whisper_full_get_segment_t0_from_state(state, i)), 8);
+        append_le(packed, packed_time(whisper_full_get_segment_t1_from_state(state, i)), 8);
+        append_le(packed, static_cast<uint64_t>(length), 4);
+        packed.append(segment != nullptr ? segment : "", length);
+    }
+    return utf8_bytes(env, packed);
 }
 
 extern "C" JNIEXPORT void JNICALL

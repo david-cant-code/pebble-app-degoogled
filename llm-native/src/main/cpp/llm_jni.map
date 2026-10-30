@@ -1,0 +1,10 @@
+/* Export only the JNI entry points: nothing else in the statically linked
+ * engine is reachable through the dynamic symbol table. The NDK links with
+ * --no-undefined-version, so only symbols these libraries define may be
+ * named here. */
+{
+  global:
+    Java_*;
+  local:
+    *;
+};

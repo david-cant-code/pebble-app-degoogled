@@ -196,6 +196,10 @@ class FakeLibPebble : LibPebble {
         return flow { emit(fakeLockerEntries.first()) }
     }
 
+    override suspend fun cachedPbwSha256(id: Uuid): String? = null
+
+    override suspend fun sideloadAppWithoutLaunch(pbwPath: Path, id: Uuid): Boolean = true
+
     override suspend fun setAppOrder(id: Uuid, order: Int) {
 
     }
@@ -445,6 +449,10 @@ class FakeLibPebble : LibPebble {
         )) }
 
     override fun updateHealthSettings(healthSettings: HealthSettings) {}
+
+    override suspend fun updateImperialUnits(imperialUnits: Boolean) {}
+
+    override suspend fun seedImperialUnits(imperialUnits: Boolean) {}
 
     override suspend fun getHealthDebugStats(): HealthDebugStats {
         return HealthDebugStats(

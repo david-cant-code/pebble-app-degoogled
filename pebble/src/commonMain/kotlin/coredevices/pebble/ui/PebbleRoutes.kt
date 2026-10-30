@@ -13,6 +13,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
 import com.anopticlabs.gravel.firmware.FirmwarePickerRoute
 import com.anopticlabs.gravel.firmware.FirmwarePickerScreen
+import com.anopticlabs.gravel.ui.TextModelsScreen
+import com.anopticlabs.gravel.ui.rememberNotebookTab
 import io.rebble.libpebblecommon.locker.AppType
 import kotlinx.serialization.Serializable
 import kotlin.uuid.Uuid
@@ -76,6 +78,9 @@ object PebbleNavBarRoutes {
     data object IndexRoute : NavBarRoute
 
     @Serializable
+    data object NotebookRoute : NavBarRoute
+
+    @Serializable
     data object HealthRoute : NavBarRoute
 
     @Serializable
@@ -124,6 +129,10 @@ object PebbleNavBarRoutes {
 
     @Serializable
     data object OfflineModelsRoute : NavBarRoute
+
+    // Gravel: Settings > AI > LLM.
+    @Serializable
+    data object TextModelsRoute : NavBarRoute
 
     @Serializable
     data class WatchSettingsCategoryRoute(val section: String, val topLevelType: String) : NavBarRoute
@@ -204,6 +213,15 @@ fun NavGraphBuilder.addNavBarRoutes(
     composableWithAnimations<PebbleNavBarRoutes.IndexRoute>(viewModel) {
         indexScreen(topBarParams, nav, scopedCoreNav)
     }
+    composableWithAnimations<PebbleNavBarRoutes.NotebookRoute>(viewModel) {
+        rememberNotebookTab()?.Screen(
+            topBarParams,
+            openTextModels = { nav.navigateTo(PebbleNavBarRoutes.TextModelsRoute) },
+            openSpeechSettings = {
+                nav.navigateTo(PebbleNavBarRoutes.WatchSettingsCategoryRoute(section = Section.Speech.name, topLevelType = TopLevelType.Phone.name))
+            },
+        )
+    }
     composableWithAnimations<PebbleNavBarRoutes.NotificationAppRoute>(viewModel) {
         val route: PebbleNavBarRoutes.NotificationAppRoute = it.toRoute()
         NotificationAppScreen(topBarParams, route.packageName, nav)
@@ -271,6 +289,9 @@ fun NavGraphBuilder.addNavBarRoutes(
     }
     composable<PebbleNavBarRoutes.OfflineModelsRoute> {
         ModelManagementScreen(nav, topBarParams)
+    }
+    composable<PebbleNavBarRoutes.TextModelsRoute> {
+        TextModelsScreen(topBarParams)
     }
     composableWithAnimations<PebbleNavBarRoutes.WatchSettingsCategoryRoute>(viewModel) {
         val route: PebbleNavBarRoutes.WatchSettingsCategoryRoute = it.toRoute()

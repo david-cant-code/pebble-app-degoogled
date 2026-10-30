@@ -58,12 +58,6 @@ class CoreConfigHolder(
         _config.value = value
     }
 
-    /** Sets the feed on and keeps a permission confirmation the user already gave. */
-    fun enableIndexFeed() {
-        val current = config.value
-        if (!current.enableIndex) update(current.withIndexFeedEnabled(true))
-    }
-
     private val _config: MutableStateFlow<CoreConfig> = MutableStateFlow(defaultValue())
     val config: StateFlow<CoreConfig> = _config.asStateFlow()
 }
@@ -74,10 +68,10 @@ class CoreConfigFlow(val flow: StateFlow<CoreConfig>) {
 
 private const val SETTINGS_KEY = "coreapp.config"
 
-enum class WeatherUnit(val code: String, val displayName: String) {
-    Metric("m", "Metric"),
-    Imperial("e", "Imperial"),
-    UkHybrid("h", "Mixed (UK)"),
+enum class WeatherUnit(val code: String) {
+    Metric("m"),
+    Imperial("e"),
+    UkHybrid("h"),
 }
 
 @Serializable
@@ -89,6 +83,9 @@ data class CoreConfig(
     val disableFirmwareUpdateNotifications: Boolean = false,
     val enableIndex: Boolean = false,
     val indexPermissionsConfirmed: Boolean = false,
+    /** No longer written — weather units are the watch's imperial/metric pref. The migration in
+     * [coredevices.pebble.weather.WeatherFetcher] reads it, and an upgrade can arrive from any
+     * older version, so it has to stay. */
     val weatherUnits: WeatherUnit? = null,
     val showAllSettingsTab: Boolean = false,
     val sttConfig: STTConfig = STTConfig(),
@@ -115,17 +112,9 @@ data class CoreConfig(
      * chose during setup.
      */
     val lastSeenWhatsNewVersion: Int = 0,
-) {
-    /** Null until the user picks explicitly; the settings [Json] omits defaults, so a
-     * locale-derived default here would never be persisted. */
-    val resolvedWeatherUnits: WeatherUnit get() = weatherUnits ?: deviceDefaultWeatherUnit()
-
-    /** Turning the feed off clears the permission confirmation, so the next enable asks again. */
-    fun withIndexFeedEnabled(enabled: Boolean): CoreConfig = copy(
-        enableIndex = enabled,
-        indexPermissionsConfirmed = if (enabled) indexPermissionsConfirmed else false,
-    )
-}
+    /** Set the day/night backlight switch times from the local sunrise/sunset during weather sync. */
+    val backlightColorAutoSunriseSunset: Boolean = true,
+)
 
 @Serializable
 data class STTConfig(
@@ -177,6 +166,10 @@ data class STTConfig(
      * model ignore it; OpenAI-style servers require it. Null sends none.
      */
     val serverModel: String? = null,
+    /** Gravel: "Use the Server on Mobile Data"; off holds dictation uploads to the Wi-Fi-only rule. */
+    val serverOnMobileData: Boolean = false,
+    /** Gravel: "Flaky Network Mode"; see HybridTranscriptionService.keepsDictationOnPhone. */
+    val flakyNetworkMode: Boolean = false,
 ) {
     /**
      * The server URL names the user's own infrastructure, and the config
@@ -187,5 +180,6 @@ data class STTConfig(
         "STTConfig(mode=$mode, modelName=$modelName, spokenLanguage=$spokenLanguage, " +
             "debugSingleThread=$debugSingleThread, debugCaptureDump=$debugCaptureDump, " +
             "debugSubstituteAudio=$debugSubstituteAudio, debugSlowDecode=$debugSlowDecode, " +
-            "serverUrl=${if (serverUrl != null) "[set]" else "null"}, serverModel=$serverModel)"
+            "serverUrl=${if (serverUrl != null) "[set]" else "null"}, serverModel=$serverModel, " +
+            "serverOnMobileData=$serverOnMobileData, flakyNetworkMode=$flakyNetworkMode)"
 }

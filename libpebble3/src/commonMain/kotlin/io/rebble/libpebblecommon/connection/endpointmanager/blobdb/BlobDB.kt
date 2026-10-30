@@ -23,6 +23,7 @@ import io.rebble.libpebblecommon.database.dao.WatchPrefRealDao
 import io.rebble.libpebblecommon.database.dao.WeatherAppRealDao
 import io.rebble.libpebblecommon.database.entity.AppPrefsEntryDao
 import io.rebble.libpebblecommon.database.dao.HealthSettingsEntryRealDao
+import io.rebble.libpebblecommon.database.entity.WatchPref
 import io.rebble.libpebblecommon.database.entity.HealthStatDao
 import io.rebble.libpebblecommon.di.ConnectionCoroutineScope
 import io.rebble.libpebblecommon.di.PlatformConfig
@@ -101,6 +102,43 @@ class RealTimeProvider : TimeProvider {
 
 @Serializable
 data class DevicesWhichHaveSyncedSettings(val identifiers: Set<String>)
+
+/**
+ * Per watch, the pref keys the phone knew when that watch last finished a WatchPrefs sync the phone
+ * asked for with MarkAllDirty.
+ */
+@Serializable
+data class SyncedWatchPrefKeys(val keysByDevice: Map<String, Set<String>>) {
+    fun covers(device: String, keys: Set<String>): Boolean = keysByDevice[device]?.containsAll(keys) == true
+    fun withDevice(device: String, keys: Set<String>) = copy(keysByDevice = keysByDevice + (device to keys))
+}
+
+private const val PREF_KEY_SYNCED_WATCH_PREF_KEYS = "syncedWatchPrefKeys"
+
+@OptIn(ExperimentalSettingsApi::class)
+internal fun Settings.syncedWatchPrefKeys(): SyncedWatchPrefKeys =
+    decodeValue(PREF_KEY_SYNCED_WATCH_PREF_KEYS, SyncedWatchPrefKeys(emptyMap()))
+
+@OptIn(ExperimentalSettingsApi::class)
+internal fun Settings.recordSyncedWatchPrefKeys(device: String, keys: Set<String>) =
+    encodeValue(PREF_KEY_SYNCED_WATCH_PREF_KEYS, syncedWatchPrefKeys().withDevice(device, keys))
+
+/**
+ * Says, once, that a WatchPrefs sync the phone asked for has finished: at the first WatchPrefs
+ * SyncDone after the [alreadySeen] ones that arrived before the request was answered.
+ */
+internal class RequestedPrefSyncDone(private val alreadySeen: Int) {
+    private var seen = 0
+    private var reported = false
+
+    fun onSyncDone(database: BlobDatabase): Boolean {
+        if (database != BlobDatabase.WatchPrefs || reported) return false
+        seen++
+        if (seen <= alreadySeen) return false
+        reported = true
+        return true
+    }
+}
 
 @OptIn(ExperimentalSettingsApi::class)
 class BlobDB(
@@ -185,8 +223,12 @@ class BlobDB(
             notificationRuleDao = blobDatabases.getNotificationRuleDao(),
             libPebbleConfigFlow = libPebbleConfigFlow,
         )
+        val currentPrefKeys = WatchPref.enumeratePrefs().map { it.id }.toSet()
+        // Gravel: a watch is asked for all its prefs again once the phone knows keys it did not
+        // when that watch last finished such a sync.
         val deviceHasPreviouslySyncedSettings =
-            loadDevicePreviousSettingsSyncState().identifiers.contains(identifier.asString)
+            loadDevicePreviousSettingsSyncState().identifiers.contains(identifier.asString) &&
+                settings.syncedWatchPrefKeys().covers(identifier.asString, currentPrefKeys)
         watchScope.launch {
             // Watch isn't sending a version response
             val blobDbVersion = if (capabilities.contains(ProtocolCapsFlag.SupportsBlobDbVersion)) {
@@ -209,6 +251,7 @@ class BlobDB(
                 }
             }
 
+            var requestedPrefSync: RequestedPrefSyncDone? = null
             if (unfaithful || !deviceHasPreviouslySyncedSettings) {
                 if (blobDbVersion >= 1) {
                     // Request a full sync of watch prefs
@@ -219,8 +262,17 @@ class BlobDB(
                         )
                     )
                     logger.v { "Marked all dirty for watch prefs: $dirtyResponse" }
+                    if (dirtyResponse is BlobDB2Response.MarkAllDirtyResponse &&
+                        dirtyResponse.status.get() == BlobResponse.BlobStatus.Success.value
+                    ) {
+                        // syncCompletes replays; a SyncDone already in it predates this request.
+                        requestedPrefSync = RequestedPrefSyncDone(
+                            alreadySeen = blobDBService.syncCompletes.replayCache.count { it == BlobDatabase.WatchPrefs },
+                        )
+                    }
                 }
             }
+            val prefSyncToRecord = requestedPrefSync
 
             watchScope.launch {
                 blobDBService.writes.collect { message ->
@@ -254,6 +306,9 @@ class BlobDB(
                 watchScope.launch {
                     blobDBService.syncCompletes.collect {
                         databasesWhichWillSync.value -= it
+                        if (prefSyncToRecord?.onSyncDone(it) == true) {
+                            settings.recordSyncedWatchPrefKeys(identifier.asString, currentPrefKeys)
+                        }
                     }
                 }
 

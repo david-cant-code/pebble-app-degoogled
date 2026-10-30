@@ -26,10 +26,12 @@ De-google work is completed, all telemetry is removed. What remains is polish an
 - [x] Per-app watchapp permissions (internet + location, deny by default)
 - [x] Free speech engine (whisper.cpp built from source, replacing the
       proprietary Cactus stack)
-- [ ] Third-party microphone API
+- [x] Notebook: voice and typed notes and reminders, from the phone or a
+      Pebble watch with the
+      [Notebook watch app](https://github.com/david-cant-code/gravel-watchapp)
+      (early beta)
 - [ ] Local on-device battery analytics (secondary goal, feasibility open)
-- [ ] Pebble Index 01 (Ring) / Index AI support without Firebase or other
-      cloud services (approach open)
+- [ ] Recording into the Notebook from a Pebble Index 01 ring (planned)
 - [x] F-Droid inclusion (listing live)
 
 ## Goals
@@ -44,15 +46,17 @@ De-google work is completed, all telemetry is removed. What remains is polish an
   app talks to are fixed in the app, with two exceptions you control: an
   app store source you add yourself is fetched from the host you entered,
   with no account token attached and no store search sent to it, and a
-  transcription server you configure receives your dictation audio
-  (nothing is sent unless you set one up). Problem reports are a manual
+  transcription server you configure receives your dictation audio and,
+  in the server modes, your Notebook recordings (nothing is sent unless
+  you set one up). Problem reports are a manual
   export: Settings > Get Help > Export logs writes a zip (app log, device
   summary, anything you attach) for you to add to an issue yourself, and
   nothing in the app can upload it.
 - **Hardening beyond the de-Googling.** The app's own attack surface is in
   scope, not just its Google dependencies
   ([KNOWN_ISSUES.md](KNOWN_ISSUES.md) records the trade-offs). Landed so far:
-  - The speech engine runs in an isolated process with no permissions and
+  - The speech and text engines each run in an isolated process with no
+    permissions and
     no path into the app's files, so a memory-safety bug in the model
     parser or decoder, reached through a model file, is contained to that
     process.
@@ -93,12 +97,9 @@ De-google work is completed, all telemetry is removed. What remains is polish an
   than its firmware (any build in recovery), including the one an update
   check would offer from the same data; it marks which are on the
   changelog and links to it. Legacy Pebble watches keep using the Rebble
-  cohorts endpoint and install its offer from the Devices tab. Gravel builds ship no Memfault
-  token and make no Memfault requests; upstream's optional `memfaultToken`
-  Gradle property would route Core watch update checks through
-  `api.memfault.com`, periodically sending the watch serial number (or a
-  MAC-derived identifier), hardware revision, and firmware version in the
-  background.
+  cohorts endpoint and install its offer from the Devices tab. Upstream's
+  Memfault update check and what remained of the firmware-diagnostics relay
+  are removed.
 - **Weather without Play services.** Manual latitude/longitude entry, since
   the stock place search relies on the GMS-backed platform geocoder.
 - **Free on-device dictation.** Voice dictation runs on whisper.cpp,
@@ -110,38 +111,56 @@ De-google work is completed, all telemetry is removed. What remains is polish an
   watch's dictation window prompts a switch to a smaller one.
 - **Dictation through your own server.** A phone too slow for the
   watch's window can send dictation audio to a self-hosted transcription
-  server instead, or use one as a fallback; see
+  server instead, or use one as a fallback, and the Notebook's recordings
+  follow the same setting; see
   [Using your own transcription server](#using-your-own-transcription-server).
   Nothing is sent anywhere unless you configure a server.
-- **A watch microphone API for third-party applications** documented and
-  authorization-gated, rather than locking watch mic audio to first-party
-  features.
+- **A Notebook on the phone.** Voice and typed notes and reminders, taken
+  from the Notebook tab or from a Pebble watch running the Notebook watch
+  app ([source](https://github.com/david-cant-code/gravel-watchapp)),
+  which Gravel offers to install.
+  It needs Android 9 or newer, and voice notes need a phone whose
+  processor can run both engines; other phones get typed notes and
+  reminders. The speech recognition and the text model that writes
+  titles, tags, and a reminder's wording run on the phone, in
+  isolated processes, on whisper.cpp and llama.cpp built from source; a
+  recording goes to a transcription server only if you set one up.
+  Notes, reminders and waiting recordings are stored as encrypted files
+  whose keys are sealed by a key in the phone's keystore;
+  `KNOWN_ISSUES.md` records gaps of that storage. A reminder that goes
+  off, and the notice of when a voice reminder is set, are phone
+  notifications like any other: their text can show on the lock screen,
+  goes to the watch, and is kept in Gravel's notification history. Backups
+  are files written where you choose, sealed with a password or a recovery
+  key. The text models are downloads you start
+  yourself, checked against a pinned SHA-256; recordings wait until one
+  is installed.
 - **Distribution through F-Droid.** Gravel is in F-Droid's main
   repository, as
   [`com.anopticlabs.gravel`](https://f-droid.org/packages/com.anopticlabs.gravel/),
   and staying there constrains every change: the tree holds no binaries
   and every dependency is free software from a repository F-Droid allows.
-  The speech engine is built from source, and the Ring satellite library,
+  The speech and text engines are built from source, and the Ring
+  satellite library,
   the last dependency whose native code had no public source, is replaced
   by a stub. `DESIGN_NOTES.md` records what the tree guarantees and what
   the build recipe supplies.
 
 Out of scope: iOS (sources remain in-tree but are unmaintained here).
 
-The F-Droid and default builds leave the Pebble Index 01 unplugged.
-`:experimental` stays out of the build because it depends on Firebase
-and other cloud services. `libindex` stays compiled because the watch UI
-shares code with it, and the default graph binds `NoOpLibIndex`, so that
-APK never scans or pairs a ring and has no Index tab.
-
-An open-ring build (`-Pgravel.ring=open`, application id
-`com.anopticlabs.gravel.ring`) pairs an Index 01 and shows an Index tab
-when onboarding was Index 01 or Both. See
-[Index recordings](#index-recordings).
+Not functional: upstream's Pebble Index 01 (Ring) and Index AI features.
+The Ring feature module (`experimental`) depends on the Firebase SDKs and is
+unplugged from the build; the `libindex`/`index-ai`/`mcp` libraries stay
+compiled because the watch UI shares code with them, but their runtime is
+disabled at the dependency-injection seam (verified against the built APK:
+no Ring services, no Ring endpoints, rings cannot be scanned or paired).
+The Notebook is separate from those features and was written
+independently of them. Recording into the Notebook from an Index 01 ring
+is planned; bringing back Index AI is not.
 
 ## Using your own transcription server
 
-Settings > Speech Recognition > Self-hosted Server takes the full URL
+Settings > AI > Speech Recognition > Self-hosted Server takes the full URL
 of a transcription endpoint, an optional model name, and an optional
 bearer token, and then offers three modes in the speech recognition
 dropdown: server only, server with local fallback, and local with server
@@ -149,6 +168,72 @@ fallback. The app sends each dictation as a 16 kHz WAV in a multipart
 POST with `response_format=json` and reads `text` from the reply, which
 is what whisper.cpp's server and OpenAI-compatible servers (Speaches,
 faster-whisper-server, LocalAI and others) expect.
+
+Unless "Use the Server on Mobile Data" is on, audio goes to the server
+only while the phone is using Wi-Fi that is not marked metered, and an
+upload that loses that Wi-Fi stops instead of carrying on over mobile
+data. Off such Wi-Fi, server only refuses watch dictation, and the two
+fallback modes transcribe it on the phone when the phone has a speech
+model. From Android 10, a VPN counts as that Wi-Fi only while Android
+shows it running over Wi-Fi; `KNOWN_ISSUES.md` covers older versions.
+The switch starts on for a server set up before Gravel had it. "Flaky
+Network Mode", offered in the two fallback modes once the phone has a
+speech model, keeps watch dictation on the phone everywhere, for
+connections that cannot return the words within the watch's 15 seconds.
+
+Notebook recordings follow the same setting. Server only sends each one
+to the server. Server with local fallback sends each one to the server
+first: a recording of 30 seconds or less goes to the phone when the
+Wi-Fi rule keeps it off the server, the server can't be reached, or the
+server fails it, and a longer one waits while the Wi-Fi rule keeps it
+off the server and goes to the phone after 3 failed tries to reach the
+server, at least 15 minutes apart, or after an error from the server; on
+the phone it waits for the charger when Long Recordings Wait for Power
+is on. Without a speech model on the phone it works like server only.
+Local with server fallback
+sends the ones the phone has too little memory or time for, cannot load
+its model for, or hears no speech in, and all of them while the phone
+has no speech model. A recording is up to 5 minutes, a WAV of up to
+about 9.6 MB in one request, and Gravel waits up to 10 minutes without a
+reply from the server, so a reverse proxy in front of the server needs
+an upload limit and a read timeout to match (nginx's
+`client_max_body_size` defaults to 1 MB and its `proxy_read_timeout` to
+60 seconds); the whole request may take up to 15 minutes. While the
+Wi-Fi rule keeps recordings off the server, or the server's name does
+not resolve, it refuses the connection or
+connecting times out, they wait without counting as failed attempts. Any
+other connection failure, such as one lost partway, counts as a failed
+attempt and is tried again later, up to the Notebook's limit of 10. In
+server with local fallback, every connection failure while the phone is
+on an allowed network is instead one of a longer recording's 3 tries. An
+error from the server, a reply without text, a certificate Gravel does
+not trust, 10 minutes without a reply, or a request not finished in 15
+minutes stops sending recordings until you tap Try again in the Notebook
+or change the server's URL, model, token or trusted certificate; a
+recording whose next request after Try again fails the same way moves
+to the Notebook's failed list. In server
+with local fallback with a speech model on the phone, recordings go to
+the phone meanwhile, and none moves to the failed list for it. Pausing
+processing, or a short recording interrupting a long one (Interrupt Long
+Recordings), hangs up on a recording the server is working on;
+whisper.cpp's server then stops working on it, while some other servers
+finish it anyway.
+
+Gravel does not send a watch dictation behind a recording over 30
+seconds that is on the server. In the two fallback modes with a speech
+model on the phone, the dictation is transcribed on the phone. In server
+only, or a fallback mode without a speech model, Gravel hangs up on the
+recording as the watch starts the dictation, sends no recording until
+the dictation is over (or, if it never gets that far, for 30 seconds),
+and then sends the recording again from the start, without counting a
+failed attempt. On a server that finishes a request after a hang-up,
+the dictation still waits behind it. A server that transcribes dictation
+apart from long recordings can say so with the header
+`Gravel-Dictation-Lane: separate` on its successful replies, and Gravel
+then sends dictation to it as if no recording were there. Gravel keeps
+that for the host and port of the last successful reply that carried it,
+the settings dialog's connection test included, and forgets it when a
+successful reply comes without it or another address is saved.
 
 The reference server is whisper.cpp's own, from the same project whose
 engine this app builds. On the machine that will run it:
@@ -189,61 +274,11 @@ each rotation would ask you to confirm again. The bearer token belongs
 to the server it was saved with: a URL edited to another host or port is
 tested and saved without it unless you type one.
 
-## Index recordings
-
-The open-ring build stores every synced Index 01 recording on the phone:
-the WAV, the time, the duration, and the button or tap sequence. A later
-sync of the same ring, iteration, and collection index does not add a
-second copy. Re-pairing the ring starts a new iteration, so collection
-indexes can repeat without hiding the older recordings.
-
-The Index tab lists them newest first, in the same top bar as the other
-tabs. Each row shows the date and time, duration, transcript (or a
-pending / not-transcribed state), playback, and delete. New recordings
-show up as the sync finishes. The tab follows Settings → General →
-Enable Index Feed. Getting started with Index 01 or Both turns that on,
-and so does pairing a ring. Turning it off hides the tab and keeps the
-recordings. Devices always offers Add Index 01 in this build, including
-while the feed is off.
-
-The overflow on that tab can export or share every recording as one zip.
-The archive is `manifest.json` and `manifest.csv` (time, duration, ring,
-iteration, collection index, button sequence, transcription status and
-text), `transcripts.txt`, and one folder per recording named from its
-UTC timestamp: `audio.wav` when the file is still on the phone,
-`transcript.txt`, and `metadata.json`. Saving uses the system document
-picker. An empty library still writes the manifest.
-
-Transcription reuses the speech stack the watch already uses. The default
-is on-device whisper.cpp, which this app builds from source. Nothing is
-sent off the phone unless you point Speech Recognition at a server.
-
-Other options that were considered, and why they are not the default:
-
-- Android's on-device `SpeechRecognizer` (`createOnDeviceSpeechRecognizer`)
-  needs API 31 or 33, has no file-input API this app can rely on, and the
-  platform recognizer in this tree is not implemented on Android. Where a
-  device does ship one, it is often a Google module.
-- A second on-device engine such as Vosk would add another native library
-  and another model download. whisper.cpp is already in the APK, built
-  from the pinned submodule, so the F-Droid checks that reject checked-in
-  binaries and the closed ring `.so` files stay as they are.
-- A self-hosted OpenAI-compatible Whisper server is supported, as the
-  optional remote mode above. It is not the default, because it needs a
-  server you run.
-
-Until a model is installed, the recording still appears, marked not
-transcribed, with Retry. Download one under Settings → Speech
-Recognition → Manage Offline Models (the picker recommends a model from
-the phone's memory). Local Only is the default mode. To use a server
-instead, set Self-hosted Server and choose a server mode in the same
-screen; Retry uses whatever that screen is set to.
-
 ## Building
 
 - Clone with `--recursive` (or run `git submodule update --init`): the
-  whisper.cpp speech engine is a pinned git submodule, compiled from
-  source by the Android build.
+  whisper.cpp speech engine and the llama.cpp text engine are pinned git
+  submodules, compiled from source by the Android build.
 - Any JDK 17 or newer; Gradle wrapper included. Debug build:
   `./gradlew :androidApp:assembleDebug`
 - No `google-services.json` is needed: the google-services plugin is gone
@@ -274,6 +309,8 @@ Kermit (logging).
 | `util` | Shared utilities (logging, IO, theme) |
 | `whisper`, `whisper-native` | The speech engine: Kotlin bindings, and the NDK/CMake build of the pinned whisper.cpp submodule |
 | `socketfilter` | A process-wide filter that refuses the creation of UDP sockets, built from its C source with the NDK; not installed, for example, where the platform's name lookups need UDP, before Android 10, or on a device that is not ARM (see `KNOWN_ISSUES.md`) |
+| `notebook` | The Notebook feature (voice and typed notes, reminders): its tab, note screens, reminder list, calendar (which can also show the phone's calendar) and editor, completion review, reminder alarms, its reminder and quick-completion settings, backup, restore and check of a backup file, automatic backups to a folder, with their keeping rules, warnings and recovery key checks, recovery from a damaged file or a lost key, its text model settings, a setup guide, and recordings from the Notebook watch app. Its settings, setup guide and text model screens are in `pebble`, its engine wiring in `composeApp` and `util`, and its watch app wiring in `composeApp` and `libpebble3` |
+| `llm`, `llm-native` | The Notebook's text engine: Kotlin bindings, and the NDK/CMake build of the pinned llama.cpp submodule |
 | `resampler` | Audio resampling |
 | `blobannotations`, `blobdbgen` | KSP annotations and code generator for BlobDB records |
 | `libindex`, `index-ai`, `mcp` | Ring and Index AI libraries, compiled because the watch UI depends on them, with their runtime disabled |
@@ -323,7 +360,8 @@ confused about which app they are running.
 The bundled Inter typeface (version 4.001, copyright 2016 The Inter Project
 Authors) is licensed under the SIL Open Font License 1.1; the notice and
 license text are in [LICENSE-Inter-OFL](LICENSE-Inter-OFL). The whisper.cpp
-speech engine submodule carries its own MIT license file.
+speech engine and llama.cpp text engine submodules each carry their own MIT
+license file.
 
 Development of Gravel uses AI assistance; commits carry `Co-Authored-By`
 trailers accordingly.

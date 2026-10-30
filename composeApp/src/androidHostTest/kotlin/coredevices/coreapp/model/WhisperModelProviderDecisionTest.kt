@@ -1,5 +1,6 @@
 package coredevices.coreapp.model
 
+import com.anopticlabs.gravel.models.LlmModelCatalog
 import coredevices.util.models.WhisperModelCatalog
 import java.io.File
 import java.io.RandomAccessFile
@@ -70,6 +71,34 @@ class WhisperModelProviderDecisionTest {
         val staging = modelsDir.resolve(ModelFileInstaller.STAGING_DIR).also { it.mkdirs() }
         staging.resolve("whisper-base-en.partial").writeText("partial bytes")
         assertEquals(emptyList(), WhisperModelProvider.incompatibleIn(modelsDir))
+    }
+
+    @Test
+    fun existingSpeechInstallsStayValidBesideTextModels() {
+        // Every install a dictation user can have today, next to every text
+        // model: the startup sweep must leave all of them alone.
+        for (installed in WhisperModelCatalog.MODELS + LlmModelCatalog.MODELS) {
+            fileOfSize(modelsDir.resolve(installed.id).resolve(installed.fileName), installed.sizeBytes)
+        }
+        assertEquals(emptyList(), WhisperModelProvider.incompatibleIn(modelsDir))
+        for (speech in WhisperModelCatalog.MODELS) {
+            assertTrue(WhisperModelProvider.speechModelInstalledIn(modelsDir, speech.id))
+        }
+    }
+
+    @Test
+    fun anInstalledTextModelIsNeverASpeechModel() {
+        val text = LlmModelCatalog.MODELS.first()
+        fileOfSize(modelsDir.resolve(text.id).resolve(text.fileName), text.sizeBytes)
+        assertTrue(WhisperModelProvider.isInstalledShapeIn(modelsDir, text))
+        assertFalse(WhisperModelProvider.speechModelInstalledIn(modelsDir, text.id))
+    }
+
+    @Test
+    fun aTornTextModelInstallIsIncompatible() {
+        val text = LlmModelCatalog.MODELS.first()
+        fileOfSize(modelsDir.resolve(text.id).resolve(text.fileName), text.sizeBytes - 1)
+        assertEquals(listOf(text.id), WhisperModelProvider.incompatibleIn(modelsDir))
     }
 
     @Test

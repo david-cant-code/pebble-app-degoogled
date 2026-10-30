@@ -32,4 +32,8 @@
     <!-- Debug-only dictation captures: voice data kept for the capture hook and deleted
          when it is turned off. They stay on this phone. -->
     <exclude domain="file" path="debug-captures" />
+    <!-- Notebook notes and reminders, sealed under a Keystore key that never leaves this
+         device: a restored copy could only be quarantined, and its own backup feature is the
+         way that data moves. -->
+    <exclude domain="file" path="notebook" />
 </full-backup-content>

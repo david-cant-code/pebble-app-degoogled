@@ -45,7 +45,6 @@ abstract class CoreDatabase : RoomDatabase() {
     abstract fun appstoreCollectionDao(): AppstoreCollectionDao
     abstract fun weatherLocationDao(): WeatherLocationDao
     abstract fun heartsDao(): HeartsDao
-    abstract fun memfaultChunkDao(): MemfaultChunkDao
     abstract fun analyticsHeartbeatDao(): AnalyticsHeartbeatDao
 }
 

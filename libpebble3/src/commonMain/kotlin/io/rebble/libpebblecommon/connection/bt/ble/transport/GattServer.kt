@@ -11,6 +11,10 @@ import io.rebble.libpebblecommon.connection.bt.ble.pebble.SERVER_META_RESPONSE
 import io.rebble.libpebblecommon.di.LibPebbleCoroutineScope
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -39,6 +43,9 @@ expect class GattServer {
     ): SendResult
     fun wasRestoredWithSubscribedCentral(): Boolean
     fun initServer()
+
+    /** Gravel: the phone stack's reports of a connection's new link parameters; empty where none are delivered. */
+    val connectionUpdates: Flow<ServerConnectionUpdate>
 }
 
 class GattServerManager(
@@ -50,7 +57,11 @@ class GattServerManager(
 ) {
     private val serverMutex = Mutex()
     private val logger = Logger.withTag("GattServerManager")
-    private var gattServer: GattServer? = null
+    // Gravel: kept in a flow so connectionUpdates follows a closed and reopened server.
+    private val openServer = MutableStateFlow<GattServer?>(null)
+    private var gattServer: GattServer?
+        get() = openServer.value
+        set(value) { openServer.value = value }
     private val registeredDevices = mutableSetOf<PebbleBleIdentifier>()
     private var servicesAdded = false
 
@@ -140,6 +151,17 @@ class GattServerManager(
         return gattServer?.wasRestoredWithSubscribedCentral() ?: false
     }
 
+    /**
+     * Gravel: every device's link updates from whichever server is open, led by a null each time the open
+     * server changes, since a new server's reports start from nothing.
+     */
+    val connectionUpdates: Flow<ServerConnectionUpdate?> = openServer.flatMapLatest { server ->
+        flow {
+            emit(null)
+            server?.let { emitAll(it.connectionUpdates) }
+        }
+    }
+
     private suspend fun openIfNeeded() {
         serverMutex.withLock {
             if (gattServer != null) return@withLock
@@ -184,6 +206,14 @@ data class ServerCharacteristicReadRequest(
 )
 
 data class NotificationSent(val deviceId: PebbleBleIdentifier, val status: Int)
+
+/** Gravel: [interval] is in 1.25 ms units, [latency] in connection events the peripheral may skip. */
+data class ServerConnectionUpdate(
+    val deviceId: PebbleBleIdentifier,
+    val interval: Int,
+    val latency: Int,
+    val succeeded: Boolean,
+)
 
 data class GattService(
     val uuid: Uuid,

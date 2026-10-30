@@ -41,6 +41,13 @@ include(":whisper")
 include(":whisper-native")
 // Gravel module: the UDP socket-creation filter, built from source.
 include(":socketfilter")
+// Gravel module: the Notebook feature (notes and reminders).
+include(":notebook")
+// Gravel modules: the llama.cpp text engine behind the Notebook, built from
+// source (KMP bindings plus the plain Android library that owns the
+// NDK/CMake build and the pinned engine submodule).
+include(":llm")
+include(":llm-native")
 include(":libindex")
 // :experimental (the Ring/Index feature module) is unplugged from the fork's
 // build: it carries firebase-auth/firestore/storage, the googleServices
@@ -61,7 +68,6 @@ include(":firebase-stubs")
 // dependency substitution rule below; the seam is described in
 // DESIGN_NOTES.md (Ring / Index AI).
 include(":haversine-stubs")
-include(":haversine-open")
 
 // Every project resolves the substitution, not just :libindex: the artifact
 // is a transitive runtime dependency of everything that depends on libindex
@@ -71,17 +77,11 @@ include(":haversine-open")
 // The coordinate is matched by group:name only, so an upstream version bump
 // in libs.versions.toml still lands on the stub.
 gradle.lifecycle.beforeProject {
-    val selected = providers.gradleProperty("gravel.ring").orElse("stub").get()
-    val replacement = when (selected) {
-        "stub" -> ":haversine-stubs"
-        "open" -> ":haversine-open"
-        else -> error("gravel.ring must be stub or open (was '$selected')")
-    }
     configurations.configureEach {
         resolutionStrategy.dependencySubstitution {
             substitute(module("io.github.coredevices.haversine:haversine"))
-                .using(project(replacement))
-                .because("Gravel replaces the prebuilt Ring satellite AAR with $replacement")
+                .using(project(":haversine-stubs"))
+                .because("Gravel replaces the prebuilt Ring satellite AAR with :haversine-stubs")
         }
     }
 }

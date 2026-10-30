@@ -15,7 +15,4 @@
     <cache-path
         name="bugreports"
         path="bugreports/" />
-    <cache-path
-        name="index_exports"
-        path="index-exports/" />
 </paths>

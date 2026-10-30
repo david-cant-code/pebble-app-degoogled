@@ -44,18 +44,6 @@ check when it is handled. Each check spends part of the shared GitHub limit
 (see "Update checks share GitHub's anonymous hourly limit"). The fix is for the
 link to start no check. This entry leaves the file when it no longer does.
 
-## An oversized changelog list can leave an update check waiting
-
-**Status: deferred; to be fixed on its own branch.**
-
-When GitHub returns a changelog list much larger than the 64 KiB the app
-accepts, a Core watch's update check or the build picker can wait
-indefinitely instead of reporting the list as unreadable. The workflow that
-publishes the list refuses one over 64 KiB. The test that sends an endless list
-(`PebbleOsChangelogListTest.stopsReadingABodyThatNeverEnds`) runs into the same
-wait at random and can fail a CI run. This entry leaves the file when the fix
-lands.
-
 ## Classic PebbleKit broadcasts cannot be restricted to authorized callers
 
 **Status: accepted while the classic toggle is on; the surface is off by
@@ -85,8 +73,10 @@ That leaves the following classic entry points open to any installed
 application, deliberately:
 
 - `com.getpebble.action.app.START` and `.STOP` launch or close a watchapp
-  on the connected watch. Nuisance only: they take a watchapp UUID and
-  return nothing to the sender.
+  on the connected watch. They take a watchapp UUID and return nothing to
+  the sender. Requests naming the Notebook watch app are dropped, but
+  launching any other watchapp closes the Notebook app, and a recording it
+  was making is lost.
 - `com.getpebble.action.app.SEND` injects an app message into a live
   classic session as if it came from the watchapp's real companion. The
   session relays a SEND only when it addresses the session's own watchapp,
@@ -397,6 +387,26 @@ one of the types that `VerifyApkContents` lists, three Java UDP socket
 types and `DatagramPacket`, which opens no socket; an app bundle build does
 not run that check.
 
+## The Dev Connection switch closes the app with the LAN setting on
+
+**Status: deferred; to be fixed on its own branch.**
+
+Where the UDP filter is installed, turning on Dev Connection in a watch's
+menu while "Use LAN developer connection" (Settings > Connectivity) is on
+closes Gravel. The menu lists the phone's network interfaces to show its
+addresses, and `NetworkInterface.getNetworkInterfaces()` returned null in
+Gravel's process, which the menu does not handle. By the platform's source
+that is the filter's effect: Android looks up each interface's index
+through an IPv4 datagram socket, which the filter refuses, and leaves out
+an interface it gets no index for (`android17-release`: bionic
+`libc/bionic/net_if.cpp`, `if_nametoindex`; libcore
+`ojluni/src/main/java/java/net/NetworkInterface.java`, `getAll` and
+`getNetworkInterfaces`). Seen once, on a Pixel running GrapheneOS (Android
+17) with a development build and the filter installed. Not tried: a
+released build (0.3.1 and 0.3.3 have the same menu code and install the
+filter), and a build or phone without the filter. This entry leaves the
+file when the fix lands.
+
 ## The UDP filter starts with the app process, not before it
 
 **Status: accepted.**
@@ -405,8 +415,8 @@ When installed, the filter goes in at `MainApplication.attachBaseContext`,
 ahead of the app's content providers, library initializers and `onCreate`
 (android16-release, `ActivityThread.handleBindApplication`). A socket
 opened earlier than that by platform code would be outside the filter; none
-is known. The speech engine's isolated process gets no filter. A process
-that Android starts for a full backup or restore uses the base
+is known. The speech and text engines' isolated processes get no filter.
+A process that Android starts for a full backup or restore uses the base
 `Application` class (android16-release,
 `ActivityThread.handleBindApplication`, `LoadedApk.makeApplicationInner`),
 so neither the filter nor the rest of Gravel's startup runs in it.
@@ -661,13 +671,12 @@ feature being armable.
 
 Upstream's watch-settings debug section (2026-08 sync) gained a "Use Core
 OTA service" toggle that routes firmware checks to a Core Devices OTA
-service. The routing requires a bug-endpoint build config value that this
-fork never sets, a fact the fork's own routing test asserts, so the
-toggle changes nothing on any fork build while its description names a
-firmware source the fork does not use. The toggle stays as upstream
-ships it, except that the setting behind it keeps the fork's off
-default where upstream now defaults it on, so an inert control is not
-shown enabled; hiding it behind the same predicate that makes it functional
+service. The routing requires a bug-endpoint build config value that
+Gravel never sets, a fact BugReportUploadUnplugTest asserts, so the toggle
+changes nothing on any Gravel build. Gravel's description for it says so,
+and the setting behind it keeps Gravel's off default where upstream
+defaulted it on, so an inert control is not shown enabled; hiding it
+behind the same predicate that makes it functional
 remains open as a follow-up, and renaming it would keep an inert control
 under a different label. This entry leaves the file if the toggle is
 hidden behind that predicate or the fork ever sets the endpoint that
@@ -732,6 +741,33 @@ there rather than diverge here. This entry leaves the file when upstream
 disambiguates the match (channel id first, then position-stable matching)
 and the fork syncs it.
 
+## Notification images are read without the album art checks
+
+**Status: open; planned for a branch of its own.**
+
+When a notification carries an image (a messaging photo or a big
+picture), Gravel reads the image the posting app names, with Gravel's
+own access, to cache it for the watch. Album art from media apps is
+checked for where it comes from before it is opened, and for how large
+it is and how long reading it takes while it is read; notification
+images do not get those checks yet. The image reaches only the user's
+own watch, and nothing goes back to the app that posted the
+notification; a slow or very large image can hold up the notifications
+behind it on their way to the watch. This entry leaves the file when
+notification images get the same checks as album art.
+
+## Notebook background jobs are not scheduled where WorkManager cannot start
+
+**Status: accepted; device defect.**
+
+On devices where WorkManager fails as it starts (the failure
+`scheduleBackgroundJob` in MainApplication.kt guards against), the
+Notebook schedules none of its background jobs: automatic backups do
+not run although the setting shows them on, and recordings waiting for
+a charger or a network get no job to start them while Gravel is not
+running. Only Gravel's log says so. This entry leaves the file if the
+Notebook shows the failure or runs those jobs without WorkManager.
+
 ## gradle-wrapper.jar lags the declared Gradle version
 
 **Status: accepted; cosmetic, self-correcting at the next upstream bump.**
@@ -748,24 +784,26 @@ the committed jar matches the declared distribution.
 
 ## Large whisper models are absent from the catalog
 
-**Status: accepted; blocked on the pinned upstream engine revision.**
+**Status: accepted; too slow for watch dictation on the test phone; the
+earlier crash did not recur in the v1.9.5 runs below.**
 
 The catalog originally carried ggml-large-v3-turbo-q5_0. Two findings
 removed it. First, transcribing with it on the test platform (a Pixel
 running GrapheneOS) crashed the app with a native out-of-bounds read
-inside ggml's quantized matrix-multiply path at the pinned whisper.cpp
-revision; the hardened system allocator surfaces the stray read as a
-fault, and a model whose inference can fault the process cannot ship
-for any consumer. Second, whisper.cpp applies the audio-context trim
-only to the main transcription pass, while language auto-detection
-(reached whenever a multilingual model runs with no spoken language
-pinned) encodes at the full 1500-frame context; for a 32-encoder-layer
-model on phone-class CPUs that single pass alone exceeds the watch
-dictation window, so the model could never serve dictation even without
-the crash. Both point at the engine revision rather than the catalog
-design. This entry leaves the file when a large tier is reinstated
-after an upstream fix or a re-pin that passes the same on-device checks
-the smaller models passed.
+inside ggml's quantized matrix-multiply path at whisper.cpp v1.9.2, the
+revision pinned then; the hardened system allocator surfaces the stray
+read as a fault. At v1.9.5 the same file ran three dictation calls and
+a 53-second recording on that phone without a fault, in a debug build
+and in one built with NDEBUG (C asserts compiled out). Second, the
+model is too slow for the watch there: at 4 threads, a 4-second
+dictation took about 13.5 seconds with the language set and 24 with it
+detected, and the recording took about three times its length.
+Gravel's dictation speed check extrapolates the 13.5 seconds to about
+42 for a full 15-second recording, against the 14 seconds Gravel leaves
+a decode after the recording ends. This entry leaves the file when a
+large tier returns to the catalog, either fast enough for watch
+dictation on the test phone or excluded from watch dictation, after it
+passes the engine's on-device suites.
 
 ## Watch dictation accuracy varies sharply between sessions
 
@@ -811,6 +849,13 @@ watch: the microphone port covered while the watch is held to the
 mouth, debris or moisture in the port, and the firmware's microphone
 or gain state.
 
+The watch can also lose the first syllables of a recording when speech
+starts the moment the microphone icon shows. The audio Gravel received in
+those recordings was complete, so the loss happens on the watch. In one
+test, a phrase spoken right at the icon kept its first words in 1 of 3
+recordings, and in 3 of 3 when the speaker waited about a second after
+the icon before speaking.
+
 ## A silent dictation can transcribe as a stray word
 
 **Status: open; engine behavior.**
@@ -823,6 +868,227 @@ recording reaches it whole. A gate on the audio itself (an absolute
 level floor measured after the microphone's start-up transient, or the
 engine's own per-segment no-speech probability) needs captures from
 more than one watch before its threshold can be set.
+
+## A Notebook recording can lose a phrase at a whisper window boundary
+
+**Status: accepted for now; engine behavior.**
+
+Whisper transcribes a recording in 30-second windows and chooses where
+the next window starts from its own timestamps. When it judges a window
+finished before the window's end, it skips the rest of that window
+(whisper.cpp v1.9.5, `src/whisper.cpp`, `whisper_full_with_state`, the
+single-timestamp ending), so speech it did not transcribe there is lost;
+on-device runs of a four-minute test recording that repeats its phrases
+lost whole sentences within a single call. Starting each window at a
+pause, instead of where whisper's timestamps put it, might address this;
+it is not built.
+
+## A watch dictation restarts a Notebook transcription in progress
+
+**Status: accepted.**
+
+Watch dictation and Notebook transcription share one speech engine, and
+a dictation must answer within the watch's deadline. A dictation the
+phone transcribes while a Notebook recording is being transcribed, such
+as a spoken reply to a message, stops that transcription, which then
+starts again from the beginning once the dictation is done; where the
+phone answers first (Local Only, Local (with Server Fallback), and
+Server (with Local Fallback) while it keeps dictation on the phone) a
+watch session opening stops it
+already. The recording
+itself is kept; the transcript arrives later, and the stopped work is
+done again. Recordings are capped at 5 minutes, so each stop repeats at
+most one recording's transcription; the number of stops is not limited.
+The same holds on a transcription server without a separate dictation
+lane in server only, or a fallback mode without a speech model on the
+phone: a watch session opening hangs up on a recording over 30 seconds
+there, which is uploaded and transcribed again from the start once the
+dictation is over.
+Notebook text generation (a note's title and tags, a reminder's message)
+runs in an engine of its own but gives way the same way: loading the
+model and generating each wait while a dictation holds the speech
+engine, and a dictation arriving mid-call stops the call, which starts
+again. A load of the model that is already under way when a dictation
+arrives runs to its end beside it.
+
+## The Notebook watch app check reads the phone's copy, not the watch's
+
+**Status: open; closing it needs the watch to report what it runs.**
+
+Gravel takes recordings into the Notebook only from a copy of the Notebook
+watch app it trusts, judged by the digest of the watch app file the phone
+keeps for the watch. The watch does not report which binary it runs, so in
+some conditions a different copy under the same app ID could pass the
+check. Such a copy can add recordings to the Notebook. It cannot read or
+change what is already there, and it gets back only the short answer the
+watch shows. Installing or replacing the watch app from Settings >
+Notebook stores Gravel's copy on the phone for the watch to fetch; it
+does not tell Gravel which copy the watch then runs. A copy you mark as
+trusted in Settings > Notebook passes the check the same way a shipped
+one does.
+
+## The watch can show a failure for a Notebook recording the phone then stores
+
+**Status: open; closing it needs the Notebook to answer before the watch's
+deadline with what it knows by then, for example that the recording may
+still be saved.**
+
+The Notebook watch app gets its answer within the deadline the watch allows
+a dictation. When the phone's checks, storing and lookup of the recording
+take longer, the watch is told the recording failed while the phone still
+stores and processes it, and a recording made again after the failure is
+stored twice. That takes a stall such as one of the phone's key store or
+storage, or a long wait for the recordings list while a restore writes to
+it, which device testing did not meet.
+
+## A BACK on the watch during a Notebook recording can leave it stored
+
+**Status: open; closing it needs the watch to report whether BACK was
+pressed during the recording.**
+
+BACK during a recording on the Notebook watch app discards it, and BACK
+after SELECT has ended it keeps it. Gravel tells the two apart by how soon
+after the audio ends the watch's message arrives (`DESIGN_NOTES.md`, the
+watch source): within 50 milliseconds counts as a discard. A discard whose
+message arrives later leaves the recording stored and processed, with no
+sign of it on the watch, and a BACK after SELECT whose message arrives
+within that time drops a recording the user meant to keep. The limit rests
+on eight measurements on one phone and one watch.
+
+## A Notebook watch recording can start on the slow link or be refused
+
+**Status: open; closing it needs watch firmware that starts the
+microphone only on the fast link, or keeps what it records before.**
+
+The watch starts its microphone when the phone answers a recording's
+start, and audio recorded while the Bluetooth link is still in its slow
+idle state can be lost. Gravel therefore holds that answer for a
+Notebook watch app recording until Android reports the link as fast,
+for up to 6 seconds, asks for the fast link itself while it waits, and
+refuses the recording if the link is still slow then
+(`VoiceSessionCoordinator`). Known cases where it falls short:
+
+- **No link report.** The link's speed comes from an Android callback
+  outside the public SDK, which reports a change of the link's settings.
+  Before a connection's first report, and after Gravel's GATT server
+  closes or reopens until the next report (also when that happens during
+  the hold), a recording is answered at once and can lose its start as
+  before the hold. On a phone that does not deliver the callback, and on a
+  Bluetooth Classic connection, that is every recording. Both test
+  phones deliver it: a Pixel running GrapheneOS (Android 17) and one
+  running LineageOS 22.2 (Android 15).
+- **A slow switch.** On some phones the link turns fast later than the
+  hold allows, and the watch shows "Something went wrong. Try again."
+  without starting the microphone. On the phone running LineageOS, 2 of
+  6 recordings were refused this way; the switch took about 3 seconds
+  when the watch asked for it, and longer when only the phone did. On
+  the one running GrapheneOS, held recordings waited 1.3 to 4.6 seconds
+  and none was refused.
+- **The end of a fast window.** The link stays fast for about 10 seconds
+  after the watch app sends a message (among them one when it opens and,
+  while its menu stays open, one after a recording), and after a refusal
+  it can turn fast for a few seconds. A recording started in the moment the
+  watch returns the link to slow can be answered as if the link were
+  fast and lose its start.
+  Device testing did not reach this case.
+
+## A notice that a reminder is set can cut a watch recording short
+
+**Status: open; closing it needs Gravel to hold its own notices while a
+watch recording is in progress.**
+
+Gravel posts a notice when it sets a voice reminder ("Reminder set", or
+"Check this reminder's time" when it asks the user to check the time),
+and the watch shows it. When the notice arrives while the next recording is
+still running on the watch, the watch ends that recording where it is
+(PebbleOS v4.41.1, `fw/applib/voice/voice_window.c`,
+`prv_mic_window_disappear`), and Gravel keeps what was recorded up to
+then. When the notice is dismissed, the watch starts a new recording on
+its own (`prv_mic_window_appear`), which can be saved as a note of a
+stray phrase (see "A silent dictation can transcribe as a stray word").
+Seen once, on a Pixel running GrapheneOS (Android 17), when a second
+recording was started right after a reminder.
+
+## A dictation can wait for a Notebook transcription's first seconds
+
+**Status: accepted; whisper cannot stop the recording's preparation or
+an encoder pass once it has begun.**
+
+A Notebook transcription stops for a dictation only at whisper's next
+abort check, and whisper makes no abort check while it prepares the
+whole recording and encodes the first 30 seconds (whisper.cpp v1.9.5,
+`src/whisper.cpp`, `whisper_full_with_state`, `whisper_encode_internal`).
+A dictation that arrives in that stretch waits for it: on the test phone
+with the base model and a four-minute recording, a cancel at the start
+of a call took about 4 seconds to land, with the language set or
+detected, and a slower phone or larger model takes longer, possibly past
+the watch's deadline. Gravel does not set the callback whisper calls
+before the first encoder pass (`encoder_begin_callback`,
+`whisper_full_with_state`), which could stop a call canceled while the
+recording is prepared. In the modes where local transcription is only a
+fallback, no hold on the speech engine is raised when the watch session
+opens unless the dictation is to stay on the phone, so a local fallback
+meets this whenever a transcription has just started.
+
+## Local (with Rebble Fallback) raises no dictation hold when a watch session opens
+
+**Status: open; raising the hold at the session's opening in that mode
+would close it.**
+
+Under Local (with Rebble Fallback) the phone transcribes a watch dictation
+first, but unlike Local Only and Local (with Server Fallback) the watch
+session's opening does not stop a Notebook transcription, so the dictation
+waits for that transcription to stop as described in the entry above.
+
+## Notebook reminder times are read only from the phrasings the rules know
+
+**Status: open; covering more needs more phrasings in the rules.**
+
+A voice reminder's time is read by fixed English rules, not by the text
+model. When the rules are unsure, for example with a time said another way
+("after lunch", "in a couple of hours", "every Tuesday", "by Friday") or a
+word around a time that could change it, the reminder is set for the
+Default Reminder Time and Gravel asks the user to check it with a mark in
+the Reminders list and, unless Android refused its alarm, a notification.
+A reminder whose words the rules do not take for a time at all is set for
+the Default Reminder Time without asking; this is the case for English
+phrasings the rules do not know, such as "first thing" or "at sunset", and
+often for a reminder said in another language, though English-looking
+words in it, such as "5 pm", are read. Some words are still read as a
+time the user did not mean:
+"stop at 7-Eleven" reads as 7:11 PM, and a time stated as a fact, as in "I
+parked at 9", is read as the time to remind. Gravel posts a notice saying
+when a voice reminder is set, where the phone lets its notifications show
+and Android did not refuse the reminder's alarm, so a time read wrong or
+set to the default can be seen there while the notice is up; only the ten
+newest "Reminder set" notices stay. Some words that only sound like a time
+make Gravel ask ("ask Sam when the party is"). A reminder cannot be set to
+repeat by voice.
+
+## A Notebook transcription needs more engine memory than a dictation
+
+**Status: open; the check before a transcription uses an estimate, not the
+engine's own use.**
+
+Each Notebook transcription runs on a second engine state beside the one
+dictation keeps, for the length of the call: whisper.cpp counts that state
+at about 160 MiB with the base model and 230 MiB with the small one, and in
+one measured call per model on the test phone the engine's memory peaked
+123 MiB (base) and 264 MiB (small) above its size with the model loaded. Before it starts, the Notebook
+compares the phone's available memory with a measured estimate of that
+need; when it is short, it frees its text model, and if that is not
+enough the transcription waits for the next capture run. The estimate
+comes from measurements on a single phone, and the available figure does
+not count memory the system could free by ending cached apps, so the check
+can make a transcription wait that would have fit, or let one start that
+the system then ends; an ended engine is retried three times and the
+transcription then fails. On a phone that stays short, every run stops at
+the first capture and the whole queue waits until memory frees or a
+smaller speech model is chosen, except under Local (with Server Fallback)
+with a server set up, which sends such a capture to the server, and for a
+capture Server (with Local Fallback) passed to the phone, which waits
+alone while the rest still go to the server. The text
+model's own step has no such check.
 
 ## A provider that fails before the recording ends is answered only after it
 
@@ -863,31 +1129,6 @@ full-window session costs a full-window decode, and a truncated session
 transcribes as the fragment that was actually captured. Recorded here so
 short or slow dictation results are attributed correctly during testing.
 
-## A stale model directory resets local dictation for one launch
-
-**Status: accepted; no catalog change that reaches it is planned.**
-
-The model directory is swept at every launch, and any directory the
-sweep cannot match to an installed catalog model is treated as a
-leftover of the previous speech engine: the directory is deleted, the
-selected model is cleared, and a local mode is stashed and replaced by
-cloud-only until the next launch, when the sweep finds the stash and a
-model it knows, restores the mode, and selects the first installed
-model the directory listing returns, which may not be the one selected
-before. With a self-hosted server configured, dictation for that launch
-goes to it; without one, dictation fails until the next launch. Three
-states reach it: a downgrade to 0.1.6 or earlier from an install
-holding a tiny model, whose catalog lacks the name (the tiny model has
-to be downloaded again); a later version that drops or re-pins a
-catalog entry while the selected model stays valid; and an install from
-an unreleased build holding a directory this catalog no longer names. A
-model file that fails its load-time hash check is not one of them: the
-installer deletes its directory as it quarantines the file. Installs
-holding only catalog models in their pinned shape are unaffected.
-Closing this means resetting the mode only when the selected model
-itself is gone and keeping the selected model on restore, each with a
-migration test; deferred because no such catalog change is planned.
-
 ## A superseded decode can hold the engine into the next session
 
 **Status: open; bounded by the engine's unwind bound.**
@@ -910,16 +1151,41 @@ joining the superseded decode after its recording ends and before its
 provider call, with a service test that cancels a blocking engine call
 and starts a second decode during the unwind.
 
+## A dictation that meets an engine restart can fail
+
+**Status: open; arises when the engine's process ends as a
+transcription arrives at the engine or waits for it.**
+
+After the speech engine's process ends, the service reloads the model
+on its own, within the limits `DESIGN_NOTES.md` gives ("The whisper
+speech engine"). A dictation decides what to wait for from what is on
+record when it arrives, and does not wait again once it has the
+engine. One that arrives, or is already waiting for the engine, as the
+process ends can therefore reach the engine before the reload has put
+the model back and fail, reported as the engine unavailable or as no
+model installed, or reach it right after the load and decode ahead of
+the warm-up that is meant to come first, with the first decode's
+one-time cost inside its own decode. The failure reaches the watch
+where the phone is the last provider tried for that dictation, as
+under Local Only, and the dictation goes to the next provider where
+one follows the phone, as under Local (with Server Fallback). A
+Notebook transcription makes the same wait: one that meets a restart
+can stop the queue until its next run, or go to the server under Local
+(with Server Fallback). Closing this means tying what a transcription
+waits for to the model it then decodes on, with service tests that end
+the engine process before, during and after that wait; deferred to a
+change of its own.
+
 ## A model prompt's download can settle on another download's status
 
 **Status: open; the prompt shows a failure it can retry.**
 
 The speed nudge and the engine update prompt wait for their download by
 taking the first status after the current one that is not Downloading,
-and the status names no download. When a download of another model is
-already running, scheduling the prompt's own cancels that job, whose
-Idle then settles the prompt's wait before its own download has
-reported anything: the prompt shows "Download failed" while the
+and the status names no download. When a download of another speech
+model is already running, scheduling the prompt's own cancels that
+job, whose Idle then settles the prompt's wait before its own download
+has reported anything: the prompt shows "Download failed" while the
 download runs. A retry attaches to the running download without
 starting it again; dismissing the prompt instead leaves the model to
 finish downloading unselected. Closing this means settling on a
@@ -979,7 +1245,10 @@ of the configured one, so the next load of either re-hashes the file
 whichever job makes it, since a death is the one event a corrupt file
 could have caused; a load that takes the mutex before the death report
 is acted on reads a memo set by a re-hash seconds earlier, so only a
-swap inside that window escapes. Hashing through the
+swap inside that window escapes. The Notebook's text model is hashed and
+opened the same way, and a death of its engine process while the model is
+loaded or loading drops its memo.
+Hashing through the
 descriptor that is sent would tie the hash to the file the engine
 reads, not to its bytes: a rewrite in place after the hash still
 reaches the parser. Closing the window means hashing the bytes as they
@@ -1062,3 +1331,405 @@ whoever the user sends it to, which may be a public issue. Gating the
 payload bytes means changing upstream's own logging calls rather than the
 fork's seams, so it is recorded here and left to the pass over what the log
 writer accepts.
+
+## Notebook files can be rolled back or deleted without detection
+
+**Status: accepted; detecting it is left to a later change.**
+
+Each Notebook file is sealed under a data key of its own, which is sealed
+under a device-bound key, and both seals are bound to the file's path, so
+an offline adversary with access to the file system cannot read a file,
+forge one, or make one open from another path. The same adversary can still
+replace a file with an older authentic version of itself, or delete it, and
+the app accepts both: nothing binds a version or a directory listing into
+what is authenticated. For the capture queue this has a further cost: the
+blob of a capture queued after a rolled-back queue file has no entry, and
+the sweep for unreferenced blobs deletes it. A rolled-back reminders file
+hands out ids again that the event log still holds occurrences for, so a
+new reminder can inherit an older one's history. The Notebook's own backup
+gives the user a copy to compare against but does not detect the change
+either. A note file put back after its note was deleted is listed again at
+the next start. Closing this needs authenticated state that is not rolled
+back along with the files.
+
+## The Notebook directory shows how many notes there are, their sizes and times
+
+**Status: accepted.**
+
+Note files are named by random ids and keep their folder, name and title
+inside the encryption, but the directory still shows anyone who can read
+the app's files how many notes and queued recordings there are, the size
+of each file, and when each file was last written. Hiding these would need
+padded files and a different layout.
+
+## A Notebook key that stops working can leave only Try again
+
+**Status: accepted.**
+
+When Android still holds the Notebook's key but can no longer use it, the
+Notebook tab offers Start over only when Android reports the failure as
+permanent, which it does from Android 13 on and not for every error.
+Otherwise the tab shows a read that may pass, with Try again only, until the
+key works again. Clearing Gravel's storage in Android's settings is the way
+out: it erases all of Gravel's data and settings, the Notebook key included
+(android16-release `PackageManagerService.clearApplicationUserDataLIF`
+clears the app's Keystore entries), after which a backup brings the
+Notebook back.
+
+## A Notebook key store that does not answer can be offered Start over
+
+**Status: open; retrying before taking Android's verdict would narrow it.**
+
+On Android 16, the release checked, a key store that does not answer a
+retried lookup of the Notebook key is reported as a permanent failure, and
+Gravel takes it as one at the first failure, so the Notebook tab can offer
+Start over for a key a restart of the phone would bring back. Start over
+looks the key up again before deleting anything.
+
+## A Notebook capture the store could not seal waits as plaintext for a later attempt
+
+**Status: accepted.**
+
+When the queue cannot take a just-finished recording, from the phone's
+microphone or from the Notebook watch app, whatever the failure, the app
+writes it under the Notebook directory for a later attempt, and each later
+capture run tries again to seal and queue everything waiting there; the
+watch is answered "Saved". If that write fails too, the recording is lost:
+the Notebook screen says a phone recording could not be saved, and for a
+watch recording the watch shows "Couldn't save. Try again." and the phone
+shows nothing. A recording kept this way is dated in the time zone current
+when it is processed, not the one it was recorded in.
+Until that succeeds the recordings sit unencrypted in the app's private
+storage, still under Android's file-based encryption and excluded from
+backup with the rest of the Notebook. When the cause is a busy key store
+the window closes at the next run; when the queue file is corrupt it stays
+open until the file is rebuilt, at the next app start or from the Notebook
+tab, and when the Notebook key is gone until the Notebook starts over, with
+every capture retained meanwhile joining it. The alternative,
+deleting the only copy of a recording because the store failed, was judged
+worse. The store provides the holding area, the retry, and a count of what
+is waiting, which the Notebook screen shows. The holding area is also the one place where the store
+accepts a file it did not seal itself: a recording placed there by whoever
+can write to the app's private storage is queued and transcribed as if
+the user had recorded it, which the sealed files' authentication cannot
+prevent because sealing is exactly what failed.
+
+## A Notebook recording in progress is lost if the app process ends
+
+**Status: accepted; sealing the recording in parts while it records would
+close it.**
+
+A phone recording is held in memory until it stops, so Gravel writes an
+unencrypted copy to storage only in the failure case above. If the app
+process ends before the recording stops, as in a crash, a restart of the
+phone or a flat battery, the recording is lost. Leaving the Notebook tab,
+leaving Gravel, turning the screen off or swiping Gravel away from recent
+apps stops the recording and keeps what was recorded, unless it is under a
+second or cannot be saved, which the Notebook screen reports.
+
+## A Notebook write just before a power loss can be undone
+
+**Status: open; syncing the directory after each write would close it.**
+
+A sealed Notebook file's move into place after its write is not synced
+(`DESIGN_NOTES.md` describes the write). If the phone loses power soon
+after a write, the file can be back at its earlier version after the
+restart, or missing if it was new, although a just-saved watch recording
+was already answered as saved. How soon is up to the storage and was not
+measured.
+
+## Notebook processing that starts out of sight can wait for the app to open
+
+**Status: accepted; the start rule is Android's.**
+
+The Notebook keeps processing going while no Gravel screen is shown
+through a foreground service, and Android 12 and later let an app start
+one from the background only under an exemption. When processing begins
+with no Gravel screen shown and no exemption applies, the start is refused,
+the system can freeze or end the app partway, and the recording stays
+queued for a later run, such as when Gravel is next opened. Processing
+already under way when the user leaves a Gravel screen asks for the
+service at that moment, a start Android allowed in device testing.
+
+## Notebook long recordings can wait past plug-in while Gravel is not running
+
+**Status: accepted.**
+
+With Long Recordings Wait for Power on (the default), plugging the phone
+in asks for a run through a receiver while Gravel's process is running;
+that run is a start out of sight like the one in the entry above. When
+the process is not running, a scheduled job starts the run, and that job
+waits for Android's idea of charging, not of being plugged in. On
+Android 14 that is the platform's charging broadcast alone, which a
+phone holding its charge below full (an adaptive or 80% charging limit)
+may not send, so the recordings can wait until charging resumes or
+another run starts, such as when Gravel is opened, a recording is made
+or Process now is tapped. Android 15 and 16 also count a held charge of
+70% or more as charging when the phone reports an adaptive charging
+mode. Releases before Android 14 were not checked. A run on power that
+leaves a long recording queued, such as after a failed attempt, leaves no
+job behind, and if Gravel's process then ends before a run off power sets
+one, a later plug-in starts nothing.
+After a force stop
+the job is gone too (android16-release `JobSchedulerService` cancels a
+force-stopped app's jobs on `ACTION_PACKAGE_RESTARTED`), so nothing
+starts them until Gravel is opened. The charging sources are cited at
+`WorkManagerChargingWork`.
+
+## Notebook recordings can wait past a network's return while Gravel is not running
+
+**Status: accepted.**
+
+A Notebook recording can wait for a network its server may use, such as
+Wi-Fi with "Use the Server on Mobile Data" off. While Gravel's process
+is running, a run is asked for when that network connects; the watch
+connection service runs while a watch is connected. When the process is
+not running, a scheduled job checks on any connected network, and each
+check that still has to wait puts the next one further off: 15 minutes,
+then 30, then 45, up to 5 hours (androidx.work 2.12.0,
+`WorkSpec.calculateNextRunTime` and `WorkRequest.MAX_BACKOFF_MILLIS`).
+After seven hours of waiting the next check is two hours away, so the
+recording can stay queued that long after the phone is back on Wi-Fi,
+or until another run starts, such as when Gravel is opened, a recording
+is made or Process now is tapped.
+
+## A damaged Notebook recording can leave the queue without being listed
+
+**Status: open; closing it needs the flag written before the file is set
+aside.**
+
+A recording whose file fails to open is set aside and meant to show in
+the failed list as damaged. When the failure is not stored after the
+file is set aside, a later processing pass finds no recording and
+removes the entry without listing it, so the user gets no notice. The
+recording could not have been read anyway.
+
+## Set-aside Notebook files are aged by the phone's clock
+
+**Status: accepted.**
+
+A Notebook file that is set aside is deleted once the time in its name
+is 30 days behind the phone's clock. If the clock jumps 30 days or more
+ahead, the set-aside files are deleted at the next cleanup, however
+recent. A file set aside while the clock was behind goes early by that
+much once the clock is right, and one set aside while it was ahead stays
+that much longer. No screen opens a set-aside file, so what changes is
+how long a copy stays on the phone.
+
+## Automatic Notebook backups are thinned by the phone's clock
+
+**Status: open; skipping the thinning on a run whose clock reads far past
+the last confirmed backup would narrow it.**
+
+Older automatic backups are thinned by their age on the phone's clock. A
+run made while the clock reads ahead thins as if every backup were that
+much older, so it can delete backups the keeping rule would still keep, and
+they stay deleted once the clock is right. What goes is older restore
+points; the newest backup stays.
+
+## Start over anyway can leave the Notebook key in place
+
+**Status: accepted.**
+
+Start over anyway is offered when Android's key store cannot use or
+look up the Notebook key. If the key store still does not answer when
+the key is to be deleted, the delete is skipped and Gravel reports the
+key deleted. The old Notebook files are deleted all the same; the key
+stays, and the Notebook uses it again once the key store answers.
+`NotebookKeystore.deleteKey` asks whether the key exists before it
+deletes, and that check answers no when the key store cannot be
+reached (android16-release `AndroidKeyStoreSpi.getKeyMetadata`;
+android11-release, android10-release and pie-release
+`KeyStore.contains`). Deleting without the check would close this.
+
+## A Notebook capture can be published twice
+
+**Status: open; closing it needs the capture's id stored with what it
+published.**
+
+A capture leaves the queue in a second write after the note, reminder
+or completion claim it produced is stored. The next drain processes
+the capture again in cases such as when the app is ended between the two
+writes or the
+queue file cannot be written at that moment, after a damaged queue file is
+rebuilt while the capture's recording was still there, and after this
+Notebook restores a backup made while the capture was queued, a restore run
+again after a stopped one included. A note with the same content then
+reuses its file, but a reminder or a claim is stored a
+second time, and a note whose second model reply differs is written beside
+the first. Storing the capture's id with each result, and skipping a
+capture already published, would close this.
+
+## A Notebook completion backlog past fifty drops the oldest
+
+**Status: accepted.**
+
+A spoken completion waiting for the user to choose the reminder it
+completes sits in a store until the user acts on it. The store holds fifty
+entries; the fifty-first save drops the oldest completion claim without
+asking. The bound keeps an ignored backlog from growing without limit.
+
+## A Notebook reminder whose alarm Android refuses can stay silent
+
+**Status: open; the screens do not tell a reminder or snooze stored
+without its alarm from one that has it.**
+
+Each Notebook reminder with a time ahead and each pending snooze holds one
+Android alarm, beside Gravel's other alarms, and Android refuses a new one
+once Gravel holds its per-app limit (500 by default; android16-release
+`AlarmManagerService`, `MAX_ALARMS_PER_UID`). Nothing in the Notebook keeps
+the number of reminders below that limit. A reminder whose alarm is
+refused is stored without one: one made under Reminders in the Notebook
+tab is reported as saved, one from a recording is listed under Recent
+captures as a reminder but gets no notice that it is set or that its time
+needs checking, and one brought back by a restore shows nothing.
+A snooze refused this way is kept without its alarm: a swiped
+notification is gone with nothing set, and a snooze picked in Gravel is
+reported as "The reminder couldn't be snoozed." but rings after the next
+re-arm. Nothing sets the missing alarms until the reminder is edited or
+the next re-arm runs, such as when Gravel next starts, and while Gravel
+stays at the limit both are refused too, an edit then being reported as
+not saved although it is stored; a reminder whose time has passed by then
+is shown late or listed as missed. An edit of a reminder that has its
+alarm moves that alarm, but another of Gravel's alarms set in the same
+instant can take its place and leave the reminder without one.
+
+## The Notebook key is usable while the device is locked
+
+**Status: accepted by design.**
+
+The Notebook key requires no user authentication and no unlocked device, so
+code running as Gravel can read and write Notebook files whenever the
+process runs, including on a locked phone. That is what lets a reminder
+fire and a watch capture be stored while the phone stays in a pocket.
+The cost is that a device seized while locked, if an attacker can execute
+code as Gravel on it, yields the notes; the offline file-system adversary
+the encryption is aimed at still cannot, because the key never leaves the
+Keystore. Gating the key on an unlocked device would break the background
+uses above and is not planned.
+
+## The phone holds the key that opens every automatic backup
+
+**Status: accepted by design.**
+
+Automatic Notebook backups are sealed under a recovery key that Gravel
+shows at setup and also keeps, sealed by the Notebook key, so a backup can
+run without the user. Like the Notebook key, that copy needs no user
+authentication, so code running as Gravel, or as root, on the phone can
+open every automatic backup made with that key, in the current folder or an
+earlier one, older ones holding notes since deleted included. Manual
+backups are sealed under a password Gravel does not keep.
+
+## Gravel cannot tell whether the backup folder leaves the phone
+
+**Status: accepted.**
+
+Automatic backups go to the folder the user picks. Gravel cannot see
+whether another app copies that folder off the phone, so backups in a
+folder that stays on the phone are lost with the phone. First setup asks
+for a folder a sync or cloud app keeps.
+
+## Automatic backup files show when the Notebook changed
+
+**Status: accepted.**
+
+An automatic backup is written about an hour after a change, and its file
+name and time say when. Whoever can list the backup folder, such as the
+app or service that syncs it, can see when the Notebook was changed,
+though not what changed.
+
+## Automatic backups wait for the first unlock after the phone starts
+
+**Status: accepted.**
+
+The Notebook and its backup key are in the app's default storage, which
+Android makes available only after the user unlocks the phone once since
+it started (developer.android.com/training/articles/direct-boot,
+credential encrypted storage). No automatic backup runs before that.
+
+## A force-stopped Gravel gives no backup warning until it is used again
+
+**Status: accepted.**
+
+A force stop removes an app's alarms (android14-release and main,
+`AlarmManagerService`, `ACTION_PACKAGE_RESTARTED` handling), and Android
+keeps a force-stopped app stopped until the user opens or otherwise uses
+it, canceling its pending intents from Android 15
+(developer.android.com/about/versions/15/behavior-changes-all, "Changes to
+package stopped state"). So after a force stop neither the warning about a
+day without a confirmed backup nor a recovery key reminder comes until the
+user opens or otherwise uses Gravel again.
+
+## Without a screen lock, anyone holding the phone can redirect or restore automatic backups
+
+**Status: accepted.**
+
+Setting up automatic backups, making a new recovery key, changing the
+backup folder and restoring the newest automatic backup ask for the phone's
+screen lock, or a biometric the phone accepts for it, first. A phone with no
+screen lock has nothing to ask for, so whoever holds it can send later
+backups to a folder of their choosing under a key they see, as they can
+already read the Notebook on it, and while part of the Notebook cannot be
+read can restore the newest automatic backup, bringing back what was
+deleted since it was made.
+
+## The Notebook tab's screen-capture block can start a frame late
+
+**Status: accepted.**
+
+Screenshots, screen recordings and the Recents preview leave out the
+Notebook tab: Gravel marks the app's window secure while the tab is open
+and clears the mark after the tab closes. Android applies each change a
+moment after Gravel makes it, so the tab holds its content back for two
+frames after setting the mark and keeps the mark for two frames after
+closing; on a slow phone, a screen recording already running as the tab
+opens or closes can still catch a frame of it.
+
+## A keyboard can ignore the Notebook's request not to learn
+
+**Status: accepted.**
+
+The Notebook's text fields ask the keyboard not to learn from what is
+typed in them, so note text stays out of its suggestions and typing
+history. Android leaves this to the keyboard ("the flag is not a
+guarantee, and some IMEs may not respect it", android16-release,
+`EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING`): a keyboard that ignores
+the request can keep words from notes, titles, folder names and tags.
+
+## The Notebook's text models are community quantizations
+
+**Status: accepted.**
+
+Both text models in `LlmModelCatalog` are unsloth's GGUF quantizations
+rather than files from the model's publisher: Qwen publishes no GGUF of
+Qwen3.5 0.8B and only an 8-bit one of Qwen3 1.7B. The pins hold each
+file to the bytes vetted on 2026-09-22, but whether those bytes are a
+faithful quantization of Qwen's weights rests on unsloth. ggml-org, the
+llama.cpp project's organization, publishes a Q4_K_M of Qwen3 1.7B that
+could replace the first entry after a quality check on the Notebook's
+prompts; it publishes no Q5_K_M of Qwen3.5 0.8B.
+
+## Behind a VPN, the Wi-Fi-only rule sees only what Android shows
+
+**Status: accepted.**
+
+With "Use the Server on Mobile Data" off, Gravel sends audio to a
+self-hosted transcription server only while the phone uses Wi-Fi that
+is not marked metered. On Android 10 and newer a VPN shows which kinds
+of network it runs over, and Gravel sends through it only while that is
+Wi-Fi. On Android 9 a VPN shows that only if its app declares its
+networks; when it does not, Gravel sends while such Wi-Fi is connected.
+On Android 8 Gravel cannot see a VPN at all and goes by the network
+under it. In both cases the route is the VPN app's, so a VPN running
+over mobile data at the same time carries the audio over mobile data.
+When a VPN moves off Wi-Fi during an upload, Gravel stops the upload
+once Android reports the move; what was sent before that went the new
+way. On Android 8 uploads are also not tied to the Wi-Fi itself, so in
+the moment between the Wi-Fi dropping and Android reporting it, an
+upload can start over mobile data. On any version, Gravel does not
+check that the Wi-Fi a VPN runs over is the one not marked metered,
+which matters only while two Wi-Fi networks are connected at once. Server
+(with Local Fallback) counts a long Notebook recording's failed tries to
+reach the server only while the network Android gives Gravel runs over
+something besides the VPN; on Android 9 and older, where a VPN may show
+nothing under it, every failure behind a VPN counts, with no signal too.

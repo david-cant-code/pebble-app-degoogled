@@ -95,4 +95,27 @@ class PebbleKitClassicStartListenersTest {
         runCurrent()
         assertEquals(1, registrations, "an unrelated config save re-registered the receivers")
     }
+
+    @Test
+    fun aRefusedAppIsNeitherStartedNorStopped() = runTest {
+        val starts = MutableSharedFlow<Uuid>()
+        val stops = MutableSharedFlow<Uuid>()
+        val launched = mutableListOf<Uuid>()
+        val stopped = mutableListOf<Uuid>()
+        PebbleKitClassicStartListeners(
+            classicEnabled = MutableStateFlow(true),
+            startRequests = starts,
+            stopRequests = stops,
+            launchApp = { launched += it },
+            stopApp = { stopped += it },
+            scope = backgroundScope,
+            refused = { it == appA },
+        ).init()
+        runCurrent()
+        starts.emit(appA); stops.emit(appA)
+        starts.emit(appB); stops.emit(appB)
+        runCurrent()
+        assertEquals(listOf(appB), launched)
+        assertEquals(listOf(appB), stopped)
+    }
 }

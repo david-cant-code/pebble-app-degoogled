@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.watchapp.InjectedWatchAppCaptures
 import io.rebble.libpebblecommon.WatchConfigFlow
 import io.rebble.libpebblecommon.connection.LibPebble
 import io.rebble.libpebblecommon.di.LibPebbleCoroutineScope
@@ -24,7 +25,10 @@ import kotlin.uuid.toKotlinUuid
 
 private val logger = Logger.withTag("PebbleKitClassicStartListeners")
 
-/** Fork: the exported START/STOP receivers are registered only while classic PebbleKit is on. */
+/**
+ * Fork: the exported START/STOP receivers are registered only while classic PebbleKit is on.
+ * Gravel: requests naming a [refused] app, the embedder's capture app, are dropped.
+ */
 class PebbleKitClassicStartListeners(
     private val classicEnabled: Flow<Boolean>,
     private val startRequests: Flow<Uuid>,
@@ -32,6 +36,7 @@ class PebbleKitClassicStartListeners(
     private val launchApp: suspend (Uuid) -> Unit,
     private val stopApp: suspend (Uuid) -> Unit,
     private val scope: CoroutineScope,
+    private val refused: (Uuid) -> Boolean = { false },
 ) {
     fun init() {
         scope.launch {
@@ -45,13 +50,13 @@ class PebbleKitClassicStartListeners(
                     launch {
                         startRequests.collect { uuid ->
                             logger.d { "Got app start: $uuid" }
-                            launchApp(uuid)
+                            if (!refused(uuid)) launchApp(uuid)
                         }
                     }
                     launch {
                         stopRequests.collect { uuid ->
                             logger.d { "Got app stop: $uuid" }
-                            stopApp(uuid)
+                            if (!refused(uuid)) stopApp(uuid)
                         }
                     }
                 }
@@ -65,6 +70,7 @@ class PebbleKitClassicStartListeners(
             libPebble: LibPebble,
             coroutineScope: LibPebbleCoroutineScope,
             watchConfig: WatchConfigFlow,
+            watchAppCaptures: InjectedWatchAppCaptures,
         ) = PebbleKitClassicStartListeners(
             classicEnabled = classicEnabled(watchConfig),
             startRequests = IntentFilter(INTENT_APP_START).asFlow(context, exported = true)
@@ -74,6 +80,7 @@ class PebbleKitClassicStartListeners(
             launchApp = libPebble::launchApp,
             stopApp = libPebble::stopApp,
             scope = coroutineScope,
+            refused = { uuid -> uuid == watchAppCaptures.captures?.appUuid },
         )
 
         internal fun classicEnabled(watchConfig: WatchConfigFlow): Flow<Boolean> =

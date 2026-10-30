@@ -15,9 +15,7 @@ class CoreConfigTest {
     fun explicitWeatherUnitsSurvivesRoundTrip() {
         WeatherUnit.entries.forEach { unit ->
             val encoded = json.encodeToString(CoreConfig(weatherUnits = unit))
-            val decoded = json.decodeFromString<CoreConfig>(encoded)
-            assertEquals(unit, decoded.weatherUnits)
-            assertEquals(unit, decoded.resolvedWeatherUnits)
+            assertEquals(unit, json.decodeFromString<CoreConfig>(encoded).weatherUnits)
         }
     }
 
@@ -37,6 +35,13 @@ class CoreConfigTest {
         val decoded = json.decodeFromString<CoreConfig>("""{"sttConfig":{"mode":"LocalOnly"}}""")
         assertEquals(null, decoded.sttConfig.serverUrl)
         assertEquals(null, decoded.sttConfig.serverModel)
+    }
+
+    @Test
+    fun serverNetworkSettingsAreOffForExistingConfigs() {
+        val decoded = json.decodeFromString<CoreConfig>("""{"sttConfig":{"mode":"RemoteOnly","serverUrl":"https://stt.example.net/inference"}}""")
+        assertEquals(false, decoded.sttConfig.serverOnMobileData)
+        assertEquals(false, decoded.sttConfig.flakyNetworkMode)
     }
 
     @Test
@@ -71,9 +76,7 @@ class CoreConfigTest {
     }
 
     @Test
-    fun unsetWeatherUnitsFallsBackToDeviceDefault() {
-        val decoded = json.decodeFromString<CoreConfig>("{}")
-        assertEquals(null, decoded.weatherUnits)
-        assertEquals(deviceDefaultWeatherUnit(), decoded.resolvedWeatherUnits)
+    fun unsetWeatherUnitsDecodesAsNull() {
+        assertEquals(null, json.decodeFromString<CoreConfig>("{}").weatherUnits)
     }
 }

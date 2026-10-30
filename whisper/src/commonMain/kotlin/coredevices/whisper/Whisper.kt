@@ -1,10 +1,13 @@
 package coredevices.whisper
 
+import com.anopticlabs.gravel.whisper.WhisperLongForm
+import com.anopticlabs.gravel.whisper.WhisperLongFormResult
+
 /**
- * The complete engine surface for on-device speech recognition. Six
+ * The complete engine surface for on-device speech recognition. Seven
  * functions: this is the fork's replacement for a much larger proprietary
  * binding surface, and everything the app asks of the engine goes
- * through here (five for the speech model, one model-free speed probe);
+ * through here (six for the speech model, one model-free speed probe);
  * what the transcription service reads about the process the engine
  * runs in comes from the Android client behind these actuals
  * (`EngineProcess.android.kt`). Anything not expressible through these
@@ -18,9 +21,9 @@ package coredevices.whisper
  * call); and a plain exception carrying the engine's error text for a
  * failure inside the engine.
  *
- * Threading contract: callers serialize [whisperInit], [whisperTranscribe]
- * and [whisperFree] per handle (the transcription service holds one mutex
- * across every native call).
+ * Threading contract: callers serialize [whisperInit], [whisperTranscribe],
+ * [whisperTranscribeLongForm] and [whisperFree] per handle (the
+ * transcription service holds one mutex across every native call).
  * [whisperCancel] is the one function safe to call concurrently; it
  * targets a specific in-flight call by its [callId], so a cancellation
  * can never revoke a different call's pending abort (the case that arises
@@ -98,10 +101,26 @@ expect fun whisperTranscribe(
 ): String
 
 /**
- * Requests cancellation of the in-flight [whisperTranscribe] call with the
- * matching [callId]. Cancellation is per call, not process-wide, so it
- * only aborts that call; the engine polls it between inference passes and
- * the call clears its own request on return.
+ * Transcribes a recording ([pcm16], 16 kHz mono PCM16 of at most
+ * [WhisperLongForm.MAX_RECORDING_MILLIS]) into timed segments. A
+ * [whisperCancel] of [callId] ends it with no segments and not complete;
+ * the rest is as for [whisperTranscribe].
+ */
+expect fun whisperTranscribeLongForm(
+    handle: Long,
+    pcm16: ByteArray,
+    threads: Int,
+    language: String?,
+    callId: Long,
+    placement: EnginePlacement = EnginePlacement.DEFAULT,
+): WhisperLongFormResult
+
+/**
+ * Requests cancellation of the in-flight [whisperTranscribe] or
+ * [whisperTranscribeLongForm] call with the matching [callId].
+ * Cancellation is per call, not process-wide, so it only aborts that
+ * call; the engine polls it between inference passes and the call
+ * clears its own request on return.
  */
 expect fun whisperCancel(callId: Long)
 

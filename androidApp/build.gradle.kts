@@ -9,6 +9,9 @@ import java.util.zip.ZipFile
 // DESIGN_NOTES.md for the de-Googling seams.
 plugins {
     alias(libs.plugins.android.application)
+    // Gravel: for the instrumented Compose tests; the module's main code has no composables, and the
+    // compiler wants the Compose runtime (already in the app through composeApp) on its classpath too.
+    alias(libs.plugins.composeCompiler)
 }
 
 val properties = Properties().apply {
@@ -74,10 +77,6 @@ android {
         // deliberately stays "coredevices.coreapp" so source packages match upstream and
         // merges stay cheap; only the applicationId is rebranded.
         applicationId = "com.anopticlabs.gravel"
-        // The open ring build installs beside a stub build.
-        if (providers.gradleProperty("gravel.ring").orElse("stub").get() == "open") {
-            applicationIdSuffix = ".ring"
-        }
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -154,7 +153,14 @@ dependencies {
     implementation(project(":composeApp"))
     // Components this module's manifest declares, so lint can resolve them.
     implementation(project(":util"))
+    // Gravel: the Notebook's receivers, which the merged manifest declares.
+    implementation(project(":notebook"))
+    implementation(libs.compose.runtime)
+    // Gravel: the text engine's isolated service, which the merged manifest declares.
+    implementation(project(":llm"))
     implementation(libs.androidx.core.ktx)
+    // The manifest's androidx.startup provider entry, so lint can resolve it.
+    implementation(libs.androidx.work)
     // Fork: string notation on purpose, mirroring composeApp; the catalog has
     // no health-kmp alias so that upstream's plain libs.health.kmp fails at
     // configuration time instead of silently resolving the Google Fit
@@ -178,6 +184,9 @@ dependencies {
     // module's own classpath otherwise.
     debugImplementation(libs.koin.core)
     debugImplementation(libs.kermit)
+    // Gravel: the debug-only NotebookDebugReceiver drives the Notebook stores
+    // from adb inside a coroutine; the notebook module keeps coroutines private.
+    debugImplementation(libs.coroutines)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.ktor.client.okhttp)
@@ -193,6 +202,14 @@ dependencies {
     androidTestImplementation(project(":pebble"))
     androidTestImplementation(project(":socketfilter"))
     androidTestImplementation(project(":whisper"))
+    androidTestImplementation(project(":notebook"))
+    androidTestImplementation(libs.markdown.renderer)
+    androidTestImplementation(libs.jetbrains.markdown)
+    androidTestImplementation(libs.compose.ui)
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(libs.espresso.core)
+    debugImplementation(libs.compose.ui.test.manifest)
+    androidTestImplementation(project(":llm"))
     androidTestImplementation(project(":libpebble3"))
     androidTestImplementation(libs.serialization)
     // Same artifact and version the app already ships via libpebble3; test-scope only,
@@ -304,15 +321,20 @@ abstract class VerifyExportedComponents : DefaultTask() {
 
 /**
  * Fork: services that must ship isolated and unexported in the merged manifest of every variant.
- * The whisper engine parses untrusted model bytes in a process of its own, and
+ * Each engine parses untrusted model bytes in a process of its own, and
  * `android:isolatedProcess` on its service is what makes that process isolated. The attribute is
- * declared in the `:whisper` module manifest, which WhisperEngineManifestTest pins, but a merge
- * rule in this module (`tools:remove`, `tools:replace`) can take it out of the manifest the APK
- * ships without touching that file, and the merged manifest is what installs. Wired like
+ * declared in the engine module's manifest, which WhisperEngineManifestTest and
+ * LlmEngineManifestTest pin, but a merge rule in this module (`tools:remove`, `tools:replace`)
+ * can take it out of the manifest the APK ships without touching that file, and the merged
+ * manifest is what installs. Wired like
  * VerifyApkContents, as a listener on the artifact, so it runs whenever a variant's merged
  * manifest is produced.
  */
-val isolatedServices = setOf("coredevices.whisper.WhisperEngineService")
+val isolatedServices = setOf(
+    "coredevices.whisper.WhisperEngineService",
+    // Gravel: the llama.cpp text engine behind the Notebook, in a process of its own.
+    "com.anopticlabs.gravel.llm.LlmEngineService",
+)
 
 abstract class VerifyIsolatedServices : DefaultTask() {
 
@@ -359,9 +381,9 @@ abstract class VerifyIsolatedServices : DefaultTask() {
                 appendLine("Engine containment changed in the merged manifest ${mergedManifest.get().asFile}:")
                 problems.forEach { appendLine("  $it") }
                 appendLine()
-                appendLine("The engine parses untrusted model bytes; isolatedProcess=\"true\" and exported=\"false\" on")
+                appendLine("An engine parses untrusted model bytes; isolatedProcess=\"true\" and exported=\"false\" on")
                 appendLine("its service are its containment. A merge rule in this module can drop either without")
-                appendLine("changing the whisper module's manifest, so fix the manifest rather than this list.")
+                appendLine("changing the engine module's manifest, so fix the manifest rather than this list.")
             },
         )
     }
@@ -497,6 +519,87 @@ abstract class VerifyApkContents : DefaultTask() {
     }
 }
 
+/**
+ * Gravel: fails if a merged native library (every ABI, before stripping) names this checkout by absolute path, if a
+ * library built here ([builtHere], each required) names the SDK or a home directory ([machinePaths]), or if a library
+ * is named in neither [builtHere] nor [dependencies]. Dependencies' prebuilt libraries can name their builders'
+ * machines, so only [builtHere] is checked for [machinePaths]. -ffile-prefix-map in the native modules' CMakeLists.txt
+ * remaps paths in debug info and in __FILE__ (clang release/19.x clang/include/clang/Driver/Options.td
+ * ffile_prefix_map_EQ); the check reads the libraries before stripping because the linker hashes the whole output,
+ * debug info included, into the build ID (lld release/19.x lld/ELF/Writer.cpp writeBuildId). Wired like
+ * VerifyApkContents, as a listener on AGP 9.3.1 SingleArtifact.MERGED_NATIVE_LIBS ("not yet been stripped").
+ */
+abstract class VerifyNativeLibPaths : DefaultTask() {
+
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val nativeLibs: DirectoryProperty
+
+    @get:Input
+    abstract val checkoutPaths: SetProperty<String>
+
+    @get:Input
+    abstract val machinePaths: SetProperty<String>
+
+    @get:Input
+    abstract val builtHere: SetProperty<String>
+
+    @get:Input
+    abstract val dependencies: SetProperty<String>
+
+    @TaskAction
+    fun verify() {
+        val checkout = needles(checkoutPaths.get())
+        val machine = needles(machinePaths.get())
+        if (checkout.isEmpty() || machine.isEmpty()) throw GradleException("Native library path check has no path to look for")
+        // Every build first finds each needle in a planted sample, so a broken match fails here.
+        for ((path, needle) in checkout + machine) {
+            if (!names("\u0000$needle/x\u0000", needle)) throw GradleException("Native library path check cannot find $path")
+        }
+        val dir = nativeLibs.get().asFile
+        val libs = dir.walkTopDown().filter { it.isFile && it.extension == "so" }.toList()
+        val found = libs.map { it.name }.toSet()
+        val problems = mutableListOf<String>()
+        val missing = builtHere.get() - found
+        if (missing.isNotEmpty()) problems += "libraries built here are missing: ${missing.sorted()}"
+        val unknown = found - builtHere.get() - dependencies.get()
+        if (unknown.isNotEmpty()) problems += "libraries named neither built here nor a dependency's: ${unknown.sorted()}"
+        for (lib in libs) {
+            val text = latin1(lib.readBytes())
+            val paths = if (lib.name in builtHere.get()) checkout + machine else checkout
+            for ((path, needle) in paths) {
+                if (names(text, needle)) problems += "${lib.relativeTo(dir)} names $path"
+            }
+        }
+        if (problems.isNotEmpty()) {
+            throw GradleException("Native library path check failed:\n" + problems.joinToString("\n") { "  $it" })
+        }
+        logger.lifecycle("Native library paths verified: ${libs.size} libraries")
+    }
+
+    // ISO-8859-1 maps bytes to chars one to one, so a byte search becomes a string search.
+    private fun latin1(bytes: ByteArray) = String(bytes, Charsets.ISO_8859_1)
+
+    /** Each path (without a trailing slash; the filesystem root dropped) to its UTF-8 bytes as a search string. */
+    private fun needles(paths: Set<String>) =
+        paths.map { it.trimEnd('/') }.filter { it.isNotEmpty() }.associateWith { latin1(it.toByteArray(Charsets.UTF_8)) }.toList()
+
+    /** Whether [text] holds [needle] as a whole path: not the tail of a longer name, and followed by '/' or NUL. */
+    private fun names(text: String, needle: String): Boolean {
+        var at = text.indexOf(needle)
+        while (at >= 0) {
+            val before = text.getOrElse(at - 1) { '\u0000' }
+            val after = text.getOrElse(at + needle.length) { '\u0000' }
+            if (!before.inName() && (after == '/' || after == '\u0000')) return true
+            at = text.indexOf(needle, at + 1)
+        }
+        return false
+    }
+
+    // Bytes from 0x80 up are parts of UTF-8 names.
+    private fun Char.inName() = code >= 0x80 || isLetterOrDigit() || this in "._~+-/"
+}
+
 // Fork: F-Droid's update checker reads the versionCode of a tagged release from
 // androidApp/version.properties (the recipe's UpdateCheckData names that file);
 // it cannot count commits the way the build does. The file is bumped in the
@@ -566,9 +669,9 @@ tasks.configureEach {
     if (name == "preBuild") dependsOn(verifyReleaseVersionFile)
 }
 
-// Fork: FdroidGuardrailsTest and ExcludedAssetSentinelTest read the git-tracked
-// tree (build files, tracked binaries, sources) through git rather than
-// through declared task inputs, so Gradle cannot tell when their verdict is
+// Fork: the tree-reading sentinels (the tests that use TrackedTree) read the
+// git-tracked tree (build files, tracked binaries, sources) through git rather
+// than through declared task inputs, so Gradle cannot tell when their verdict is
 // stale. Left tracked, an unchanged test classpath would let the unit test
 // task be skipped as up-to-date or restored from the build cache while the
 // tree they judge had changed, which is the silent-skip shape the guardrails
@@ -640,6 +743,30 @@ androidComponents {
         variant.artifacts.use(verifyIsolated)
             .wiredWith(VerifyIsolatedServices::mergedManifest)
             .toListenTo(com.android.build.api.artifact.SingleArtifact.MERGED_MANIFEST)
+    }
+
+    // Gravel: every variant runs VerifyNativeLibPaths on its merged native libraries.
+    onVariants { variant ->
+        val verifyPaths = tasks.register<VerifyNativeLibPaths>(
+            "verify${variant.name.replaceFirstChar { it.uppercase() }}NativeLibPaths",
+        ) {
+            group = "verification"
+            description = "Fails if a merged native library names the checkout, or one built here the SDK or a home directory."
+            checkoutPaths.set(setOf(rootDir.absolutePath, rootDir.canonicalPath))
+            val homes = listOf(File(System.getProperty("user.home")), gradle.gradleUserHomeDir)
+            machinePaths.set(
+                sdkComponents.sdkDirectory.map { sdk ->
+                    (homes + sdk.asFile).flatMap { listOf(it.absolutePath, it.canonicalPath) }.toSet()
+                },
+            )
+            builtHere.set(
+                setOf("libwhisperjni.so", "libwhispercpu.so", "libllmjni.so", "libllmcpu.so", "libgravelsocketfilter.so"),
+            )
+            dependencies.set(setOf("libsqliteJni.so", "libspeex_codec.so", "libandroidx.graphics.path.so"))
+        }
+        variant.artifacts.use(verifyPaths)
+            .wiredWith(VerifyNativeLibPaths::nativeLibs)
+            .toListenTo(com.android.build.api.artifact.SingleArtifact.MERGED_NATIVE_LIBS)
     }
 
     // Fork: release builds fail unless every exported component is allowlisted

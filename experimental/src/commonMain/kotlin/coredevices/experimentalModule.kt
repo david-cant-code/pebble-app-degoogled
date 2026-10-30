@@ -51,7 +51,6 @@ import coredevices.ring.reminders.ReminderDeepLinkResolver
 import coredevices.ring.service.indexfeed.DefaultListsBootstrap
 import coredevices.ring.service.indexfeed.IndexFeedSyncService
 import coredevices.ring.service.indexfeed.ItemFactory
-import coredevices.libindex.database.repository.RingIterationStore
 import coredevices.libindex.database.repository.RingTransferRepository
 import coredevices.ring.external.indexwebhook.IndexWebhookApi
 import coredevices.ring.external.indexwebhook.IndexWebhookApiImpl
@@ -171,7 +170,7 @@ val experimentalModule = module {
     singleOf(::RecordingRepository)
     single {
         RingTransferRepository(get(), get<RingDatabase>())
-    } binds arrayOf(RingTransferRepository::class, RingIterationStore::class)
+    }
     singleOf(::RecordingProcessingTaskRepository)
     single {
         val builtInReminders = get<BuiltInReminderIntegration>()

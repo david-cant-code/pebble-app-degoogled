@@ -1,0 +1,26 @@
+[
+  {
+    "in": "{\"a\": \"line1\nline2\"}",
+    "out": "{\"a\": \"line1\\nline2\"}"
+  },
+  {
+    "in": "{\"a\": \"tab\there\"}",
+    "out": "{\"a\": \"tab\\there\"}"
+  },
+  {
+    "in": "{\n\"a\": 1}",
+    "out": "{\n\"a\": 1}"
+  },
+  {
+    "in": "{\"a\": \"he said \\\"hi\\\"\"}",
+    "out": "{\"a\": \"he said \\\"hi\\\"\"}"
+  },
+  {
+    "in": "{\"a\": \"carriage\rreturn\"}",
+    "out": "{\"a\": \"carriage\\rreturn\"}"
+  },
+  {
+    "in": "plain text, no json at all",
+    "out": "plain text, no json at all"
+  }
+]

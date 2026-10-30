@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.rebble.libpebblecommon.voice.PEBBLE_FW_TRANSCRIPTION_TIMEOUT
 
 /**
  * Fork: the current "What's New" changelog revision. Bump this by one, and prepend an
@@ -21,9 +22,9 @@ import androidx.compose.ui.unit.dp
  * users on update. The popup auto-shows once per user per bump (`WhatsNewDialog` in
  * composeApp) and can be reopened any time from Settings > About.
  */
-const val WHATS_NEW_VERSION = 12
+const val WHATS_NEW_VERSION = 14
 
-/** A single announced change: a short heading and a sentence or two of body. */
+/** A single announced change: a short heading and a paragraph of body. */
 data class WhatsNewEntry(val title: String, val body: String)
 
 /**
@@ -32,6 +33,32 @@ data class WhatsNewEntry(val title: String, val body: String)
  * changelog (that lives in git history and the repo docs).
  */
 val whatsNewEntries: List<WhatsNewEntry> = listOf(
+    WhatsNewEntry(
+        title = "Notebook (early beta)",
+        body = "Record a note or a reminder from your watch with the new Notebook watch app, " +
+            "which Gravel offers to install, or from the Notebook tab. Recording needs a phone " +
+            "whose processor can run the AI models; other phones get typed notes and reminders. " +
+            "The AI runs on this phone: Whisper turns your words into text (or your own " +
+            "transcription server, if you set one up), and a local language model titles each " +
+            "note and writes each reminder's message. Reminder times come from deterministic " +
+            "rules: a time they're unsure of is set to your default and marked for you to check, " +
+            "and a notice shows the time a spoken reminder was set for. Reminder notices can show " +
+            "their text on the lock screen and on the watch. Spotting a spoken reminder and " +
+            "reading its time work only in English for now; reminders you type can be in any " +
+            "language. Contributions for other languages are welcome on GitHub.",
+    ),
+    WhatsNewEntry(
+        title = "Your transcription server and mobile data",
+        body = "Settings > AI > Speech Recognition has two new switches for a self-hosted " +
+            "transcription server. With Use the Server on Mobile Data off, audio goes to your " +
+            "server only while this phone is using Wi-Fi that isn't marked metered. If a server " +
+            "was already set up when you updated, the switch starts on, so nothing changes until " +
+            "you turn it off; otherwise it starts off. Flaky Network Mode, in Server (with Local " +
+            "Fallback) and Local (with Server Fallback) once this phone has a speech model, " +
+            "transcribes watch dictation on this phone instead of your server, for connections " +
+            "that can't get the words back within the watch's " +
+            "${PEBBLE_FW_TRANSCRIPTION_TIMEOUT.inWholeSeconds} seconds.",
+    ),
     WhatsNewEntry(
         title = "Steps and heart rate sync again",
         body = "PebbleOS 4.39.0 and 4.40.0 send a watch's steps and heart rate in a newer " +
@@ -109,7 +136,7 @@ val whatsNewEntries: List<WhatsNewEntry> = listOf(
             "each model costs, and offers a smaller one if needed for your device. " +
             "Dictation with Gravel in the background or the screen locked, which used " +
             "to fail on some phones, now works. And you can connect Gravel to your own " +
-            "self-hosted transcription server over https in Settings > Speech " +
+            "self-hosted transcription server over https in Settings > AI > Speech " +
             "Recognition; nothing is sent unless you set one up.",
     ),
     WhatsNewEntry(

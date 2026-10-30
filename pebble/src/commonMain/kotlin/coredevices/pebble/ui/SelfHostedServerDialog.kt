@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import coredevices.ui.M3Dialog
+import com.anopticlabs.gravel.transcription.adoptUnboundServerToken
 import coredevices.util.CoreConfigHolder
 import coredevices.util.models.CactusSTTMode
 import coredevices.util.transcription.SelfHostedServerStore
@@ -68,13 +69,62 @@ internal fun effectiveServerToken(typed: String, clearToken: Boolean, saved: Str
     else -> null
 }
 
+/**
+ * Gravel: Save's writes, the store's before the config's. A request reads the address, then the token; with the
+ * config written last, one started on the config's change reads the token saved for that address.
+ */
+internal fun saveServerSettings(
+    holder: CoreConfigHolder,
+    store: SelfHostedServerStore,
+    url: String,
+    model: String,
+    token: String,
+    clearToken: Boolean,
+    savedHostPort: String?,
+) {
+    val cleaned = url.trim().ifBlank { null }
+    val hostPort = cleaned?.let(::serverHostPort)
+    // A token left alone for the same address is not read: one that cannot be decrypted for the moment stays.
+    if (token.isNotBlank() || clearToken || hostPort != savedHostPort) {
+        val currentToken = store.tokenFor(savedHostPort)
+        val nextToken = effectiveServerToken(token, clearToken, currentToken, savedHostPort, hostPort)
+        if (hostPort != savedHostPort || writesServerToken(nextToken, currentToken)) store.setToken(hostPort = hostPort, value = nextToken)
+    }
+    if (cleaned == null) savedHostPort?.let(store::forget)
+    store.keepDictationLaneOnlyFor(hostPort)
+    val config = holder.config.value
+    val mode = config.sttConfig.mode
+    val serverModes = setOf(CactusSTTMode.RemoteOnly, CactusSTTMode.RemoteFirst, CactusSTTMode.LocalFirst)
+    holder.update(
+        config.copy(
+            sttConfig = config.sttConfig.copy(
+                serverUrl = cleaned,
+                serverModel = model.trim().ifBlank { null },
+                // Without a server the server modes have nothing to run; local is the only complete choice.
+                mode = if (cleaned == null && mode in serverModes) CactusSTTMode.LocalOnly else mode,
+            ),
+        ),
+    )
+}
+
+/**
+ * Gravel: whether Save writes [next] over the [current] token. An unchanged token is left alone: writing it again
+ * stores a new ciphertext (KeystoreSecretCipher.encrypt takes a fresh IV per write), which the Notebook reads as a
+ * change of the server settings.
+ */
+internal fun writesServerToken(next: String?, current: String?): Boolean = next == null || next != current
+
 /** The token field's label: whether a saved token exists, and whether it applies to the host and port typed. */
 internal fun tokenFieldLabel(typed: String, clearToken: Boolean, hasSaved: Boolean, savedHostPort: String?, hostPort: String?): String = when {
     // Without a server the save keeps no token, so nothing is "saved" to replace.
     typed.isNotBlank() || clearToken || !hasSaved || hostPort == null -> "Bearer token (optional)"
     hostPort == savedHostPort -> "Bearer token (saved; type to replace)"
-    else -> "Bearer token (the saved one stays with the previous server)"
+    else -> "Bearer token (the saved one is for the previous server and is removed on Save)"
 }
+
+/** Gravel: the token a request from the dialog carries to [hostPort], the address the request goes to. */
+internal fun dialogRequestToken(store: SelfHostedServerStore, typed: String, clearToken: Boolean, savedHostPort: String?, hostPort: String?): String? =
+    effectiveServerToken(typed, clearToken, store.tokenFor(hostPort), savedHostPort, hostPort)
 
 /**
  * Configures the self-hosted transcription server: URL, optional model
@@ -100,37 +150,37 @@ fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
     var model by remember { mutableStateOf(initial.serverModel ?: "") }
     var token by remember { mutableStateOf("") }
     var clearToken by remember { mutableStateOf(false) }
-    val hasStoredToken = remember { store.token() != null }
+    val savedHostPort = remember { initial.serverUrl?.let(::serverHostPort) }
+    val hasStoredToken = remember {
+        adoptUnboundServerToken(coreConfigHolder, store)
+        store.tokenFor(savedHostPort) != null
+    }
     var status by remember { mutableStateOf<String?>(null) }
-    var pending by remember { mutableStateOf<ServerCertificateProbe?>(null) }
+    // With the address the certificate was presented by: one for another address is neither shown nor trusted.
+    var pending by remember { mutableStateOf<Pair<String, ServerCertificateProbe>?>(null) }
     var busy by remember { mutableStateOf(false) }
     // Bumped when a pin is written or forgotten, so the trust line re-reads the store.
     var pinVersion by remember { mutableIntStateOf(0) }
 
     val urlProblem = validateServerUrl(url).takeUnless { it == ServerUrlProblem.Empty }
     val hostPort = serverHostPort(url)
-    val savedHostPort = remember { initial.serverUrl?.let(::serverHostPort) }
     val pinned = remember(hostPort, pinVersion) { hostPort?.let { store.pinnedFingerprint(it) } }
 
-    fun effectiveToken(): String? = effectiveServerToken(token, clearToken, store.token(), savedHostPort, hostPort)
-
-    fun runRequestTest() {
-        scope.launch {
-            busy = true
-            status = try {
-                serverTestStatusText(service.testConnection(url.trim(), model.trim().ifBlank { null }, effectiveToken()))
-            } catch (e: TranscriptionException.TranscriptionNetworkError) {
-                "Could not reach the server: ${e.cause?.message ?: "network error"}"
-            } catch (e: TranscriptionException) {
-                e.message ?: "The request failed."
-            } finally {
-                busy = false
-            }
+    // One test works from one reading of the URL field: [target], its address [hp], and the token for that address.
+    suspend fun requestTest(target: String, hp: String) {
+        status = try {
+            val requestToken = dialogRequestToken(store, token, clearToken, savedHostPort, hp)
+            serverTestStatusText(service.testConnection(target, model.trim().ifBlank { null }, requestToken))
+        } catch (e: TranscriptionException.TranscriptionNetworkError) {
+            "Could not reach the server: ${e.cause?.message ?: "network error"}"
+        } catch (e: TranscriptionException) {
+            e.message ?: "The request failed."
         }
     }
 
     fun test() {
-        val hp = hostPort ?: return
+        val target = url.trim()
+        val hp = serverHostPort(target) ?: return
         scope.launch {
             busy = true
             status = null
@@ -142,7 +192,7 @@ fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
                     pinned = store.pinnedFingerprint(hp),
                     presented = probe.fingerprint,
                 )
-                if (decision == ServerTrust.Trusted) runRequestTest() else pending = probe
+                if (decision == ServerTrust.Trusted) requestTest(target, hp) else pending = hp to probe
             } catch (e: Exception) {
                 status = "Could not connect: ${e.message ?: e::class.simpleName}"
             } finally {
@@ -152,31 +202,24 @@ fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
     }
 
     fun trustPending() {
-        val probe = pending ?: return
-        val hp = hostPort ?: return
+        val (hp, probe) = pending ?: return
+        pending = null
+        val target = url.trim()
+        if (serverHostPort(target) != hp) return
         store.trust(hp, probe.fingerprint)
         pinVersion++
-        pending = null
-        runRequestTest()
+        scope.launch {
+            busy = true
+            try {
+                requestTest(target, hp)
+            } finally {
+                busy = false
+            }
+        }
     }
 
     fun save() {
-        val cleaned = url.trim().ifBlank { null }
-        val config = coreConfigHolder.config.value
-        val mode = config.sttConfig.mode
-        val serverModes = setOf(CactusSTTMode.RemoteOnly, CactusSTTMode.RemoteFirst, CactusSTTMode.LocalFirst)
-        coreConfigHolder.update(
-            config.copy(
-                sttConfig = config.sttConfig.copy(
-                    serverUrl = cleaned,
-                    serverModel = model.trim().ifBlank { null },
-                    // Without a server the server modes have nothing to run; local is the only complete choice.
-                    mode = if (cleaned == null && mode in serverModes) CactusSTTMode.LocalOnly else mode,
-                ),
-            ),
-        )
-        store.setToken(effectiveServerToken(token, clearToken, store.token(), savedHostPort, cleaned?.let(::serverHostPort)))
-        if (cleaned == null) savedHostPort?.let(store::forget)
+        saveServerSettings(coreConfigHolder, store, url, model, token, clearToken, savedHostPort)
         onDismissRequest()
     }
 
@@ -193,8 +236,11 @@ fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
     ) {
         Column {
             Text(
-                "Sends dictation audio to your own transcription server over https. Works with " +
-                    "whisper.cpp's server and any OpenAI-compatible server.",
+                "Sends dictation audio, and Notebook recordings in the server modes, to your own " +
+                    "transcription server over https, only while " +
+                    "this phone is using Wi-Fi that isn't marked metered unless Use the Server on " +
+                    "Mobile Data is on (it appears with the server modes). Works with whisper.cpp's " +
+                    "server and any OpenAI-compatible server.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(Modifier.height(12.dp))
@@ -206,6 +252,7 @@ fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
                 singleLine = true,
                 isError = urlProblem != null,
                 supportingText = urlProblem?.let { { Text(serverUrlProblemText(it)) } },
+                enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
@@ -214,6 +261,7 @@ fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
                 label = { Text("Model name (optional)") },
                 supportingText = { Text("Leave empty for whisper.cpp's server.") },
                 singleLine = true,
+                enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
@@ -222,6 +270,7 @@ fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
                 label = { Text(tokenFieldLabel(token, clearToken, hasStoredToken, savedHostPort, hostPort)) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
+                enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),
             )
             if (hasStoredToken && !clearToken && hostPort == savedHostPort) {
@@ -233,7 +282,7 @@ fun SelfHostedServerDialog(onDismissRequest: () -> Unit) {
             } else {
                 TextButton(onClick = { test() }, enabled = urlProblem == null && hostPort != null) { Text("Test connection") }
             }
-            pending?.let { probe ->
+            pending?.let { (_, probe) ->
                 val changed = pinned != null
                 Text(
                     if (changed) {

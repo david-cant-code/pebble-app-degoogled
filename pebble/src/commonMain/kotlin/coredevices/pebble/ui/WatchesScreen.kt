@@ -43,7 +43,6 @@ import androidx.compose.material.icons.filled.Battery4Bar
 import androidx.compose.material.icons.filled.Battery5Bar
 import androidx.compose.material.icons.filled.Battery6Bar
 import androidx.compose.material.icons.filled.BatteryFull
-import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.ChevronRight
@@ -122,8 +121,6 @@ import coreapp.pebble.generated.resources.devices
 import coredevices.analytics.CoreAnalytics
 import coredevices.firestore.UsersDao
 import coredevices.libindex.IndexDevices
-import coredevices.libindex.IndexRingClient
-import coredevices.util.showAddIndexButton
 import coredevices.libindex.LibIndex
 import coredevices.libindex.device.DiscoveredIndexDevice
 import coredevices.libindex.device.IndexDevice
@@ -201,7 +198,6 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.compose.ui.tooling.preview.Preview
-import org.koin.compose.getKoin
 import org.koin.compose.koinInject
 import org.koin.dsl.module
 import theme.gravelPurple
@@ -213,7 +209,6 @@ expect fun scanPermission(): Permission?
 expect fun getIPAddress(): Pair<String?, String?>
 
 private val logger = Logger.withTag("WatchesScreen")
-private val idleRingStatus = MutableStateFlow<String?>(null)
 
 sealed interface ScanningStatus {
     object NotScanning : ScanningStatus
@@ -227,9 +222,6 @@ sealed interface ScanningStatus {
 fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
     val libPebble = rememberLibPebble()
     val libIndex = koinInject<LibIndex>()
-    val ringClient = getKoin().getOrNull<IndexRingClient>()
-    val showAddIndex = showAddIndexButton(ringClient != null)
-    val ringStatus by (ringClient?.status ?: idleRingStatus).collectAsState()
     val pebbleFeatures = koinInject<PebbleFeatures>()
     val scanningStatus by combine(
         libPebble.isScanningBle,
@@ -358,24 +350,15 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                             )
                         },
                     )
-                    if (showAddIndex) {
-                        FloatingActionButtonMenuItem(
-                            onClick = {
-                                addFabExpanded = false
-                                val context = uiContext ?: return@FloatingActionButtonMenuItem
-                                scope.launch {
-                                    if (!ensureScanPermission(context)) return@launch
-                                    if (libIndex.rings.value.any { it is KnownIndexDevice }) {
-                                        showIndexAlreadyPairedDialog = true
-                                    } else {
-                                        libIndex.startScan()
-                                    }
-                                }
-                            },
-                            icon = { Icon(Icons.Filled.Bluetooth, contentDescription = "Index 01") },
-                            text = { Text("Add Index 01") },
-                        )
-                    }
+                    // Fork: the "Add Index 01" menu item is removed. Ring
+                    // support is unplugged from this build and LibIndex is a
+                    // no-op, so a scan started from here could never find
+                    // anything. The item's former collaborator
+                    // showIndexAlreadyPairedDialog (with its "already paired"
+                    // dialog below) stays as retained-but-dead upstream code
+                    // for cheap merges; the 2026-08 upstream sync deleted its
+                    // other collaborators (indexAlreadyPaired, scanIndex)
+                    // upstream-side and inlined their logic here.
                     if (pebbleFeatures.supportsBtClassic()) {
                         FloatingActionButtonMenuItem(
                             onClick = {
@@ -451,14 +434,6 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
             val entries by entriesFlow.collectAsState(initial = emptyList())
 
             Column {
-                val statusLine = ringStatus
-                if (statusLine != null) {
-                    Text(
-                        text = statusLine,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
-                }
                 if (!bluetoothEnabled.enabled()) {
                     Card(
                         modifier = Modifier

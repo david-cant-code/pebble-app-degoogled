@@ -1,21 +1,33 @@
 package coredevices.util.transcription
 
+import com.russhwolf.settings.MapSettings
 import com.sun.net.httpserver.HttpsConfigurator
 import com.sun.net.httpserver.HttpsServer
+import coredevices.util.CoreConfig
+import coredevices.util.CoreConfigFlow
+import coredevices.util.STTConfig
+import coredevices.util.security.DecryptResult
+import coredevices.util.security.SecretCipher
 import io.ktor.client.HttpClient
 import io.ktor.client.request.forms.formData
 import io.ktor.client.request.forms.submitFormWithBinaryData
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import java.io.File
+import com.anopticlabs.gravel.network.NotOnAllowedNetworkException
+import com.anopticlabs.gravel.network.RouteBoundSocketFactory
+import com.anopticlabs.gravel.network.RouteBoundDns
 import java.io.IOException
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.nio.file.Files
 import java.security.KeyStore
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
+import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSession
@@ -29,6 +41,10 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 /**
  * The client and probe as built, against a local TLS server whose
@@ -47,6 +63,9 @@ class SelfHostedTlsGlueTest {
 
     private companion object {
         const val PASSWORD = "changeit"
+        const val SLOW_REPLY_MILLIS = 1_500L
+        const val DRIP_MILLIS = 20_000L
+        const val DRIP_GAP_MILLIS = 50L
         const val SERVER_NAME = "stt-server-c.test"
 
         private fun keytool(workDir: File, vararg args: String) {
@@ -94,6 +113,8 @@ class SelfHostedTlsGlueTest {
     private val certificate get() = material.certificate
     private val issuer get() = material.issuer
     private lateinit var server: HttpsServer
+    private val served = AtomicInteger()
+    private val dripped = AtomicInteger()
     private val port get() = server.address.port
     private val url get() = "https://127.0.0.1:$port/inference"
 
@@ -121,10 +142,38 @@ class SelfHostedTlsGlueTest {
         server = HttpsServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
             httpsConfigurator = HttpsConfigurator(context)
             createContext("/inference") { exchange ->
+                served.incrementAndGet()
                 exchange.requestBody.use { it.readBytes() }
                 val reply = """{"text":"from the local server"}""".encodeToByteArray()
                 exchange.sendResponseHeaders(200, reply.size.toLong())
                 exchange.responseBody.use { it.write(reply) }
+            }
+            createContext("/drop") { exchange ->
+                exchange.requestBody.use { it.readBytes() }
+                exchange.close()
+            }
+            createContext("/slow") { exchange ->
+                exchange.requestBody.use { it.readBytes() }
+                Thread.sleep(SLOW_REPLY_MILLIS)
+                val reply = """{"text":"late"}""".encodeToByteArray()
+                exchange.sendResponseHeaders(200, reply.size.toLong())
+                exchange.responseBody.use { it.write(reply) }
+            }
+            // A reply that keeps coming, a space at a time, then a whole answer.
+            createContext("/drip") { exchange ->
+                exchange.requestBody.use { it.readBytes() }
+                exchange.sendResponseHeaders(200, 0)
+                runCatching {
+                    exchange.responseBody.use { body ->
+                        repeat((DRIP_MILLIS / DRIP_GAP_MILLIS).toInt()) {
+                            body.write(' '.code)
+                            body.flush()
+                            dripped.incrementAndGet()
+                            Thread.sleep(DRIP_GAP_MILLIS)
+                        }
+                        body.write("""{"text":"late"}""".encodeToByteArray())
+                    }
+                }
             }
             start()
         }
@@ -207,5 +256,119 @@ class SelfHostedTlsGlueTest {
             override fun verifyHostname(host: String, session: SSLSession): Boolean = false
         }
         assertTrue(probeServerCertificate("127.0.0.1", port, anchored).platformTrusted)
+    }
+
+    /** A client on [route] dialling [host]; "stt.test" only the bound lookup resolves. */
+    private class Bound(port: Int, pin: String, wifiOnly: Boolean = true, host: String = "stt.test", route: () -> String?) {
+        val attached = AtomicInteger()
+        val lookups = AtomicInteger()
+        val url = "https://$host:$port/inference"
+        private val binding = NetworkBinding(
+            RouteBoundSocketFactory(route) { _, _ -> attached.incrementAndGet() },
+            RouteBoundDns(route) { _, host -> lookups.incrementAndGet(); listOf(InetAddress.getByName(if (host == "stt.test") "127.0.0.1" else host)) },
+        )
+        val client = AndroidSelfHostedClientFactory({ binding }, { HostPlatform }).create("$host:$port", { pin }, wifiOnly, SelfHostedTranscriptionService.DICTATION_ANSWER_WAIT)
+
+        suspend fun post(): Int {
+            val parts = formData { append("file", ByteArray(32), Headers.build { append(HttpHeaders.ContentType, "audio/wav") }) }
+            return client.submitFormWithBinaryData(url, parts).status.value
+        }
+    }
+
+    @Test
+    fun aWifiOnlyClientConnectsAndLooksUpThroughItsBindingWithNoIdleConnection() = runBlocking {
+        val bound = Bound(port, sha256Fingerprint(certificate)) { "wifi" }
+        bound.client.use {
+            assertEquals(200, bound.post())
+            assertEquals(200, bound.post())
+        }
+        assertEquals(2, bound.attached.get(), "each request made its own bound connection")
+        assertEquals(2, bound.lookups.get())
+        assertEquals(2, served.get())
+    }
+
+    @Test
+    fun aWifiOnlyClientWithNoRouteNeverReachesTheServer() = runBlocking {
+        val bound = Bound(port, sha256Fingerprint(certificate)) { null }
+        val failure = bound.client.use { assertFailsWith<Exception> { bound.post() } }
+        assertTrue(
+            generateSequence<Throwable>(failure) { it.cause }.take(MAX_CAUSE_DEPTH).any { it is NotOnAllowedNetworkException },
+            "no refusal by the rule in ${failure::class.simpleName}: ${failure.message}",
+        )
+        assertEquals(0, bound.lookups.get())
+        assertEquals(0, bound.attached.get())
+        assertEquals(0, served.get())
+    }
+
+    @Test
+    fun aClientNotHeldToTheRuleTakesNoBinding() = runBlocking {
+        val bound = Bound(port, sha256Fingerprint(certificate), wifiOnly = false, host = "localhost") { null }
+        assertEquals(200, bound.client.use { bound.post() })
+        assertEquals(0, bound.lookups.get())
+        assertEquals(0, bound.attached.get())
+    }
+
+    @Test
+    fun theAnswerWaitBoundsHowLongTheClientWaitsForTheReply() = runBlocking {
+        val factory = AndroidSelfHostedClientFactory({ error("no binding without the rule") }, { HostPlatform })
+        suspend fun post(answerWait: Duration): Int = factory.create("127.0.0.1:$port", { sha256Fingerprint(certificate) }, false, answerWait).use { client ->
+            val parts = formData { append("file", ByteArray(32), Headers.build { append(HttpHeaders.ContentType, "audio/wav") }) }
+            client.submitFormWithBinaryData("https://127.0.0.1:$port/slow", parts).status.value
+        }
+        val failure = assertFailsWith<Exception> { post((SLOW_REPLY_MILLIS / 4).milliseconds) }
+        assertTrue(
+            generateSequence<Throwable>(failure) { it.cause }.take(MAX_CAUSE_DEPTH).any { it::class.simpleName.orEmpty().contains("Timeout") },
+            "not a timeout: ${failure::class.simpleName}: ${failure.message}",
+        )
+        assertEquals(200, post((SLOW_REPLY_MILLIS * 4).milliseconds))
+    }
+
+    // No token is saved here, so the store never encrypts or decrypts.
+    private object NoCipher : SecretCipher {
+        override fun encrypt(plaintext: String): String? = error("no token in this test")
+        override fun decrypt(stored: String): DecryptResult = error("no token in this test")
+    }
+
+    @Test
+    fun aRecordingWhoseReplyKeepsTricklingEndsAtTheRequestLimit() = runBlocking {
+        val hostPort = "127.0.0.1:$port"
+        val config = CoreConfig(sttConfig = STTConfig(serverUrl = "https://$hostPort/drip", serverOnMobileData = true))
+        val store = SelfHostedServerStore(MapSettings(), NoCipher).also { it.trust(hostPort, sha256Fingerprint(certificate)) }
+        val real = AndroidSelfHostedClientFactory({ error("no binding without the rule") }, { HostPlatform })
+        val clients = ArrayList<HttpClient>()
+        // An answer wait the drip's gaps stay inside, so the request limit is what ends the reply.
+        val factory = SelfHostedClientFactory { key, pin, wifiOnly, _ -> real.create(key, pin, wifiOnly, 2.seconds).also { clients += it } }
+        val limit = 5.seconds
+        val service = SelfHostedTranscriptionService(CoreConfigFlow(MutableStateFlow(config)), store, FakeUnmeteredWifi(), factory, recordingLimit = limit)
+        val started = TimeSource.Monotonic.markNow()
+        val error = try {
+            assertFailsWith<TranscriptionException.TranscriptionServiceError> { service.transcribeRecording(ByteArray(3_200), 16_000) }
+        } finally {
+            clients.forEach { it.close() }
+        }
+        val elapsed = started.elapsedNow()
+        assertTrue(error.message.orEmpty().contains("not finished within"), "${error.message}")
+        assertTrue(elapsed >= limit && elapsed < (DRIP_MILLIS / 2).milliseconds, "ended after $elapsed")
+        assertTrue(dripped.get() > 0, "no reply byte was sent")
+    }
+
+    private suspend fun failureOf(client: HttpClient, target: String): Throwable = client.use {
+        val parts = formData { append("file", ByteArray(32), Headers.build { append(HttpHeaders.ContentType, "audio/wav") }) }
+        assertFailsWith<Exception> { it.submitFormWithBinaryData(target, parts) }
+    }
+
+    @Test
+    fun theRealClientsFailuresAreClassedAsTheNotebookReadsThem() = runBlocking {
+        val closed = java.net.ServerSocket(0).use { it.localPort }
+        assertEquals(TransportFailure.NOT_CONNECTED, transportFailure(failureOf(client(pin = null), "https://127.0.0.1:$closed/inference")))
+        val pin = sha256Fingerprint(certificate)
+        assertEquals(TransportFailure.LOST, transportFailure(failureOf(client(pin), "https://127.0.0.1:$port/drop")))
+        assertEquals(TransportFailure.CERTIFICATE, transportFailure(failureOf(client(pin = null), url)))
+        val chainOnly = object : PlatformServerTrust {
+            override val acceptedIssuers: Array<X509Certificate> = emptyArray()
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String, host: String) = Unit
+            override fun verifyHostname(host: String, session: SSLSession): Boolean = false
+        }
+        assertEquals(TransportFailure.CERTIFICATE, transportFailure(failureOf(client(pin = null, platform = chainOnly), url)), "a certificate for another host")
     }
 }

@@ -10,5 +10,22 @@
                 <action android:name="io.rebble.pebblekit2.RECEIVE_DATA_FROM_WATCH" />
             </intent-filter>
         </service>
+
+        <!-- A DocumentsProvider and its grant helper for the backup publisher's contract test.
+             Both run in the test package's own process; the DocumentsProvider is gated by
+             MANAGE_DOCUMENTS as the framework requires and is reachable only through the grants
+             the helper issues, which go only to the app under test. No DOCUMENTS_PROVIDER
+             intent filter, so no picker lists it. -->
+        <provider
+            android:name="com.anopticlabs.gravel.notebook.backup.TestDocumentsProvider"
+            android:authorities="com.anopticlabs.gravel.test.documents"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS" />
+
+        <provider
+            android:name="com.anopticlabs.gravel.notebook.backup.TestGrantProvider"
+            android:authorities="com.anopticlabs.gravel.test.grants"
+            android:exported="true" />
     </application>
 </manifest>

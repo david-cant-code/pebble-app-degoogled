@@ -1,6 +1,11 @@
 package coredevices.whisper
 
+import com.anopticlabs.gravel.whisper.WhisperLongForm
+import com.anopticlabs.gravel.whisper.WhisperEngineTimeoutException
+import java.nio.FloatBuffer
+import kotlin.random.Random
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -49,6 +54,7 @@ class WhisperEngineRepliesTest {
             WhisperEngineProtocol.TRANSACTION_INIT, WhisperEngineProtocol.TRANSACTION_TRANSCRIBE,
             WhisperEngineProtocol.TRANSACTION_CANCEL, WhisperEngineProtocol.TRANSACTION_FREE,
             WhisperEngineProtocol.TRANSACTION_BENCHMARK, WhisperEngineProtocol.TRANSACTION_RUNTIME,
+            WhisperEngineProtocol.TRANSACTION_TRANSCRIBE_LONG,
         )
         assertEquals(
             listOf(WhisperEngineProtocol.TRANSACTION_TRANSCRIBE),
@@ -72,21 +78,48 @@ class WhisperEngineRepliesTest {
         val engine = exceptionForStatus("init", WhisperEngineProtocol.STATUS_ENGINE_ERROR, "fdopen failed")
         assertEquals(RuntimeException::class, engine::class, "an engine error is the plain exception")
         assertEquals("whisper init failed: fdopen failed", engine.message)
-        assertIs<WhisperEngineUnavailableException>(exceptionForStatus("benchmark", 99, "x"), "an unknown status is not a reply to act on")
-        assertIs<WhisperEngineUnavailableException>(exceptionForStatus("benchmark", WhisperEngineProtocol.STATUS_OK, "x"), "a success status is never a failure to map")
+        assertIs<ReplyRefusedException>(exceptionForStatus("benchmark", 99, "x"), "an unknown status is not a reply to act on")
+        assertIs<ReplyRefusedException>(exceptionForStatus("benchmark", WhisperEngineProtocol.STATUS_OK, "x"), "a success status is never a failure to map")
     }
 
     @Test
-    fun aReplyPastItsBoundIsRefusedAsAnUnavailableEngine() {
+    fun aReplyPastItsBoundIsRefused() {
         checkReplyBound("bytes", 0, WhisperEngineProtocol.MAX_TEXT_BYTES)
         checkReplyBound("bytes", WhisperEngineProtocol.MAX_TEXT_BYTES, WhisperEngineProtocol.MAX_TEXT_BYTES)
-        val refused = assertFailsWith<WhisperEngineUnavailableException> {
+        val refused = assertFailsWith<ReplyRefusedException> {
             checkReplyBound("bytes", WhisperEngineProtocol.MAX_TEXT_BYTES + 1, WhisperEngineProtocol.MAX_TEXT_BYTES)
         }
         assertEquals("engine reply bytes of 8193 exceeds the 8192 bound", refused.message)
-        assertFailsWith<WhisperEngineUnavailableException> {
+        assertFailsWith<ReplyRefusedException> {
             checkReplyBound("chars", Int.MAX_VALUE, WhisperEngineProtocol.MAX_MESSAGE_BYTES)
         }
+    }
+
+    /** A refused payload or status ends the process like a bad header; a stale handle ends nothing. */
+    @Test
+    fun aRefusedReplyEndsTheProcessAndAStaleHandleDoesNot() {
+        var ended: String? = null
+        val refused = assertFailsWith<WhisperEngineUnavailableException> {
+            readPastReplyHeader("transcribe", REPLY_HEADER_NO_EXCEPTION, expire = { ended = it }) {
+                checkReplyBound("bytes", WhisperEngineProtocol.MAX_TEXT_BYTES + 1, WhisperEngineProtocol.MAX_TEXT_BYTES)
+            }
+        }
+        assertEquals("engine reply bytes of 8193 exceeds the 8192 bound; its process is ended", refused.message)
+        assertEquals(refused.message, ended)
+
+        ended = null
+        assertFailsWith<WhisperEngineUnavailableException> {
+            readPastReplyHeader<Unit>("free", REPLY_HEADER_NO_EXCEPTION, expire = { ended = it }) { throw exceptionForStatus("free", 99, "x") }
+        }
+        assertEquals("whisper free failed: unknown status 99; its process is ended", ended)
+
+        ended = null
+        assertFailsWith<WhisperEngineUnavailableException> {
+            readPastReplyHeader<Unit>("free", REPLY_HEADER_NO_EXCEPTION, expire = { ended = it }) {
+                throw exceptionForStatus("free", WhisperEngineProtocol.STATUS_STALE_HANDLE, "handle 7 was not issued by this engine process")
+            }
+        }
+        assertNull(ended, "a stale handle ended the process")
     }
 
     @Test
@@ -101,24 +134,76 @@ class WhisperEngineRepliesTest {
 
     /**
      * Every transaction has a bound, none is shorter than a stalled but
-     * healthy phone needs, the decode's is the longest since it is the
-     * slowest legitimate call, and a code the table does not know gets
-     * the shortest.
+     * healthy phone needs, a dictation-sized call holds a hung engine for
+     * at most five minutes and a long-form call for at most twenty, and a
+     * code the table does not know gets the shortest.
      */
     @Test
-    fun everyTransactionHasADeadlineAndTheDecodeHasTheLongest() {
-        val codes = listOf(
-            WhisperEngineProtocol.TRANSACTION_INIT, WhisperEngineProtocol.TRANSACTION_TRANSCRIBE,
-            WhisperEngineProtocol.TRANSACTION_CANCEL, WhisperEngineProtocol.TRANSACTION_FREE,
-            WhisperEngineProtocol.TRANSACTION_BENCHMARK, WhisperEngineProtocol.TRANSACTION_RUNTIME,
-        )
+    fun everyTransactionHasADeadlineWithinItsCeiling() {
+        val codes = (WhisperEngineProtocol.TRANSACTION_INIT..WhisperEngineProtocol.LAST_TRANSACTION).toList()
         val shortest = codes.minOf(::transactionDeadline)
         assertTrue(shortest >= 15.seconds, "the shortest bound is $shortest")
-        val longest = codes.maxOf(::transactionDeadline)
-        assertEquals(transactionDeadline(WhisperEngineProtocol.TRANSACTION_TRANSCRIBE), longest)
-        assertTrue(longest <= 5.minutes, "a hung engine is held for $longest")
+        val fixed = codes - WhisperEngineProtocol.TRANSACTION_TRANSCRIBE_LONG
+        assertEquals(transactionDeadline(WhisperEngineProtocol.TRANSACTION_TRANSCRIBE), fixed.maxOf(::transactionDeadline))
+        assertTrue(fixed.maxOf(::transactionDeadline) <= 5.minutes, "a hung engine is held for ${fixed.maxOf(::transactionDeadline)}")
+        val longForm = transactionDeadline(WhisperEngineProtocol.TRANSACTION_TRANSCRIBE_LONG)
+        assertTrue(longForm <= 20.minutes, "a hung long-form call is held for $longForm")
         assertTrue(transactionDeadline(WhisperEngineProtocol.TRANSACTION_INIT) >= 1.minutes, "a model load reads up to a gigabyte")
-        assertEquals(shortest, transactionDeadline(WhisperEngineProtocol.TRANSACTION_RUNTIME + 1), "an unknown code gets the shortest bound")
+        assertEquals(shortest, transactionDeadline(WhisperEngineProtocol.LAST_TRANSACTION + 1), "an unknown code gets the shortest bound")
+    }
+
+    @Test
+    fun aLongFormDeadlineScalesWithItsRecording() {
+        assertEquals(2.minutes, longFormDeadline(0))
+        assertEquals(5.minutes, longFormDeadline(60 * WhisperLongForm.SAMPLE_RATE))
+        assertEquals(
+            longFormDeadline(WhisperLongForm.MAX_CALL_SAMPLES),
+            transactionDeadline(WhisperEngineProtocol.TRANSACTION_TRANSCRIBE_LONG),
+            "the code's own entry is the bound of the longest recording",
+        )
+    }
+
+    /** A long-form reply the parser refuses ends the engine process that sent it, as an over-bound reply does. */
+    @Test
+    fun aMalformedLongFormReplyEndsItsEngineProcess() {
+        var ended: String? = null
+        val failure = assertFailsWith<WhisperEngineUnavailableException> {
+            readPastReplyHeader("long-form transcription", REPLY_HEADER_NO_EXCEPTION, expire = { ended = it }) {
+                readLongFormReply(byteArrayOf(7), 60_000)
+            }
+        }
+        assertEquals(failure.message, ended)
+        assertTrue(ended.orEmpty().startsWith("engine reply to long-form transcription is malformed"), "ended for: $ended")
+        ended = null
+        val stopped = readPastReplyHeader("long-form transcription", REPLY_HEADER_NO_EXCEPTION, expire = { ended = it }) {
+            readLongFormReply(byteArrayOf(1), 60_000)
+        }
+        assertFalse(stopped.complete)
+        assertNull(ended, "a readable reply ended the process")
+    }
+
+    /** Only a call its own deadline ended reads as a timeout; every other loss stays a plain unavailable engine. */
+    @Test
+    fun anEngineLostToItsDeadlineIsATimeout() {
+        val timedOut = engineLostException("did not answer", timedOut = true, cause = null)
+        assertIs<WhisperEngineTimeoutException>(timedOut)
+        assertEquals("did not answer", timedOut.message)
+        val died = engineLostException("died", timedOut = false, cause = null)
+        assertEquals(WhisperEngineUnavailableException::class, died::class)
+    }
+
+    @Test
+    fun theChunkedPcmWriterMatchesTheCommonConversion() {
+        val random = Random(7)
+        val samples = 64 * 1024 + 3
+        val pcm16 = ByteArray(2 * samples).also(random::nextBytes)
+        pcm16[0] = 0x00
+        pcm16[1] = 0x80.toByte() // -32768, the one sample that reaches -1.0
+        val out = FloatBuffer.allocate(samples)
+        writePcm16AsFloats(pcm16, out)
+        assertEquals(samples, out.position(), "every sample written")
+        assertContentEquals(pcm16ToFloats(pcm16), out.array())
+        assertEquals(-1.0f, out.get(0))
     }
 
     /**

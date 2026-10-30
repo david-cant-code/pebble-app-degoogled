@@ -31,8 +31,8 @@ import kotlin.test.assertTrue
  *   Android classpath yet still fails the scan.
  *
  * Scope is what F-Droid scans: the tracked tree of the superproject plus the
- * checked-out whisper.cpp submodule (the buildserver clones it, and
- * scanner.py walks it like any other directory), minus the paths the F-Droid
+ * checked-out engine submodules (the buildserver clones them, and
+ * scanner.py walks them like any other directory), minus the paths the F-Droid
  * build recipe removes before its scan, listed in [recipeRemovedPaths]. That
  * list is the tree's half of a contract with the out-of-tree recipe, and
  * DESIGN_NOTES.md (F-Droid section) records the whole contract.
@@ -69,15 +69,19 @@ class FdroidGuardrailsTest {
      * removed nothing as an error, `rm:` tolerates a missing path.
      */
     private val recipeRemovedPaths = listOf(
-        // whisper.cpp ships language bindings with their own gradle builds and
-        // a lockfile-less package.json, example apps with a maven URL off the
-        // allowlist, binary test-fixture models, sample audio, and its own
+        // whisper.cpp ships a language binding with its own gradle build,
+        // example apps with a maven URL off the allowlist and a lockfile-less
+        // package.json, binary test-fixture models, sample audio, and its own
         // test suite; none of it takes part in the fork's build.
         "whisper-native/src/main/cpp/whisper.cpp/bindings/",
         "whisper-native/src/main/cpp/whisper.cpp/examples/",
         "whisper-native/src/main/cpp/whisper.cpp/models/",
         "whisper-native/src/main/cpp/whisper.cpp/samples/",
         "whisper-native/src/main/cpp/whisper.cpp/tests/",
+        // llama.cpp ships an example Android app with its own gradle build,
+        // a toolchain pin and a version catalog this replica cannot parse;
+        // none of it takes part in the build.
+        "llm-native/src/main/cpp/llama.cpp/examples/",
     )
 
     /** The tracked tree as the scanner sees it after the recipe's removals. */
@@ -97,6 +101,39 @@ class FdroidGuardrailsTest {
             "recipeRemovedPaths names paths no longer in the tree; update the list and the F-Droid recipe together:\n" +
                 stale.joinToString("\n"),
         )
+    }
+
+    /**
+     * Entries of [recipeRemovedPaths] the recipe carries for size, not for
+     * a scanner hit: whisper.cpp's sample audio and test suite, in the
+     * recipe since the listing was accepted. Every other entry must remove
+     * something the scanner would flag ([everyRecipeRemovedPathRemovesAScannerHit]).
+     */
+    private val recipeRemovedWithoutScannerHit = setOf(
+        "whisper-native/src/main/cpp/whisper.cpp/samples/",
+        "whisper-native/src/main/cpp/whisper.cpp/tests/",
+    )
+
+    /**
+     * Each removed path must remove something the scanner or the checks
+     * below would otherwise flag (a gradle file, a binary by suffix or by
+     * its bytes, a lockfile-less manifest), except the listed size
+     * removals; an entry that removes nothing is a stale `rm:` line for
+     * the recipe to carry.
+     */
+    @Test
+    fun everyRecipeRemovedPathRemovesAScannerHit() {
+        val tracked = TrackedTree.files.toSet()
+        val idle = recipeRemovedPaths.filter { it !in recipeRemovedWithoutScannerHit }.filter { prefix ->
+            TrackedTree.files.filter { it.startsWith(prefix) }.none { path ->
+                FdroidScannerReplica.isGradleFile(path) ||
+                    FdroidScannerReplica.binaryKind(path) != null ||
+                    FdroidScannerReplica.lacksLockfile(path, tracked) ||
+                    (FdroidScannerReplica.isSniffed(path) && FdroidScannerReplica.isBinary(read(path).inputStream().use { it.readNBytes(1024) }))
+            }
+        }
+        assertTrue(idle.isEmpty(), "recipeRemovedPaths entries that remove no scanner hit:\n" + idle.joinToString("\n"))
+        assertTrue(recipeRemovedWithoutScannerHit.all { it in recipeRemovedPaths }, "the size removals must stay listed in recipeRemovedPaths")
     }
 
     @Test

@@ -1,6 +1,8 @@
 package io.rebble.libpebblecommon.connection.endpointmanager.audio
 
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.link.LinkPace
+import com.anopticlabs.gravel.watchapp.WatchAppCaptures
 import io.rebble.libpebblecommon.SystemAppIDs
 import io.rebble.libpebblecommon.packets.Result
 import io.rebble.libpebblecommon.packets.SessionType
@@ -8,9 +10,11 @@ import io.rebble.libpebblecommon.services.VoiceService
 import io.rebble.libpebblecommon.voice.DEADLINE_MARGIN
 import io.rebble.libpebblecommon.voice.DICTATION_DEADLINE
 import io.rebble.libpebblecommon.voice.PEBBLE_FW_RECORDING_CAP
+import io.rebble.libpebblecommon.voice.PEBBLE_FW_SESSION_SETUP_TIMEOUT
 import io.rebble.libpebblecommon.voice.PEBBLE_FW_TRANSCRIPTION_TIMEOUT
 import io.rebble.libpebblecommon.voice.TranscriptionProvider
 import io.rebble.libpebblecommon.voice.TranscriptionResult
+import io.rebble.libpebblecommon.voice.TranscriptionWord
 import io.rebble.libpebblecommon.voice.boundedForProtocol
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -21,11 +25,15 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.Uuid
 
 /**
@@ -63,6 +71,11 @@ import kotlin.uuid.Uuid
  * Frames are buffered from the moment the setup is accepted, because the
  * inbound packet flow has no replay and the provider only starts reading
  * once it is called.
+ *
+ * Gravel: a session from [watchAppCaptures]' app goes to it instead of the
+ * provider, under the same bound, deadline and supersede rules, skips the
+ * provider's readiness check, and has its setup reply held for the fast
+ * link ([awaitFastLink]).
  */
 internal class VoiceSessionCoordinator(
     private val scope: CoroutineScope,
@@ -74,6 +87,9 @@ internal class VoiceSessionCoordinator(
     private val deadline: Duration = DICTATION_DEADLINE,
     private val onSessionStarted: (VoiceService.SessionSetupRequest) -> Unit = {},
     private val onSessionEnded: (VoiceService.SessionSetupRequest, TranscriptionResult) -> Unit = { _, _ -> },
+    private val watchAppCaptures: WatchAppCaptures? = null,
+    private val linkPace: StateFlow<LinkPace> = MutableStateFlow(LinkPace.Unknown),
+    private val requestFastLink: () -> Unit = {},
 ) {
     companion object {
         private val logger = Logger.withTag("VoiceSession")
@@ -85,6 +101,14 @@ internal class VoiceSessionCoordinator(
          * cap, so no answer can reach it any more.
          */
         val RECORDING_BOUND = PEBBLE_FW_RECORDING_CAP + PEBBLE_FW_TRANSCRIPTION_TIMEOUT
+
+        /**
+         * How long a capture app's setup reply waits for the fast link, from the phone's receipt of the
+         * request. It leaves room under [PEBBLE_FW_SESSION_SETUP_TIMEOUT] for the refusal to cross the slow
+         * link (about 1.4 s: PebbleOS v4.41.1, fw/comm/ble/gap_le_connect_params.c, 45 ms interval with
+         * peripheral latency 30).
+         */
+        val FAST_LINK_WAIT = 6.seconds
     }
 
     /** Collects setup requests for the life of [scope]; one job per session, each superseding the last. */
@@ -111,9 +135,15 @@ internal class VoiceSessionCoordinator(
             sendSetupResult(request.sessionType, Result.FailInvalidMessage, appInitiated)
             return
         }
-        if (!provider.canServeSession()) {
+        val captures = watchAppCaptures?.takeIf { it.appUuid == request.appUuid }
+        if (captures == null && !provider.canServeSession()) {
             logger.w { "Voice session requested, but speech recognition is disabled or not available" }
             sendSetupResult(request.sessionType, Result.FailDisabled, appInitiated)
+            return
+        }
+        if (captures != null && !awaitFastLink()) {
+            logger.w { "Voice session ${request.sessionId} still on the slow link after $FAST_LINK_WAIT; refusing it" }
+            sendSetupResult(request.sessionType, Result.FailTimeout, appInitiated)
             return
         }
         val sessionId = request.sessionId.toUShort()
@@ -146,7 +176,11 @@ internal class VoiceSessionCoordinator(
 
                 val transcription = async {
                     try {
-                        provider.transcribe(encoderInfo, frames.receiveAsFlow(), isNotificationReply(request))
+                        if (captures != null) {
+                            captures.capture(encoderInfo, frames.receiveAsFlow()).asAnswer()
+                        } else {
+                            provider.transcribe(encoderInfo, frames.receiveAsFlow(), isNotificationReply(request))
+                        }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -190,6 +224,23 @@ internal class VoiceSessionCoordinator(
             }
             throw e
         }
+    }
+
+    /**
+     * The watch starts its microphone when the setup reply lands (PebbleOS v4.41.1,
+     * fw/services/voice/voice.c, prv_handle_subsystem_started), and audio on its slow idle link
+     * can lose the start of the recording, so the reply waits for the fast link. A link whose pace
+     * is unknown is not waited on, also when the pace is lost during the wait.
+     */
+    private suspend fun awaitFastLink(): Boolean {
+        if (linkPace.value != LinkPace.Slow) return true
+        requestFastLink()
+        return withTimeoutOrNull(FAST_LINK_WAIT) { linkPace.first { it != LinkPace.Slow } } != null
+    }
+
+    private fun String.asAnswer(): TranscriptionResult {
+        val words = split(' ').filter { it.isNotBlank() }
+        return if (words.isEmpty()) TranscriptionResult.Failed else TranscriptionResult.Success(words.map { TranscriptionWord(it, 1f) })
     }
 
     private fun describe(result: TranscriptionResult): String = when (result) {

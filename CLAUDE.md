@@ -13,15 +13,12 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   write, fix, or build iOS code.
 - **De-Google at the DI seam, not by mass deletion.** Swap Firebase/GMS-backed
   implementations for no-op or GMS-free ones at the Koin module level, keeping
-  upstream call sites intact so upstream merges stay cheap. `DESIGN_NOTES.md`
-  maps the existing seams (the `:firebase-stubs` and `:haversine-stubs`
-  modules, `:haversine-open` selected with `-Pgravel.ring=open`, the
-  unplugged `experimental` module, the no-op `LibIndex`);
-  extend those seams rather than deleting upstream code. The FCM push stack
-  is the one deliberate exception to the seam rule: push either registers a
-  device token with Google or does not exist, so `PushMessaging`,
-  `PushService`, and their call sites were deleted outright rather than
-  no-opped; do not read that deletion as precedent for other strips. The
+  upstream call sites intact so upstream commits stay cheap to cherry-pick.
+  `DESIGN_NOTES.md` maps the existing seams (the `:firebase-stubs` and
+  `:haversine-stubs` modules, the unplugged `experimental` module, the no-op
+  `LibIndex`); prefer extending those seams to deleting upstream code.
+  Upstream code Gravel did delete outright stays deleted ("Upstream syncs keep
+  Gravel's side" below). The
   google-services plugin and the Firebase SDKs are gone, so no
   `google-services.json` (dummy or real) is needed or consumed.
 - **The speech engine is whisper.cpp, built from source.** Upstream's
@@ -31,11 +28,23 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   `--recursive` (or run `git submodule update --init`) before building.
   Model weights are integrity-pinned runtime downloads, never committed;
   the re-pin procedure lives in `WhisperModelCatalog`.
+  The Notebook's text engine is llama.cpp, built from source the same way
+  (`:llm`/`:llm-native`, submodule at `llm-native/src/main/cpp/llama.cpp`);
+  its models are integrity-pinned runtime downloads too
+  (`LlmModelCatalog`).
 - **Distinct branding: the app is Gravel.** applicationId is
   `com.anopticlabs.gravel`; the Kotlin `namespace` and source packages
-  deliberately stay `coredevices.coreapp` so upstream merges stay cheap;
-  only the applicationId and user-facing branding are renamed (asset and
-  color details in `DESIGN_NOTES.md`). adb commands in upstream code
+  deliberately stay `coredevices.coreapp` so upstream commits stay cheap to
+  cherry-pick; only the applicationId and user-facing branding are renamed
+  (asset and color details in `DESIGN_NOTES.md`). Code Gravel adds goes
+  under `com.anopticlabs.gravel.*`, never `coredevices.*` (that root marks
+  code Core Devices wrote): a new module's `namespace`, source packages and
+  JNI symbol names, and the package of a new self-contained file in any
+  module. Additions to an existing file keep that file's package, nothing
+  existing is renamed (`:whisper` and `:whisper-native` predate the rule
+  and stay `coredevices.whisper`), and where the rule would force
+  visibility workarounds or moving upstream code, the code stays where it
+  works. adb commands in upstream code
   comments (the debug receivers' KDocs, for example) still name
   `coredevices.coreapp` as the installed package; substitute
   `com.anopticlabs.gravel`. Nominative references to Pebble watches and
@@ -52,7 +61,7 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   so a change must not add non-free dependencies, dependencies from
   repositories F-Droid does not allow, or prebuilt binaries in the tree.
   `FdroidGuardrailsTest` in `:androidApp` replicates F-Droid's source
-  scanner over the tracked tree, the whisper.cpp submodule included, minus
+  scanner over the tracked tree, the engine submodules included, minus
   the paths the F-Droid recipe removes (dependency lines in every gradle
   file, iOS-only and unplugged modules included; maven URLs; checked-in
   binaries; lockfile-less dependency manifests), and defines the envelope:
@@ -61,7 +70,7 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   `DESIGN_NOTES.md` (F-Droid section).
 - **Security first.** No known security flaw ships, however small; genuinely
   deferred issues are documented in `KNOWN_ISSUES.md` with rationale. Any
-  cross-app interface (e.g. the third-party mic API) must be explicitly
+  cross-app interface must be explicitly
   authorization-gated (signature/knownSigner-level permissions or equivalent),
   never openly exported. Vulnerability reports follow `SECURITY.md`.
 - **Tests come with the change.** New logic (parsers, encoders, state
@@ -74,7 +83,7 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
 - **Comments: intent and breakable constraints, up to a ceiling.** New and
   changed code gets a comment where its intent is not obvious from its name,
   and wherever it relies on a constraint someone could break (ordering,
-  threading, a platform behaviour, a difference from upstream). It does not
+  threading, a platform behavior, a difference from upstream). It does not
   get comments that restate the code, repeat a fact stated elsewhere, or
   claim more than a test or a cited source backs. Also banned: comments
   naming a rejected alternative ("X, not Y"), ticket or issue references,
@@ -97,7 +106,11 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
 - **Upstream syncs keep Gravel's side.** A merge or cherry-pick from upstream
   must not bring back what Gravel removed or replaced, including toolchain
   pins, the tag-packed versionCode (both below), Firebase/GMS dependencies,
-  and upstream's `LICENSE-COMMERCIAL`. `README.md`, `CLAUDE.md`,
+  upstream's `LICENSE-COMMERCIAL`, and code Gravel deleted outright, such as
+  the FCM push stack (`PushMessaging`, `PushService` and their call sites; push
+  either registers a device token with Google or does not exist) and the
+  Memfault update check and chunk relay (`Memfault`, `MemfaultChunkQueue`,
+  the Datalogging chunk branch). `README.md`, `CLAUDE.md`,
   `CONTRIBUTING.md`, and `SECURITY.md` are Gravel's own documents: on a
   conflict keep Gravel's version and carry over only upstream changes that
   apply to Gravel.
@@ -184,7 +197,9 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   services where requesting permissions is not possible, and the app
   already prompts for missing permissions (see `RequiredPermissions` in
   `util`). Do not add manual `requestPermission()` calls in feature code;
-  handle the denied case gracefully.
+  handle the denied case gracefully. The exception is a permission that a
+  tap in the foreground needs at that moment (the Notebook's record button
+  asks for the microphone), requested through `PermissionRequester`.
 - **Keep changes single-purpose.** One concern per branch or PR.
 - **Prefer simple architectures.** For example, keep a storage format
   unchanged and convert at the boundary rather than adding format dispatch

@@ -6,6 +6,8 @@ import androidx.paging.PagingSource
 import co.touchlab.kermit.Logger
 import com.anopticlabs.gravel.pkjs.UnreportedNetworkDenyEnforcement
 import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
+import com.anopticlabs.gravel.watchapp.InjectedWatchAppCaptures
+import com.anopticlabs.gravel.watchapp.WatchAppCaptures
 import io.rebble.libpebblecommon.ErrorTracker
 import io.rebble.libpebblecommon.Housekeeping
 import io.rebble.libpebblecommon.LibPebbleConfig
@@ -135,6 +137,9 @@ data class OtherPebbleApp(
 interface HealthApi {
     val healthSettings: Flow<HealthSettings>
     fun updateHealthSettings(healthSettings: HealthSettings)
+    suspend fun updateImperialUnits(imperialUnits: Boolean)
+    /** Stores the units only when none are stored; see unitsSeedEntry. */
+    suspend fun seedImperialUnits(imperialUnits: Boolean)
     suspend fun getHealthDebugStats(): HealthDebugStats
     fun requestHealthData(fullSync: Boolean = false)
     fun sendHealthAveragesToWatch()
@@ -241,7 +246,6 @@ interface WebServices {
     suspend fun fetchLocker(): LockerModelWrapper?
     suspend fun removeFromLocker(id: Uuid): Boolean
     suspend fun checkForFirmwareUpdate(watch: WatchInfo, force: Boolean): FirmwareUpdateCheckResult
-    fun uploadMemfaultChunk(chunk: ByteArray, watchInfo: WatchInfo)
     fun uploadAnalyticsHeartbeat(payload: ByteArray, watchInfo: WatchInfo)
 }
 
@@ -311,6 +315,20 @@ interface LockerApi {
     fun getAllLockerUuids(): Flow<List<Uuid>>
     fun getLocker(type: AppType, searchQuery: String?, limit: Int): Flow<List<LockerWrapper>>
     fun getLockerApp(id: Uuid): Flow<LockerWrapper?>
+
+    /**
+     * Gravel: SHA-256 (lowercase hex) of the PBW cached on the phone for [id]'s locker entry, the
+     * file the watch is served its binary from, or null when none is cached. Never fetches.
+     */
+    suspend fun cachedPbwSha256(id: Uuid): String?
+
+    /**
+     * Gravel: stores the PBW at [pbwPath] as a sideloaded app like [sideloadApp], without opening it on a watch,
+     * when it is the app [id].
+     * @return false when the PBW is another app's or could not be read or stored. A store that fails can leave an
+     * entry that was there before without its PBW.
+     */
+    suspend fun sideloadAppWithoutLaunch(pbwPath: Path, id: Uuid): Boolean
     suspend fun setAppOrder(id: Uuid, order: Int)
     suspend fun waitUntilAppSyncedToWatch(id: Uuid, identifier: PebbleIdentifier, timeout: Duration): Boolean
     suspend fun removeApp(id: Uuid): Boolean
@@ -529,8 +547,12 @@ class LibPebble3(
             injectedPKJSHttpInterceptors: InjectedPKJSHttpInterceptors = InjectedPKJSHttpInterceptors(emptyList()),
             // Gravel: an embedder that reports nothing gets no PebbleKit JS for network-denied apps.
             networkDenyEnforcement: NetworkDenyEnforcement = UnreportedNetworkDenyEnforcement,
+            watchAppCaptures: WatchAppCaptures? = null,
         ): LibPebble {
-            koin = initKoin(defaultConfig, webServices, appContext, tokenProvider, proxyTokenProvider, transcriptionProvider, injectedPKJSHttpInterceptors, networkDenyEnforcement)
+            koin = initKoin(
+                defaultConfig, webServices, appContext, tokenProvider, proxyTokenProvider, transcriptionProvider,
+                injectedPKJSHttpInterceptors, networkDenyEnforcement, InjectedWatchAppCaptures(watchAppCaptures),
+            )
             // Reads the persisted config (not defaultConfig), but must still precede anything that
             // touches Kable's shared central manager. Every Koin single here is lazy, and Kable is
             // only reached on the first scan/connect, which happens after create() returns.

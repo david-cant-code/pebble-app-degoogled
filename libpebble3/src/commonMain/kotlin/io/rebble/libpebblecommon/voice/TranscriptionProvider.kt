@@ -19,6 +19,12 @@ interface TranscriptionProvider {
 val PEBBLE_FW_TRANSCRIPTION_TIMEOUT = 15.seconds
 
 /**
+ * How long the firmware waits for the phone's answer to a dictation setup, from sending its request
+ * (PebbleOS v4.41.1, fw/services/voice/voice.c, TIMEOUT_SESSION_SETUP).
+ */
+val PEBBLE_FW_SESSION_SETUP_TIMEOUT = 8.seconds
+
+/**
  * The longest recording the firmware makes before it stops the audio
  * transfer on its own; the longest dictation the phone has to decode.
  */
