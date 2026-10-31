@@ -162,6 +162,25 @@ whatever rate the ring claims, is dropped as a broken ring's, together
 with its later parts in the same session. A later session that starts
 inside such a recording keeps its remaining parts as a recording.
 
+The Notebook side (`NotebookRingSink` and `RingSyncFiles` in `composeApp`)
+is not wired to a sync yet. The sink drops recordings under a second as
+taps, resamples the rest to 16 kHz with `:resampler`, and ingests them as
+WAV marked as from the ring, dated by the ring's clock unless the ring
+gives no time, one before 2025 (a clock the phone never set) or one ahead
+of the phone's, in the phone's time zone at the sync. As for a watch
+recording, Pause all does not hold a ring recording and it never counts as
+long, whatever its length, so it does not wait for the charger; the
+Notebook's settings texts and paused lines name the exception. While the
+Notebook does not take recordings, 50 ring recordings are queued or kept,
+or 60 were stored in the past hour, the sink stores nothing and the session
+stops without moving the position, so the recordings stay on the ring for
+a later sync. A stored recording and the position past it are saved in one
+step that a canceled sync still finishes; what is left open is in
+`KNOWN_ISSUES.md`. The position is kept per ring under its Bluetooth
+address in the no-backup directory, so pairing the same ring again resumes
+where its last sync ended; a saved position that does not read back stops
+the sync rather than importing the ring again.
+
 The Bluetooth link (`withRingConnection`, androidMain) uses Kable. It
 refuses a device that is not bonded before connecting, finds the three
 characteristics by UUID, subscribes the control channel and then the data
@@ -1672,9 +1691,10 @@ in the app's device suite:
   The note list and the recordings list are rebuilt (both also at each
   process start) from what remains: each recording that opens gets
   the name `recovered`, its file's time (now when that is unusable), no
-  zone, no attempts, no flag and no watch mark (so a watch recording is
-  handled as a phone recording, for example under Pause all and in the
-  limit on held watch recordings); what the rebuild processes again is in
+  zone, no attempts, no flag and no watch or ring mark (so a watch or ring
+  recording is handled as a phone recording, for example under Pause all and
+  in the limits on held watch and ring recordings); what the rebuild
+  processes again is in
   `KNOWN_ISSUES.md` (a capture published twice). For any other damaged part the card offers
   Restore and Start fresh side by side, or Start fresh alone for the parked
   completions, which backups do not hold. Start fresh sets the damaged
@@ -1744,12 +1764,13 @@ in the app's device suite:
   one capture at a time, one drain at a time (`CaptureDrain`), on the I/O
   dispatcher. Before each capture it reads the queue again and takes the
   first of `processingOrder`: short captures before long ones (long is
-  over 30 seconds or of unknown length, and never from the watch), each
-  group oldest first, under the user's pauses and settings
+  over 30 seconds or of unknown length, and never from the watch or the
+  ring), each group oldest first, under the user's pauses and settings
   (`ProcessingControls`). Pause all holds every capture but those from the
-  watch, Pause long recordings holds the long ones, and a pause stays
-  until Resume, across restarts, in a no-backup file. A pause, and a short
-  capture queued while a long one that may start again is still
+  watch or the ring, Pause long recordings holds the long ones, and a
+  pause stays until Resume, across restarts, in a no-backup file. A
+  pause, and a short capture queued while a long one that may start again
+  is still
   transcribing (Settings > Notebook, on by default), stops the matching
   capture through `CaptureDrain.interrupt`, even one picked but not yet
   started: it stays queued with its attempt given back and starts over
@@ -1851,8 +1872,8 @@ in the app's device suite:
   mode routes to the phone and the screen shows a notice
   (`CaptureSpeech.notice`) with Try again. Try again on the failed list
   resets the server tries. In both fallback modes with a phone model,
-  Flaky Network Mode sends captures made on the watch
-  (`QueuedCapture.fromWatch`) to the phone alone. A capture goes to the
+  Flaky Network Mode sends captures made on the watch or the ring
+  (`QueuedCapture.fromWearable`) to the phone alone. A capture goes to the
   server as one WAV built in
   memory (`SelfHostedTranscriptionService.transcribeRecording`), on a
   client of its own whose read timeout is 10 minutes, under dictation's
@@ -2015,9 +2036,8 @@ in the app's device suite:
   When that is short it frees the text model and compares again, and a
   second shortfall holds the drain, or, for a capture another route passed
   to the phone (Server (with Local Fallback), or Flaky Network Mode for
-  one made on the watch), makes only that capture wait; otherwise the text
-  model stays
-  loaded.
+  one made on the watch or the ring), makes only that capture wait;
+  otherwise the text model stays loaded.
   Host tests pin the order and the need; the estimates are measurements to
   repeat when the engine or the long-form limits change.
 - `CaptureCoordinator` runs the drain on a scope of its own, so no screen's

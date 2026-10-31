@@ -15,9 +15,27 @@ bonded ring's link on connecting by itself; it does when the ring asks for
 it, and the ring's behavior there is not documented. If the ring does not
 ask, recordings could cross the air unencrypted, readable by a listener
 nearby, and a device passing for the bonded ring could put recordings of
-its own into the Notebook. DESIGN_NOTES (Gravel's ring client) gives the
+its own into the Notebook, up to 50 waiting at a time. Ring recordings are
+processed even while the Notebook's processing is paused or waiting for
+the charger, so such recordings would be too. DESIGN_NOTES (Gravel's ring client) gives the
 sources. This entry leaves the file when the ring is shown to require
 encryption, or Gravel can check the link before reading from it.
+
+## A ring recording can reach the Notebook more than once
+
+**Status: open; needs the app to stop at the wrong moment, a power loss
+or a storage failure.**
+
+Ring sync (`:ring`, not yet used by the app) stores a recording in the
+Notebook and then saves its place on the ring, in one step that a canceled
+sync still finishes. If Gravel's process is killed between the two, the
+next sync reads the recording again and the Notebook makes a second note
+from it; if the phone loses power before saved places reach its storage,
+the same happens to the recordings stored since. While the place cannot be
+written at all, each sync can repeat this, up to the ring import limits.
+The recordings themselves are in the Notebook either way.
+This entry leaves the file when the Notebook recognizes a ring recording it
+already holds.
 
 ## Kable stays on 0.43.1
 

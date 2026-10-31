@@ -4,6 +4,7 @@ import co.touchlab.kermit.Logger
 import com.anopticlabs.gravel.notebook.capture.ProcessingPause
 import com.anopticlabs.gravel.notebook.capture.ProcessingRules
 import com.anopticlabs.gravel.notebook.capture.QueuedCapture
+import com.anopticlabs.gravel.notebook.capture.fromWearable
 import com.anopticlabs.gravel.notebook.capture.isLong
 import com.anopticlabs.gravel.notebook.capture.mayStart
 import java.io.File
@@ -82,7 +83,7 @@ class ProcessingControls(
     fun pauseAll() {
         synchronized(lock) {
             set(ProcessingPause.ALL)
-            interrupt(false) { !it.fromWatch }
+            interrupt(false) { !it.fromWearable }
         }
     }
 

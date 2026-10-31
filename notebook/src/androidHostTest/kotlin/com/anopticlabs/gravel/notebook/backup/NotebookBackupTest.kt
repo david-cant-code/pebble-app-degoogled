@@ -1595,6 +1595,15 @@ class NotebookBackupTest {
     }
 
     @Test
+    fun aRestoredCaptureKeepsItsRingMark() = runBlocking<Unit> {
+        source.queue.enqueue(QueuedCapture("r_1", "ring_2.wav", 1_700_000_000_250L, fromRing = true), audio)
+        restore(create())
+        val restored = target.queue.readQueue().single()
+        assertTrue(restored.fromRing)
+        assertFalse(restored.fromWatch)
+    }
+
+    @Test
     fun aRestoredFailedCaptureKeepsItsReasonAndAnUnknownCodeReadsAsUnknown() = runBlocking<Unit> {
         source.queue.enqueue(QueuedCapture("f_1", "recording_1.m4a", 1L, MAX_QUEUE_ATTEMPTS, true, failure = "no_speech"), audio)
         restore(create())

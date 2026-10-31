@@ -178,8 +178,9 @@ model. From Android 10, a VPN counts as that Wi-Fi only while Android
 shows it running over Wi-Fi; `KNOWN_ISSUES.md` covers older versions.
 The switch starts on for a server set up before Gravel had it. "Flaky
 Network Mode", offered in the two fallback modes once the phone has a
-speech model, keeps watch dictation on the phone everywhere, for
-connections that cannot return the words within the watch's 15 seconds.
+speech model, keeps watch dictation, and Notebook recordings from the
+watch and the ring, on the phone everywhere, for connections that
+cannot return the words within the watch's 15 seconds.
 
 Notebook recordings follow the same setting. Server only sends each one
 to the server. Server with local fallback sends each one to the server

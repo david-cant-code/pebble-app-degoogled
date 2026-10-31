@@ -176,6 +176,9 @@ kotlin {
             implementation(project(":llm"))
             // Gravel: the Application class installs the UDP socket filter at process start.
             implementation(project(":socketfilter"))
+            // Gravel: ring sync hands its recordings to the Notebook, resampled to the Notebook's rate.
+            implementation(project(":ring"))
+            implementation(project(":resampler"))
             implementation(compose.preview)
             implementation(compose.uiTooling)
             implementation(libs.androidx.activity.compose)

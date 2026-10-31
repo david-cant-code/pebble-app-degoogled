@@ -278,7 +278,7 @@ class CaptureDrainTest {
         enqueueTimed("a", 60_000L)
         backend.onProcess = { request, _ ->
             assertTrue(request.long)
-            assertFalse(request.fromWatch)
+            assertFalse(request.fromWearable)
             if (request.serverTries == 0) {
                 assertTrue(request.markServerTry(now + 5))
                 throw CaptureProcessingException(CaptureFailureKind.WAIT, "server unreachable")
@@ -387,11 +387,20 @@ class CaptureDrainTest {
     }
 
     @Test
-    fun aRecordingFromTheWatchReachesTheSpeechStepAsShortAndFromTheWatch() = runBlocking<Unit> {
+    fun aRecordingFromTheWatchReachesTheSpeechStepAsShortAndFromAWearable() = runBlocking<Unit> {
         assertTrue(queue.enqueue(QueuedCapture("w", "w.m4a", now, durationMillis = 60_000L, fromWatch = true), "w".encodeToByteArray()))
         drain.drain()
         val request = backend.requests.single()
-        assertTrue(request.fromWatch)
+        assertTrue(request.fromWearable)
+        assertFalse(request.long)
+    }
+
+    @Test
+    fun aRecordingFromTheRingReachesTheSpeechStepAsShortAndFromAWearable() = runBlocking<Unit> {
+        assertTrue(queue.enqueue(QueuedCapture("r", "r.wav", now, durationMillis = 60_000L, fromRing = true), "r".encodeToByteArray()))
+        drain.drain()
+        val request = backend.requests.single()
+        assertTrue(request.fromWearable)
         assertFalse(request.long)
     }
 

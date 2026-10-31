@@ -29,7 +29,7 @@ class SpeechCapture(
     val phoneFits: suspend () -> Boolean,
     val markPhoneTried: suspend () -> Unit,
     val long: Boolean = false,
-    val fromWatch: Boolean = false,
+    val fromWearable: Boolean = false,
     val serverTries: Int = 0,
     val serverTriedAtMillis: Long? = null,
     val markServerTry: suspend (atMillis: Long) -> Boolean = { false },

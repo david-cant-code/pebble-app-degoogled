@@ -59,8 +59,8 @@
     <string name="notebook_server_try_again">Try again</string>
     <string name="notebook_pause_all">Pause all</string>
     <string name="notebook_pause_long">Pause long recordings</string>
-    <string name="notebook_paused_all">Processing is paused</string>
-    <string name="notebook_paused_long">Long recordings are paused. Recordings of 30 seconds or less still go through</string>
+    <string name="notebook_paused_all">Processing is paused, except recordings from the watch or the ring</string>
+    <string name="notebook_paused_long">Long recordings are paused. Recordings of 30 seconds or less and recordings from the ring still go through</string>
     <string name="notebook_resume">Resume</string>
     <plurals name="notebook_waiting_for_power">
         <item quantity="one">%1$d long recording waiting for the phone to be plugged in</item>

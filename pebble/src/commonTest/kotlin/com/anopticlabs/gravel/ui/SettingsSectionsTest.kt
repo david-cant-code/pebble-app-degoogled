@@ -94,7 +94,8 @@ class SettingsSectionsTest {
                     mode != CactusSTTMode.RemoteFirst && mode != CactusSTTMode.LocalFirst -> null
                     !hasModel -> "watch dictation doesn't work until this phone has a speech model, and Notebook recordings wait for Wi-Fi."
                     mode == CactusSTTMode.RemoteFirst ->
-                        "watch dictation and Notebook recordings of 30 seconds or less are transcribed on this phone, and longer recordings wait for Wi-Fi."
+                        "watch dictation, Notebook recordings of 30 seconds or less and recordings from the ring are " +
+                            "transcribed on this phone, and longer recordings wait for Wi-Fi."
                     else -> "watch dictation is transcribed on this phone, and Notebook recordings the phone can't transcribe wait for Wi-Fi."
                 }
                 if (expected == null) assertEquals(null, note, "$mode") else assertTrue(note!!.endsWith(expected), "$mode $hasModel: $note")

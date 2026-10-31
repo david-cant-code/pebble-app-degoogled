@@ -21,6 +21,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
@@ -107,6 +108,32 @@ class CaptureIngestTest {
         assertEquals("watch_$now.wav", queued.originalFileName)
         assertTrue(queued.fromWatch)
         assertTrue(entriesQueued.single().fromWatch)
+    }
+
+    @Test
+    fun aRingRecordingIsQueuedAsOneAndStaysOneWhenItWasKeptFirst() = runBlocking<Unit> {
+        val wav = RecordingBuffer().apply { append(ShortArray(32_000), 32_000) }.toWav()
+        val recorded = now - 20_000
+        crypto.failSealWhenAadContains = "queue/c-1"
+
+        assertEquals(IngestResult.KEPT, ingest.ingest(wav, "wav", capturedAtMillis = recorded, fromRing = true))
+        assertEquals(listOf("c-1~ring_$recorded.wav"), pendingDir.list().orEmpty().toList())
+        assertEquals(1, queue.retainedRingCount())
+        assertEquals(0, queue.retainedWatchCount())
+
+        crypto.failSealWhenAadContains = null
+        assertEquals(listOf("c-1"), queue.salvagePending().queued)
+        val salvaged = queue.readQueue(strict = true).single()
+        assertTrue(salvaged.fromRing, "a kept ring recording is queued as one")
+        assertFalse(salvaged.fromWatch)
+        assertEquals(recorded, salvaged.queuedAtMillis)
+
+        queue.remove("c-1")
+        assertEquals(IngestResult.QUEUED, ingest.ingest(wav, "wav", fromRing = true))
+        val queued = queue.readQueue(strict = true).single()
+        assertEquals("ring_$now.wav", queued.originalFileName)
+        assertTrue(queued.fromRing)
+        assertFalse(queued.fromWatch)
     }
 
     @Test

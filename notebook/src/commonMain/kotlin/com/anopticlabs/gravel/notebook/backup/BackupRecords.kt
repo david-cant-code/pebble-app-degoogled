@@ -50,6 +50,7 @@ data class BackupCapture(
     val zoneId: String? = null,
     val fromWatch: Boolean = false,
     val failure: String? = null,
+    val fromRing: Boolean = false,
 )
 
 @Serializable

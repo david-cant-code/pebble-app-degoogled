@@ -43,6 +43,7 @@ class ProcessingControlsTest {
     private val short = QueuedCapture("short", "short.wav", 0, durationMillis = 5_000)
     private val long = QueuedCapture("long", "long.wav", 0, durationMillis = 60_000)
     private val watch = QueuedCapture("watch", "watch.wav", 0, fromWatch = true)
+    private val ring = QueuedCapture("ring", "ring.wav", 0, durationMillis = 60_000, fromRing = true)
 
     @AfterTest
     fun cleanUp() {
@@ -74,13 +75,14 @@ class ProcessingControlsTest {
     }
 
     @Test
-    fun pausingAllStopsTheRunningCaptureUnlessItIsFromTheWatch() {
+    fun pausingAllStopsTheRunningCaptureUnlessItIsFromTheWatchOrTheRing() {
         controls().pauseAll()
         val (transcribingOnly, which) = interrupts.single()
         assertFalse(transcribingOnly)
         assertTrue(which(short))
         assertTrue(which(long))
         assertFalse(which(watch))
+        assertFalse(which(ring))
     }
 
     @Test
@@ -147,6 +149,8 @@ class ProcessingControlsTest {
         assertTrue(interrupts.isEmpty())
         paused.captureQueued(watch)
         assertEquals(1, interrupts.size)
+        paused.captureQueued(ring)
+        assertEquals(2, interrupts.size)
     }
 
     @Test

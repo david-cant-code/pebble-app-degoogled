@@ -280,8 +280,8 @@ class OnDeviceCaptureBackendTest {
         assertEquals(1, marked)
     }
 
-    private fun CaptureRequest.copyOrigin(long: Boolean, fromWatch: Boolean) = CaptureRequest(
-        audio, capturedAt, zone, folders, folderTags, settings, id, phoneTried, markPhoneTried, long, fromWatch, serverTries, serverTriedAtMillis, markServerTry,
+    private fun CaptureRequest.copyOrigin(long: Boolean, fromWearable: Boolean) = CaptureRequest(
+        audio, capturedAt, zone, folders, folderTags, settings, id, phoneTried, markPhoneTried, long, fromWearable, serverTries, serverTriedAtMillis, markServerTry,
     )
 
     @Test
@@ -290,15 +290,15 @@ class OnDeviceCaptureBackendTest {
         val speech = FakeSpeech("get milk")
         val request = CaptureRequest(
             byteArrayOf(9), capturedAt, berlin, listOf("unclassified"), emptyMap(), CaptureSettings(), "c8",
-            long = true, fromWatch = false, serverTries = 2, serverTriedAtMillis = 40L, markServerTry = { markedAt = it; true },
+            long = true, fromWearable = false, serverTries = 2, serverTriedAtMillis = 40L, markServerTry = { markedAt = it; true },
         )
         OnDeviceCaptureBackend(decoder, speech, FakeText(), plenty).process(request) {}
         val capture = assertNotNull(speech.capture)
         assertTrue(capture.long)
-        assertFalse(capture.fromWatch)
-        OnDeviceCaptureBackend(decoder, speech, FakeText(), plenty).process(request.copyOrigin(long = false, fromWatch = true)) {}
+        assertFalse(capture.fromWearable)
+        OnDeviceCaptureBackend(decoder, speech, FakeText(), plenty).process(request.copyOrigin(long = false, fromWearable = true)) {}
         assertFalse(assertNotNull(speech.capture).long)
-        assertTrue(assertNotNull(speech.capture).fromWatch)
+        assertTrue(assertNotNull(speech.capture).fromWearable)
         assertEquals(2, capture.serverTries)
         assertEquals(40L, capture.serverTriedAtMillis)
         assertTrue(capture.markServerTry(77L))
