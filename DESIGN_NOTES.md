@@ -88,6 +88,52 @@ last dependency whose native code had no public source, and the last
 tree-level F-Droid inclusion blocker (the F-Droid section below records
 what the tree guarantees).
 
+### Gravel's ring client
+
+`:ring` is Gravel's own client for the Index 01 ring, separate from the
+upstream ring code above, which stays unplugged. It is written from the
+protocol description posted on
+[issue #23](https://github.com/david-cant-code/pebble-app-degoogled/issues/23)
+(2026-09-22, with a capture of pairing and a firmware update added
+2026-10-30). That description's author states they derived it from the
+haversine library's binaries and checked it against Bluetooth captures of
+Core's app; Gravel's code was written from the description alone, without
+the library's code or decompiled output, and takes its constants, byte
+layouts and decoding algorithm, not its text.
+
+So far it holds the protocol's pure parts, in
+`com.anopticlabs.gravel.ring.protocol`: advertisement, reply and
+collection parsing, the audio decoder, and the grouping of collections
+into recordings. Nothing in the app uses it yet. The requests it builds
+are reads of the stored range, a collection and the advertisement, and a
+write of the ring's clock; it has no erase or firmware request, and
+firmware updates are not implemented.
+
+Where the description leaves a choice open, the client reads it this way:
+
+- Its sync rule resumes inside the range excluding the end, while its
+  state diagram treats a position at the end as nothing new;
+  `RingRange.resumeAt` follows the diagram.
+- A write's reply counts the bytes written (the firmware-update capture),
+  so a write is done on its reply.
+- A collection is refused whole when it does not match the description
+  where the parser checks it, including: a header other than the one seen
+  on hardware, a missing audio or part record, a repeated record the
+  parser uses, a bitstream that ends inside a code, a sample rate outside
+  1 to 192,000 Hz. 16-bit PCM is moved to the unsigned scale the
+  compressed audio decodes to.
+- An escaped audio value is read most significant bit first.
+- A recording's parts are taken as consecutive collections sharing a
+  start index; a group the next collection does not continue (parts left
+  from before the ring restarted its indexes, for example) is rejected as
+  incomplete. A recording whose earlier parts are gone is kept from where
+  it starts. Sample rates within 1% of the first
+  part's are joined at that rate, and the first part dates the recording.
+
+The decoder's tests use hand-built vectors and round trips through a test
+encoder written from the same description, not recordings from a ring, so
+a misreading shared by both would pass them.
+
 ## Firebase
 
 The Firebase SDKs are gone via the same idea at a different seam: the

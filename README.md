@@ -311,6 +311,7 @@ Kermit (logging).
 | `socketfilter` | A process-wide filter that refuses the creation of UDP sockets, built from its C source with the NDK; not installed, for example, where the platform's name lookups need UDP, before Android 10, or on a device that is not ARM (see `KNOWN_ISSUES.md`) |
 | `notebook` | The Notebook feature (voice and typed notes, reminders): its tab, note screens, reminder list, calendar (which can also show the phone's calendar) and editor, completion review, reminder alarms, its reminder and quick-completion settings, backup, restore and check of a backup file, automatic backups to a folder, with their keeping rules, warnings and recovery key checks, recovery from a damaged file or a lost key, its text model settings, a setup guide, and recordings from the Notebook watch app. Its settings, setup guide and text model screens are in `pebble`, its engine wiring in `composeApp` and `util`, and its watch app wiring in `composeApp` and `libpebble3` |
 | `llm`, `llm-native` | The Notebook's text engine: Kotlin bindings, and the NDK/CMake build of the pinned llama.cpp submodule |
+| `ring` | Gravel's client for the Pebble Index 01 ring: so far the protocol's parsing and audio decoding, not yet used by the app |
 | `resampler` | Audio resampling |
 | `blobannotations`, `blobdbgen` | KSP annotations and code generator for BlobDB records |
 | `libindex`, `index-ai`, `mcp` | Ring and Index AI libraries, compiled because the watch UI depends on them, with their runtime disabled |

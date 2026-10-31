@@ -48,6 +48,8 @@ include(":notebook")
 // NDK/CMake build and the pinned engine submodule).
 include(":llm")
 include(":llm-native")
+// Gravel module: the Pebble Index 01 ring client.
+include(":ring")
 include(":libindex")
 // :experimental (the Ring/Index feature module) is unplugged from the fork's
 // build: it carries firebase-auth/firestore/storage, the googleServices
