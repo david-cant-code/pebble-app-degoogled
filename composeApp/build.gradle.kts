@@ -176,9 +176,11 @@ kotlin {
             implementation(project(":llm"))
             // Gravel: the Application class installs the UDP socket filter at process start.
             implementation(project(":socketfilter"))
-            // Gravel: ring sync hands its recordings to the Notebook, resampled to the Notebook's rate.
+            // Gravel: ring sync hands its recordings to the Notebook, resampled to the Notebook's rate;
+            // the ring client searches for rings with Kable, as :ring's link connects with it.
             implementation(project(":ring"))
             implementation(project(":resampler"))
+            implementation(libs.kable)
             implementation(compose.preview)
             implementation(compose.uiTooling)
             implementation(libs.androidx.activity.compose)
@@ -245,7 +247,7 @@ kotlin {
             // checks for the engine process.
             implementation(project(":whisper"))
             // :experimental is unplugged from the fork's build (Firebase +
-            // Supabase); ring runtime is stubbed at the Koin seam instead.
+            // Supabase); Gravel's ring client takes LibIndex's place at the Koin seam instead.
             // :libindex stays because PebbleBackgroundManager and :pebble
             // compile against its types; :index-ai/:mcp remain only as its
             // transitive compile deps, not direct app deps.

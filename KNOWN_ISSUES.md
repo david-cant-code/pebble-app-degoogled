@@ -8,8 +8,8 @@ leaves this file when the fix lands.
 
 **Status: open; depends on the ring and on Android.**
 
-Ring sync (`:ring`, not yet used by the app) refuses a ring that is not
-bonded with the phone, but Android does not let apps read whether a link
+Ring sync refuses a ring that is not bonded with the phone, but Android
+does not let apps read whether a link
 is encrypted, and on Android 15 and earlier the phone does not encrypt a
 bonded ring's link on connecting by itself; it does when the ring asks for
 it, and the ring's behavior there is not documented. If the ring does not
@@ -26,8 +26,8 @@ encryption, or Gravel can check the link before reading from it.
 **Status: open; needs the app to stop at the wrong moment, a power loss
 or a storage failure.**
 
-Ring sync (`:ring`, not yet used by the app) stores a recording in the
-Notebook and then saves its place on the ring, in one step that a canceled
+Ring sync stores a recording in the Notebook and then saves its place on
+the ring, in one step that a canceled
 sync still finishes. If Gravel's process is killed between the two, the
 next sync reads the recording again and the Notebook makes a second note
 from it; if the phone loses power before saved places reach its storage,
@@ -47,7 +47,8 @@ either version (checked 2026-10-30). Kable 0.44.0 escalated the deprecation
 of `Bluetooth.availability` (Kable release notes, 0.44.0), which the watch
 connection's Bluetooth state reads (libpebble3 `BluetoothState.kt`), so the
 upgrade changes the watch connection and gets that change's device checks.
-The ring client in `:ring` uses the same version. This entry leaves the
+Gravel's ring client (`:ring` and its search in `composeApp`) uses the
+same version. This entry leaves the
 file when Kable is upgraded.
 
 ## GitHub firmware update path not hardware-tested on single-slot watches

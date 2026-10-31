@@ -88,8 +88,9 @@ val androidDefaultModule = module {
     // Fork: Play in-app updates removed; see NoOpAppUpdate.
     singleOf(::NoOpAppUpdate) bind AppUpdate::class
     single {
-        // Ring support is unplugged in this fork, so the watch delegate's
-        // permissions plus the Notebook's are the whole set; the upstream
+        // Upstream's ring feature is unplugged in this fork, and Gravel's ring
+        // client needs only the watch's Bluetooth permissions, so the watch
+        // delegate's permissions plus the Notebook's are the whole set; the upstream
         // version unioned in the RingDelegate permissions when
         // CoreConfig.enableIndex was on. The exact-alarm grant is required
         // only while a Notebook reminder exists.

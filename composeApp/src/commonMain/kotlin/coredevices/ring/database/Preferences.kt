@@ -10,9 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
  * collides at compile time, which is the intended tripwire.
  *
  * PebbleBackgroundManager null-checks `ringPaired` to decide whether the
- * foreground service must stay alive for a ring; with no ring support it is
- * permanently null, so the service lifecycle is driven by watches alone.
+ * foreground service must stay alive for a ring; Gravel passes the address
+ * of the ring paired with its ring client.
  */
-class Preferences {
-    val ringPaired: StateFlow<String?> = MutableStateFlow(null)
-}
+class Preferences(val ringPaired: StateFlow<String?> = MutableStateFlow(null))

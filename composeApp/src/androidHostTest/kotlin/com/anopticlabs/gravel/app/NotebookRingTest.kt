@@ -142,6 +142,53 @@ class NotebookRingSinkTest {
         repeat(MAX_RING_RECORDINGS_PER_HOUR - 1) { assertTrue(store(seconds(16_000, 1.0))) }
         assertFalse(store(seconds(16_000, 1.0)), "the kept one counts")
     }
+
+    @Test
+    fun eachRecordingLeftOnTheRingSaysWhyAndATakenOneClearsIt() = runTest {
+        on = false
+        store(seconds(16_000, 2.0))
+        assertEquals(RingWait.NOTEBOOK_OFF, sink.lastWait)
+        on = true
+        queued = MAX_RING_RECORDINGS_QUEUED
+        store(seconds(16_000, 2.0))
+        assertEquals(RingWait.TOO_MANY_WAITING, sink.lastWait)
+        queued = 0
+        result = IngestResult.LOST
+        store(seconds(16_000, 2.0))
+        assertEquals(RingWait.NOT_KEPT, sink.lastWait)
+        result = IngestResult.QUEUED
+        store(seconds(16_000, 2.0))
+        assertNull(sink.lastWait)
+        repeat(MAX_RING_RECORDINGS_PER_HOUR - 1) { store(seconds(16_000, 1.0)) }
+        store(seconds(16_000, 1.0))
+        assertEquals(RingWait.HOURLY_LIMIT, sink.lastWait)
+    }
+
+    @Test
+    fun theWaitReasonBeforeASyncMatchesWhatStoringWouldSay() = runTest {
+        assertNull(sink.waitReason())
+        on = false
+        assertEquals(RingWait.NOTEBOOK_OFF, sink.waitReason())
+        on = true
+        queued = MAX_RING_RECORDINGS_QUEUED
+        assertEquals(RingWait.TOO_MANY_WAITING, sink.waitReason())
+        queued = 0
+        repeat(MAX_RING_RECORDINGS_PER_HOUR) { store(seconds(16_000, 1.0)) }
+        assertEquals(RingWait.HOURLY_LIMIT, sink.waitReason())
+    }
+
+    @Test
+    fun onlyRecordingsPassedToTheNotebookAreCountedAsImported() = runTest {
+        store(seconds(16_000, 0.5))
+        result = IngestResult.LOST
+        store(seconds(16_000, 2.0))
+        result = IngestResult.KEPT
+        store(seconds(16_000, 2.0))
+        result = IngestResult.QUEUED
+        store(seconds(16_000, 2.0))
+
+        assertEquals(2, sink.imported)
+    }
 }
 
 class RingSyncFilesTest {
@@ -187,11 +234,22 @@ class RingSyncFilesTest {
         val saved = File(dir, "ring_A1B2C3D4E5F6_next")
         for (bad in listOf("70000", "-1", "abc", " ")) {
             saved.writeText(bad)
-            assertFailsWith<IOException>(bad) { files.nextIndex() }
+            assertFailsWith<RingPositionUnreadableException>(bad) { files.nextIndex() }
         }
         saved.delete()
         saved.mkdir()
-        assertFailsWith<IOException> { files.nextIndex() }
+        assertFailsWith<RingPositionUnreadableException> { files.nextIndex() }
+    }
+
+    @Test
+    fun startingOverForgetsAnUnreadablePositionAndTheCount() = runTest {
+        val files = RingSyncFiles.of(dir, address)
+        files.setLastCount(7)
+        File(dir, "ring_A1B2C3D4E5F6_next").writeText("abc")
+        files.startOver()
+
+        assertNull(files.nextIndex())
+        assertNull(files.lastCount())
     }
 
     @Test

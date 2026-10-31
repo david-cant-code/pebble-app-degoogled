@@ -15,10 +15,12 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   implementations for no-op or GMS-free ones at the Koin module level, keeping
   upstream call sites intact so upstream commits stay cheap to cherry-pick.
   `DESIGN_NOTES.md` maps the existing seams (the `:firebase-stubs` and
-  `:haversine-stubs` modules, the unplugged `experimental` module, the no-op
-  `LibIndex`); prefer extending those seams to deleting upstream code.
-  Upstream code Gravel did delete outright stays deleted ("Upstream syncs keep
-  Gravel's side" below). The
+  `:haversine-stubs` modules, the unplugged `experimental` module, the
+  `LibIndex` that Gravel's ring client provides); prefer extending those
+  seams to deleting upstream code. Upstream code Gravel did delete outright
+  stays deleted ("Upstream syncs keep Gravel's side" below) unless a later
+  decision brings it back, as the ring client did for the Devices tab's
+  "Add Index 01" item. The
   google-services plugin and the Firebase SDKs are gone, so no
   `google-services.json` (dummy or real) is needed or consumed.
 - **The speech engine is whisper.cpp, built from source.** Upstream's

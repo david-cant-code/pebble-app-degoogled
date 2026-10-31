@@ -8,6 +8,7 @@ import androidx.core.content.ContextCompat
 import co.touchlab.kermit.Logger
 import coredevices.libindex.LibIndex
 import coredevices.libindex.device.DiscoveredIndexDevice
+import coredevices.libindex.device.IndexDevice
 import coredevices.libindex.device.IndexImage
 import coredevices.libindex.device.isFailsafe
 import coredevices.ring.database.Preferences
@@ -34,6 +35,12 @@ class PebbleBackgroundManager(
 ) {
     companion object {
         private val logger = Logger.withTag("PebbleBackgroundManager")
+
+        private const val GRAVEL_HOLDS_FOR_RING_RECOVERY = false
+
+        /** Gravel: upstream's hold for a failsafe ring a search heard, off, since Gravel has no ring recovery. */
+        internal fun holdsForRingRecovery(rings: List<IndexDevice>): Boolean =
+            GRAVEL_HOLDS_FOR_RING_RECOVERY && rings.any { it is DiscoveredIndexDevice && it.isFailsafe }
     }
 
     @Volatile
@@ -84,7 +91,7 @@ class PebbleBackgroundManager(
             libPebble.bluetoothEnabled,
             libPebble.watches,
         ) { ringPaired, rings, config, btState, watches ->
-            val ringRecover = rings.any { it is DiscoveredIndexDevice && it.isFailsafe }
+            val ringRecover = holdsForRingRecovery(rings)
             if (ringRecover) {
                 holdIndexEnabled = true
             }

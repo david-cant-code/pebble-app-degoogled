@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NetworkPing
 import androidx.compose.material.icons.filled.NotificationAdd
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
@@ -140,6 +141,7 @@ import coredevices.pebble.PebbleFeatures
 import coredevices.pebble.account.PebbleAccount
 import com.anopticlabs.gravel.firmware.FirmwarePickerRoute
 import com.anopticlabs.gravel.firmware.firmwarePickerServes
+import com.anopticlabs.gravel.ui.RingSyncStatus
 import coredevices.pebble.firmware.FirmwareUpdateUiTracker
 import coredevices.pebble.firmware.VerifiedFirmwareInstaller
 import coredevices.pebble.firmware.isCoreDevice
@@ -350,15 +352,26 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                             )
                         },
                     )
-                    // Fork: the "Add Index 01" menu item is removed. Ring
-                    // support is unplugged from this build and LibIndex is a
-                    // no-op, so a scan started from here could never find
-                    // anything. The item's former collaborator
-                    // showIndexAlreadyPairedDialog (with its "already paired"
-                    // dialog below) stays as retained-but-dead upstream code
-                    // for cheap merges; the 2026-08 upstream sync deleted its
-                    // other collaborators (indexAlreadyPaired, scanIndex)
-                    // upstream-side and inlined their logic here.
+                    FloatingActionButtonMenuItem(
+                        onClick = {
+                            addFabExpanded = false
+                            uiContext?.let { ctx ->
+                                scope.launch {
+                                    // Ask for the scan permission before trusting the paired
+                                    // state: reconciling it against the platform bond list
+                                    // needs that permission.
+                                    if (!ensureScanPermission(ctx)) return@launch
+                                    if (libIndex.rings.value.any { it is KnownIndexDevice }) {
+                                        showIndexAlreadyPairedDialog = true
+                                    } else {
+                                        libIndex.startScan()
+                                    }
+                                }
+                            }
+                        },
+                        icon = { Icon(Icons.Default.RadioButtonUnchecked, contentDescription = "Scan") },
+                        text = { Text("Add Index 01") },
+                    )
                     if (pebbleFeatures.supportsBtClassic()) {
                         FloatingActionButtonMenuItem(
                             onClick = {
@@ -613,6 +626,8 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                         Text("To unpair, first remove it from this app using the 3-dot menu, then go to Settings > Bluetooth, find the Index 01 in the list of devices, tap the info icon and choose \"Forget This Device\".")
                         Text("After unpairing, reset the ring by pressing the button in an 'SOS' sequence as shown below.")
                     } else {
+                        // Gravel: the hard-reset article linked below does not say whether a reset erases the ring's recordings.
+                        Text("Let Gravel sync it first: resetting it may erase recordings Gravel has not imported yet.")
                         Text("To unpair, find the Index 01 in your Bluetooth settings and choose to forget/unpair it.")
                         Text("After unpairing, reset the ring by pressing the button in an 'SOS' sequence as shown below.")
                     }
@@ -767,7 +782,8 @@ fun RingItem(
     val companionDevice = koinInject<CompanionDevice>()
     val uiContext = rememberUiContext()
     var showRingAlreadyPairedDialog by remember { mutableStateOf(false) }
-    var companionApproved by remember(ring.identifier) {
+    // Gravel: read again once a found ring becomes the paired one, since Pair asked for the approval in between.
+    var companionApproved by remember(ring.identifier, ring is KnownIndexDevice) {
         mutableStateOf(companionDevice.hasApprovedDevice(ring.identifier))
     }
     ListItem(
@@ -787,6 +803,8 @@ fun RingItem(
                 }
                 is RepairableIndexDevice -> "Production test mode"
                 is InterviewedIndexDevice if (ring.updating) -> "Updating..."
+                // Gravel: its ring client's paired ring says how syncing stands.
+                is RingSyncStatus -> ring.statusLine.collectAsState().value
                 else -> "Ready"
             }
             Column {
@@ -824,7 +842,8 @@ fun RingItem(
                     }
                     if (ring.pairingState is IndexPairingState.Error || ring.pairingState is IndexPairingState.NotPaired) {
                         Button(
-                            enabled = !ring.isFailsafe,
+                            // Gravel: its ring client pairs a ring only in its normal image.
+                            enabled = ring.currentImage == IndexImage.Primary,
                             onClick = {
                                 scope.launch {
                                     uiContext?.let { companionDevice.registerDevice(ring.identifier, it) }
@@ -885,6 +904,8 @@ fun RingItem(
                             .fillMaxWidth()
                             .padding(vertical = 6.dp)
                     )
+                } else if (ring is RingSyncStatus) {
+                    ImportAgainButton(ring, scope)
                 }
                 if (ring is KnownIndexDevice && !companionApproved) {
                     Text(
@@ -948,6 +969,8 @@ fun RingItem(
                         Text("4. Reset the ring by pressing the button in an 'SOS' sequence as shown below.")
                     } else {
                         Text("This device is already paired to another phone.")
+                        // Gravel: reason at the showIndexAlreadyPairedDialog dialog.
+                        Text("Resetting may erase recordings Gravel has not imported yet.")
                         Spacer(modifier = Modifier.height(8.dp))
                         Text("Please reset the ring by pressing the button in an 'SOS' sequence as shown below, then try pairing again.")
                     }
@@ -1015,6 +1038,38 @@ private fun RingMenu(ring: KnownIndexDevice) {
             },
             dismissButton = {
                 TextButton(onClick = { showRemoveDialog = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+/** Gravel: offered while syncing is stopped on a damaged saved position; confirmed before the ring is imported again. */
+@Composable
+private fun ImportAgainButton(ring: RingSyncStatus, scope: CoroutineScope) {
+    val canImportAgain by ring.canImportAgain.collectAsState()
+    var confirming by remember { mutableStateOf(false) }
+    if (!canImportAgain) return
+    Button(onClick = { confirming = true }, modifier = Modifier.padding(top = 5.dp)) {
+        Text("Import again")
+    }
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text("Import everything again?") },
+            text = {
+                Text(
+                    "Gravel imports every recording still on the ring. Recordings already in the Notebook " +
+                        "arrive a second time; you can delete the copies."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirming = false
+                    scope.launch { ring.importAgain() }
+                }) { Text("Import again") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirming = false }) { Text("Cancel") }
             },
         )
     }

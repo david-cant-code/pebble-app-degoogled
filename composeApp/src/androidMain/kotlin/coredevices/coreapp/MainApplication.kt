@@ -34,6 +34,7 @@ import coredevices.ExperimentalDevices
 import com.anopticlabs.gravel.app.notebookEnginesModule
 import com.anopticlabs.gravel.app.notebookTabModule
 import com.anopticlabs.gravel.app.notebookWatchAppModule
+import com.anopticlabs.gravel.app.ringClientModule
 import com.anopticlabs.gravel.app.textModelsModule
 import com.anopticlabs.gravel.network.AndroidUnmeteredWifi
 import com.anopticlabs.gravel.transcription.adoptUnboundServerToken
@@ -51,12 +52,17 @@ import coredevices.coreapp.util.initLogging
 import coredevices.coreapp.util.registerBluetoothPairingDebugLogger
 import coredevices.pebble.PebbleAppDelegate
 import coredevices.pebble.watchModule
+import coredevices.libindex.LibIndex
 import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigHolder
+import coredevices.util.Permission
+import coredevices.util.PermissionRequester
 import com.anopticlabs.gravel.llm.LlmEngineClient
 import coredevices.whisper.WhisperEngineClient
 import coredevices.whisper.runningInIsolatedProcess
 import io.rebble.libpebblecommon.connection.AppContext
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import org.koin.android.ext.android.get
 import org.koin.android.ext.android.inject
 import org.koin.android.ext.koin.androidContext
@@ -115,6 +121,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, Configurati
                 notebookEnginesModule,
                 notebookTabModule,
                 notebookWatchAppModule,
+                ringClientModule,
                 textModelsModule,
             )
         }
@@ -132,6 +139,10 @@ class MainApplication : Application(), SingletonImageLoader.Factory, Configurati
         adoptUnboundServerToken(coreConfigHolder, get())
         // Gravel: a force stop drops the Notebook's alarms; the sweep re-arms them from the stores.
         get<NotebookStartup>().start()
+        // Gravel: the ring client's paired ring and bond watch, ahead of the background service it keeps up.
+        get<LibIndex>().init(
+            get<PermissionRequester>().missingPermissions.map { Permission.Bluetooth !in it }.distinctUntilChanged(),
+        )
         // Fork: installs upgraded from pre-strip builds still hold the
         // Firebase SDKs' persisted refresh token and Firestore cache, and the
         // strip removed every code path that could clear them; see

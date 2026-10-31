@@ -5,8 +5,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 // with no public source that ships two native libraries per ABI into the
 // APK, which is what stood between the fork and F-Droid's inclusion policy
 // once the speech stack was rebuilt from source. The Ring runtime the
-// library serves is dead in this fork (NoOpLibIndex at the Koin seam), so
-// nothing observable changes: :libindex only needs the seven symbols below
+// library serves is dead in this fork (Gravel's own ring client at the Koin
+// seam), so nothing observable changes: :libindex only needs the seven symbols below
 // to compile.
 //
 // Wired by the dependencySubstitution rule in settings.gradle.kts, not by

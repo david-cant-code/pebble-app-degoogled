@@ -58,20 +58,23 @@ hierarchy types its error kind against an `index-ai` enum
 (`api(project(":index-ai"))` in `util/build.gradle.kts`). Their runtime
 is dead:
 
-- a no-op `LibIndex` is bound at the Koin seam;
+- the `LibIndex` bound at the Koin seam is Gravel's ring client (below),
+  never upstream's `RealLibIndex`, so `libindex`'s own scanner, pairing
+  and Room database are never constructed (`RingUnplugTest` checks that
+  Gravel's ring modules bind its client);
 - Gravel's stubs in `composeApp` replace the `experimental` types the app
   wiring touches, under the same fully-qualified names, so re-plugging
   the `experimental` module trips duplicate-class errors;
 - `CoreConfig.enableIndex` has no reachable set-point in a release build
-  (debug builds' adb-driven settings receiver can write it, and a flag
-  flipped that way reaches only the empty stubs).
+  (debug builds' adb-driven settings receiver can write it).
 
 The Ring satellite library `libindex` compiles against
 (`io.github.coredevices.haversine`, a prebuilt AAR with no public source
 that bundles two native libraries per ABI) is replaced by Gravel's module
 `:haversine-stubs`: inert same-FQN stand-ins for the eight symbols
 `libindex` references, whose satellite classes have private constructors
-and no factory, so no ring object can exist anywhere in the app
+and no factory, so none of haversine's ring objects can exist anywhere in
+the app (Gravel's ring client below does not use them)
 (`HaversineStubShapeTest` pins that shape, `HaversineStubTest` the
 static entry points). The wiring is a `dependencySubstitution` rule in
 `settings.gradle.kts`, applied to every project, rather than an edited
@@ -103,8 +106,7 @@ layouts and decoding algorithm, not its text.
 
 Its protocol package (`com.anopticlabs.gravel.ring.protocol`) holds the
 pure parts: advertisement, reply and collection parsing, the audio
-decoder, and the grouping of collections into recordings. Nothing in the
-app uses the module yet. The requests it builds
+decoder, and the grouping of collections into recordings. The requests it builds
 are reads of the stored range, a collection and the advertisement, and a
 write of the ring's clock; it has no erase or firmware request, and
 firmware updates are not implemented.
@@ -143,7 +145,8 @@ that, as long as the ring counts a collection once it is in the stored
 range, the count stored when a sync ends is one the sync has read up to;
 the next advertisement's count is compared with it to decide whether to
 connect. The count is 8 bits, so when a multiple of 256 collections
-arrives between syncs, the sync waits for the next change.
+arrives between syncs, the sync waits for the next change or the
+runner's 6-hourly sync (below).
 
 The saved position moves past a recording only once the Notebook side has
 stored it, and past groups the assembly rejects and collections the parser
@@ -163,7 +166,7 @@ with its later parts in the same session. A later session that starts
 inside such a recording keeps its remaining parts as a recording.
 
 The Notebook side (`NotebookRingSink` and `RingSyncFiles` in `composeApp`)
-is not wired to a sync yet. The sink drops recordings under a second as
+takes what a sync reads. The sink drops recordings under a second as
 taps, resamples the rest to 16 kHz with `:resampler`, and ingests them as
 WAV marked as from the ring, dated by the ring's clock unless the ring
 gives no time, one before 2025 (a clock the phone never set) or one ahead
@@ -179,7 +182,9 @@ step that a canceled sync still finishes; what is left open is in
 `KNOWN_ISSUES.md`. The position is kept per ring under its Bluetooth
 address in the no-backup directory, so pairing the same ring again resumes
 where its last sync ended; a saved position that does not read back stops
-the sync rather than importing the ring again.
+the sync rather than importing the ring again, until the user confirms
+Import again on the ring's Devices entry, which forgets the position so
+the next sync imports everything still on the ring, duplicates included.
 
 The Bluetooth link (`withRingConnection`, androidMain) uses Kable. It
 refuses a device that is not bonded before connecting, finds the three
@@ -202,6 +207,54 @@ whether the ring sends one. `BluetoothDevice.isEncrypted` is a system API
 (`@SystemApi`, same branch,
 `framework/java/android/bluetooth/BluetoothDevice.java`), so Gravel cannot
 check the link's encryption itself.
+
+In the app, `RingClientLibIndex` (`composeApp`) is bound as upstream's
+`LibIndex`, so upstream's Devices tab lists and pairs rings. Its "Add
+Index 01" item, removed while rings were unsupported, is back as upstream
+has it: a 30-second search for the ring's service, then Pair, which
+registers the ring with the companion device manager (upstream's step)
+and bonds with it, in the client's own scope so leaving the screen does
+not cancel it. Pair is offered for a ring in its normal image only, and
+nothing is erased on the ring. A bond attempt ends on Android's final
+state, and its unbond reason is read as upstream reads it, so a ring
+bonded to another phone gets upstream's reset instructions. Only a ring
+paired with that button is synced; unlike upstream, a ring bonded in
+Android's settings is not adopted. The paired ring's address is kept in
+the no-backup directory, since a bond stays on its phone, and is dropped
+when a read of Android's bonds finds none: after Android reports a bond
+change (the entry's menu sends the user to Android's Bluetooth settings
+to remove it, as upstream's does), at start, when the Bluetooth
+permission is granted, and when Bluetooth turns on.
+The client never presents upstream's interviewed ring type, whose arrival
+turns on upstream's Index feature, and `enableIndex` stays off;
+onboarding's Index 01 and Both choices take the watch's steps to the
+Devices tab. Two upstream behaviors that serve its ring feature are off:
+`PebbleBackgroundManager` does not keep the service up for a failsafe
+ring a search heard (Gravel has no ring recovery), and the `pebble://`
+companion request, which only upstream's own notification issues, is
+refused.
+
+`RingSyncRunner` runs while the background service does, which
+`PebbleBackgroundManager` keeps up while a ring is paired and Bluetooth
+is on (upstream's rule). It searches for the paired ring's advertisements
+continuously, as upstream does, starting again 3 seconds after a search
+that heard the ring and doubling that up to 5 minutes while searches end
+without hearing it; it syncs in a separate coroutine, so a failing search
+does not cut a sync short. It connects when `shouldSyncRing` calls for
+it, on first hearing the ring after the service starts, and 6 hours after
+the last sync while the ring is heard, never to a ring in its failsafe or
+factory-test image. It asks the sink first, within 10 seconds, so it does
+not connect while the Notebook is off or a limit is reached. A connection
+failing with status 133 is tried up to 5 times in all, a lost bond or
+failed authentication asks for pairing again, a session ends after 15
+minutes (one that imported something counts as a sync and is followed by
+the next at once),
+and any other unsuccessful end holds syncing off for 30 seconds, doubling
+up to 15 minutes; a sync is followed by 30 seconds without one. These
+holds run on `SystemClock.elapsedRealtimeNanos` (`ElapsedRealtime` in
+`RingClientLibIndex.kt`). A damaged saved position, found by a sync or when the
+runner starts, stops syncing until Import again. The ring's Devices entry
+shows where syncing stands in place of upstream's "Ready".
 
 ## Firebase
 

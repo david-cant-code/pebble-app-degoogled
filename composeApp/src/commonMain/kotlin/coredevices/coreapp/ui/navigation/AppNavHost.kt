@@ -193,9 +193,10 @@ fun AppNavHost(navController: NavHostController, startDestination: Any) {
             // CommonRoutes.RingOnboardingRoute is deliberately not registered:
             // the ring onboarding screens are removed with the unplugged ring
             // feature. Both navigations to it are dead: WatchHomeScreen's (on
-            // a newly interviewed ring) cannot fire while LibIndex is the
-            // no-op, and WatchSettingsScreen's "Show Ring Onboarding" debug
-            // item is hidden. Navigating here anyway would crash the nav host.
+            // a newly interviewed ring) cannot fire because Gravel's ring
+            // client never presents an interviewed ring (RingClientLibIndexTest),
+            // and WatchSettingsScreen's "Show Ring Onboarding" debug item is
+            // hidden. Navigating here anyway would crash the nav host.
         }
     }
 }

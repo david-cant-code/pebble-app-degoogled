@@ -21,6 +21,8 @@ data class RingAdvertisement(
 ) {
     /** False for a ring running its failsafe or factory-test image. */
     val pairable: Boolean get() = fingerprint != FAILSAFE_IMAGE && fingerprint != FACTORY_TEST_IMAGE
+
+    val factoryTestImage: Boolean get() = fingerprint == FACTORY_TEST_IMAGE
 }
 
 /** The advertisement in [data], the manufacturer data without its company id, or null when it is too short. */

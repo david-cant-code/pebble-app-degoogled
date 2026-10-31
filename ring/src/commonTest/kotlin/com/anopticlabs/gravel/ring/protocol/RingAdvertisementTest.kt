@@ -30,6 +30,13 @@ class RingAdvertisementTest {
     }
 
     @Test
+    fun onlyTheFactoryTestFingerprintMarksAFactoryTestImage() {
+        assertTrue(parseRingAdvertisement(data(0xDEADBEEF, 0, 0))!!.factoryTestImage)
+        assertFalse(parseRingAdvertisement(data(0xDEADDEAD, 0, 0))!!.factoryTestImage)
+        assertFalse(parseRingAdvertisement(data(0x1234_FFFF, 0, 0))!!.factoryTestImage)
+    }
+
+    @Test
     fun shortDataIsNoAdvertisementAndLongerDataIsReadFromItsStart() {
         assertNull(parseRingAdvertisement(bytes(1, 2, 3, 4, 5)))
         assertEquals(7, parseRingAdvertisement(data(1, 7, 0) + bytes(9, 9))!!.collectionCount)

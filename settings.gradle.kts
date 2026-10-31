@@ -56,7 +56,8 @@ include(":libindex")
 // plugin, and Supabase. :libindex/:index-ai/:mcp stay included because the
 // watch UI in :pebble compiles against :libindex, whose Room schema is
 // entangled with :index-ai (which needs :mcp); their runtime is disabled at
-// the Koin seam instead (no-op LibIndex, ring stubs in :composeApp).
+// the Koin seam instead (Gravel's ring client as LibIndex, ring stubs in
+// :composeApp).
 // include(":experimental")
 include(":krisp-stubs")
 // Fork module: inert dev.gitlive.firebase.* stand-ins replacing the real

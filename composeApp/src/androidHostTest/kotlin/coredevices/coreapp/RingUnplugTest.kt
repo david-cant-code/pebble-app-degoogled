@@ -1,16 +1,20 @@
 package coredevices.coreapp
 
-import coredevices.coreapp.di.NoOpLibIndex
+import com.anopticlabs.gravel.app.RingClientLibIndex
+import com.anopticlabs.gravel.app.ringClientModule
 import coredevices.coreapp.di.ringStubsModule
 import coredevices.libindex.LibIndex
+import coredevices.libindex.device.DiscoveredIndexDevice
+import coredevices.libindex.device.IndexIdentifier
+import coredevices.libindex.device.IndexImage
+import coredevices.libindex.device.IndexPairingState
 import coredevices.util.CoreConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
-import kotlin.test.assertIs
-import kotlin.test.assertTrue
-import org.koin.dsl.koinApplication
+import org.koin.core.annotation.KoinInternalApi
+import org.koin.core.module.flatten
 
 class RingUnplugTest {
     // :experimental is unplugged from the build, but its call sites survive
@@ -52,37 +56,38 @@ class RingUnplugTest {
         assertEquals(0, ctor.parameterCount)
     }
 
-    // NoOpLibIndex is the runtime kill switch for :libindex (which stays on
-    // the compile classpath for the watch UI's sake): rings can never
-    // appear and scanning can never start, which keeps every ring UI path
-    // in WatchesScreen/WatchHomeScreen and the WatchHomeScreen auto-enable
-    // of CoreConfig.enableIndex unreachable.
+    // The ring seam: Gravel's two ring modules bind LibIndex once, to its
+    // ring client, never to upstream's RealLibIndex (libindex's own scanner
+    // and Room database). Upstream's libIndexModule added to the app's
+    // module list would not be caught here. The modules are read, not
+    // started, so nothing in them is constructed.
+    @OptIn(KoinInternalApi::class)
     @Test
-    fun noOpLibIndexNeverScansAndNeverReportsRings() {
-        val libIndex = NoOpLibIndex()
-        assertTrue(libIndex.rings.value.isEmpty())
-        libIndex.startScan()
-        assertFalse(libIndex.isScanning.value)
-        libIndex.stopScan()
-        assertTrue(libIndex.rings.value.isEmpty())
+    fun gravelsRingModulesBindItsRingClient() {
+        val bindings = flatten(listOf(ringStubsModule, ringClientModule)).flatMap { it.mappings.entries }
+            .filter { (key, _) -> key.startsWith("${LibIndex::class.qualifiedName}:") }
+        assertEquals(listOf(RingClientLibIndex::class), bindings.map { it.value.beanDefinition.primaryType })
     }
 
-    // The behavior test above pins the stub class; this pins the seam. The
-    // real RealLibIndex binding survives in the deliberately kept :libindex
-    // (libIndexModule), so a one-line rebinding there or in an upstream
-    // merge would compile clean and pass every other test while quietly
-    // reviving the BLE scanner and Room database. Matches the seam tests
-    // the sibling strips got (GmsAuthUnplugTest, AppUpdateUnplugTest).
+    // Upstream keeps its service up for a failsafe ring a search heard, for a
+    // firmware recovery Gravel does not have.
     @Test
-    fun ringSeamResolvesToTheForkNoOpLibIndex() {
-        val koin = koinApplication { modules(ringStubsModule) }.koin
-        assertIs<NoOpLibIndex>(koin.get<LibIndex>())
+    fun aFailsafeRingHeardInASearchHoldsNothingUp() {
+        val failsafe = object : DiscoveredIndexDevice {
+            override val identifier = IndexIdentifier("A1B2C3D4E5F6")
+            override val name = "Pebble Index"
+            override val rssi = -50
+            override val pairingState = IndexPairingState.NotPaired
+            override val currentImage = IndexImage.Failsafe
+            override suspend fun pair() = error("not paired")
+        }
+        assertFalse(PebbleBackgroundManager.holdsForRingRecovery(listOf(failsafe)))
     }
 
     // Kill layer 2 of the ring unplug: enableIndex gates the Index tab and
     // every Index UI surface, its in-app set-points are suppressed in the
-    // fork (debug builds' adb settings receiver can still write it, into
-    // the empty stubs), and nothing pins the upstream-owned default. An upstream merge
+    // fork (debug builds' adb settings receiver can still write it), and
+    // nothing pins the upstream-owned default. An upstream merge
     // flipping it to true would merge conflict-free and re-open the gate
     // even for existing installs (CoreConfigHolder omits defaults from
     // stored JSON), so the default itself is the invariant to hold.
