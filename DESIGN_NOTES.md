@@ -101,10 +101,10 @@ Core's app; Gravel's code was written from the description alone, without
 the library's code or decompiled output, and takes its constants, byte
 layouts and decoding algorithm, not its text.
 
-So far it holds the protocol's pure parts, in
-`com.anopticlabs.gravel.ring.protocol`: advertisement, reply and
-collection parsing, the audio decoder, and the grouping of collections
-into recordings. Nothing in the app uses it yet. The requests it builds
+Its protocol package (`com.anopticlabs.gravel.ring.protocol`) holds the
+pure parts: advertisement, reply and collection parsing, the audio
+decoder, and the grouping of collections into recordings. Nothing in the
+app uses the module yet. The requests it builds
 are reads of the stored range, a collection and the advertisement, and a
 write of the ring's clock; it has no erase or firmware request, and
 firmware updates are not implemented.
@@ -133,6 +133,56 @@ Where the description leaves a choice open, the client reads it this way:
 The decoder's tests use hand-built vectors and round trips through a test
 encoder written from the same description, not recordings from a ring, so
 a misreading shared by both would pass them.
+
+A sync (`RingSession`, in `com.anopticlabs.gravel.ring.sync`) runs over
+one connection. It sets the ring's clock when the ring asks, then in each
+round reads the advertisement, the stored range and every collection from
+the saved position to the range's end, and repeats while the advertisement
+says the ring is recording. The advertisement is read before the range so
+that, as long as the ring counts a collection once it is in the stored
+range, the count stored when a sync ends is one the sync has read up to;
+the next advertisement's count is compared with it to decide whether to
+connect. The count is 8 bits, so when a multiple of 256 collections
+arrives between syncs, the sync waits for the next change.
+
+The saved position moves past a recording only once the Notebook side has
+stored it, and past groups the assembly rejects and collections the parser
+refuses. A collection the ring refuses is passed with the recording it
+belongs to, and the session ends there. An unfinished recording keeps the
+position at its first part and is read again next time, since the ring
+keeps its collections; the session holds ring audio in memory only. The
+resume rule is the description's: a range that no longer holds the saved
+position restarts at its start, and a ring that was erased and has
+refilled past the saved position is read from that position.
+
+Core's Index 01 FAQ (help.repebble.com, "Index 01 - FAQ and Tips", updated
+2026-09-14) gives a recording at most 2 minutes, so an unfinished group
+past the Notebook's 5-minute limit, or past that limit's samples at 16 kHz
+whatever rate the ring claims, is dropped as a broken ring's, together
+with its later parts in the same session. A later session that starts
+inside such a recording keeps its remaining parts as a recording.
+
+The Bluetooth link (`withRingConnection`, androidMain) uses Kable. It
+refuses a device that is not bonded before connecting, finds the three
+characteristics by UUID, subscribes the control channel and then the data
+channel before sending anything, and watches the connection state so a
+lost link ends the session at once with the status Android reported
+(`runRingLink`). It hangs up by subscribing to the system-input channel,
+which the description gives as the ring's disconnect signal, before the
+other subscriptions end.
+
+Whether the link is encrypted is up to Android and the ring.
+`btm_ble_connection_established` (android16-release,
+packages/modules/Bluetooth, `system/stack/btm/btm_ble_sec.cc`) encrypts a
+bonded LE link on connection, behind the flag `le_enc_on_reconnect`
+(`flags/pairing.aconfig`); android15-release has no such step. A
+peripheral's security request is answered by encrypting with the bond's
+key (`smp_proc_sec_req` in `system/stack/smp/smp_act.cc` and
+`btm_ble_link_sec_check`, same branch), and the description does not say
+whether the ring sends one. `BluetoothDevice.isEncrypted` is a system API
+(`@SystemApi`, same branch,
+`framework/java/android/bluetooth/BluetoothDevice.java`), so Gravel cannot
+check the link's encryption itself.
 
 ## Firebase
 

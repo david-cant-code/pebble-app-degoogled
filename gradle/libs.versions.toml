@@ -21,6 +21,8 @@ atomicfu = "0.33.0"
 compose-multiplatform = "1.11.1"
 pebblekit = "1.1.0"
 settings = "1.3.0"
+# Upstream's pin; current stable is newer, and the upgrade changes the watch
+# connection, so it has its own branch (KNOWN_ISSUES.md, "Kable stays on 0.43.1").
 kable = "0.43.1"
 kmpio = "0.3.0"
 androidx-core = "1.19.0"

@@ -1,8 +1,8 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 // Gravel module: the client for the Pebble Index 01 ring (commonMain: the
-// protocol's byte layouts and the audio decoder). Android only, like the
-// Notebook.
+// protocol's byte layouts, the audio decoder and the sync session;
+// androidMain: the Bluetooth link). Android only, like the Notebook.
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.androidKotlinMultiplatformLibrary)
@@ -22,8 +22,16 @@ kotlin {
     }
 
     sourceSets {
+        commonMain.dependencies {
+            implementation(libs.coroutines)
+            implementation(libs.kermit)
+        }
+        androidMain.dependencies {
+            implementation(libs.kable)
+        }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+            implementation(libs.coroutines.test)
         }
     }
 }

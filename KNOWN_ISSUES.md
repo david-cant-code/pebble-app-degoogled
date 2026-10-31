@@ -4,6 +4,34 @@ Deliberately deferred issues, each with the rationale and threat-model
 context, per the project rule that nothing is deferred silently. An entry
 leaves this file when the fix lands.
 
+## Gravel cannot confirm that the ring's link is encrypted
+
+**Status: open; depends on the ring and on Android.**
+
+Ring sync (`:ring`, not yet used by the app) refuses a ring that is not
+bonded with the phone, but Android does not let apps read whether a link
+is encrypted, and on Android 15 and earlier the phone does not encrypt a
+bonded ring's link on connecting by itself; it does when the ring asks for
+it, and the ring's behavior there is not documented. If the ring does not
+ask, recordings could cross the air unencrypted, readable by a listener
+nearby, and a device passing for the bonded ring could put recordings of
+its own into the Notebook. DESIGN_NOTES (Gravel's ring client) gives the
+sources. This entry leaves the file when the ring is shown to require
+encryption, or Gravel can check the link before reading from it.
+
+## Kable stays on 0.43.1
+
+**Status: deferred; the upgrade goes on its own branch.**
+
+Gravel pins the Bluetooth library Kable at 0.43.1, the version upstream
+uses; the current stable release is 0.45.0. OSV lists no advisory for
+either version (checked 2026-10-30). Kable 0.44.0 escalated the deprecation
+of `Bluetooth.availability` (Kable release notes, 0.44.0), which the watch
+connection's Bluetooth state reads (libpebble3 `BluetoothState.kt`), so the
+upgrade changes the watch connection and gets that change's device checks.
+The ring client in `:ring` uses the same version. This entry leaves the
+file when Kable is upgraded.
+
 ## GitHub firmware update path not hardware-tested on single-slot watches
 
 **Status: deferred until single-slot Core hardware is available.**
