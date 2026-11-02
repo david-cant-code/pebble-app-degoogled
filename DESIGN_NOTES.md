@@ -2310,6 +2310,14 @@ WebView routes (`RoadmapChangelogRoute`, `PebbleOsChangelogRoute`,
 `TroubleshootingRoute`) stay registered in `AppNavHost` but are
 unreachable, keeping the upstream cherry-pick surface small.
 
+Upstream's manifest also claims `https://cloud.repebble.com/githubAuth`,
+the return link of its GitHub sign-in, as an auto-verified App Link,
+which has the phone check that host when the app is installed or
+updated (sources in `AppLinkVerificationTest`). GitHub sign-in is off
+in Gravel, so the intent filter is gone, and that test fails if an
+auto-verified claim comes back in a tracked manifest.
+`PebbleDeepLinkHandler.handleGithubAuth` stays as upstream has it.
+
 ## App store search
 
 Both app store feeds (Core Devices and Rebble) keep their search index on
