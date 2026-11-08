@@ -181,7 +181,8 @@ def main():
         typed.update(city["name"])
         for alternate in alternates:
             typed.update(alternate)
-        # Population in thousands, rounded: it only orders search results.
+        # Population in thousands, rounded: it orders search results and picks the Current
+        # Location town.
         row = [city["name"], coordinate(city["lat"]), coordinate(city["lon"]), city["cc"], city["admin1"],
                str(round(city["population"] / 1000))]
         if alternates:

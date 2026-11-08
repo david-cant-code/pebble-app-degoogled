@@ -263,7 +263,7 @@ private fun AddWeatherLocationDialog(
                     AddLocationChoice(
                         icon = Icons.Default.MyLocation,
                         title = "Current Location",
-                        subtitle = "Uses your device's location",
+                        subtitle = "Uses a town near your phone, not its exact position",
                     ) {
                         val location = WeatherLocationEntity(
                             key = Uuid.random(),

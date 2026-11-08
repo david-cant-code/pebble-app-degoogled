@@ -55,9 +55,15 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import co.touchlab.kermit.Logger
 import com.anopticlabs.gravel.pkjs.DeniedPkjsNotice
+import com.anopticlabs.gravel.pkjs.NetworkDenyEnforcement
 import com.anopticlabs.gravel.pkjs.deniedPkjsNotice
 import com.anopticlabs.gravel.pkjs.networkDenyEnforcement
 import com.anopticlabs.gravel.ui.KnownIssuesLink
+import com.anopticlabs.gravel.weather.WeatherShareSwitch
+import com.anopticlabs.gravel.weather.applyWeatherChoice
+import com.anopticlabs.gravel.weather.visibleSwitchColors
+import com.anopticlabs.gravel.weather.weatherConsentText
+import coredevices.util.weatherOn
 import coredevices.util.KnownIssue
 import com.russhwolf.settings.Settings
 import com.russhwolf.settings.set
@@ -67,6 +73,7 @@ import io.rebble.libpebblecommon.connection.LibPebble
 import coredevices.pebble.ui.PebbleRoutes
 import coredevices.pebble.ui.PreviewWrapper
 import coredevices.pebble.ui.WHATS_NEW_VERSION
+import coredevices.pebble.weather.WeatherFetcher
 import coredevices.ui.PebbleElevatedButton
 import coredevices.ui.SignInButtons
 import coredevices.util.CoreConfig
@@ -77,6 +84,7 @@ import coredevices.util.PermissionRequester
 import coredevices.util.name
 import coredevices.util.rememberUiContext
 import coredevices.util.requestIsFullScreen
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import org.jetbrains.compose.resources.painterResource
@@ -373,26 +381,50 @@ fun OnboardingScreen(
 
 /**
  * Fork: one-time onboarding choice for the global watchapp/watchface phone-side
- * permission defaults (internet + location). Both default to off (deny) here: the user
- * opts in rather than out. The choice is confirmed via a dialog, then written to
- * WatchConfig, then acknowledged with a note pointing at the settings screen where it
- * can be changed later.
+ * permission defaults (internet + location) and for Gravel's own weather. All default to
+ * off (deny) here: the user opts in rather than out. The choice is confirmed via a dialog,
+ * then written to WatchConfig and CoreConfig, then acknowledged with a note pointing at the
+ * settings screens where it can be changed later.
  */
 @Composable
 private fun WatchappPrivacyStage(onDone: () -> Unit) {
-    val libPebble: LibPebble = koinInject()
     val koin = getKoin()
-    val networkDenyEnforcement = remember { koin.networkDenyEnforcement() }
+    val weatherFetcher: WeatherFetcher = koinInject()
+    WatchappPrivacyChoices(
+        libPebble = koinInject(),
+        networkDenyEnforcement = remember { koin.networkDenyEnforcement() },
+        configHolder = koinInject(),
+        // As the Settings switch does: on fetches at once, off clears what weather left.
+        onWeatherChosen = { GlobalScope.launch { weatherFetcher.fetchWeather(this) } },
+        onDone = onDone,
+    )
+}
+
+/**
+ * Gravel: [WatchappPrivacyStage] with its dependencies passed in, so a device test can drive it.
+ * [onWeatherChosen] runs after Confirm has recorded the weather choice.
+ */
+@Composable
+fun WatchappPrivacyChoices(
+    libPebble: LibPebble,
+    networkDenyEnforcement: NetworkDenyEnforcement,
+    configHolder: CoreConfigHolder,
+    onWeatherChosen: () -> Unit,
+    onDone: () -> Unit,
+) {
     var allowInternet by remember { mutableStateOf(false) }
     var allowLocation by remember { mutableStateOf(false) }
+    val weatherInterval = remember { configHolder.config.value.weatherSyncInterval }
+    // Gravel: a new install starts off; a re-run of setup after an earlier Confirm shows what is stored.
+    var shareWeather by remember { mutableStateOf(configHolder.config.value.weatherOn) }
     var showConfirm by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
 
     if (saved) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(20.dp),
+            modifier = Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
         ) {
             Text(
                 text = "You're all set",
@@ -404,7 +436,20 @@ private fun WatchappPrivacyStage(onDone: () -> Unit) {
             Text(
                 text = "Watchfaces and apps will have internet ${onOff(allowInternet)} and " +
                     "location ${onOff(allowLocation)} by default. You can change this any time, " +
-                    "for all apps or one at a time, in Settings > Apps > Watch App Permissions.",
+                    "for all apps or one at a time, in Settings > Apps > Watch App Permissions.\n\n" +
+                    if (shareWeather) {
+                        "Your weather locations are shared with Core Devices for forecasts, with " +
+                            "Current Location as a nearby town. You can turn this off in Settings > Weather."
+                    } else {
+                        "Gravel's own weather is off, so it sends nothing to Core Devices. You can " +
+                            "turn it on in Settings > Weather." +
+                            if (allowInternet) {
+                                " Watchfaces and apps you allow online can still get weather through " +
+                                    "Core Devices' weather server."
+                            } else {
+                                ""
+                            }
+                    },
                 textAlign = TextAlign.Center,
             )
             Spacer(modifier = Modifier.height(20.dp))
@@ -414,13 +459,15 @@ private fun WatchappPrivacyStage(onDone: () -> Unit) {
                 primaryColor = true,
             )
         }
+        }
         return
     }
 
+    // Gravel: both screens scroll, as the weather text can make them taller than the screen.
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(20.dp),
+        modifier = Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
     ) {
         Text(
             text = "Privacy",
@@ -443,21 +490,26 @@ private fun WatchappPrivacyStage(onDone: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("Allow internet access", modifier = Modifier.weight(1f))
-            Switch(checked = allowInternet, onCheckedChange = { allowInternet = it })
+            Switch(checked = allowInternet, onCheckedChange = { allowInternet = it }, colors = visibleSwitchColors())
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("Allow location", modifier = Modifier.weight(1f))
-            Switch(checked = allowLocation, onCheckedChange = { allowLocation = it })
+            Switch(checked = allowLocation, onCheckedChange = { allowLocation = it }, colors = visibleSwitchColors())
         }
+        Spacer(modifier = Modifier.height(20.dp))
+        WeatherShareSwitch(checked = shareWeather, onCheckedChange = { shareWeather = it })
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = weatherConsentText(weatherInterval), textAlign = TextAlign.Center)
         Spacer(modifier = Modifier.height(24.dp))
         PebbleElevatedButton(
             text = "Finish setup",
             onClick = { showConfirm = true },
             primaryColor = true,
         )
+    }
     }
 
     if (showConfirm) {
@@ -477,6 +529,8 @@ private fun WatchappPrivacyStage(onDone: () -> Unit) {
                             "Internet: ${if (oneLayerNote) "Blocked (see below)" else allowedBlocked(allowInternet)}\n" +
                             "Location: ${allowedBlocked(allowLocation)}\n\n" +
                             (if (oneLayerNote) ONE_LAYER_NOTE + "\n\n" else "") +
+                            "Gravel's own weather (sends your weather locations to Core Devices): " +
+                            "${if (shareWeather) "On" else "Off"}\n\n" +
                             "You can change this any time in Settings.",
                     )
                     if (oneLayerNote) KnownIssuesLink(KnownIssue.REAL_TIME_CONNECTIONS_ON_ONE_LAYER)
@@ -493,6 +547,8 @@ private fun WatchappPrivacyStage(onDone: () -> Unit) {
                             ),
                         ),
                     )
+                    configHolder.applyWeatherChoice(shareWeather)
+                    onWeatherChosen()
                     showConfirm = false
                     saved = true
                 }) { Text("Confirm") }

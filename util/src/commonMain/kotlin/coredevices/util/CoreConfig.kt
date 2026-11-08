@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.atomicfu.locks.reentrantLock
+import kotlinx.atomicfu.locks.withLock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
 
@@ -53,7 +55,24 @@ class CoreConfigHolder(
         settings.set(SETTINGS_KEY, json.encodeToString(value))
     }
 
-    fun update(value: CoreConfig) {
+    // Gravel: writes are serialized so the weather guard below compares against the stored value.
+    private val lock = reentrantLock()
+
+    fun update(value: CoreConfig) = lock.withLock {
+        // Gravel: only agreeToWeather turns weather on or grants the agreement, so a writer holding a
+        // copy from before the user declined or withdrew cannot turn either back on.
+        val current = _config.value
+        val kept = value.copy(
+            fetchWeather = value.fetchWeather && current.fetchWeather,
+            weatherAgreed = value.weatherAgreed && current.weatherAgreed,
+        )
+        saveToStorage(kept)
+        _config.value = kept
+    }
+
+    /** Gravel: the user agreed to what weather sends; turns weather on with the agreement. */
+    fun agreeToWeather() = lock.withLock {
+        val value = _config.value.copy(fetchWeather = true, weatherAgreed = true)
         saveToStorage(value)
         _config.value = value
     }
@@ -114,7 +133,21 @@ data class CoreConfig(
     val lastSeenWhatsNewVersion: Int = 0,
     /** Set the day/night backlight switch times from the local sunrise/sunset during weather sync. */
     val backlightColorAutoSunriseSunset: Boolean = true,
+    /**
+     * Gravel: the user agreed to what weather sends to Core Devices' weather server. Weather is
+     * fetched only with this and [fetchWeather] both set ([weatherOn]); stored configs from before
+     * the field read it as false, so an update leaves weather off until the user agrees. Set to true
+     * only by [CoreConfigHolder.agreeToWeather]; [CoreConfigHolder.update] cannot turn it or
+     * [fetchWeather] on.
+     */
+    val weatherAgreed: Boolean = false,
 )
+
+/** Gravel: weather is switched on and agreed to; see [CoreConfig.weatherAgreed]. */
+val CoreConfig.weatherOn: Boolean get() = fetchWeather && weatherAgreed
+
+/** Gravel: weather off and the agreement withdrawn, as answering off and the Settings switch leave it. */
+fun CoreConfig.withWeatherOff(): CoreConfig = copy(fetchWeather = false, weatherAgreed = false)
 
 @Serializable
 data class STTConfig(

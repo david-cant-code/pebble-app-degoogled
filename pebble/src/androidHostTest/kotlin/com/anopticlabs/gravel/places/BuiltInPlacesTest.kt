@@ -1,5 +1,7 @@
 package com.anopticlabs.gravel.places
 
+import com.anopticlabs.gravel.weather.currentLocationTown
+import com.anopticlabs.gravel.weather.hasTownAt
 import dev.jordond.compass.geocoder.Geocoder
 import dev.jordond.compass.geocoder.GeocoderResult
 import java.io.File
@@ -10,6 +12,7 @@ import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +56,51 @@ class BuiltInPlacesTest {
             val best = rows.minOf { (rowLat, rowLon) -> PlaceTable.distanceKm(lat, lon, rowLat, rowLon) }
             assertEquals(best, found, 1e-9, "nearest to $lat, $lon")
         }
+    }
+
+    @Test
+    fun largestWithinMatchesABruteForceScan() = runBlocking {
+        val table = places.table()
+        val rows = listFile("places.tsv").readLines().filter { it.isNotEmpty() && !it.startsWith('#') }
+            .map { it.split('\t').let { c -> Triple(c[1].toDouble(), c[2].toDouble(), c[5].toInt()) } }
+        val random = Random(20261108)
+        repeat(200) {
+            val (rowLat, rowLon) = rows[random.nextInt(rows.size)]
+            val lat = (rowLat + random.nextDouble(-0.1, 0.1)).coerceIn(-90.0, 90.0)
+            val lon = (rowLon + random.nextDouble(-0.1, 0.1)).coerceIn(-180.0, 180.0)
+            val town = checkNotNull(table.largestWithin(lat, lon, 10.0))
+            val best = rows.withIndex()
+                .map { (index, row) -> Triple(index, row.third, PlaceTable.distanceKm(lat, lon, row.first, row.second)) }
+                .filter { it.third <= 10.0 }
+                .maxWithOrNull(compareBy<Triple<Int, Int, Double>> { it.second }.thenByDescending { it.first })
+            val expected = best?.let { rows[it.first].first to rows[it.first].second }
+                ?: checkNotNull(table.nearest(lat, lon)).let { it.latitude to it.longitude }
+            assertEquals(expected, town.latitude to town.longitude, "largest within 10 km of $lat, $lon")
+        }
+    }
+
+    @Test
+    fun currentLocationIsTheLargestPlaceWithin10KmElseTheNearest() = runBlocking {
+        val table = places.table()
+        fun at(latitude: Double, longitude: Double) = checkNotNull(table.currentLocationTown(latitude, longitude)).name
+        assertEquals("New York City", at(40.758, -73.985), "Times Square")
+        assertEquals("London", at(51.513, -0.134), "Soho")
+        assertEquals("Vienna", at(48.2123, 16.3901), "Landstraße")
+        assertEquals("Oakland", at(37.804, -122.271))
+        assertEquals("Sutton", at(51.372, -0.098), "Croydon: Sutton is bigger and 7.5 km away")
+        assertEquals("Pasadena", at(34.147, -118.144), "Los Angeles is 14 km away")
+        assertEquals("Hoisington", at(38.5, -99.0), "rural Kansas: nothing within 10 km, the nearest is 19 km away")
+    }
+
+    @Test
+    fun aPickedTownIsKnownAsATownAndAPhonePositionIsNot() = runBlocking {
+        val table = places.table()
+        listOf(40.758 to -73.985, 51.372 to -0.098, 38.5 to -99.0).forEach { (lat, lon) ->
+            val town = checkNotNull(table.currentLocationTown(lat, lon))
+            assertTrue(table.hasTownAt(town.latitude, town.longitude), town.name)
+            assertFalse(table.hasTownAt(lat + 0.0004, lon), "a phone position near $lat, $lon")
+        }
+        assertFalse(table.hasTownAt(38.5, -99.0), "a phone position on the list's 0.001-degree grid")
     }
 
     @Test

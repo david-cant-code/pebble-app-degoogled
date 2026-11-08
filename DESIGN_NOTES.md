@@ -2361,9 +2361,9 @@ Upstream finds places with compass's `geocoder-mobile` and
 `PlatformGeocoderSentinelTest`. Gravel answers the same compass calls
 from a town list in the APK: `BuiltInPlaces` in `:pebble` implements
 compass's `PlatformGeocoder` and `AutocompleteService`, and
-`watchModule` binds it where `MobileGeocoder` was. The four upstream
-call sites (`WeatherFetcher`, the Weather Locations search,
-`OpenWeather25Interceptor`, `YahooWeatherInterceptor`) keep their code
+`watchModule` binds it where `MobileGeocoder` was. Three upstream call
+sites (the Weather Locations search, `OpenWeather25Interceptor`,
+`YahooWeatherInterceptor`) keep their code
 apart from the search screen (injection, wording, a trimmed query, and
 a "No town found" line with coordinate entry), and the Yahoo
 location cache, which is capped at 64 entries because every lookup now
@@ -2400,8 +2400,9 @@ geocoder:
   the phone's language, and a place has no county
   (`subAdministrativeArea`), so the Yahoo responses' `locality1` is the
   country.
-- The Current Location row and the watchapp position lookups are named
-  after the nearest listed town, however far away it is.
+- Watchapp position lookups are named after the nearest listed town,
+  however far away it is; the Current Location row is a listed town near
+  the phone (see Weather asks first).
 - Search ignores case, accents and punctuation. The town is always the
   first comma part: its exact name or alternate name, or that of its
   leading words when every other word that is not a number names the
@@ -2441,6 +2442,74 @@ checks them against a brute-force scan of the committed list. The full
 credit (creator, license link, modification) is in Settings > About
 ("Town list") and the README; the town search and the store listing
 name GeoNames and the license.
+
+## Weather asks first
+
+Upstream has weather on by default and sends the position of each
+weather location, for Current Location the phone's own, to Core
+Devices' weather server at the refresh interval; with no current
+position it sends the last one stored. Gravel adds
+`CoreConfig.weatherAgreed`: `WeatherFetcher.fetchWeather` fetches only
+while `fetchWeather` and the agreement are both set (`weatherOn`), and
+a config stored before the field reads it as false, so weather is off
+after the update. Setup's Privacy step has a share switch, off on a
+new install and showing the stored choice on a re-run, that records the
+choice with the watchapp defaults (`applyWeatherChoice`), so a new
+install is not offered the popup; its Confirm then starts a fetch, as
+the Settings switch does.
+`WeatherOfferDialog` (`:composeApp`) asks once after the update, once
+What's New has been closed, while weather is on but not agreed to; its
+switch also starts off, so Done alone leaves weather off, and Done
+ignores taps for a second, as the popup can open under the finger that
+closed What's New. The
+Settings switch asks the same before turning weather on, and turning it
+off clears the agreement. The Locations list stays reachable with
+weather off, so the places the agreement covers can be checked first.
+
+`currentLocationAsTown` (the fourth call site, which now reads the
+town list directly) keeps the Current Location row at a listed town's
+position and name: the most populous listed place within 10 km of the
+phone, else the nearest (`currentLocationTown`; KNOWN_ISSUES has what
+this costs in accuracy). Populations are in thousands, so ties are
+common among villages; a tie goes to the first in the list's order,
+which does not depend on where the phone is among the tied places.
+With no position from the phone, a stored town is kept, as picking
+again from a town's own position can move to a bigger one, and any
+other stored position (an earlier build's) is snapped the same way, so
+it is not sent as it was.
+Without location access (`LocationAccess`: location permission and the
+phone's location switch on; bound on Android only) the row drops its
+position and town name. A fetch with weather off, which `init`, setup's
+Confirm and the Settings switch each start, clears the watch's weather
+and the row's
+position without a network call. A row with no position is
+left out of the weather sent to the watch, so the watch drops its entry,
+and the timeline pins come from the first place that has one. A fetch
+already running checks `weatherOn` again before each request and before
+writing to the watch, and every `WeatherFetcher` instance shares one
+lock, so the clearing fetch runs after it. libpebble applies each watch
+write in a coroutine of its own (`WeatherManager.updateWeatherData`), so
+a write made just before the switch and the clear after it can still
+land in either order. `CoreConfigHolder`
+serializes its writes, and `update` cannot switch weather on or set the
+agreement (only `agreeToWeather` can), so a write from an older copy of
+the config cannot turn a declined or withdrawn weather back on; it can
+still switch weather off. With weather off, the backlight's automatic
+sunrise and sunset option is hidden, and a time set by hand turns it
+off so a later fetch does not overwrite it. With weather on but no
+Current Location weather, the automatic times are not updated. Watchapp weather requests that
+Gravel answers through Core's server (`OpenWeather25Interceptor`,
+`YahooWeatherInterceptor`) are outside the agreement: they need the
+watchapp's internet permission (`PrivatePKJSInterface.onIntercepted`)
+and the intercept setting.
+`WeatherAgreementTest` runs `fetchWeather` against fakes for the
+agreement, the town sent and kept for Current Location, forgetting it
+without location access, the clear with weather off, the row left out
+and the re-check during a fetch; `WeatherScreensTest` covers which
+backlight controls show and the time set by hand, and
+`PrivatePKJSInterfaceGateTest` the watchapp permission gate. The
+sunrise and sunset schedule, the shared lock, the pins rule, the
+intercept setting and setup's binding of its fetch have no test.
 
 ## PebbleOS changelog list
 

@@ -71,6 +71,23 @@ class PlaceTable private constructor(
     }
 
     /**
+     * The most populous listed place within [radiusKm] of the position, by [Town.population] in
+     * thousands, and of equally populous ones the first in the list's order; with none that
+     * close, [nearest].
+     */
+    fun largestWithin(latitude: Double, longitude: Double, radiusKm: Double): Town? {
+        require(latitude in -90.0..90.0 && longitude in -180.0..180.0) { "not a position: $latitude, $longitude" }
+        var best = -1
+        forEachRowNear(latitude, longitude, radiusKm) { row ->
+            val within = distanceKm(latitude, longitude, latitudes[row] / SCALE, longitudes[row] / SCALE) <= radiusKm
+            val better = best < 0 || populations[row] > populations[best] ||
+                (populations[row] == populations[best] && row < best)
+            if (within && better) best = row
+        }
+        return if (best >= 0) town(best) else nearest(latitude, longitude)
+    }
+
+    /**
      * Places for a place name, ignoring case, accents and punctuation. The name is the first comma
      * part: its exact matches (name or alternate name), or else those of its leading words whose
      * region or country every other word that is not a number names, alone or in a phrase

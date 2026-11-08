@@ -21,6 +21,8 @@ De-google work is completed, all telemetry is removed. What remains is polish an
 
 - [x] Manual weather location entry
 - [x] Weather place search on the phone (built-in town list)
+- [x] Weather asks first: off until you agree, Current Location sent as a
+      nearby town
 - [x] Telemetry strip (Crashlytics, analytics, firmware-diagnostics relay)
 - [x] Google Play services / Firebase removal
 - [x] Core watch firmware updates from the public PebbleOS GitHub releases
@@ -108,6 +110,21 @@ De-google work is completed, all telemetry is removed. What remains is polish an
   more) instead of Android's geocoder, which can send the lookup online.
   A place too small for the list can still be entered by latitude and
   longitude.
+- **Weather asks first.** Gravel's own weather is off until you agree
+  to what it sends to Core Devices' weather server: the position of each
+  place in your weather list, with your language and region setting and
+  your units, at the refresh interval and at times such as when you open
+  Gravel before the first forecast arrives, tap Refresh, or change a
+  weather, units or sunrise setting. Current Location is sent as a listed
+  town near the phone (the largest within 10 km, with sizes rounded to the
+  thousand, else the nearest) rather than the phone's own position.
+  Switching weather off clears the stored Current Location position;
+  taking away location access, or switching the phone's location off,
+  stops Current Location weather and clears it at the next sync.
+  Watchapps you allow online can still get
+  weather from that server: while "Use Pebble Weather Service when apps
+  are broken" is on, Gravel answers their OpenWeather and Yahoo requests
+  through it, with the position the watchapp sends.
 - **Free on-device dictation.** Voice dictation runs on whisper.cpp,
   built from source as a pinned git submodule, with a choice of
   integrity-pinned model downloads; the proprietary speech engine

@@ -71,6 +71,23 @@ class PlaceTableTest {
     }
 
     @Test
+    fun largestWithinPrefersPopulationInsideTheRadiusThenListOrder() {
+        // From 45, 10: Small 0.8 km, Middle 3.9 km, Twin 4.7 km, Big 15.7 km, Far 79 km.
+        val table = table(
+            """
+                Big	45.0	10.2	AT	09	500
+                Twin	45.0	9.94	AT	09	100
+                Middle	45.0	10.05	AT	09	100
+                Small	45.0	10.01	AT	09	1
+                Far	45.0	11.0	AT	09	9000
+            """,
+        )
+        assertEquals("Twin", table.largestWithin(45.0, 10.0, 10.0)?.name, "the first of equals, though Middle is nearer")
+        assertEquals("Big", table.largestWithin(45.0, 10.0, 20.0)?.name)
+        assertEquals("Far", table.largestWithin(45.0, 12.5, 10.0)?.name, "none within the radius: the nearest")
+    }
+
+    @Test
     fun distanceIsGreatCircle() {
         assertEquals(343.6, PlaceTable.distanceKm(48.8566, 2.3522, 51.5074, -0.1278), 0.5)
     }
