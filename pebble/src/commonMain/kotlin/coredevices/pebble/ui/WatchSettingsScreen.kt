@@ -768,6 +768,15 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                         action = { nav.navigateTo(FirmwarePickerRoute()) },
                     )
                 },
+                // Gravel: the credit CC BY 4.0 asks for, for the built-in town list.
+                basicSettingsActionItem(
+                    title = "Town list",
+                    description = "Town names and positions adapted from GeoNames (geonames.org), under CC BY 4.0. Tap for the license.",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.About,
+                    action = { uriHandler.openUri("https://creativecommons.org/licenses/by/4.0/") },
+                    actionIcon = Icons.AutoMirrored.Default.Launch,
+                ),
                 // Fork: external browser, keeping the Intercom-backed help centre out
                 // of the app's own network traffic.
                 basicSettingsActionItem(

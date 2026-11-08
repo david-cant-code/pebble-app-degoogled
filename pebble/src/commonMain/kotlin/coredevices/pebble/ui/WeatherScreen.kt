@@ -55,7 +55,6 @@ import coredevices.pebble.weather.usefulName
 import coredevices.ui.M3Dialog
 import dev.jordond.compass.Place
 import dev.jordond.compass.autocomplete.Autocomplete
-import dev.jordond.compass.autocomplete.mobile
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -198,9 +197,11 @@ private fun AddWeatherLocationDialog(
 ) {
     var mode by remember { mutableStateOf(AddLocationMode.Choose) }
     var addressQuery by remember { mutableStateOf("") }
-    val autoComplete = remember { Autocomplete.mobile() }
+    // Gravel: searches the built-in town list on the phone.
+    val autoComplete: Autocomplete<Place> = koinInject()
     var suggestions by remember { mutableStateOf<List<Place>>(emptyList()) }
     var searchFailed by remember { mutableStateOf(false) }
+    var searchedFor by remember { mutableStateOf<String?>(null) }
     var latitudeText by remember { mutableStateOf("") }
     var longitudeText by remember { mutableStateOf("") }
     var nameText by remember { mutableStateOf("") }
@@ -208,9 +209,11 @@ private fun AddWeatherLocationDialog(
     val longitude = parseLongitude(longitudeText)
 
     LaunchedEffect(addressQuery) {
-        if (addressQuery.length >= 3) {
+        val typed = addressQuery
+        val query = typed.trim()
+        if (query.length >= 3) {
             delay(300)
-            val result = autoComplete.search(addressQuery)
+            val result = autoComplete.search(query)
             if (result.isError) {
                 logger.e { "Error searching for places: ${result.errorOrNull()}" }
                 searchFailed = true
@@ -219,9 +222,11 @@ private fun AddWeatherLocationDialog(
                 searchFailed = false
                 suggestions = result.getOrNull() ?: emptyList()
             }
+            searchedFor = typed
         } else {
             searchFailed = false
             suggestions = emptyList()
+            searchedFor = null
         }
     }
 
@@ -231,7 +236,7 @@ private fun AddWeatherLocationDialog(
             Text(
                 when (mode) {
                     AddLocationMode.Choose -> "Add Weather Location"
-                    AddLocationMode.Search -> "Search Location"
+                    AddLocationMode.Search -> "Search Towns"
                     AddLocationMode.Manual -> "Enter Coordinates"
                 }
             )
@@ -276,7 +281,7 @@ private fun AddWeatherLocationDialog(
                 AddLocationChoice(
                     icon = Icons.Default.LocationOn,
                     title = "Fixed Location",
-                    subtitle = "Search for a specific address",
+                    subtitle = "Search for a town or city",
                 ) { mode = AddLocationMode.Search }
 
                 AddLocationChoice(
@@ -291,14 +296,15 @@ private fun AddWeatherLocationDialog(
                     value = addressQuery,
                     onValueChange = { addressQuery = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Address") },
-                    placeholder = { Text("Enter city or address") },
+                    label = { Text("Town or city") },
+                    placeholder = { Text("e.g. Portland") },
                     leadingIcon = {
                         Icon(Icons.Default.Search, contentDescription = null)
                     },
                     singleLine = true,
                 )
 
+                val notice = townSearchNotice(suggestions.isNotEmpty(), searchFailed, searchedFor, addressQuery)
                 if (suggestions.isNotEmpty()) {
                     Column(
                         modifier = Modifier
@@ -339,9 +345,9 @@ private fun AddWeatherLocationDialog(
                             }
                         }
                     }
-                } else if (searchFailed) {
+                } else if (notice == TownSearchNotice.ListUnreadable) {
                     Text(
-                        "Couldn't search for locations. Check your connection and try again.",
+                        "Couldn't open the built-in town list.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(top = 12.dp),
@@ -350,14 +356,25 @@ private fun AddWeatherLocationDialog(
                         onClick = { mode = AddLocationMode.Manual },
                         modifier = Modifier.padding(top = 4.dp),
                     ) { Text("Enter coordinates instead") }
-                } else if (addressQuery.length >= 3) {
+                } else if (notice == TownSearchNotice.NoTownFound) {
                     Text(
-                        "Type to search for locations...",
+                        "No town found. Try the town's name alone, or enter its coordinates.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
                     )
+                    TextButton(
+                        onClick = { mode = AddLocationMode.Manual },
+                        modifier = Modifier.padding(top = 4.dp),
+                    ) { Text("Enter coordinates instead") }
                 }
+                // Gravel: GeoNames credit where the town names are shown.
+                Text(
+                    "Towns from GeoNames (CC BY 4.0)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
             }
 
             // Plain text keyboard on these fields: some IMEs' decimal layouts
@@ -454,3 +471,15 @@ private fun DeleteLocationConfirmDialog(
         Text("Are you sure you want to remove \"$locationName\"?")
     }
 }
+
+/** Gravel: the line under the town search field when there is nothing to list. */
+internal enum class TownSearchNotice { None, ListUnreadable, NoTownFound }
+
+/** "No town found" only once the search for exactly what is typed has finished. */
+internal fun townSearchNotice(hasResults: Boolean, searchFailed: Boolean, searchedFor: String?, typed: String): TownSearchNotice =
+    when {
+        hasResults -> TownSearchNotice.None
+        searchFailed -> TownSearchNotice.ListUnreadable
+        searchedFor == typed -> TownSearchNotice.NoTownFound
+        else -> TownSearchNotice.None
+    }

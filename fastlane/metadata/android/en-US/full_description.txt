@@ -10,7 +10,7 @@ Hardening:
 - Core watch firmware comes from the public PebbleOS releases and is verified before install
 - App store searches are sent when you tap search, not while you type, with the search provider's analytics switched off
 
-Dictation runs on the phone with whisper.cpp, built from source; the speech model is an optional, integrity-pinned download. You can also send dictation and Notebook recordings to your own transcription server over https. Weather locations can also be entered by latitude and longitude.
+Dictation runs on the phone with whisper.cpp, built from source; the speech model is an optional, integrity-pinned download. You can also send dictation and Notebook recordings to your own transcription server over https. Weather place search runs on the phone, from a town list built into the app (GeoNames, geonames.org, CC BY 4.0); a place can also be entered by latitude and longitude.
 
 The Notebook stores voice and typed notes and reminders on the phone (Android 9 and newer; voice notes also need a processor that can run both engines). The text model that writes titles, tags, and a reminder's wording runs on the phone, and so does speech recognition unless you set up a transcription server; the text model is an integrity-pinned download you start yourself. Notes are stored encrypted, and backups are encrypted files written where you choose. A reminder that goes off is shown as a notification and sent to the watch like any other.
 

@@ -119,9 +119,7 @@ kotlin {
                 api(libs.algolia)
                 implementation(libs.reorderable)
                 implementation(libs.compass.geocoder)
-                implementation(libs.compass.geocoder.mobile)
                 implementation(libs.compass.autocomplete)
-                implementation(libs.compass.autocomplete.mobile)
                 implementation(project(":libindex"))
             }
         }

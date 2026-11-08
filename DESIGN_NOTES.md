@@ -2353,6 +2353,95 @@ the phone's IP reach Algolia's servers, which keep request logs of their
 own. The app listing (the fastlane description and the F-Droid recipe's
 NonFreeNet note) names Algolia for that reason.
 
+## Built-in town list
+
+Upstream finds places with compass's `geocoder-mobile` and
+`autocomplete-mobile`, which wrap Android's geocoder (compass 3.2.0,
+`AndroidPlatformGeocoder`); what that geocoder does is in
+`PlatformGeocoderSentinelTest`. Gravel answers the same compass calls
+from a town list in the APK: `BuiltInPlaces` in `:pebble` implements
+compass's `PlatformGeocoder` and `AutocompleteService`, and
+`watchModule` binds it where `MobileGeocoder` was. The four upstream
+call sites (`WeatherFetcher`, the Weather Locations search,
+`OpenWeather25Interceptor`, `YahooWeatherInterceptor`) keep their code
+apart from the search screen (injection, wording, a trimmed query, and
+a "No town found" line with coordinate entry), and the Yahoo
+location cache, which is capped at 64 entries because every lookup now
+succeeds. The two `-mobile` artifacts are dropped, and
+`PlatformGeocoderSentinelTest` fails if a tracked source or the version
+catalog brings them, another compass artifact, or Android's geocoder
+back.
+
+The list is GeoNames' `cities1000` (its readme: places of more than
+1,000 people, or seats of administrative divisions down to the third
+order), minus historical, abandoned and destroyed places, trimmed by
+`tools/place-table/make_place_table.py` to four text files under
+`pebble/src/commonMain/composeResources/files/places/`: towns (name,
+position to three decimals, country and region codes, population in
+thousands, and for places of 100,000 or more their Latin-script
+alternate names, leaving out all-lowercase ones, ones with a digit,
+ones over 40 characters, all-capital ones of three characters or fewer
+and ones that, lowercased and without accents, equal the name or an
+alternate already kept), region names, country names, and a folding table
+for case- and accent-blind search. It is committed as text because
+GeoNames' data changes daily (its readme lists daily modification
+files) and its download directory held no dated copies of the dump
+files when checked on 2026-11-01, so a build-time download could not be
+checksum-pinned, and F-Droid's scanner rejects compressed archives in
+the tree. Each file's header names the
+download time and the source file's SHA-256; a refresh is a new
+download and a new run of the script, committed with the files it
+writes.
+
+What changes for users and watchapps, compared with the platform
+geocoder:
+
+- Names are GeoNames' primary names ("Munich", "Köln"), not localized to
+  the phone's language, and a place has no county
+  (`subAdministrativeArea`), so the Yahoo responses' `locality1` is the
+  country.
+- The Current Location row and the watchapp position lookups are named
+  after the nearest listed town, however far away it is.
+- Search ignores case, accents and punctuation. The town is always the
+  first comma part: its exact name or alternate name, or that of its
+  leading words when every other word that is not a number names the
+  place's region or country, alone or in a phrase
+  ("Portland OR", "Halifax Nova Scotia", "Portland 97201"). A region or
+  country is named by its GeoNames code, a code or name the generator
+  adds (ISO alpha-3, "UK", "UAE", common English and former country
+  names such as "Holland" and "Burma", Canadian and Australian postal
+  abbreviations), or its name or the start of it from three letters. A
+  run of single letters reads as one word, in those words and in area
+  names alike ("B.C." as "BC"). Later comma parts only rank the results
+  ("Portland, OR"), and numbers do not rank. Watchapp lookups
+  (`forward`, whose first result is used) return exact matches only, so
+  with none they return nothing. The search screen lists the other
+  places with a word starting with the same words after the exact
+  matches, and with no exact match it offers places with a word starting
+  with the first part, then the exact matches of the longest leading
+  words that have any. Each list ranks exact matches first, then the
+  places whose area the other words name most strongly, summed over
+  words and phrases: region code or name 4, country code or name 3,
+  start of the region's name 2, start of the country's name 1; a word
+  that names the country scores 3 even where the region has the same
+  name (the state of México). Among equals, an exact match on another
+  town's alternate name ranks below a town's own name unless that town
+  is 100 times bigger (GeoNames lists "Victoria" for Hong Kong and
+  "Cologne" for Köln). Five results, as upstream asked for, and a query
+  is read only to 100 characters, 4 parts and 8 words a part.
+- Short all-capital abbreviations such as "NYC" do not find the place
+  they abbreviate: no all-capital alternate of three characters or fewer
+  is kept.
+
+`PlaceTable` holds the list in parallel arrays and one search-key string,
+read on first use and kept for the life of the process. Nearest-town
+lookups search 1-degree cells inside a bounding box of a growing radius
+until the nearest hit lies within the radius; `BuiltInPlacesTest`
+checks them against a brute-force scan of the committed list. The full
+credit (creator, license link, modification) is in Settings > About
+("Town list") and the README; the town search and the store listing
+name GeoNames and the license.
+
 ## PebbleOS changelog list
 
 Core publishes PebbleOS builds as GitHub releases

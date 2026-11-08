@@ -4,6 +4,7 @@ import co.touchlab.kermit.Logger
 import com.algolia.client.api.SearchClient
 import com.anopticlabs.gravel.firmware.PebbleOsChangelogListSource
 import com.anopticlabs.gravel.pkjs.UnreportedNetworkDenyEnforcement
+import com.anopticlabs.gravel.places.BuiltInPlaces
 import com.anopticlabs.gravel.ui.AppSetupSpeech
 import com.anopticlabs.gravel.ui.NotebookSetupViewModel
 import com.anopticlabs.gravel.ui.SetupSpeech
@@ -70,8 +71,8 @@ import coredevices.pebble.weather.WeatherFetcher
 import coredevices.pebble.weather.YahooWeatherInterceptor
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
-import dev.jordond.compass.geocoder.Geocoder
-import dev.jordond.compass.geocoder.MobileGeocoder
+import dev.jordond.compass.Place
+import dev.jordond.compass.autocomplete.Autocomplete
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
@@ -155,7 +156,10 @@ val watchModule = module {
     singleOf(::RealFirestoreLocker) bind FirestoreLocker::class
     singleOf(::RealFirestoreKnownWatchesSync) bind FirestoreKnownWatchesSync::class
     singleOf(::RealAppstoreCache) bind AppstoreCache::class
-    single { MobileGeocoder() } bind Geocoder::class
+    // Gravel: place lookups come from the built-in town list, never the platform geocoder.
+    single { BuiltInPlaces() }
+    single { get<BuiltInPlaces>().geocoder() }
+    single<Autocomplete<Place>> { get<BuiltInPlaces>().autocomplete() }
     single<HealthDataApi> { get<LibPebble>() }
     single { InjectedPKJSHttpInterceptors(
         listOf(

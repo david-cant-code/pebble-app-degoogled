@@ -32,6 +32,7 @@ class YahooWeatherInterceptor(
     private val cacheMutex = Mutex()
 
     companion object {
+        internal const val MAX_CACHED_LOCATIONS = 64
         private val UUIDS_USE_STANDARD_RESPONSE = listOf(
             Uuid.parse("1f0b0701-cc8f-47ec-86e7-7181397f9a25"), // Weather land
             Uuid.parse("1f0b0701-cc8f-47ec-86e7-7181397f9a52"), // Real weather
@@ -109,6 +110,9 @@ class YahooWeatherInterceptor(
             }
         }
         woeidCache[location.woeid] = location
+        // Gravel: a lookup of any valid position now succeeds from the built-in town list, so a
+        // watchapp sending new positions would otherwise grow the cache for the life of the process.
+        if (woeidCache.size > MAX_CACHED_LOCATIONS) woeidCache.remove(woeidCache.keys.first())
         return location
     }
 
