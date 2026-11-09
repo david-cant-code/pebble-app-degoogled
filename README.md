@@ -34,7 +34,7 @@ De-google work is completed, all telemetry is removed. What remains is polish an
       [Notebook watch app](https://github.com/david-cant-code/gravel-watchapp)
       (early beta)
 - [ ] Local on-device battery analytics (secondary goal, feasibility open)
-- [ ] Recording into the Notebook from a Pebble Index 01 ring (built, untested on a ring)
+- [x] Recording into the Notebook from a Pebble Index 01 ring (early beta)
 - [x] F-Droid inclusion (listing live)
 
 ## Goals
@@ -180,7 +180,8 @@ no Ring services, no Ring endpoints).
 The Notebook is separate from those features and was written
 independently of them. Recording into the Notebook from an Index 01 ring
 goes through Gravel's own ring client, paired from the Devices tab, and
-is untested on a ring so far; bringing back Index AI is not planned.
+is in early beta, tested on a ring by one tester so far; bringing back
+Index AI is not planned.
 
 ## Using your own transcription server
 

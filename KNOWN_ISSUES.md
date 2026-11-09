@@ -23,8 +23,8 @@ encryption, or Gravel can check the link before reading from it.
 
 ## A ring recording can reach the Notebook more than once
 
-**Status: open; needs the app to stop at the wrong moment, a power loss
-or a storage failure.**
+**Status: open; needs the app to stop at the wrong moment, a power loss,
+a storage failure, or a restored backup.**
 
 Ring sync stores a recording in the Notebook and then saves its place on
 the ring, in one step that a canceled
@@ -33,6 +33,10 @@ next sync reads the recording again and the Notebook makes a second note
 from it; if the phone loses power before saved places reach its storage,
 the same happens to the recordings stored since. While the place cannot be
 written at all, each sync can repeat this, up to the ring import limits.
+A Notebook backup does not carry the ring's place. After a backup is
+restored on a new install (a new phone, a reinstall, or cleared app
+data) and the ring is paired again, its syncs import the recordings still
+on the ring, including ones the restored Notebook already holds.
 The recordings themselves are in the Notebook either way.
 This entry leaves the file when the Notebook recognizes a ring recording it
 already holds.
