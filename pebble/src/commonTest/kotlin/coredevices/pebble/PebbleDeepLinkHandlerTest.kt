@@ -6,7 +6,9 @@ import coredevices.pebble.RealPebbleDeepLinkHandler.Companion.parseTokenFrom
 import coredevices.pebble.ui.PebbleNavBarRoutes
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class PebbleDeepLinkHandlerTest {
     @Test fun handlesIosBootConfig() {
@@ -35,6 +37,12 @@ class PebbleDeepLinkHandlerTest {
     @Test fun rejectsUnencodedAddStoreFeedUrl() {
         val uri = Uri.parse("pebble://add-store-feed/TTMM/https://apps.ttmm.is/pebble/api")
         assertNull(parseAddStoreFeedFrom(uri))
+    }
+
+    @Test fun gravelRefusesTheRingCompanionRequestOnly() {
+        assertTrue(RealPebbleDeepLinkHandler.refusedByGravel(Uri.parse("pebble://register-index-companion").host))
+        assertFalse(RealPebbleDeepLinkHandler.refusedByGravel(Uri.parse("pebble://show-watches").host))
+        assertFalse(RealPebbleDeepLinkHandler.refusedByGravel(null))
     }
 
     @Test fun rejectsAddStoreFeedWithoutUrl() {

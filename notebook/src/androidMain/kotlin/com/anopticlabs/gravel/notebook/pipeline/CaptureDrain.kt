@@ -10,6 +10,7 @@ import com.anopticlabs.gravel.notebook.capture.QueuedCapture
 import com.anopticlabs.gravel.notebook.capture.applyQueueDrainResults
 import com.anopticlabs.gravel.notebook.capture.captureZone
 import com.anopticlabs.gravel.notebook.capture.flagQueuedCapture
+import com.anopticlabs.gravel.notebook.capture.fromWearable
 import com.anopticlabs.gravel.notebook.capture.isLong
 import com.anopticlabs.gravel.notebook.capture.markPhoneTried
 import com.anopticlabs.gravel.notebook.capture.markServerTry
@@ -384,7 +385,7 @@ class CaptureDrain(
                 phoneTried = entry.phoneTried,
                 markPhoneTried = { recordPhoneTried(entry.id) },
                 long = entry.isLong,
-                fromWatch = entry.fromWatch,
+                fromWearable = entry.fromWearable,
                 serverTries = entry.serverTries,
                 serverTriedAtMillis = entry.serverTriedAtMillis,
                 markServerTry = { at -> recordServerTry(entry.id, at) },

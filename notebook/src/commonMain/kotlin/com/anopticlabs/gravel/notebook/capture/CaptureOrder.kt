@@ -5,10 +5,13 @@ import com.anopticlabs.gravel.notebook.pipeline.SpeechRoute
 /** Recordings longer than this are long: they go after short ones, and a pause or the charger rule can hold them. */
 const val LONG_CAPTURE_MILLIS = 30_000L
 
-/** A recording of unknown length counts as long; a recording from the watch never does. */
-val QueuedCapture.isLong: Boolean get() = !fromWatch && (durationMillis ?: Long.MAX_VALUE) > LONG_CAPTURE_MILLIS
+/** Recorded on the watch or the ring, away from the phone: never long, and Pause all does not hold it. */
+val QueuedCapture.fromWearable: Boolean get() = fromWatch || fromRing
 
-/** What the user paused: nothing, the long recordings, or everything but recordings from the watch. */
+/** A recording of unknown length counts as long; a recording from the watch or the ring never does. */
+val QueuedCapture.isLong: Boolean get() = !fromWearable && (durationMillis ?: Long.MAX_VALUE) > LONG_CAPTURE_MILLIS
+
+/** What the user paused: nothing, the long recordings, or everything but recordings from the watch or the ring. */
 enum class ProcessingPause { NONE, LONG, ALL }
 
 /**
@@ -36,7 +39,7 @@ fun ProcessingRules.toServer(entry: QueuedCapture): Boolean = when (speech) {
 }
 
 fun ProcessingRules.mayStart(entry: QueuedCapture): Boolean = when (pause) {
-    ProcessingPause.ALL -> entry.fromWatch
+    ProcessingPause.ALL -> entry.fromWearable
     ProcessingPause.LONG -> !entry.isLong
     ProcessingPause.NONE -> !waitsForPower(entry)
 }

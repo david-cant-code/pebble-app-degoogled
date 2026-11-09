@@ -53,7 +53,7 @@ class OnDeviceCaptureBackend(
         val pcm16 = decoder.decode(request.audio)
         val capture = SpeechCapture(
             request.id, request.phoneTried, ::phoneFits, request.markPhoneTried,
-            request.long, request.fromWatch, request.serverTries, request.serverTriedAtMillis, request.markServerTry,
+            request.long, request.fromWearable, request.serverTries, request.serverTriedAtMillis, request.markServerTry,
         )
         val transcript = speech.transcribe(pcm16, capture)
         if (!hasSpeech(transcript)) throw CaptureProcessingException(CaptureFailureKind.FLAG, "no speech was heard", reason = CaptureFailureReason.NO_SPEECH)

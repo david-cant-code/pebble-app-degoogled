@@ -462,7 +462,7 @@ private fun TypedOnlyPage() {
 private fun ProcessingPage(tab: NotebookTab) {
     val settings by tab.settings.collectAsState()
     PageTitle("Long recordings")
-    Body("These two settings decide when recordings over 30 seconds are turned into text.")
+    Body("These two settings decide when recordings over 30 seconds, other than those from the ring, are turned into text.")
     SwitchRow("Long Recordings Wait for Power", NotebookSettingsText.WAIT_FOR_POWER, settings.longRecordingsWaitForPower, tab::setLongRecordingsWaitForPower)
     SwitchRow("Interrupt Long Recordings", NotebookSettingsText.INTERRUPT_LONG, settings.interruptLongRecordings, tab::setInterruptLongRecordings)
 }

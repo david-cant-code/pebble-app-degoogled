@@ -34,7 +34,7 @@ De-google work is completed, all telemetry is removed. What remains is polish an
       [Notebook watch app](https://github.com/david-cant-code/gravel-watchapp)
       (early beta)
 - [ ] Local on-device battery analytics (secondary goal, feasibility open)
-- [ ] Recording into the Notebook from a Pebble Index 01 ring (planned)
+- [x] Recording into the Notebook from a Pebble Index 01 ring (early beta)
 - [x] F-Droid inclusion (listing live)
 
 ## Goals
@@ -176,10 +176,12 @@ The Ring feature module (`experimental`) depends on the Firebase SDKs and is
 unplugged from the build; the `libindex`/`index-ai`/`mcp` libraries stay
 compiled because the watch UI shares code with them, but their runtime is
 disabled at the dependency-injection seam (verified against the built APK:
-no Ring services, no Ring endpoints, rings cannot be scanned or paired).
+no Ring services, no Ring endpoints).
 The Notebook is separate from those features and was written
 independently of them. Recording into the Notebook from an Index 01 ring
-is planned; bringing back Index AI is not.
+goes through Gravel's own ring client, paired from the Devices tab, and
+is in early beta, tested on a ring by one tester so far; bringing back
+Index AI is not planned.
 
 ## Using your own transcription server
 
@@ -201,8 +203,9 @@ model. From Android 10, a VPN counts as that Wi-Fi only while Android
 shows it running over Wi-Fi; `KNOWN_ISSUES.md` covers older versions.
 The switch starts on for a server set up before Gravel had it. "Flaky
 Network Mode", offered in the two fallback modes once the phone has a
-speech model, keeps watch dictation on the phone everywhere, for
-connections that cannot return the words within the watch's 15 seconds.
+speech model, keeps watch dictation, and Notebook recordings from the
+watch and the ring, on the phone everywhere, for connections that
+cannot return the words within the watch's 15 seconds.
 
 Notebook recordings follow the same setting. Server only sends each one
 to the server. Server with local fallback sends each one to the server
@@ -334,6 +337,7 @@ Kermit (logging).
 | `socketfilter` | A process-wide filter that refuses the creation of UDP sockets, built from its C source with the NDK; not installed, for example, where the platform's name lookups need UDP, before Android 10, or on a device that is not ARM (see `KNOWN_ISSUES.md`) |
 | `notebook` | The Notebook feature (voice and typed notes, reminders): its tab, note screens, reminder list, calendar (which can also show the phone's calendar) and editor, completion review, reminder alarms, its reminder and quick-completion settings, backup, restore and check of a backup file, automatic backups to a folder, with their keeping rules, warnings and recovery key checks, recovery from a damaged file or a lost key, its text model settings, a setup guide, and recordings from the Notebook watch app. Its settings, setup guide and text model screens are in `pebble`, its engine wiring in `composeApp` and `util`, and its watch app wiring in `composeApp` and `libpebble3` |
 | `llm`, `llm-native` | The Notebook's text engine: Kotlin bindings, and the NDK/CMake build of the pinned llama.cpp submodule |
+| `ring` | Gravel's client for the Pebble Index 01 ring: the protocol's parsing and audio decoding, the sync session and the Bluetooth link; the app pairs and syncs through it from `composeApp` |
 | `resampler` | Audio resampling |
 | `blobannotations`, `blobdbgen` | KSP annotations and code generator for BlobDB records |
 | `libindex`, `index-ai`, `mcp` | Ring and Index AI libraries, compiled because the watch UI depends on them, with their runtime disabled |

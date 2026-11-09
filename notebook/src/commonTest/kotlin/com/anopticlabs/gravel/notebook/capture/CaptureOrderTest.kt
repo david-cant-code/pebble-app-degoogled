@@ -9,27 +9,30 @@ import kotlin.test.assertTrue
 
 class CaptureOrderTest {
 
-    private fun capture(id: String, durationMillis: Long?, at: Long = 0, fromWatch: Boolean = false) =
-        QueuedCapture(id, "$id.wav", at, durationMillis = durationMillis, fromWatch = fromWatch)
+    private fun capture(id: String, durationMillis: Long?, at: Long = 0, fromWatch: Boolean = false, fromRing: Boolean = false) =
+        QueuedCapture(id, "$id.wav", at, durationMillis = durationMillis, fromWatch = fromWatch, fromRing = fromRing)
 
     private val short = capture("short", 30_000)
     private val long = capture("long", 30_001)
     private val unknown = capture("unknown", null)
     private val watch = capture("watch", null, fromWatch = true)
+    private val ring = capture("ring", 60_000, fromRing = true)
 
     @Test
-    fun longMeansOverThirtySecondsOrUnknownAndNeverFromTheWatch() {
+    fun longMeansOverThirtySecondsOrUnknownAndNeverFromTheWatchOrTheRing() {
         assertFalse(short.isLong)
         assertTrue(long.isLong)
         assertTrue(unknown.isLong)
         assertFalse(watch.isLong)
         assertFalse(capture("watch-long", 60_000, fromWatch = true).isLong)
+        assertFalse(ring.isLong)
+        assertFalse(capture("ring-unknown", null, fromRing = true).isLong)
     }
 
     @Test
-    fun pausingAllLetsOnlyRecordingsFromTheWatchStart() {
+    fun pausingAllLetsOnlyRecordingsFromTheWatchOrTheRingStart() {
         val rules = ProcessingRules(pause = ProcessingPause.ALL)
-        assertEquals(listOf(watch), listOf(short, long, unknown, watch).filter(rules::mayStart))
+        assertEquals(listOf(watch, ring), listOf(short, long, unknown, watch, ring).filter(rules::mayStart))
     }
 
     @Test
@@ -41,8 +44,8 @@ class CaptureOrderTest {
     @Test
     fun theChargerRuleHoldsLongOnesOffPowerUnlessApproved() {
         val unplugged = ProcessingRules(longWaitsForPower = true, pluggedIn = false)
-        assertEquals(listOf(short, watch), listOf(short, long, unknown, watch).filter(unplugged::mayStart))
-        assertEquals(listOf(long, unknown), listOf(short, long, unknown, watch).filter(unplugged::waitsForPower))
+        assertEquals(listOf(short, watch, ring), listOf(short, long, unknown, watch, ring).filter(unplugged::mayStart))
+        assertEquals(listOf(long, unknown), listOf(short, long, unknown, watch, ring).filter(unplugged::waitsForPower))
         val approved = unplugged.copy(approved = setOf("long"))
         assertTrue(approved.mayStart(long))
         assertFalse(approved.waitsForPower(long))

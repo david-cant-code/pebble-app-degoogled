@@ -31,7 +31,8 @@ class CaptureIngest(
 ) {
     /**
      * [extension] names the container of [audio], which the drain's decoder reads by its content;
-     * [capturedAtMillis] and [capturedIn] date the capture; [fromWatch] marks a recording made on the watch.
+     * [capturedAtMillis] and [capturedIn] date the capture; [fromWatch] marks a recording made on the watch,
+     * [fromRing] one from the ring.
      */
     suspend fun ingest(
         audio: ByteArray,
@@ -39,10 +40,11 @@ class CaptureIngest(
         capturedAtMillis: Long = clock(),
         capturedIn: TimeZone = zone(),
         fromWatch: Boolean = false,
+        fromRing: Boolean = false,
     ): IngestResult = withContext(NonCancellable + Dispatchers.IO) {
         val entry = QueuedCapture(
-            newId(), captureFileName(capturedAtMillis, extension, fromWatch), capturedAtMillis, zoneId = capturedIn.id,
-            durationMillis = wavDurationMillis(audio), fromWatch = fromWatch,
+            newId(), captureFileName(capturedAtMillis, extension, fromWatch, fromRing), capturedAtMillis, zoneId = capturedIn.id,
+            durationMillis = wavDurationMillis(audio), fromWatch = fromWatch, fromRing = fromRing,
         )
         val result = try {
             if (queue.enqueue(entry, audio)) IngestResult.QUEUED else keep(entry, audio, null)

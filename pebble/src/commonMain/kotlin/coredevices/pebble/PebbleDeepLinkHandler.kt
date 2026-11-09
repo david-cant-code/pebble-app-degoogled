@@ -98,6 +98,7 @@ class RealPebbleDeepLinkHandler(
         uri ?: return false
         return when {
             uri.scheme == "pebble" -> {
+                if (refusedByGravel(uri.host)) return false
                 when (uri.host) {
                     CUSTOM_BOOT_CONFIG_URL -> handleBootConfig(uri.path)
                     STORE_URL -> handleAppstore(
@@ -376,6 +377,12 @@ class RealPebbleDeepLinkHandler(
         private val SHOW_WATCHES_HOST = "show-watches"
 //        private val UPDATE_WATCH_NOW_HOST = "update-watch-now"
         private val REGISTER_INDEX_COMPANION_HOST = IndexPlatformBluetoothAssociations.REQUEST_URI_HOST
+
+        /**
+         * Gravel: `pebble://` hosts it refuses. It never issues the ring's companion request (upstream sends it from a
+         * notification Gravel does not have), so any page or app could otherwise raise that prompt.
+         */
+        internal fun refusedByGravel(host: String?): Boolean = host == REGISTER_INDEX_COMPANION_HOST
         val NOTIFICATION_INTENT_URI_SHOW_WATCHES = Uri.parse("pebble://${SHOW_WATCHES_HOST}")
         val NOTIFICATION_INTENT_URI_REGISTER_INDEX_COMPANION = Uri.parse("pebble://${REGISTER_INDEX_COMPANION_HOST}")
 //        val NOTIFICATION_INTENT_URI_UPDATE_NOW = Uri.parse("pebble://${UPDATE_WATCH_NOW_HOST}")

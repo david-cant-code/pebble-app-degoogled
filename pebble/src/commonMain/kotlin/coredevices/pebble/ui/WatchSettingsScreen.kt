@@ -291,7 +291,8 @@ internal fun serverOnMobileDataNote(mode: CactusSTTMode, phoneHasModel: Boolean)
         mode != CactusSTTMode.RemoteFirst && mode != CactusSTTMode.LocalFirst -> null
         !phoneHasModel -> "$lead Otherwise, watch dictation doesn't work until this phone has a speech model, and Notebook recordings wait for Wi-Fi."
         mode == CactusSTTMode.RemoteFirst ->
-            "$lead Otherwise, watch dictation and Notebook recordings of 30 seconds or less are transcribed on this phone, and longer recordings wait for Wi-Fi."
+            "$lead Otherwise, watch dictation, Notebook recordings of 30 seconds or less and recordings from the ring are " +
+                "transcribed on this phone, and longer recordings wait for Wi-Fi."
         else -> "$lead Otherwise, watch dictation is transcribed on this phone, and Notebook recordings the phone can't transcribe wait for Wi-Fi."
     }
 }
@@ -306,7 +307,7 @@ internal fun showsFlakyNetworkMode(mode: CactusSTTMode, phoneHasModel: Boolean):
 internal const val FLAKY_NETWORK_MODE_NOTE =
     "Turn this on if watch dictation fails because of your connection. The watch gives up if the " +
         "words don't come back within 15 seconds, so with this on, watch dictation is transcribed " +
-        "on this phone instead of your server."
+        "on this phone instead of your server, and so are Notebook recordings from the watch and the ring."
 
 object SettingsIds {
     const val OfflineSpeechRecognition = "OfflineSpeechRecognition"
@@ -2086,7 +2087,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                 basicSettingsToggleItem(
                     title = "Flaky Network Mode",
                     description = FLAKY_NETWORK_MODE_NOTE,
-                    keywords = "server self-hosted flaky network connection watch dictation phone",
+                    keywords = "server self-hosted flaky network connection watch dictation phone notebook ring",
                     topLevelType = TopLevelType.Phone,
                     section = Section.Speech,
                     checked = coreConfig.sttConfig.flakyNetworkMode,

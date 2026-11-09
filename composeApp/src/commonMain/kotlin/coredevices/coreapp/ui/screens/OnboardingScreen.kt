@@ -4,7 +4,6 @@ import CoreNav
 import NoOpCoreNav
 import PlatformUiContext
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,7 +41,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.text.AnnotatedString
@@ -228,22 +226,15 @@ fun OnboardingScreen(
                                     viewModel.stage.value = OnboardingStage.Permissions
                                 },
                             )
-                            // Fork: the Index 01 (Ring) feature modules are
-                            // Firebase-backed and unplugged from this build,
-                            // so the choices that would enable them are
-                            // stamped out instead of removed, keeping the
-                            // upstream layout recognizable and honest about
-                            // why the device class is unavailable.
+                            // Gravel: a ring is paired from the Devices tab, where these choices end
+                            // as Watch does; upstream's Index feature (enableIndex) stays off.
                             DeviceChoiceCard(
                                 label = "Index 01",
                                 icon = Icons.Default.RadioButtonUnchecked,
                                 onClick = {
-                                    viewModel.setIndexEnabled(true)
                                     viewModel.deviceChoice.value = DeviceChoice.Index01
                                     viewModel.stage.value = OnboardingStage.Permissions
                                 },
-                                enabled = false,
-                                disabledStamp = "Requires\nGoogle Firebase",
                             )
                         }
                         Spacer(modifier = Modifier.height(20.dp))
@@ -251,12 +242,9 @@ fun OnboardingScreen(
                             label = "Both",
                             icon = Icons.Default.Devices,
                             onClick = {
-                                viewModel.setIndexEnabled(true)
                                 viewModel.deviceChoice.value = DeviceChoice.Both
                                 viewModel.stage.value = OnboardingStage.Permissions
                             },
-                            enabled = false,
-                            disabledStamp = "Requires\nGoogle Firebase",
                         )
                     }
                 }
@@ -575,54 +563,31 @@ private fun DeviceChoiceCard(
     label: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     onClick: () -> Unit,
-    enabled: Boolean = true,
-    disabledStamp: String? = null,
 ) {
-    Box(modifier = Modifier.width(140.dp)) {
-        Card(
-            onClick = onClick,
-            enabled = enabled,
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                disabledContentColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.35f),
-            ),
-            modifier = Modifier.fillMaxWidth(),
+    Card(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+        ),
+        modifier = Modifier.width(140.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = label,
-                    modifier = Modifier.size(72.dp),
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = label,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-        }
-        // Rubber-stamp overlay explaining why the choice is unavailable.
-        if (!enabled && disabledStamp != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                modifier = Modifier.size(72.dp),
+            )
+            Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = disabledStamp,
-                color = MaterialTheme.colorScheme.error,
-                fontSize = 14.sp,
-                lineHeight = 16.sp,
-                fontWeight = FontWeight.Black,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .rotate(-15f)
-                    .border(2.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(4.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                text = label,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
             )
         }
     }

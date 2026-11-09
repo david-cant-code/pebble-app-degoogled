@@ -502,6 +502,16 @@ class QueueStoreTest {
     }
 
     @Test
+    fun onlyKeptRingRecordingsCountAsRingRecordings() = runBlocking {
+        pending("id_a", "ring_1000.wav")
+        pending("id_b", "ring_1500.wav")
+        pending("id_c", "watch_2000.wav")
+        pending("id_d", "ring_3000.wav", ByteArray(0))
+        assertEquals(2, store.retainedRingCount())
+        assertEquals(1, store.retainedWatchCount())
+    }
+
+    @Test
     fun salvageDatesARecordingAtTheStartItsNameCarries() = runBlocking {
         pending("id_a", "recording_1699999990000.wav").apply { setLastModified(now - 1_000) }
         store.salvagePending()

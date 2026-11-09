@@ -197,7 +197,10 @@ class NotebookBackup(
                 unreadCaptures += entry.id
                 logger.w { "capture ${entry.id} is queued but has no readable blob; left out of the backup" }
             } else {
-                val capture = BackupCapture(entry.id, entry.originalFileName, entry.queuedAtMillis, entry.attempts, entry.flagged, entry.zoneId, entry.fromWatch, entry.failure)
+                val capture = BackupCapture(
+                    entry.id, entry.originalFileName, entry.queuedAtMillis, entry.attempts, entry.flagged, entry.zoneId, entry.fromWatch,
+                    entry.failure, entry.fromRing,
+                )
                 writer.write(RecordType.CAPTURE, BackupRecords.capture(capture, bytes))
             }
             onProgress(BackupStage.CAPTURES, (i + 1).toFloat() / queued.size)
@@ -546,7 +549,7 @@ class NotebookBackup(
                         val zoneId = e.zoneId?.takeIf { captureZone(it) != null }
                         pendingCaptures[e.id] = QueuedCapture(
                             e.id, e.originalFileName, e.queuedAtMillis, e.attempts.coerceIn(0, MAX_QUEUE_ATTEMPTS), e.flagged, zoneId,
-                            durationMillis = wavDurationMillis(body.audio), fromWatch = e.fromWatch,
+                            durationMillis = wavDurationMillis(body.audio), fromWatch = e.fromWatch, fromRing = e.fromRing,
                             failure = e.failure?.let { CaptureFailureReason.of(it).code },
                         ) to body.audio
                         pendingAudio += body.audio.size

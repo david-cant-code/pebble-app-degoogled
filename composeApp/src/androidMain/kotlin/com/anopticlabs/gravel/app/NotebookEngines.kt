@@ -179,7 +179,7 @@ class SelfHostedServerSpeech(private val server: SelfHostedTranscriptionService,
  * A server step that cannot run holds the drain on the server route and makes only its capture wait on the others;
  * [serverCheck] keeps captures off a server that failed one, and [serverDictation] keeps them off while a watch
  * dictation needs the server, stopping a long one there. With [flaky] on, the routes with both send recordings made
- * on the watch to the phone alone. [clock] is the wall clock that spaces a recording's tries to reach the server.
+ * on the watch or the ring to the phone alone. [clock] is the wall clock that spaces a recording's tries to reach the server.
  */
 class NotebookSpeech(
     private val mode: () -> CactusSTTMode,
@@ -273,7 +273,7 @@ class NotebookSpeech(
     override suspend fun transcribe(pcm16: ByteArray, capture: SpeechCapture): String {
         checkMode()
         val route = route()
-        if (capture.fromWatch && flaky() && (route == SpeechRoute.PHONE_THEN_SERVER || route == SpeechRoute.SERVER_THEN_PHONE)) {
+        if (capture.fromWearable && flaky() && (route == SpeechRoute.PHONE_THEN_SERVER || route == SpeechRoute.SERVER_THEN_PHONE)) {
             return phoneInstead(pcm16, capture)
         }
         return when (route) {

@@ -226,7 +226,7 @@ class NotebookEnginesTest {
             val told = s.watchRecordingWait()
             val drained = try {
                 s.checkReady()
-                s.transcribe(ByteArray(4), SpeechCapture("w", false, { true }, {}, fromWatch = true))
+                s.transcribe(ByteArray(4), SpeechCapture("w", false, { true }, {}, fromWearable = true))
                 RecordingWait.NONE
             } catch (e: CaptureProcessingException) {
                 assertTrue(e.kind == CaptureFailureKind.HOLD || e.kind == CaptureFailureKind.WAIT, "$mode: ${e.kind} ${e.message}")
@@ -654,12 +654,12 @@ class NotebookEnginesTest {
     private fun recording(
         id: String = "r",
         long: Boolean = false,
-        fromWatch: Boolean = false,
+        fromWearable: Boolean = false,
         tries: Int = 0,
         lastTry: Long? = null,
         fits: (() -> Boolean)? = { true },
     ) = SpeechCapture(
-        id, false, { checkNotNull(fits) { "memory asked" }() }, { marks += id }, long, fromWatch, tries, lastTry,
+        id, false, { checkNotNull(fits) { "memory asked" }() }, { marks += id }, long, fromWearable, tries, lastTry,
         { at -> serverTries += id to at; triesRecorded },
     )
 
@@ -891,17 +891,17 @@ class NotebookEnginesTest {
     }
 
     @Test
-    fun flakyNetworkModeSendsWatchRecordingsToThePhoneAlone() = runBlocking<Unit> {
-        assertEquals("phone words", fallback(flaky = true).run(recording(fromWatch = true)))
+    fun flakyNetworkModeSendsWatchAndRingRecordingsToThePhoneAlone() = runBlocking<Unit> {
+        assertEquals("phone words", fallback(flaky = true).run(recording(fromWearable = true)))
         val local = NotebookSpeech({ CactusSTTMode.LocalFirst }, phone, server, check, dictation, { true }, { now })
         phone.reply = { throw LongFormTimeoutException("m") }
-        assertEquals(CaptureFailureKind.FLAG, failure { local.run(recording(fromWatch = true)) }.kind, "no server after the phone")
+        assertEquals(CaptureFailureKind.FLAG, failure { local.run(recording(fromWearable = true)) }.kind, "no server after the phone")
         assertEquals(0, server.calls)
         phone.reply = { "phone words" }
         assertEquals("server words", fallback(flaky = true).run(recording()), "recordings made on the phone still go to the server")
-        assertEquals("server words", fallback().run(recording(fromWatch = true)))
+        assertEquals("server words", fallback().run(recording(fromWearable = true)))
         phone.model = false
-        assertEquals("server words", fallback(flaky = true).run(recording(fromWatch = true)), "with no phone model the setting changes nothing")
+        assertEquals("server words", fallback(flaky = true).run(recording(fromWearable = true)), "with no phone model the setting changes nothing")
     }
 
     /** A long recording is the one a watch dictation may need the server back from; a short one finishes first. */

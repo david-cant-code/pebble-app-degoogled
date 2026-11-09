@@ -5,6 +5,7 @@ import com.anopticlabs.gravel.notebook.capture.QueuedCapture
 import com.anopticlabs.gravel.notebook.capture.needsReview
 import com.anopticlabs.gravel.notebook.capture.wavDurationMillis
 import com.anopticlabs.gravel.notebook.capture.capturedAtFromName
+import com.anopticlabs.gravel.notebook.capture.isRingRecordingName
 import com.anopticlabs.gravel.notebook.capture.isWatchRecordingName
 import com.anopticlabs.gravel.notebook.capture.removeQueuedCapture
 import com.anopticlabs.gravel.notebook.capture.retryFailedCaptures
@@ -395,7 +396,10 @@ class QueueStore internal constructor(
                 val bytes = f.readBytes()
                 // Dated at the start the capture path wrote into the name, else when the file was written.
                 val queuedAt = capturedAtFromName(name)?.takeIf { it in 1..now } ?: f.lastModified().takeIf { it in 1..now } ?: now
-                val entry = QueuedCapture(id, name, queuedAt, durationMillis = wavDurationMillis(bytes), fromWatch = isWatchRecordingName(name))
+                val entry = QueuedCapture(
+                    id, name, queuedAt, durationMillis = wavDurationMillis(bytes), fromWatch = isWatchRecordingName(name),
+                    fromRing = isRingRecordingName(name),
+                )
                 val stored = enqueue(entry, bytes)
                 if (!stored && !holdsBlob(id, bytes)) {
                     warnOnce(f) { "${f.name} under pending captures differs from the queued blob of $id; kept" }
@@ -418,8 +422,13 @@ class QueueStore internal constructor(
     suspend fun retainedCount(): Int = io { pendingDir.listFiles().orEmpty().count { isRetained(it) && it.length() > 0 } }
 
     /** How many of those were made on the watch. */
-    suspend fun retainedWatchCount(): Int = io {
-        pendingDir.listFiles().orEmpty().count { isRetained(it) && it.length() > 0 && isWatchRecordingName(it.name.substringAfter(SEPARATOR)) }
+    suspend fun retainedWatchCount(): Int = retainedCount(::isWatchRecordingName)
+
+    /** How many of those came from the ring. */
+    suspend fun retainedRingCount(): Int = retainedCount(::isRingRecordingName)
+
+    private suspend fun retainedCount(named: (String) -> Boolean): Int = io {
+        pendingDir.listFiles().orEmpty().count { isRetained(it) && it.length() > 0 && named(it.name.substringAfter(SEPARATOR)) }
     }
 
     private val reportedPending = ConcurrentHashMap.newKeySet<String>()
