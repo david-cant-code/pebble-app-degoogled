@@ -1,0 +1,257 @@
+# Countries: country code, name, other codes ('|'-separated: ISO alpha-3, then aliases)
+# Data: GeoNames (https://www.geonames.org), CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
+# Trimmed by tools/place-table/make_place_table.py; see that script for the columns kept.
+# Downloaded 2026-11-01T22:57Z from https://download.geonames.org/export/dump/:
+#   countryInfo.txt sha256 79f8f59ea01cbb40438bf1856dd6c2ff201f03f8fc72d0530b2646aaf603ef04
+AD	Andorra	AND
+AE	United Arab Emirates	ARE|UAE
+AF	Afghanistan	AFG
+AG	Antigua and Barbuda	ATG
+AI	Anguilla	AIA
+AL	Albania	ALB
+AM	Armenia	ARM
+AN	Netherlands Antilles	ANT
+AO	Angola	AGO
+AQ	Antarctica	ATA
+AR	Argentina	ARG
+AS	American Samoa	ASM
+AT	Austria	AUT
+AU	Australia	AUS
+AW	Aruba	ABW
+AX	Aland Islands	ALA
+AZ	Azerbaijan	AZE
+BA	Bosnia and Herzegovina	BIH
+BB	Barbados	BRB
+BD	Bangladesh	BGD
+BE	Belgium	BEL
+BF	Burkina Faso	BFA
+BG	Bulgaria	BGR
+BH	Bahrain	BHR
+BI	Burundi	BDI
+BJ	Benin	BEN
+BL	Saint Barthelemy	BLM
+BM	Bermuda	BMU
+BN	Brunei	BRN
+BO	Bolivia	BOL
+BQ	Bonaire, Saint Eustatius and Saba	BES
+BR	Brazil	BRA
+BS	Bahamas	BHS
+BT	Bhutan	BTN
+BV	Bouvet Island	BVT
+BW	Botswana	BWA
+BY	Belarus	BLR
+BZ	Belize	BLZ
+CA	Canada	CAN
+CC	Cocos Islands	CCK
+CD	Democratic Republic of the Congo	COD|Congo|DRC|DR Congo
+CF	Central African Republic	CAF
+CG	Republic of the Congo	COG|Congo
+CH	Switzerland	CHE
+CI	Ivory Coast	CIV
+CK	Cook Islands	COK
+CL	Chile	CHL
+CM	Cameroon	CMR
+CN	China	CHN
+CO	Colombia	COL
+CR	Costa Rica	CRI
+CS	Serbia and Montenegro	SCG
+CU	Cuba	CUB
+CV	Cabo Verde	CPV|Cape Verde
+CW	Curacao	CUW
+CX	Christmas Island	CXR
+CY	Cyprus	CYP
+CZ	Czechia	CZE|Czech Republic
+DE	Germany	DEU
+DJ	Djibouti	DJI
+DK	Denmark	DNK
+DM	Dominica	DMA
+DO	Dominican Republic	DOM
+DZ	Algeria	DZA
+EC	Ecuador	ECU
+EE	Estonia	EST
+EG	Egypt	EGY
+EH	Western Sahara	ESH
+ER	Eritrea	ERI
+ES	Spain	ESP
+ET	Ethiopia	ETH
+FI	Finland	FIN
+FJ	Fiji	FJI
+FK	Falkland Islands	FLK
+FM	Micronesia	FSM
+FO	Faroe Islands	FRO
+FR	France	FRA
+GA	Gabon	GAB
+GB	United Kingdom	GBR|UK|Great Britain|Britain
+GD	Grenada	GRD
+GE	Georgia	GEO
+GF	French Guiana	GUF
+GG	Guernsey	GGY
+GH	Ghana	GHA
+GI	Gibraltar	GIB
+GL	Greenland	GRL
+GM	Gambia	GMB
+GN	Guinea	GIN
+GP	Guadeloupe	GLP
+GQ	Equatorial Guinea	GNQ
+GR	Greece	GRC
+GS	South Georgia and the South Sandwich Islands	SGS
+GT	Guatemala	GTM
+GU	Guam	GUM
+GW	Guinea-Bissau	GNB
+GY	Guyana	GUY
+HK	Hong Kong	HKG
+HM	Heard Island and McDonald Islands	HMD
+HN	Honduras	HND
+HR	Croatia	HRV
+HT	Haiti	HTI
+HU	Hungary	HUN
+ID	Indonesia	IDN
+IE	Ireland	IRL
+IL	Israel	ISR
+IM	Isle of Man	IMN
+IN	India	IND
+IO	British Indian Ocean Territory	IOT
+IQ	Iraq	IRQ
+IR	Iran	IRN
+IS	Iceland	ISL
+IT	Italy	ITA
+JE	Jersey	JEY
+JM	Jamaica	JAM
+JO	Jordan	JOR
+JP	Japan	JPN
+KE	Kenya	KEN
+KG	Kyrgyzstan	KGZ
+KH	Cambodia	KHM
+KI	Kiribati	KIR
+KM	Comoros	COM
+KN	Saint Kitts and Nevis	KNA
+KP	North Korea	PRK
+KR	South Korea	KOR|Korea
+KW	Kuwait	KWT
+KY	Cayman Islands	CYM
+KZ	Kazakhstan	KAZ
+LA	Laos	LAO
+LB	Lebanon	LBN
+LC	Saint Lucia	LCA
+LI	Liechtenstein	LIE
+LK	Sri Lanka	LKA
+LR	Liberia	LBR
+LS	Lesotho	LSO
+LT	Lithuania	LTU
+LU	Luxembourg	LUX
+LV	Latvia	LVA
+LY	Libya	LBY
+MA	Morocco	MAR
+MC	Monaco	MCO
+MD	Moldova	MDA
+ME	Montenegro	MNE
+MF	Saint Martin	MAF
+MG	Madagascar	MDG
+MH	Marshall Islands	MHL
+MK	North Macedonia	MKD|Macedonia
+ML	Mali	MLI
+MM	Myanmar	MMR|Burma
+MN	Mongolia	MNG
+MO	Macao	MAC
+MP	Northern Mariana Islands	MNP
+MQ	Martinique	MTQ
+MR	Mauritania	MRT
+MS	Montserrat	MSR
+MT	Malta	MLT
+MU	Mauritius	MUS
+MV	Maldives	MDV
+MW	Malawi	MWI
+MX	Mexico	MEX
+MY	Malaysia	MYS
+MZ	Mozambique	MOZ
+NA	Namibia	NAM
+NC	New Caledonia	NCL
+NE	Niger	NER
+NF	Norfolk Island	NFK
+NG	Nigeria	NGA
+NI	Nicaragua	NIC
+NL	The Netherlands	NLD|Netherlands|Holland
+NO	Norway	NOR
+NP	Nepal	NPL
+NR	Nauru	NRU
+NU	Niue	NIU
+NZ	New Zealand	NZL
+OM	Oman	OMN
+PA	Panama	PAN
+PE	Peru	PER
+PF	French Polynesia	PYF
+PG	Papua New Guinea	PNG
+PH	Philippines	PHL
+PK	Pakistan	PAK
+PL	Poland	POL
+PM	Saint Pierre and Miquelon	SPM
+PN	Pitcairn	PCN
+PR	Puerto Rico	PRI
+PS	Palestinian Territory	PSE
+PT	Portugal	PRT
+PW	Palau	PLW
+PY	Paraguay	PRY
+QA	Qatar	QAT
+RE	Reunion	REU
+RO	Romania	ROU
+RS	Serbia	SRB
+RU	Russia	RUS
+RW	Rwanda	RWA
+SA	Saudi Arabia	SAU
+SB	Solomon Islands	SLB
+SC	Seychelles	SYC
+SD	Sudan	SDN
+SE	Sweden	SWE
+SG	Singapore	SGP
+SH	Saint Helena	SHN
+SI	Slovenia	SVN
+SJ	Svalbard and Jan Mayen	SJM
+SK	Slovakia	SVK
+SL	Sierra Leone	SLE
+SM	San Marino	SMR
+SN	Senegal	SEN
+SO	Somalia	SOM
+SR	Suriname	SUR
+SS	South Sudan	SSD
+ST	Sao Tome and Principe	STP
+SV	El Salvador	SLV
+SX	Sint Maarten	SXM
+SY	Syria	SYR
+SZ	Eswatini	SWZ|Swaziland
+TC	Turks and Caicos Islands	TCA
+TD	Chad	TCD
+TF	French Southern Territories	ATF
+TG	Togo	TGO
+TH	Thailand	THA
+TJ	Tajikistan	TJK
+TK	Tokelau	TKL
+TL	Timor Leste	TLS|East Timor
+TM	Turkmenistan	TKM
+TN	Tunisia	TUN
+TO	Tonga	TON
+TR	Turkey	TUR|Turkiye
+TT	Trinidad and Tobago	TTO
+TV	Tuvalu	TUV
+TW	Taiwan	TWN
+TZ	Tanzania	TZA
+UA	Ukraine	UKR
+UG	Uganda	UGA
+UM	United States Minor Outlying Islands	UMI
+US	United States	USA|America
+UY	Uruguay	URY
+UZ	Uzbekistan	UZB
+VA	Vatican	VAT
+VC	Saint Vincent and the Grenadines	VCT
+VE	Venezuela	VEN
+VG	British Virgin Islands	VGB
+VI	U.S. Virgin Islands	VIR
+VN	Vietnam	VNM|Viet Nam
+VU	Vanuatu	VUT
+WF	Wallis and Futuna	WLF
+WS	Samoa	WSM
+XK	Kosovo	XKX
+YE	Yemen	YEM
+YT	Mayotte	MYT
+ZA	South Africa	ZAF
+ZM	Zambia	ZMB
+ZW	Zimbabwe	ZWE

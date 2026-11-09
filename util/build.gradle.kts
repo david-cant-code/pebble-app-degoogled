@@ -9,6 +9,7 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.kotlinx.atomicfu)
     alias(libs.plugins.buildKonfig)
     alias(libs.plugins.ksp)
     alias(libs.plugins.room)

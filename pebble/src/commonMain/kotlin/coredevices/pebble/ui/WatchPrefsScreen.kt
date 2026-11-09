@@ -24,7 +24,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coredevices.pebble.rememberLibPebble
 import coredevices.pebble.weather.WeatherFetcher
+import coredevices.util.weatherOn
 import coredevices.ui.ConfirmDialog
+import coredevices.util.CoreConfig
 import coredevices.util.CoreConfigHolder
 import io.rebble.libpebblecommon.SystemAppIDs.AIRPLANE_MODE_UUID
 import kotlin.time.Duration.Companion.milliseconds
@@ -498,8 +500,9 @@ private fun <T> List<WatchPreference<*>>.preference(pref: WatchPref<T>): WatchPr
     pref.castParent(firstOrNull { it.pref == pref } ?: WatchPreference(pref, null))
 
 /**
- * Day colour, the night toggle, and — only while night colour is on — night colour, the
- * automatic-times toggle and (only while that is off) manual sunrise/sunset pickers, in one item.
+ * Day color, the night toggle, and (only while night color is on) night color, the
+ * automatic-times toggle (only while weather is on) and manual sunrise/sunset pickers (while
+ * that toggle is off or weather is off; see [backlightTimeControls]), in one item.
  */
 private fun backlightColorPref(
     settings: List<WatchPreference<*>>,
@@ -548,19 +551,24 @@ private fun backlightColorPref(
                                 onChangeColor = { libPebble.setWatchPref(night.copy(value = it)) },
                             )
                             val weatherFetcher = koinInject<WeatherFetcher>()
-                            BacklightToggleRow(
-                                label = "Automatic Sunrise/Sunset",
-                                checked = autoSunriseSunset,
-                                onCheckedChange = { on ->
-                                    coreConfigHolder.update(coreConfig.copy(backlightColorAutoSunriseSunset = on))
-                                    if (on) GlobalScope.launch { weatherFetcher.fetchWeather(this) }
-                                },
-                            )
-                            if (!autoSunriseSunset) {
+                            val controls = backlightTimeControls(coreConfig)
+                            if (controls.automaticToggle) {
+                                BacklightToggleRow(
+                                    label = "Automatic Sunrise/Sunset",
+                                    checked = autoSunriseSunset,
+                                    onCheckedChange = { on ->
+                                        coreConfigHolder.update(coreConfig.copy(backlightColorAutoSunriseSunset = on))
+                                        if (on) GlobalScope.launch { weatherFetcher.fetchWeather(this) }
+                                    },
+                                )
+                            }
+                            if (controls.pickers) {
                                 SelectTimeOfDay("Sunrise", sunrise.valueOrDefault()) {
+                                    coreConfigHolder.setBacklightTimeByHand()
                                     libPebble.setWatchPref(sunrise.copy(value = it))
                                 }
                                 SelectTimeOfDay("Sunset", sunset.valueOrDefault()) {
+                                    coreConfigHolder.setBacklightTimeByHand()
                                     libPebble.setWatchPref(sunset.copy(value = it))
                                 }
                             }
@@ -571,6 +579,22 @@ private fun backlightColorPref(
         },
         isDebugSetting = dayPref.isDebugSetting,
     )
+}
+
+internal data class BacklightTimeControls(val automaticToggle: Boolean, val pickers: Boolean)
+
+// Gravel: the automatic times come from a weather fetch, so with weather off the option is hidden
+// and the times are set by hand.
+internal fun backlightTimeControls(config: CoreConfig) = BacklightTimeControls(
+    automaticToggle = config.weatherOn,
+    pickers = !config.backlightColorAutoSunriseSunset || !config.weatherOn,
+)
+
+// Gravel: a time set by hand turns the automatic option off, hidden or not, so turning weather on
+// later does not overwrite it.
+internal fun CoreConfigHolder.setBacklightTimeByHand() {
+    val current = config.value
+    if (current.backlightColorAutoSunriseSunset) update(current.copy(backlightColorAutoSunriseSunset = false))
 }
 
 @Composable

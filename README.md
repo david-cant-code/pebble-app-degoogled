@@ -20,6 +20,9 @@ it cannot be mistaken for the official app.
 De-google work is completed, all telemetry is removed. What remains is polish and features:
 
 - [x] Manual weather location entry
+- [x] Weather place search on the phone (built-in town list)
+- [x] Weather asks first: off until you agree, Current Location sent as a
+      nearby town
 - [x] Telemetry strip (Crashlytics, analytics, firmware-diagnostics relay)
 - [x] Google Play services / Firebase removal
 - [x] Core watch firmware updates from the public PebbleOS GitHub releases
@@ -100,8 +103,28 @@ De-google work is completed, all telemetry is removed. What remains is polish an
   cohorts endpoint and install its offer from the Devices tab. Upstream's
   Memfault update check and what remained of the firmware-diagnostics relay
   are removed.
-- **Weather without Play services.** Manual latitude/longitude entry, since
-  the stock place search relies on the GMS-backed platform geocoder.
+- **Weather place search on the phone.** Searching for a weather
+  location, naming the Current Location, and the place lookups in the
+  Yahoo and OpenWeather requests Gravel answers for watchapps use a town
+  list built into the app (GeoNames, places of about 1,000 people or
+  more) instead of Android's geocoder, which can send the lookup online.
+  A place too small for the list can still be entered by latitude and
+  longitude.
+- **Weather asks first.** Gravel's own weather is off until you agree
+  to what it sends to Core Devices' weather server: the position of each
+  place in your weather list, with your language and region setting and
+  your units, at the refresh interval and at times such as when you open
+  Gravel before the first forecast arrives, tap Refresh, or change a
+  weather, units or sunrise setting. Current Location is sent as a listed
+  town near the phone (the largest within 10 km, with sizes rounded to the
+  thousand, else the nearest) rather than the phone's own position.
+  Switching weather off clears the stored Current Location position;
+  taking away location access, or switching the phone's location off,
+  stops Current Location weather and clears it at the next sync.
+  Watchapps you allow online can still get
+  weather from that server: while "Use Pebble Weather Service when apps
+  are broken" is on, Gravel answers their OpenWeather and Yahoo requests
+  through it, with the position the watchapp sends.
 - **Free on-device dictation.** Voice dictation runs on whisper.cpp,
   built from source as a pinned git submodule, with a choice of
   integrity-pinned model downloads; the proprietary speech engine
@@ -361,7 +384,12 @@ The bundled Inter typeface (version 4.001, copyright 2016 The Inter Project
 Authors) is licensed under the SIL Open Font License 1.1; the notice and
 license text are in [LICENSE-Inter-OFL](LICENSE-Inter-OFL). The whisper.cpp
 speech engine and llama.cpp text engine submodules each carry their own MIT
-license file.
+license file. The built-in town list is derived from
+[GeoNames](https://www.geonames.org) data, licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/);
+`tools/place-table/make_place_table.py` trims it to names, positions,
+regions and populations, and each list file names the download it came
+from.
 
 Development of Gravel uses AI assistance; commits carry `Co-Authored-By`
 trailers accordingly.

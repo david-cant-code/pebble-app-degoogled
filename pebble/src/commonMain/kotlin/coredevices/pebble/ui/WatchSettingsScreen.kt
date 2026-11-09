@@ -116,6 +116,7 @@ import com.anopticlabs.gravel.ui.phoneCalendarRefusalText
 import com.anopticlabs.gravel.ui.rememberNotebookTab
 import com.anopticlabs.gravel.ui.rememberTextModels
 import com.anopticlabs.gravel.ui.textModelsSummary
+import com.anopticlabs.gravel.weather.WeatherConsentDialog
 import com.anopticlabs.gravel.ui.notebookWatchAppSettings
 import com.russhwolf.settings.Settings
 import com.russhwolf.settings.set
@@ -138,6 +139,8 @@ import coredevices.pebble.ui.SettingsIds.EnableHealthTracking
 import coredevices.pebble.ui.SettingsIds.EnableSleepInsights
 import coredevices.pebble.ui.SettingsIds.OfflineSpeechRecognition
 import coredevices.pebble.weather.WeatherFetcher
+import coredevices.util.weatherOn
+import coredevices.util.withWeatherOff
 import coredevices.ui.ConfirmDialog
 import coredevices.ui.CoreLinearProgressIndicator
 import coredevices.ui.M3Dialog
@@ -570,6 +573,22 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     val healthSettingsNullable by libPebble.healthSettings.collectAsState(null)
     val healthSettings = healthSettingsNullable ?: return null
     val weatherFetcher: WeatherFetcher = koinInject()
+    // Gravel: switching weather on asks first (CoreConfig.weatherAgreed).
+    var showWeatherConsent by remember { mutableStateOf(false) }
+    if (showWeatherConsent) {
+        WeatherConsentDialog(
+            title = "Share your location for weather?",
+            interval = coreConfig.weatherSyncInterval,
+            confirmLabel = "Share and turn on",
+            dismissLabel = "Cancel",
+            onConfirm = {
+                coreConfigHolder.agreeToWeather()
+                showWeatherConsent = false
+                GlobalScope.launch { weatherFetcher.fetchWeather(this) }
+            },
+            onDismiss = { showWeatherConsent = false },
+        )
+    }
     val watches by libPebble.watches.collectAsState(null)
     val watchesCastable = watches ?: return null
     val anyWatchSupportsSettingsSync = remember(watchesCastable) {
@@ -768,6 +787,15 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                         action = { nav.navigateTo(FirmwarePickerRoute()) },
                     )
                 },
+                // Gravel: the credit CC BY 4.0 asks for, for the built-in town list.
+                basicSettingsActionItem(
+                    title = "Town list",
+                    description = "Town names and positions adapted from GeoNames (geonames.org), under CC BY 4.0. Tap for the license.",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.About,
+                    action = { uriHandler.openUri("https://creativecommons.org/licenses/by/4.0/") },
+                    actionIcon = Icons.AutoMirrored.Default.Launch,
+                ),
                 // Fork: external browser, keeping the Intercom-backed help centre out
                 // of the app's own network traffic.
                 basicSettingsActionItem(
@@ -1769,17 +1797,17 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                 ),
                 basicSettingsToggleItem(
                     title = "Enable Weather",
-                    description = "Fetch weather for the current location, for the Weather App (requires location permission)",
+                    description = "Forecasts for your weather locations from Core Devices' weather server",
                     topLevelType = TopLevelType.Phone,
                     section = Section.Weather,
-                    checked = coreConfig.fetchWeather,
+                    checked = coreConfig.weatherOn,
                     onCheckChanged = {
-                        coreConfigHolder.update(
-                            coreConfig.copy(
-                                fetchWeather = it,
-                            )
-                        )
-                        GlobalScope.launch { weatherFetcher.fetchWeather(this) }
+                        if (it) {
+                            showWeatherConsent = true
+                        } else {
+                            coreConfigHolder.update(coreConfigHolder.config.value.withWeatherOff())
+                            GlobalScope.launch { weatherFetcher.fetchWeather(this) }
+                        }
                     },
                 ),
                 basicSettingsDropdownItem(
@@ -1794,7 +1822,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     itemText = {
                         it.displayName
                     },
-                    show = { coreConfig.fetchWeather }
+                    show = { coreConfig.weatherOn }
                 ),
                 basicSettingsToggleItem(
                     title = "Weather Pins",
@@ -1810,7 +1838,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                         )
                         GlobalScope.launch { weatherFetcher.fetchWeather(this) }
                     },
-                    show = { coreConfig.fetchWeather }
+                    show = { coreConfig.weatherOn }
                 ),
                 navBarNav?.let { nav -> basicSettingsActionItem(
                     title = "Locations",
@@ -1820,7 +1848,8 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     action = {
                         nav.navigateTo(PebbleNavBarRoutes.WeatherRoute)
                     },
-                    show = { coreConfig.fetchWeather }
+                    // Gravel: viewable while weather is off, so the places it would send can be checked first.
+                    show = { true }
                 ) },
                 basicSettingsToggleItem(
                     title = "Use LAN developer connection",

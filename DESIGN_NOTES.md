@@ -2310,6 +2310,14 @@ WebView routes (`RoadmapChangelogRoute`, `PebbleOsChangelogRoute`,
 `TroubleshootingRoute`) stay registered in `AppNavHost` but are
 unreachable, keeping the upstream cherry-pick surface small.
 
+Upstream's manifest also claims `https://cloud.repebble.com/githubAuth`,
+the return link of its GitHub sign-in, as an auto-verified App Link,
+which has the phone check that host when the app is installed or
+updated (sources in `AppLinkVerificationTest`). GitHub sign-in is off
+in Gravel, so the intent filter is gone, and that test fails if an
+auto-verified claim comes back in a tracked manifest.
+`PebbleDeepLinkHandler.handleGithubAuth` stays as upstream has it.
+
 ## App store search
 
 Both app store feeds (Core Devices and Rebble) keep their search index on
@@ -2344,6 +2352,164 @@ What remains is inherent to the feature: the submitted query text and
 the phone's IP reach Algolia's servers, which keep request logs of their
 own. The app listing (the fastlane description and the F-Droid recipe's
 NonFreeNet note) names Algolia for that reason.
+
+## Built-in town list
+
+Upstream finds places with compass's `geocoder-mobile` and
+`autocomplete-mobile`, which wrap Android's geocoder (compass 3.2.0,
+`AndroidPlatformGeocoder`); what that geocoder does is in
+`PlatformGeocoderSentinelTest`. Gravel answers the same compass calls
+from a town list in the APK: `BuiltInPlaces` in `:pebble` implements
+compass's `PlatformGeocoder` and `AutocompleteService`, and
+`watchModule` binds it where `MobileGeocoder` was. Three upstream call
+sites (the Weather Locations search, `OpenWeather25Interceptor`,
+`YahooWeatherInterceptor`) keep their code
+apart from the search screen (injection, wording, a trimmed query, and
+a "No town found" line with coordinate entry), and the Yahoo
+location cache, which is capped at 64 entries because every lookup now
+succeeds. The two `-mobile` artifacts are dropped, and
+`PlatformGeocoderSentinelTest` fails if a tracked source or the version
+catalog brings them, another compass artifact, or Android's geocoder
+back.
+
+The list is GeoNames' `cities1000` (its readme: places of more than
+1,000 people, or seats of administrative divisions down to the third
+order), minus historical, abandoned and destroyed places, trimmed by
+`tools/place-table/make_place_table.py` to four text files under
+`pebble/src/commonMain/composeResources/files/places/`: towns (name,
+position to three decimals, country and region codes, population in
+thousands, and for places of 100,000 or more their Latin-script
+alternate names, leaving out all-lowercase ones, ones with a digit,
+ones over 40 characters, all-capital ones of three characters or fewer
+and ones that, lowercased and without accents, equal the name or an
+alternate already kept), region names, country names, and a folding table
+for case- and accent-blind search. It is committed as text because
+GeoNames' data changes daily (its readme lists daily modification
+files) and its download directory held no dated copies of the dump
+files when checked on 2026-11-01, so a build-time download could not be
+checksum-pinned, and F-Droid's scanner rejects compressed archives in
+the tree. Each file's header names the
+download time and the source file's SHA-256; a refresh is a new
+download and a new run of the script, committed with the files it
+writes.
+
+What changes for users and watchapps, compared with the platform
+geocoder:
+
+- Names are GeoNames' primary names ("Munich", "Köln"), not localized to
+  the phone's language, and a place has no county
+  (`subAdministrativeArea`), so the Yahoo responses' `locality1` is the
+  country.
+- Watchapp position lookups are named after the nearest listed town,
+  however far away it is; the Current Location row is a listed town near
+  the phone (see Weather asks first).
+- Search ignores case, accents and punctuation. The town is always the
+  first comma part: its exact name or alternate name, or that of its
+  leading words when every other word that is not a number names the
+  place's region or country, alone or in a phrase
+  ("Portland OR", "Halifax Nova Scotia", "Portland 97201"). A region or
+  country is named by its GeoNames code, a code or name the generator
+  adds (ISO alpha-3, "UK", "UAE", common English and former country
+  names such as "Holland" and "Burma", Canadian and Australian postal
+  abbreviations), or its name or the start of it from three letters. A
+  run of single letters reads as one word, in those words and in area
+  names alike ("B.C." as "BC"). Later comma parts only rank the results
+  ("Portland, OR"), and numbers do not rank. Watchapp lookups
+  (`forward`, whose first result is used) return exact matches only, so
+  with none they return nothing. The search screen lists the other
+  places with a word starting with the same words after the exact
+  matches, and with no exact match it offers places with a word starting
+  with the first part, then the exact matches of the longest leading
+  words that have any. Each list ranks exact matches first, then the
+  places whose area the other words name most strongly, summed over
+  words and phrases: region code or name 4, country code or name 3,
+  start of the region's name 2, start of the country's name 1; a word
+  that names the country scores 3 even where the region has the same
+  name (the state of México). Among equals, an exact match on another
+  town's alternate name ranks below a town's own name unless that town
+  is 100 times bigger (GeoNames lists "Victoria" for Hong Kong and
+  "Cologne" for Köln). Five results, as upstream asked for, and a query
+  is read only to 100 characters, 4 parts and 8 words a part.
+- Short all-capital abbreviations such as "NYC" do not find the place
+  they abbreviate: no all-capital alternate of three characters or fewer
+  is kept.
+
+`PlaceTable` holds the list in parallel arrays and one search-key string,
+read on first use and kept for the life of the process. Nearest-town
+lookups search 1-degree cells inside a bounding box of a growing radius
+until the nearest hit lies within the radius; `BuiltInPlacesTest`
+checks them against a brute-force scan of the committed list. The full
+credit (creator, license link, modification) is in Settings > About
+("Town list") and the README; the town search and the store listing
+name GeoNames and the license.
+
+## Weather asks first
+
+Upstream has weather on by default and sends the position of each
+weather location, for Current Location the phone's own, to Core
+Devices' weather server at the refresh interval; with no current
+position it sends the last one stored. Gravel adds
+`CoreConfig.weatherAgreed`: `WeatherFetcher.fetchWeather` fetches only
+while `fetchWeather` and the agreement are both set (`weatherOn`), and
+a config stored before the field reads it as false, so weather is off
+after the update. Setup's Privacy step has a share switch, off on a
+new install and showing the stored choice on a re-run, that records the
+choice with the watchapp defaults (`applyWeatherChoice`), so a new
+install is not offered the popup; its Confirm then starts a fetch, as
+the Settings switch does.
+`WeatherOfferDialog` (`:composeApp`) asks once after the update, once
+What's New has been closed, while weather is on but not agreed to; its
+switch also starts off, so Done alone leaves weather off, and Done
+ignores taps for a second, as the popup can open under the finger that
+closed What's New. The
+Settings switch asks the same before turning weather on, and turning it
+off clears the agreement. The Locations list stays reachable with
+weather off, so the places the agreement covers can be checked first.
+
+`currentLocationAsTown` (the fourth call site, which now reads the
+town list directly) keeps the Current Location row at a listed town's
+position and name: the most populous listed place within 10 km of the
+phone, else the nearest (`currentLocationTown`; KNOWN_ISSUES has what
+this costs in accuracy). Populations are in thousands, so ties are
+common among villages; a tie goes to the first in the list's order,
+which does not depend on where the phone is among the tied places.
+With no position from the phone, a stored town is kept, as picking
+again from a town's own position can move to a bigger one, and any
+other stored position (an earlier build's) is snapped the same way, so
+it is not sent as it was.
+Without location access (`LocationAccess`: location permission and the
+phone's location switch on; bound on Android only) the row drops its
+position and town name. A fetch with weather off, which `init`, setup's
+Confirm and the Settings switch each start, clears the watch's weather
+and the row's
+position without a network call. A row with no position is
+left out of the weather sent to the watch, so the watch drops its entry,
+and the timeline pins come from the first place that has one. A fetch
+already running checks `weatherOn` again before each request and before
+writing to the watch, and every `WeatherFetcher` instance shares one
+lock, so the clearing fetch runs after it. libpebble applies each watch
+write in a coroutine of its own (`WeatherManager.updateWeatherData`), so
+a write made just before the switch and the clear after it can still
+land in either order. `CoreConfigHolder`
+serializes its writes, and `update` cannot switch weather on or set the
+agreement (only `agreeToWeather` can), so a write from an older copy of
+the config cannot turn a declined or withdrawn weather back on; it can
+still switch weather off. With weather off, the backlight's automatic
+sunrise and sunset option is hidden, and a time set by hand turns it
+off so a later fetch does not overwrite it. With weather on but no
+Current Location weather, the automatic times are not updated. Watchapp weather requests that
+Gravel answers through Core's server (`OpenWeather25Interceptor`,
+`YahooWeatherInterceptor`) are outside the agreement: they need the
+watchapp's internet permission (`PrivatePKJSInterface.onIntercepted`)
+and the intercept setting.
+`WeatherAgreementTest` runs `fetchWeather` against fakes for the
+agreement, the town sent and kept for Current Location, forgetting it
+without location access, the clear with weather off, the row left out
+and the re-check during a fetch; `WeatherScreensTest` covers which
+backlight controls show and the time set by hand, and
+`PrivatePKJSInterfaceGateTest` the watchapp permission gate. The
+sunrise and sunset schedule, the shared lock, the pins rule, the
+intercept setting and setup's binding of its fetch have no test.
 
 ## PebbleOS changelog list
 

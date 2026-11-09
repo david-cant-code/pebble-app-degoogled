@@ -1,6 +1,8 @@
 package coredevices.pebble
 
 import android.content.Context
+import com.anopticlabs.gravel.weather.AndroidLocationAccess
+import com.anopticlabs.gravel.weather.LocationAccess
 import io.rebble.libpebblecommon.connection.AppContext
 import org.koin.core.module.Module
 import org.koin.core.module.dsl.singleOf
@@ -13,4 +15,5 @@ actual val platformWatchModule: Module = module {
     }
     single<Platform> { Platform.Android }
     singleOf(::PebbleAndroidDelegate)
+    single<LocationAccess> { AndroidLocationAccess(get(), get()) }
 }
