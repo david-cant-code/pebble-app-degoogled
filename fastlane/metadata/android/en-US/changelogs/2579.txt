@@ -1,0 +1,3 @@
+Pebble Index 01 ring support, in early beta: pair the ring from the Devices tab, and its recordings go into the Notebook like watch recordings, without upstream's Index AI or cloud ring code.
+
+Also, weather is now off until you agree to what it sends, and Current Location is sent as a nearby town's position instead of the phone's. Weather place search uses a town list built into the app, and Gravel no longer claims a cloud.repebble.com link.

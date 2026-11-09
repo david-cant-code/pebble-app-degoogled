@@ -22,7 +22,7 @@ import io.rebble.libpebblecommon.voice.PEBBLE_FW_TRANSCRIPTION_TIMEOUT
  * users on update. The popup auto-shows once per user per bump (`WhatsNewDialog` in
  * composeApp) and can be reopened any time from Settings > About.
  */
-const val WHATS_NEW_VERSION = 14
+const val WHATS_NEW_VERSION = 15
 
 /** A single announced change: a short heading and a paragraph of body. */
 data class WhatsNewEntry(val title: String, val body: String)
@@ -33,6 +33,16 @@ data class WhatsNewEntry(val title: String, val body: String)
  * changelog (that lives in git history and the repo docs).
  */
 val whatsNewEntries: List<WhatsNewEntry> = listOf(
+    WhatsNewEntry(
+        title = "Index 01 ring support (early beta)",
+        body = "Gravel can now pair a Pebble Index 01 ring and bring its recordings into the " +
+            "Notebook, the same way as recordings from the Notebook watch app. To pair, open the " +
+            "Devices tab, tap the add button, choose Add Index 01 and press the ring's button. The " +
+            "first sync brings in the recordings still on the ring, and new ones come in as the " +
+            "ring syncs after that. The ring's entry on the Devices tab shows its sync status. It " +
+            "works without Index AI or Core's cloud. Firmware updates for the ring aren't " +
+            "supported yet.",
+    ),
     WhatsNewEntry(
         title = "Notebook (early beta)",
         body = "Record a note or a reminder from your watch with the new Notebook watch app, " +
