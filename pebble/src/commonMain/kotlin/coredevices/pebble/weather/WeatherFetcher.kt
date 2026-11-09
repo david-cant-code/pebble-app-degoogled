@@ -7,10 +7,16 @@ import coredevices.database.WeatherLocationDao
 import coredevices.database.WeatherLocationEntity
 import coredevices.pebble.services.PebbleWebServices
 import coredevices.util.CoreConfigFlow
+import com.anopticlabs.gravel.places.BuiltInPlaces
+import com.anopticlabs.gravel.weather.LocationAccess
+import com.anopticlabs.gravel.weather.currentLocationAsTown
+import com.anopticlabs.gravel.weather.currentLocationTown
+import com.anopticlabs.gravel.weather.forgottenCurrentLocation
+import com.anopticlabs.gravel.weather.hasTownAt
 import coredevices.util.WeatherUnit
 import coredevices.util.deviceDefaultWeatherUnit
+import coredevices.util.weatherOn
 import dev.jordond.compass.Place
-import dev.jordond.compass.geocoder.Geocoder
 import dev.jordond.compass.geocoder.GeocoderResult
 import io.rebble.libpebblecommon.SystemAppIDs.WEATHER_APP_UUID
 import io.rebble.libpebblecommon.connection.LibPebble
@@ -48,6 +54,8 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
+private val sharedFetchMutex = Mutex()
+
 data class LocationWithData(
     val location: WeatherLocationEntity,
     val data: WeatherResponse?,
@@ -80,18 +88,23 @@ class WeatherFetcher(
     private val clock: Clock,
     private val settings: Settings,
     private val weatherLocationDao: WeatherLocationDao,
-    private val geocoder: Geocoder,
+    private val places: BuiltInPlaces,
+    private val locationAccess: LocationAccess,
 ) {
     companion object {
         private const val SETTINGS_KEY_HAS_DONE_ONE_SYNC = "has_done_one_weather_sync"
         private const val SETTINGS_KEY_MIGRATED_UNITS = "migrated_weather_units_to_watch_pref"
     }
 
-    private val mutex = Mutex()
+    // Gravel: one lock for every instance (watchModule binds WeatherFetcher with factoryOf), so a
+    // fetch that clears after weather is switched off runs after one already under way.
+    private val mutex = sharedFetchMutex
 
     suspend fun init() {
         migrateUnitsToWatchPref()
-        fetchIfNotFetchedYet()
+        // Gravel: with weather off, clear what an earlier build left on the watch and in the
+        // Current Location row now rather than at the next periodic sync.
+        if (coreConfigFlow.value.weatherOn) fetchIfNotFetchedYet() else fetchWeather(GlobalScope)
     }
 
     private suspend fun migrateUnitsToWatchPref() {
@@ -117,7 +130,8 @@ class WeatherFetcher(
     }
 
     suspend fun fetchWeather(scope: CoroutineScope) = mutex.withLock {
-        val weatherEnabled = coreConfigFlow.value.fetchWeather
+        // Gravel: also needs the user's agreement to what is sent (CoreConfig.weatherAgreed).
+        val weatherEnabled = coreConfigFlow.value.weatherOn
         val pinsEnabled = coreConfigFlow.value.weatherPinsV2
         val units = libPebble.healthSettings.first().weatherUnit()
         if (!pinsEnabled || !weatherEnabled) {
@@ -127,16 +141,19 @@ class WeatherFetcher(
             }
         }
         if (!weatherEnabled) {
-            libPebble.updateWeatherData(emptyList())
+            clearWeather()
             return
         }
-        val locations = getLocationsAndUpdateCurrentLocation()
+        // Gravel: a row with no position (a forgotten Current Location) is left out, so the watch
+        // drops its entry instead of keeping the last one as a failed fetch.
+        val locations = getLocationsAndUpdateCurrentLocation().filter { it.latitude != null && it.longitude != null }
         val locale = Locale.current.toLanguageTag()
         val fetchedData = locations.map { location ->
             scope.async {
                 val lat = location.latitude
                 val lon = location.longitude
-                val response = if (lat == null || lon == null) {
+                // Gravel: weather may have been switched off while the position was read.
+                val response = if (lat == null || lon == null || !coreConfigFlow.value.weatherOn) {
                     null
                 } else {
                     pebbleWebServices.getWeather(lat, lon, units, locale)
@@ -144,6 +161,14 @@ class WeatherFetcher(
                 LocationWithData(location, response)
             }
         }.awaitAll()
+        if (!coreConfigFlow.value.weatherOn) {
+            Day.entries.forEach {
+                libPebble.delete(it.dayUuid)
+                libPebble.delete(it.nightUuid)
+            }
+            clearWeather()
+            return
+        }
         val weatherAppData = fetchedData.map { location ->
             weatherAppData(location, units)
                 ?: WeatherLocationData.WeatherLocationDataFailed(location.location.key)
@@ -158,33 +183,37 @@ class WeatherFetcher(
         }
     }
 
+    // Gravel: weather off leaves nothing on the watch and no position in the Current Location row.
+    private suspend fun clearWeather() {
+        libPebble.updateWeatherData(emptyList())
+        weatherLocationDao.getAllLocations().firstOrNull { it.currentLocation }?.let { record ->
+            val forgotten = forgottenCurrentLocation(record)
+            if (forgotten != record) weatherLocationDao.upsert(forgotten)
+        }
+    }
+
+    // Gravel: the Current Location row holds and sends only a listed town's position, and none
+    // at all without location access (see currentLocationAsTown).
     private suspend fun getLocationsAndUpdateCurrentLocation(): List<WeatherLocationEntity> {
         val locations = weatherLocationDao.getAllLocations()
         val currentLocationRecord = locations.firstOrNull { it.currentLocation }
         if (currentLocationRecord == null) {
             return locations
         }
-        val geolocation = systemGeolocation.getCurrentPosition(maximumAge = 30.minutes)
-        return when (geolocation) {
-            is GeolocationPositionResult.Error -> {
-                logger.i { "Couldn't get location: ${geolocation.message}" }
-                locations
-            }
-            is GeolocationPositionResult.Success -> {
-                val updatedName = geocoder.reverse(
-                    latitude = geolocation.latitude,
-                    longitude = geolocation.longitude,
-                ).usefulName() ?: currentLocationRecord.name
-                val updatedRecord = currentLocationRecord.copy(
-                    latitude = geolocation.latitude,
-                    longitude = geolocation.longitude,
-                    name = updatedName,
-                )
-                weatherLocationDao.upsert(updatedRecord)
-                locations.map {
-                    if (it.currentLocation) updatedRecord else it
+        val updatedRecord = currentLocationAsTown(
+            record = currentLocationRecord,
+            allowed = locationAccess.allowed(),
+            position = {
+                systemGeolocation.getCurrentPosition(maximumAge = 30.minutes).also {
+                    if (it is GeolocationPositionResult.Error) logger.i { "Couldn't get location: ${it.message}" }
                 }
-            }
+            },
+            townNear = { latitude, longitude -> places.table().currentLocationTown(latitude, longitude) },
+            isTown = { latitude, longitude -> places.table().hasTownAt(latitude, longitude) },
+        )
+        if (updatedRecord != currentLocationRecord) weatherLocationDao.upsert(updatedRecord)
+        return locations.map {
+            if (it.currentLocation) updatedRecord else it
         }
     }
 

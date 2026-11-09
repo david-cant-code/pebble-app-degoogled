@@ -1780,3 +1780,46 @@ which matters only while two Wi-Fi networks are connected at once. Server
 reach the server only while the network Android gives Gravel runs over
 something besides the VPN; on Android 9 and older, where a VPN may show
 nothing under it, every failure behind a VPN counts, with no signal too.
+
+## Current Location weather is for a town, not where you are
+
+**Status: accepted; kept for privacy over accuracy.**
+
+For Current Location, Gravel sends Core Devices' weather server a listed
+town's position instead of the phone's: the largest town in the built-in
+GeoNames list within 10 km of the phone, or the nearest town when none is
+within 10 km. This keeps what is sent coarse, at a cost in accuracy:
+
+- In and near a big city the forecast is for the city's point (New York
+  City's is in lower Manhattan), up to 10 km away, and a separate town
+  beside it can show the bigger name (Hoboken shows New York City).
+- Where two places of similar size are within 10 km, the larger is used
+  even when the other is closer (in south London, Croydon shows Sutton).
+- Sizes are compared in thousands of people, rounded, so villages of 600
+  and 1,400 people count as the same size. Among places of equal rounded
+  size, the one sent is the first in the list's order (by country code,
+  region code and name), which can be a smaller or a farther one.
+- Far from any listed town, the nearest one is used however far it is, so
+  the forecast can be for a place tens of kilometers off. In a sparse area
+  the town sent can be a small one, which narrows where you are more than
+  a city does.
+- When the phone has no fresh position, the last one Android reported is
+  used, however old; when Android has none at all, the town sent last is
+  kept.
+
+For an exact forecast, add the place by coordinates as a fixed location;
+its position is sent as entered, rounded to four decimal places.
+
+## Deleting Current Location during a weather fetch can bring it back
+
+**Status: accepted; upstream's fetch has it too.**
+
+A weather fetch reads the weather list, waits for the phone's position,
+and sends what it read. If the Current Location row is deleted from the
+list during that wait, its town is still sent in that fetch. When the
+fetch picked a different town from the one stored, it then saves the row
+with it, which puts the row back, and the town is sent in later fetches
+too. Without location access, or with weather off, a fetch can put the row
+back with no position, which sends nothing. The row shows in the list
+again, and deleting it once more removes it. Closing this needs the fetch
+to update only a row that still exists.

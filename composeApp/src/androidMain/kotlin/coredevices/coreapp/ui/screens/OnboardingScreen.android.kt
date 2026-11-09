@@ -12,7 +12,7 @@ actual fun Permission.descriptionOnboarding(): AnnotatedString = when (this) {
         withStyle(HighlightStyle) {
             append("While using the app")
         }
-        append(" to get accurate weather, sunrise/sunset and other info")
+        append(" so weather and the watchapps you allow can use your location")
     }
     Permission.BackgroundLocation -> buildAnnotatedString {
         append("Tap ")

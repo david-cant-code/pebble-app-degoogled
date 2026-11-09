@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import co.touchlab.kermit.Logger
+import com.anopticlabs.gravel.app.WeatherOfferDialog
 import com.russhwolf.settings.Settings
 import coredevices.coreapp.ui.navigation.AppNavHost
 import coredevices.coreapp.ui.screens.SHOWN_ONBOARDING
@@ -47,6 +48,8 @@ fun App() {
             // Fork: one-time update notice (currently: watchapp permissions). Self-gates
             // to onboarded installs whose last-seen revision is behind the current one.
             WhatsNewDialog()
+            // Gravel: shows once What's New is closed (weatherOfferDue).
+            WeatherOfferDialog()
         }
     }
 }

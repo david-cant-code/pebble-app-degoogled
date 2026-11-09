@@ -171,9 +171,7 @@ androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "j
 reorderable = { module = "sh.calvin.reorderable:reorderable", version.ref = "reorderable" }
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 compass-geocoder = { module = "dev.jordond.compass:geocoder", version.ref = "compass" }
-compass-geocoder-mobile = { module = "dev.jordond.compass:geocoder-mobile", version.ref = "compass" }
 compass-autocomplete = { module = "dev.jordond.compass:autocomplete", version.ref = "compass" }
-compass-autocomplete-mobile = { module = "dev.jordond.compass:autocomplete-mobile", version.ref = "compass" }
 coredevices-krispPrivate = { group = "coredevices.krispkmp", name = "library", version.ref = "coredevices-krisp" }
 # Fork: no health-kmp [libraries] alias on purpose (the [versions] entry
 # stays). The fork's consumers must use string notation so the GMS excludes
