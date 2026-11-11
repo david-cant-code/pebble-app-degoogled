@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -191,7 +192,7 @@ internal fun StorageTroubleCard(status: NotebookStatus, run: RecoveryRunState, v
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             troubleLines(trouble, run, status.automaticBackupAt).forEach { Text(it.text(r), color = MaterialTheme.colorScheme.onErrorContainer) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                if (run.busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                if (run.busy) CircularProgressIndicator(Modifier.size(16.dp), color = MaterialTheme.colorScheme.onErrorContainer, strokeWidth = 2.dp)
                 for (action in troubleActions(trouble, run)) {
                     when (action) {
                         TroubleAction.TRY_AGAIN -> Action(R.string.notebook_try_again, run.busy, viewModel::retry)
@@ -234,7 +235,8 @@ internal fun StorageTroubleCard(status: NotebookStatus, run: RecoveryRunState, v
 
 @Composable
 private fun Action(label: Int, busy: Boolean, onClick: () -> Unit) {
-    TextButton(enabled = !busy, onClick = onClick) { Text(stringResource(label)) }
+    val colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onErrorContainer)
+    TextButton(enabled = !busy, onClick = onClick, colors = colors) { Text(stringResource(label)) }
 }
 
 @Composable

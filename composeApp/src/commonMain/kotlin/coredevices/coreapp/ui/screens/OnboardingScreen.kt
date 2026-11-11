@@ -91,7 +91,7 @@ import org.koin.compose.getKoin
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.dsl.module
-import theme.onboardingScheme
+import theme.OnboardingTheme
 
 
 enum class OnboardingStage {
@@ -175,7 +175,8 @@ fun OnboardingScreen(
         viewModel.requestedPermissions.value += permission
     }
 
-    MaterialTheme(colorScheme = onboardingScheme) {
+    // Gravel: setup's scheme with a selection highlight its white text reads on.
+    OnboardingTheme {
     Scaffold { windowInsets ->
         Box(modifier = Modifier.padding(windowInsets).fillMaxSize()) {
             when (viewModel.stage.value) {

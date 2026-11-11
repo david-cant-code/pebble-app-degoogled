@@ -89,6 +89,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.ToggleFloatingActionButton
+import androidx.compose.material3.ToggleFloatingActionButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -331,7 +332,7 @@ fun WatchesScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                             Icon(
                                 imageVector = if (addFabExpanded) Icons.Filled.Close else Icons.Filled.Add,
                                 contentDescription = "Add a Pebble",
-                                tint = Color.White,
+                                tint = ToggleFloatingActionButtonDefaults.iconColor()(checkedProgress),
                             )
                         }
                     },

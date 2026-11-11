@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -236,7 +237,11 @@ private fun PartProblem(text: Int, problem: StorageProblem, onRetry: () -> Unit)
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             Text(stringResource(text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
             if (problem == StorageProblem.UNREADABLE) {
-                TextButton(onClick = onRetry, modifier = Modifier.align(Alignment.End)) { Text(stringResource(R.string.notebook_try_again)) }
+                TextButton(
+                    onClick = onRetry,
+                    modifier = Modifier.align(Alignment.End),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onErrorContainer),
+                ) { Text(stringResource(R.string.notebook_try_again)) }
             }
         }
     }

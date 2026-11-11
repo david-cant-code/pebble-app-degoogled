@@ -67,6 +67,13 @@ class ThemeTest {
         }
     }
 
+    @Test
+    fun `tonal surfaces tint with each scheme's primary`() {
+        listOf("light" to lightScheme, "grey" to greyScheme, "black" to blackScheme).forEach { (name, scheme) ->
+            assertEquals(scheme.primary, scheme.surfaceTint, name)
+        }
+    }
+
     // gravelPurple is darker than the orange it replaced, so black foregrounds that passed
     // WCAG AA on orange fail on it; every text role painted over a purple fill must clear 4.5:1.
     @Test

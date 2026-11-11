@@ -367,7 +367,7 @@ fun BugReportScreen(
                                 if (sending) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(16.dp),
-                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         strokeWidth = 2.dp
                                     )
                                 } else {
@@ -392,7 +392,7 @@ fun BugReportScreen(
                                 sending -> {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(16.dp),
-                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         strokeWidth = 2.dp
                                     )
                                 }
@@ -402,7 +402,7 @@ fun BugReportScreen(
                                         Icons.Default.Check,
                                         "Success",
                                         modifier = Modifier.size(ButtonDefaults.IconSize),
-                                        tint = MaterialTheme.colorScheme.onPrimary
+                                        tint = MaterialTheme.colorScheme.onSurface
                                     )
                                     Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                                     Text("Report Sent!")

@@ -95,7 +95,7 @@ fun CalendarScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                                         text = "Approve",
                                         modifier = Modifier.padding(15.dp),
                                         textAlign = TextAlign.Center,
-                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
                                     )
                                 }
                             }

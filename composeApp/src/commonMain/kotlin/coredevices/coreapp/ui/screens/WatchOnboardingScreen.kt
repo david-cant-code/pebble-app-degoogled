@@ -108,7 +108,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import theme.AppTheme
-import theme.onboardingScheme
+import theme.OnboardingTheme
 import kotlin.time.Duration.Companion.seconds
 
 private val logger = Logger.withTag("OnboardingScreen")
@@ -154,7 +154,8 @@ fun WatchOnboardingScreen(
     }
 
     val scrollState = rememberScrollState()
-    MaterialTheme(colorScheme = onboardingScheme) {
+    // Gravel: setup's scheme with a selection highlight its white text reads on.
+    OnboardingTheme {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbarHostState) },
         ) { windowInsets ->
