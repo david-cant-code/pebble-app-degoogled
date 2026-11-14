@@ -141,6 +141,9 @@ kotlin {
                 // dependencies declared in commonMain.
                 implementation(compose.uiTooling)
                 implementation(libs.androidx.activity.compose)
+                // Fork: Health Connect permission dialog hosted by our own activity.
+                // Same version health-kmp already ships at runtime.
+                implementation(libs.androidx.health.connect.client)
             }
         }
 

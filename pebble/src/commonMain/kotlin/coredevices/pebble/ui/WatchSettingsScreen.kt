@@ -1717,7 +1717,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                     topLevelType = TopLevelType.Phone,
                     section = Section.Health,
                     checked = healthPlatformSyncEnabled,
-                    description = "Write steps, heart rate, sleep, and workouts to your phone's health platform",
+                    description = "Write steps, heart rate and sleep to your phone's health platform, plus workouts if you allow Exercise",
                     show = { healthSettings.trackingEnabled && platformHealthSync.isAvailable() },
                     onCheckChanged = { enabled ->
                         scope.launch {

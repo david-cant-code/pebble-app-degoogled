@@ -4,6 +4,15 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application>
         <receiver android:name=".ui.TestActionReceiver" android:exported="false" />
+        <!-- Fork: hosts the Health Connect permission dialog (see HealthPermissionRequest). Not
+             noHistory, unlike health-kmp's activity in androidApp's manifest: noHistory finishes
+             it as soon as the dialog covers it, before the result arrives. The permission set is
+             a constant and the request only launches on first create, so recreation is safe. -->
+        <activity
+            android:name="coredevices.pebble.health.HealthPermissionsActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <receiver
             android:name="coredevices.pebble.firmware.FirmwareSideloadReceiver"
             android:exported="true"
