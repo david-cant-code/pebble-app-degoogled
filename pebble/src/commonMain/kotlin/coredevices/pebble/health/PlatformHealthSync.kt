@@ -31,6 +31,9 @@ internal expect fun exerciseWriteTypes(): List<HealthDataType>
 
 internal expect fun supportsSleepWriting(): Boolean
 
+/** Shows the platform permission dialog for [PlatformHealthSync.RequestedWriteTypes]. */
+internal expect suspend fun requestHealthPermissionsWithDialog(healthManager: HealthManager)
+
 class PlatformHealthSync(
     private val libPebble: LibPebble,
     private val tracker: HealthSyncTracker,
@@ -60,11 +63,19 @@ class PlatformHealthSync(
 
     companion object {
         val RequestedReadTypes = emptyList<HealthDataType>()
-        val RequestedWriteTypes = listOf(
+        /** Needed for sync to run at all. */
+        val RequiredWriteTypes = listOf(
             HealthDataType.Steps,
             HealthDataType.HeartRate,
             HealthDataType.Sleep,
-        ) + exerciseWriteTypes()
+        )
+        /**
+         * Requested alongside the required types but optional: users who record workouts in
+         * another app can deny them, and everything else keeps syncing. Watch-detected
+         * workouts are then not written.
+         */
+        val OptionalExerciseWriteTypes = exerciseWriteTypes()
+        val RequestedWriteTypes = RequiredWriteTypes + OptionalExerciseWriteTypes
     }
 
     /** Check if the health platform is available on this device. */
@@ -72,20 +83,23 @@ class PlatformHealthSync(
         return healthManager.isAvailable().getOrDefault(false)
     }
 
-    /** Request write permissions. Returns true if granted. */
+    /**
+     * Request write permissions. Returns true if the required ones are granted; the exercise
+     * types are optional. The dialog is skipped when the required ones are already granted, so
+     * a user who denied exercise isn't asked again each time sync is turned on.
+     */
     suspend fun requestPermissions(): Boolean {
-        val result = try {
-            healthManager.requestAuthorization(
-                readTypes = RequestedReadTypes,
-                writeTypes = RequestedWriteTypes,
-            )
-        } catch (e: Exception) {
-            logger.w(e) { "Health platform doesn't support requested types" }
-            tracker.setEnabled(false)
-            return false
+        if (!hasPermission()) {
+            try {
+                requestHealthPermissionsWithDialog(healthManager)
+            } catch (e: Exception) {
+                logger.w(e) { "Health platform doesn't support requested types" }
+                tracker.setEnabled(false)
+                return false
+            }
         }
-        val success = result.getOrDefault(false)
-        logger.v { "requestPermissions success=$success" }
+        val success = hasPermission()
+        logger.v { "requestPermissions success=$success exercise=${hasExercisePermission()}" }
         tracker.setEnabled(success)
         GlobalScope.launch {
             sync()
@@ -93,11 +107,12 @@ class PlatformHealthSync(
         return success
     }
 
+    /** True when the types sync can't work without are granted. Exercise is optional. */
     suspend fun hasPermission(): Boolean {
         val result = try {
             healthManager.isAuthorized(
                 readTypes = RequestedReadTypes,
-                writeTypes = RequestedWriteTypes,
+                writeTypes = RequiredWriteTypes,
             )
         } catch (e: Exception) {
             logger.w(e) { "Health platform doesn't support requested types" }
@@ -180,6 +195,14 @@ class PlatformHealthSync(
         }
     }
 
+    private suspend fun hasExercisePermission(): Boolean = try {
+        healthManager.isAuthorized(readTypes = emptyList(), writeTypes = OptionalExerciseWriteTypes)
+            .getOrDefault(false)
+    } catch (e: Exception) {
+        logger.w(e) { "Exercise permission check failed" }
+        false
+    }
+
     private suspend fun syncOverlays() {
         val lastTimestamp = tracker.lastSyncedOverlayTimestamp
         val sleepTypes = listOf(
@@ -218,9 +241,14 @@ class PlatformHealthSync(
             maxSyncedTimestamp = maxOf(maxSyncedTimestamp, sleepOverlays.maxOf { it.startTime })
         }
 
-        // Write exercise records separately
+        // Write exercise records separately. Without the (optional) exercise permission they are
+        // skipped and still marked synced, so granting it later doesn't backfill old workouts.
+        val writeExercise = exerciseOverlays.isNotEmpty() && hasExercisePermission()
+        if (exerciseOverlays.isNotEmpty() && !writeExercise) {
+            logger.d { "Exercise permission not granted; skipping ${exerciseOverlays.size} workouts" }
+        }
         val exerciseRecords = mutableListOf<HealthRecord>()
-        for (overlay in exerciseOverlays) {
+        for (overlay in exerciseOverlays.takeIf { writeExercise }.orEmpty()) {
             if (overlay.duration <= 0) continue
             val startTime = Instant.fromEpochSeconds(overlay.startTime)
             val endTime = startTime + overlay.duration.seconds
