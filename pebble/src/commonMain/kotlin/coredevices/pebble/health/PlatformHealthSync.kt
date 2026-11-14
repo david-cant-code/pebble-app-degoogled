@@ -23,6 +23,12 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.minus
+import kotlinx.datetime.todayIn
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
@@ -37,6 +43,7 @@ class PlatformHealthSync(
     private val appResumed: AppResumed,
     private val healthManager: HealthManager,
     private val healthDataApi: HealthDataApi,
+    private val restingHeartRateWriter: RestingHeartRateWriter,
 ) {
     private val logger = Logger.withTag("PlatformHealthSync")
 
@@ -87,10 +94,30 @@ class PlatformHealthSync(
         val success = result.getOrDefault(false)
         logger.v { "requestPermissions success=$success" }
         tracker.setEnabled(success)
+        if (success) {
+            // Optional: declining it leaves the rest of the sync unaffected.
+            requestRestingHeartRatePermission()
+        }
         GlobalScope.launch {
             sync()
         }
         return success
+    }
+
+    /** True when the platform supports resting HR but its (optional) write permission is missing. */
+    suspend fun isRestingHeartRatePermissionMissing(): Boolean =
+        restingHeartRateWriter.isSupported() && !restingHeartRateWriter.isGranted()
+
+    suspend fun requestRestingHeartRatePermission(): Boolean {
+        val granted = try {
+            restingHeartRateWriter.requestPermission()
+        } catch (e: Exception) {
+            logger.w(e) { "Resting heart rate permission request failed" }
+            false
+        }
+        logger.v { "requestRestingHeartRatePermission granted=$granted" }
+        if (granted) GlobalScope.launch { sync() }
+        return granted
     }
 
     suspend fun hasPermission(): Boolean {
@@ -119,6 +146,7 @@ class PlatformHealthSync(
             }
             syncStepsAndHeartRate()
             syncOverlays()
+            syncRestingHeartRate()
             logger.d { "Health platform sync completed" }
         } catch (e: Exception) {
             logger.e(e) { "Health platform sync failed" }
@@ -261,6 +289,33 @@ class PlatformHealthSync(
 
         if (maxSyncedTimestamp > lastTimestamp) {
             tracker.lastSyncedOverlayTimestamp = maxSyncedTimestamp
+        }
+    }
+
+    private suspend fun syncRestingHeartRate() {
+        if (!restingHeartRateWriter.isGranted()) return
+        val timeZone = TimeZone.currentSystemDefault()
+        val today = Clock.System.todayIn(timeZone)
+        val computed = (0 until RESTING_HR_LOOKBACK_DAYS).mapNotNull { daysAgo ->
+            val day = today.minus(DatePeriod(days = daysAgo))
+            val dayStart = day.atStartOfDayIn(timeZone).epochSeconds
+            // Same calculation the Health tab shows; null when the night has too few readings.
+            val bpm = libPebble.getRestingHeartRate(dayStart) ?: return@mapNotNull null
+            val wake = libPebble.getDailySleepSession(dayStart)?.lastEnd ?: return@mapNotNull null
+            RestingHeartRateEntry(epochDay = day.toEpochDays().toLong(), wakeEpochSec = wake, bpm = bpm)
+        }
+        val written = tracker.restingHrWritten
+        val toWrite = restingHrEntriesToWrite(computed, written)
+        if (toWrite.isEmpty()) return
+
+        val result = restingHeartRateWriter.write(toWrite)
+        if (result.isSuccess) {
+            val oldestKept = today.minus(DatePeriod(days = RESTING_HR_LOOKBACK_DAYS)).toEpochDays().toLong()
+            tracker.restingHrWritten = (written + toWrite.associateBy { it.epochDay })
+                .filterKeys { it >= oldestKept }
+            logger.d { "Synced ${toWrite.size} resting heart rate records" }
+        } else {
+            logger.e { "Failed to write resting heart rate records: ${result.exceptionOrNull()}" }
         }
     }
 

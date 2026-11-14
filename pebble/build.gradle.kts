@@ -141,6 +141,9 @@ kotlin {
                 // dependencies declared in commonMain.
                 implementation(compose.uiTooling)
                 implementation(libs.androidx.activity.compose)
+                // Fork: direct Health Connect writes for record types health-kmp lacks
+                // (resting HR). Same version health-kmp already ships at runtime.
+                implementation(libs.androidx.health.connect.client)
             }
         }
 

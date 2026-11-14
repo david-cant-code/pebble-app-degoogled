@@ -2,8 +2,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Fork: written directly (health-kmp has no resting-HR type); see RestingHeartRateWriter. -->
+    <uses-permission android:name="android.permission.health.WRITE_RESTING_HEART_RATE" />
     <application>
         <receiver android:name=".ui.TestActionReceiver" android:exported="false" />
+        <!-- Unlike health-kmp's permission activity (see androidApp's manifest), no noHistory:
+             it would finish this activity as soon as the Health Connect dialog covers it, before
+             the result arrives. Recreation is safe because the permission set is a constant and
+             the request is only launched on first create. -->
+        <activity
+            android:name="coredevices.pebble.health.RestingHeartRatePermissionActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <receiver
             android:name="coredevices.pebble.firmware.FirmwareSideloadReceiver"
             android:exported="true"
