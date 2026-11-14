@@ -16,6 +16,7 @@ class HealthSyncTracker(private val settings: Settings) {
         private const val KEY_ENABLED = "health_platform_sync_enabled"
         private const val KEY_LAST_SYNCED_STEPS = "health_sync_last_steps_timestamp"
         private const val KEY_LAST_SYNCED_OVERLAY = "health_sync_last_overlay_timestamp"
+        private const val KEY_RESTING_HR_WRITTEN = "health_sync_resting_hr_written"
     }
 
     private val _enabled = MutableStateFlow<Boolean>(settings.getBoolean(KEY_ENABLED, false))
@@ -33,4 +34,9 @@ class HealthSyncTracker(private val settings: Settings) {
     var lastSyncedOverlayTimestamp: Long
         get() = settings.getLong(KEY_LAST_SYNCED_OVERLAY, 0L)
         set(value) { settings[KEY_LAST_SYNCED_OVERLAY] = value }
+
+    /** Resting HR entries last written per day, so unchanged days aren't rewritten. */
+    var restingHrWritten: Map<Long, RestingHeartRateEntry>
+        get() = decodeRestingHrWritten(settings.getStringOrNull(KEY_RESTING_HR_WRITTEN))
+        set(value) { settings[KEY_RESTING_HR_WRITTEN] = encodeRestingHrWritten(value.values) }
 }

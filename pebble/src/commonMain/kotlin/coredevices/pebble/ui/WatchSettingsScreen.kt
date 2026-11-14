@@ -618,6 +618,11 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
     val healthSyncTracker: HealthSyncTracker = koinInject()
     val healthPlatformSyncEnabled by healthSyncTracker.enabled.collectAsState()
     val healthIsSyncing by platformHealthSync.syncing.collectAsState()
+    var restingHrPermissionMissing by remember { mutableStateOf(false) }
+    LaunchedEffect(healthPlatformSyncEnabled) {
+        restingHrPermissionMissing =
+            healthPlatformSyncEnabled && platformHealthSync.isRestingHeartRatePermissionMissing()
+    }
     val notebookTab = rememberNotebookTab()
     val notebookShown = notebookTab?.shown?.collectAsState()?.value == true
     val deepLinks = koinInject<PebbleDeepLinkHandler>()
@@ -709,6 +714,7 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
             hasOfflineModels,
             phoneHasModel,
             anyWatchSupportsFiveMinHrm,
+            restingHrPermissionMissing,
         ) {
             listOfNotNull(
                 basicSettingsActionItem(
@@ -1727,6 +1733,8 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                                     logger.w { "Health platform permissions not granted" }
                                     return@launch
                                 }
+                                restingHrPermissionMissing =
+                                    platformHealthSync.isRestingHeartRatePermissionMissing()
                             } else {
                                 healthSyncTracker.setEnabled(false)
                             }
@@ -1746,6 +1754,20 @@ fun rememberSettingsItemsState(navBarNav: NavBarNav?, snackbarDisplay: SnackbarD
                             scope.launch {
                                 platformHealthSync.sync()
                             }
+                        }
+                    },
+                ),
+                basicSettingsActionItem(
+                    title = "Sync resting heart rate",
+                    description = "Allow writing the nightly resting heart rate from the Health tab",
+                    topLevelType = TopLevelType.Phone,
+                    section = Section.Health,
+                    show = { healthPlatformSyncEnabled && restingHrPermissionMissing },
+                    action = {
+                        scope.launch {
+                            platformHealthSync.requestRestingHeartRatePermission()
+                            restingHrPermissionMissing =
+                                platformHealthSync.isRestingHeartRatePermissionMissing()
                         }
                     },
                 ),
