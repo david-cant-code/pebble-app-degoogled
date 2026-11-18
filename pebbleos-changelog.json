@@ -1,8 +1,9 @@
 {
   "schema": 1,
   "source": "https://ndocs.repebble.com/pebbleos-changelog",
-  "checkedAt": "2026-11-17T19:13:52Z",
+  "checkedAt": "2026-11-18T18:53:46Z",
   "versions": [
+    "4.47.1",
     "4.44.3",
     "4.41.1",
     "4.38.4",
