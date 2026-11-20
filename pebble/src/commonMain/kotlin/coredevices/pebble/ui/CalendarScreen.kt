@@ -37,9 +37,9 @@ import coredevices.util.Platform
 import coredevices.util.granted
 import coredevices.util.isAndroid
 import coredevices.util.rememberUiContext
+import io.rebble.libpebblecommon.database.entity.CalendarEntity
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
-import theme.gravelPurple
 
 @Composable
 fun CalendarScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
@@ -113,25 +113,36 @@ fun CalendarScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
 
                     items(calendarList.size) { i ->
                         val entry = calendarList[i]
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = entry.enabled,
-                                onCheckedChange = { isChecked ->
-                                    libPebble.updateCalendarEnabled(entry.id, isChecked)
-                                }
-                            )
-                            Text(entry.name)
-                        }
-                        if (entry.enabled && (!entry.syncEvents || !entry.visible)) {
-                            Row {
-                                Text(
-                                    text = "Not synced by Android - toggle checkbox to ask Android to sync",
-                                    color = gravelPurple,
-                                )
-                            }
-                        }
+                        CalendarEntryRow(
+                            entry = entry,
+                            onEnabledChange = { isChecked ->
+                                libPebble.updateCalendarEnabled(entry.id, isChecked)
+                            },
+                        )
                     }
                 }
+            }
+        }
+    }
+}
+
+/** One calendar's row in Calendar Settings, with a notice when it is on but Android does not sync or show it. */
+@Composable
+fun CalendarEntryRow(entry: CalendarEntity, onEnabledChange: (Boolean) -> Unit) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = entry.enabled,
+                onCheckedChange = onEnabledChange,
+            )
+            Text(entry.name)
+        }
+        if (entry.enabled && (!entry.syncEvents || !entry.visible)) {
+            Row {
+                Text(
+                    text = "Not synced by Android - toggle checkbox to ask Android to sync",
+                    color = MaterialTheme.colorScheme.primary,
+                )
             }
         }
     }

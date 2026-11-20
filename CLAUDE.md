@@ -202,6 +202,17 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   handle the denied case gracefully. The exception is a permission that a
   tap in the foreground needs at that moment (the Notebook's record button
   asks for the microphone), requested through `PermissionRequester`.
+- **Composables take their colors from the theme:**
+  `MaterialTheme.colorScheme`, `ExtendedTheme.colors` or what derives from
+  them (a component's `*Defaults` colors, `LocalContentColor`);
+  `Color.Transparent` and `Color.Unspecified` are fine, and a new color
+  goes into a color scheme or `ExtendedColors`. A fixed color
+  (`Color(0xFF...)`, `Color.White`, `gravelPurple`) in a composable is only
+  for a color shown as data, such as the watch colors a color picker
+  offers, or for the black or white drawn on one to contrast with it. This
+  applies to code a change adds, upstream picks included; fixed colors
+  still in older screens are not a pattern to copy, and converting one is
+  a change of its own.
 - **Keep changes single-purpose.** One concern per branch or PR.
 - **Prefer simple architectures.** For example, keep a storage format
   unchanged and convert at the boundary rather than adding format dispatch

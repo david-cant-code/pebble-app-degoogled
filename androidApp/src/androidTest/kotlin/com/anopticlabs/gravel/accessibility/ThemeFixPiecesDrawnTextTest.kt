@@ -4,6 +4,7 @@ import androidx.compose.material3.BottomAppBar
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasProgressBarRangeInfo
+import androidx.compose.ui.test.onNodeWithText
 import com.anopticlabs.gravel.notebook.R
 import com.anopticlabs.gravel.notebook.storage.StorageTrouble
 import com.anopticlabs.gravel.notebook.ui.PartProblem
@@ -13,8 +14,10 @@ import com.anopticlabs.gravel.notebook.ui.StorageTroubleCardContent
 import coredevices.coreapp.ui.screens.ExportLogsButton
 import coredevices.coreapp.ui.screens.SendReportButton
 import coredevices.pebble.ui.AddPebbleButton
+import coredevices.pebble.ui.CalendarEntryRow
 import coredevices.pebble.ui.CalendarPermissionCard
 import coredevices.pebble.ui.SendMessageButton
+import io.rebble.libpebblecommon.database.entity.CalendarEntity
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -22,7 +25,7 @@ import org.junit.runners.Parameterized
 
 /**
  * The screen pieces whose colors the theme change had to follow: the Notebook's storage cards, Calendar's permission
- * card, the send buttons (idle, and their spinners and check), and the Devices tab's add button.
+ * card and not-synced notice, the send buttons (idle, and their spinners and check), and the Devices tab's add button.
  *
  * Run with:
  * adb shell am instrument -w -e class com.anopticlabs.gravel.accessibility.ThemeFixPiecesDrawnTextTest \
@@ -63,6 +66,16 @@ class ThemeFixPiecesDrawnTextTest(check: DrawnCheck) {
     @Test
     fun calendarPermissionCard() {
         drawn.setContent { CalendarPermissionCard {} }
+        drawn.assertReadable()
+    }
+
+    @Test
+    fun calendarNotSynced() {
+        val notSynced = CalendarEntity(
+            platformId = "1", name = "Work", ownerName = "Owner", ownerId = "1", color = 0, enabled = true, syncEvents = false,
+        )
+        drawn.setContent { CalendarEntryRow(notSynced) {} }
+        drawn.compose.onNodeWithText("Not synced by Android", substring = true).assertExists()
         drawn.assertReadable()
     }
 
