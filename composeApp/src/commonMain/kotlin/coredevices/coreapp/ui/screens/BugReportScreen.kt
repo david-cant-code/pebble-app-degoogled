@@ -356,69 +356,23 @@ fun BugReportScreen(
                         )
                         Spacer(Modifier.weight(1.0f))
                         if (!canSendReports) {
-                            Button(
+                            ExportLogsButton(
+                                sending = sending,
                                 enabled = !sending && !screenshotLoading,
                                 onClick = {
                                     keyboardController?.hide()
                                     sendLogs(shareLocally = true)
                                 },
-                                contentPadding = ButtonDefaults.ButtonWithIconContentPadding
-                            ) {
-                                if (sending) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        strokeWidth = 2.dp
-                                    )
-                                } else {
-                                    Icon(
-                                        Icons.Filled.Share,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(ButtonDefaults.IconSize)
-                                    )
-                                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                                    Text("Export logs")
-                                }
-                            }
-                        } else Button(
+                            )
+                        } else SendReportButton(
+                            sending = sending,
+                            sent = showSuccess,
                             enabled = !sending && !showSuccess && !screenshotLoading && user != null && canSendReports,
                             onClick = {
                                 keyboardController?.hide()
                                 sendLogs(shareLocally = false)
                             },
-                            contentPadding = ButtonDefaults.ButtonWithIconContentPadding
-                        ) {
-                            when {
-                                sending -> {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        strokeWidth = 2.dp
-                                    )
-                                }
-
-                                showSuccess -> {
-                                    Icon(
-                                        Icons.Default.Check,
-                                        "Success",
-                                        modifier = Modifier.size(ButtonDefaults.IconSize),
-                                        tint = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                                    Text("Report Sent!")
-                                }
-
-                                else -> {
-                                    Text("Send Report")
-                                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                                    Icon(
-                                        Icons.Default.ChevronRight,
-                                        "Send",
-                                        modifier = Modifier.size(ButtonDefaults.IconSize)
-                                    )
-                                }
-                            }
-                        }
+                        )
                     }
                 }
             }
@@ -690,6 +644,73 @@ fun BugReportScreen(
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
                 }
+            }
+        }
+    }
+}
+
+/** Export logs, for builds that cannot send reports; a spinner replaces its label while the logs are gathered. */
+@Composable
+fun ExportLogsButton(sending: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Button(
+        enabled = enabled,
+        onClick = onClick,
+        contentPadding = ButtonDefaults.ButtonWithIconContentPadding
+    ) {
+        if (sending) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                color = MaterialTheme.colorScheme.onSurface,
+                strokeWidth = 2.dp
+            )
+        } else {
+            Icon(
+                Icons.Filled.Share,
+                contentDescription = null,
+                modifier = Modifier.size(ButtonDefaults.IconSize)
+            )
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text("Export logs")
+        }
+    }
+}
+
+/** Send Report: a spinner while the report is sent, then a check with "Report Sent!". */
+@Composable
+fun SendReportButton(sending: Boolean, sent: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Button(
+        enabled = enabled,
+        onClick = onClick,
+        contentPadding = ButtonDefaults.ButtonWithIconContentPadding
+    ) {
+        when {
+            sending -> {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    strokeWidth = 2.dp
+                )
+            }
+
+            sent -> {
+                Icon(
+                    Icons.Default.Check,
+                    "Success",
+                    modifier = Modifier.size(ButtonDefaults.IconSize),
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Text("Report Sent!")
+            }
+
+            else -> {
+                Text("Send Report")
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Icon(
+                    Icons.Default.ChevronRight,
+                    "Send",
+                    modifier = Modifier.size(ButtonDefaults.IconSize)
+                )
             }
         }
     }

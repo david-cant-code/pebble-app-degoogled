@@ -65,41 +65,13 @@ fun CalendarScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
             LazyColumn(modifier = Modifier.padding(8.dp)) {
                 if (!calendarPermissionGrantedSafe) {
                     item {
-                        ElevatedCard(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            elevation = CardDefaults.cardElevation(
-                                defaultElevation = 6.dp
-                            ),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer
-                            )
-                        ) {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Text(
-                                    text = "Calendar permission missing",
-                                    modifier = Modifier.padding(15.dp)
-                                        .align(Alignment.CenterHorizontally),
-                                    textAlign = TextAlign.Center,
-                                )
-                                TextButton(
-                                    onClick = {
-                                        scope.launch {
-                                            permissionRequester.requestPermission(Permission.Calendar, uiContext)
-                                        }
-                                    },
-                                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                                ) {
-                                    Text(
-                                        text = "Approve",
-                                        modifier = Modifier.padding(15.dp),
-                                        textAlign = TextAlign.Center,
-                                        color = MaterialTheme.colorScheme.onErrorContainer,
-                                    )
+                        CalendarPermissionCard(
+                            onApprove = {
+                                scope.launch {
+                                    permissionRequester.requestPermission(Permission.Calendar, uiContext)
                                 }
-                            }
-                        }
+                            },
+                        )
                     }
                 } else if (calendars.isEmpty() && platform.isAndroid) {
                     // Have permission, but no calendars listed
@@ -160,6 +132,42 @@ fun CalendarScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/** The card Calendar Settings shows while the calendar permission is missing. */
+@Composable
+fun CalendarPermissionCard(onApprove: () -> Unit) {
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 6.dp
+        ),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        )
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = "Calendar permission missing",
+                modifier = Modifier.padding(15.dp)
+                    .align(Alignment.CenterHorizontally),
+                textAlign = TextAlign.Center,
+            )
+            TextButton(
+                onClick = onApprove,
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            ) {
+                Text(
+                    text = "Approve",
+                    modifier = Modifier.padding(15.dp),
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
             }
         }
     }

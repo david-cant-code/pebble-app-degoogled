@@ -33,5 +33,9 @@
             android:name="androidx.activity.ComponentActivity"
             android:exported="false"
             tools:replace="android:exported" />
+        <!-- The drawn-text tests' host activity at the largest font size; the tests start it from inside the app. -->
+        <activity
+            android:name="com.anopticlabs.gravel.debug.LargestFontTestActivity"
+            android:exported="false" />
     </application>
 </manifest>

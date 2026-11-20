@@ -26,13 +26,16 @@ type. Gravel keeps them out of release with
 whose `tools:node="remove"` entries drop the four elements from the
 merged manifest; upstream's declarations and classes stay verbatim,
 debug builds keep the receivers for driving an emulator from adb, and
-the release exported-component allowlist is unchanged. Gravel adds one
-receiver of the same kind, declared only in the debug overlay
-`androidApp/src/debug/AndroidManifest.xml`: `SttDebugReceiver`, gated on
-the same permission, sets the four dictation debug hooks and the local
-model from adb and can post a reply-capable test notification for
-driving an emulated watch; release builds never declare it, so there is
-nothing to remove.
+the release exported-component allowlist is unchanged. Gravel adds two
+receivers of the same kind, declared only in the debug overlay
+`androidApp/src/debug/AndroidManifest.xml` and gated on the same
+permission: `SttDebugReceiver` sets the four dictation debug hooks and the
+local model from adb and can post a reply-capable test notification for
+driving an emulated watch, and `NotebookDebugReceiver` drives the Notebook
+from adb for device testing. The overlay also declares two activities for
+the instrumented tests, neither exported: the Compose test library's
+`ComponentActivity` and `LargestFontTestActivity` (see Drawn-text tests).
+Release builds never declare any of these, so there is nothing to remove.
 Two things in
 that verbatim upstream text do not hold here: the manifest comment and
 the receiver KDocs call the receivers safe to keep in release builds,
@@ -2844,3 +2847,27 @@ come from `art/gravel-logo.png`; the brand color is `gravelPurple`
 (0xFF9129DE in `util` `theme/Theme.kt`), while the adaptive-icon
 background (`util .../res/values/ic_launcher_background.xml`) is a
 neutral dark so the purple mark stays visible against it.
+
+## Drawn-text tests
+
+`DrawnText` in `androidApp/src/androidTest` (package
+`com.anopticlabs.gravel.accessibility`) draws one piece of the app on a
+phone and checks the result. The contrast check measures each text at 4.5:1
+in the Light, Dark and Black themes (setup pieces in `onboardingScheme`, as
+`OnboardingScreen` draws them) from the drawn pixels; a styled text's colors
+are also measured as laid out, and a text field's typed value only as laid
+out, against the drawn background. It exempts text that is part of a
+disabled control. The font check fails, at font size 2.0, text cut off,
+sliced, broken inside a word or a number, hidden, or drawn over other text, a
+described icon, or a node with a Role, a progress range or a toggle state;
+"..." on a shortened line passes. `DrawnText`'s KDoc lists what each check
+does not see. The font check runs in
+`LargestFontTestActivity`, a debug-only, non-exported activity declared in
+the debug overlay, whose resources carry the 2.0 font scale so popups opened
+from it are drawn at that size too. The piece tests are instrumented tests:
+they run on a phone with `am instrument` (each test class's KDoc has the
+command), not in CI; `SchemeTextContrastTest` checks the theme's color
+values on the host. Screens whose pieces are tested this way have those
+pieces as public composables (for example `CalendarPermissionCard`,
+`AddPebbleButton`, `StorageTroubleCardContent`), so a test can draw them
+without the screen's services.

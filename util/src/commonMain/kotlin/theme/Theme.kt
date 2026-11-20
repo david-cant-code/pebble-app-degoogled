@@ -249,7 +249,12 @@ fun currentColorScheme(): CoreAppColorScheme {
 fun AppTheme(
     content: @Composable() () -> Unit
 ) {
-    val colorScheme = currentColorScheme()
+    AppTheme(currentColorScheme(), content)
+}
+
+/** The app theme in [colorScheme] whatever the setting says; the drawn-contrast tests draw through it. */
+@Composable
+fun AppTheme(colorScheme: CoreAppColorScheme, content: @Composable () -> Unit) {
     val extendedColors = if (colorScheme.isDark) darkExtendedColors else lightExtendedColors
     setStatusBarTheme(colorScheme)
     val materialColorScheme = when (colorScheme) {

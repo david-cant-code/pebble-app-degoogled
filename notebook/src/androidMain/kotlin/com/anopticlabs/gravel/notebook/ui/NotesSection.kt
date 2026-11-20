@@ -231,8 +231,9 @@ private fun FolderGridPage(grid: Loadable<FolderGrid>, viewModel: NotesViewModel
     }
 }
 
+/** A Notebook part that could not be read; Try again shows when the failure may pass. */
 @Composable
-private fun PartProblem(text: Int, problem: StorageProblem, onRetry: () -> Unit) {
+fun PartProblem(text: Int, problem: StorageProblem, onRetry: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.small) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             Text(stringResource(text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
