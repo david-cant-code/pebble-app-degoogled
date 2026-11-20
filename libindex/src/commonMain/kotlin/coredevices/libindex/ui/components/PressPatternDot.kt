@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -99,7 +100,7 @@ fun PressPatternDot(
             Icon(
                 imageVector = Icons.Default.Mic,
                 contentDescription = null,
-                tint = Color.Red.copy(alpha = 0.9f),
+                tint = contentColorFor(activeColor).copy(alpha = 0.9f),
                 modifier = Modifier
                     .size(size * 0.6f)
                     .alpha(micAlpha),

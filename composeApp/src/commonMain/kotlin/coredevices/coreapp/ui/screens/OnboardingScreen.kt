@@ -41,7 +41,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -189,7 +188,7 @@ fun OnboardingScreen(
                         Image(
                             painter = painterResource(Res.drawable.gravel_logo),
                             contentDescription = "Gravel logo",
-                            colorFilter = ColorFilter.tint(Color.White),
+                            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground),
                             modifier = Modifier.height(50.dp),
                         )
                         Spacer(modifier = Modifier.height(15.dp))

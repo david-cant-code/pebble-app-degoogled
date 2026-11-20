@@ -203,7 +203,6 @@ import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.compose.ui.tooling.preview.Preview
 import org.koin.compose.koinInject
 import org.koin.dsl.module
-import theme.gravelPurple
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
@@ -1874,7 +1873,7 @@ fun LanguageDialog(watch: ConnectedPebbleDevice, onDismissRequest: () -> Unit) {
                             selectedLanguagePack = lp
                         }.border(
                             width = 2.dp,
-                            color = if (isSelected) gravelPurple else Color.Transparent,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
                             shape = RoundedCornerShape(8.dp)
                         ).padding(9.dp),
                     )

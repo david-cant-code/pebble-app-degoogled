@@ -106,15 +106,15 @@ enum class DrawnTheme(val scheme: CoreAppColorScheme?) {
  * another node with text, a content description, a Role, a progress range or a toggle state; a line shortened with
  * "..." passes.
  *
- * Not seen by the contrast check: text without Text semantics (under clearAndSetSemantics, drawn on a Canvas); anything
- * else drawn inside a plain text's own box; what drawing changes after layout in a text field's value or a styled
- * text's colors (a fading layer or overlay, a brush); a span's own background color; text on a see-through part of a
- * popup (a captured pixel's alpha is dropped); the extended colors a setup piece would take under Dark or Black (setup
- * pieces are drawn over the Light app theme only). Not seen by the font check: text without Text semantics; overlaps
- * inside a text field, and with nodes outside the list above (decorative icons, dividers); unwrapped text past its
- * first line. The font check judges breaks by Unicode line breaking alone, in URLs and email addresses too. A piece
- * holding a lazy list longer than the screen is not supported. Emoji in a colored span are measured in the span's
- * color.
+ * Not seen by the contrast check: text without Text semantics (under clearAndSetSemantics, drawn on a Canvas) unless a
+ * test passes its node as `also`; anything else drawn inside a plain text's own box; what drawing changes after layout
+ * in a text field's value or a styled text's colors (a fading layer or overlay, a brush); a span's own background
+ * color; text on a see-through part of a popup (a captured pixel's alpha is dropped); the extended colors a setup piece
+ * would take under Dark or Black (setup pieces are drawn over the Light app theme only). Not seen by the font check:
+ * text without Text semantics; overlaps inside a text field, and with nodes outside the list above (decorative icons,
+ * dividers); unwrapped text past its first line. The font check judges breaks by Unicode line breaking alone, in URLs
+ * and email addresses too. A piece holding a lazy list longer than the screen is not supported. Emoji in a colored span
+ * are measured in the span's color.
  */
 class DrawnText(val check: DrawnCheck) : TestRule {
 
@@ -159,9 +159,12 @@ class DrawnText(val check: DrawnCheck) : TestRule {
         assertTrue(failures.isEmpty(), failures.joinToString("\n"))
     }
 
-    /** For a piece with no text, such as a button showing only a spinner: the contrast check, skipped in the font run. */
+    /**
+     * The contrast check alone, skipped in the font run: for a piece with no text, such as a button showing only a
+     * spinner, text without Text semantics measured through [also], or text still cut off at the largest font.
+     */
     fun assertContrast(vararg also: SemanticsMatcher) {
-        assumeTrue("no text to fit", check == DrawnCheck.CONTRAST)
+        assumeTrue("contrast only", check == DrawnCheck.CONTRAST)
         assertReadable(*also)
     }
 

@@ -61,7 +61,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -865,7 +864,7 @@ fun UriHandler.open(url : String): Boolean {
 }
 
 @Composable
-private fun PropertyRow(
+fun PropertyRow(
     name: String,
     value: String,
     onClick: (() -> Unit)? = null,
@@ -882,7 +881,7 @@ private fun PropertyRow(
     }) {
         Text(
             text = name,
-            color = Color.Gray,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = nameModifier,
             maxLines = 1
         )

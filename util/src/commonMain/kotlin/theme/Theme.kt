@@ -191,6 +191,7 @@ val lightExtendedColors = ExtendedColors(
     onWarning = onWarningLight,
     success = successLight,
     onSuccess = onSuccessLight,
+    inCollection = coreDarkGreen,
 )
 
 val darkExtendedColors = ExtendedColors(
@@ -200,6 +201,7 @@ val darkExtendedColors = ExtendedColors(
     onWarning = onWarningDark,
     success = successDark,
     onSuccess = onSuccessDark,
+    inCollection = coreDarkGreen,
 )
 
 @Immutable

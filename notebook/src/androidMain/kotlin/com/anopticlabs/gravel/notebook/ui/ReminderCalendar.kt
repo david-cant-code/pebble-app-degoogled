@@ -186,14 +186,17 @@ private fun MonthGrid(cells: List<LocalDate>, page: CalendarPage, selected: Loca
         for (week in cells.chunked(7)) {
             Row {
                 for (day in week) {
+                    val today = day == page.today
+                    val rows = page.rows[day].orEmpty()
+                    val phoneEvents = page.phoneEvents[day].orEmpty().size
                     DayCell(
                         day,
                         day.month == page.month.month,
-                        day == page.today,
+                        today,
                         day == selected,
-                        page.rows[day].orEmpty(),
-                        page.phoneEvents[day].orEmpty().size,
-                        times,
+                        rows,
+                        phoneEvents,
+                        dayLabel(day, today, rows, phoneEvents, times),
                         Modifier.weight(1f),
                     ) {
                         viewModel.selectDay(day)
@@ -204,19 +207,19 @@ private fun MonthGrid(cells: List<LocalDate>, page: CalendarPage, selected: Loca
     }
 }
 
+/** One day of the month grid; [label] is what a screen reader says for it. */
 @Composable
-private fun DayCell(
+fun DayCell(
     day: LocalDate,
     inMonth: Boolean,
     today: Boolean,
     selected: Boolean,
     rows: List<CalendarOccurrence>,
     phoneEvents: Int,
-    times: ReminderTimes,
+    label: String,
     modifier: Modifier,
     onClick: () -> Unit,
 ) {
-    val label = dayLabel(day, today, rows, phoneEvents, times)
     val shape = RoundedCornerShape(8.dp)
     Box(
         modifier
@@ -237,7 +240,8 @@ private fun DayCell(
                 day.day.toString(),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (today) FontWeight.Bold else null,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (inMonth) 1f else 0.38f),
+                // Other months' days are dimmed but kept at 4.5:1 or more on each theme's page.
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (inMonth) 1f else 0.62f),
             )
             // The reminders' dots come first, so phone calendar events do not crowd them out.
             val dots = rows.map { dotStatus(it.status) }.sortedBy { it.ordinal }.map { dotColor(it) } + List(phoneEvents) { MaterialTheme.colorScheme.outline }

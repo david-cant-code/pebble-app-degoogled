@@ -382,7 +382,7 @@ private fun MenuEntry(icon: ImageVector, label: Int, danger: Boolean = false, on
 }
 
 @Composable
-private fun NoteRow(note: NoteItem, date: String, selected: Boolean?, onClick: () -> Unit, onLongPress: (() -> Unit)?) {
+fun NoteRow(note: NoteItem, date: String, selected: Boolean?, onClick: () -> Unit, onLongPress: (() -> Unit)?) {
     Card(
         modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongPress),
         colors = CardDefaults.cardColors(
@@ -393,7 +393,8 @@ private fun NoteRow(note: NoteItem, date: String, selected: Boolean?, onClick: (
             if (selected != null) Checkbox(checked = selected, onCheckedChange = { onClick() })
             Column(Modifier.weight(1f)) {
                 Text(note.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
-                Text(date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Takes the card's content color, which follows the selected and unselected fills.
+                Text(date, style = MaterialTheme.typography.labelSmall)
             }
         }
     }
