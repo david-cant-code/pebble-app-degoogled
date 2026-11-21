@@ -94,13 +94,12 @@ class ScreenColorPiecesDrawnTextTest(check: DrawnCheck) {
         drawn.assertReadable()
     }
 
-    // The store cards' author line is cut off at the largest font, so they check contrast only.
     @Test
     fun storeCard() {
         drawn.setContent {
             NativeWatchfaceCard(face, NoOpNavBarNav, width = 125.dp, topBarParams = topBar, highlightInLocker = false)
         }
-        drawn.assertContrast()
+        drawn.assertReadable()
     }
 
     @Test
@@ -114,13 +113,12 @@ class ScreenColorPiecesDrawnTextTest(check: DrawnCheck) {
         drawn.assertReadable()
     }
 
-    // Same author line as storeCard.
     @Test
     fun setupStoreCard() {
         drawn.setSetupContent {
             SetupStoreCard(face) { PebbleElevatedButton(text = "Add", onClick = {}, primaryColor = true) }
         }
-        drawn.assertContrast()
+        drawn.assertReadable()
     }
 
     @Test

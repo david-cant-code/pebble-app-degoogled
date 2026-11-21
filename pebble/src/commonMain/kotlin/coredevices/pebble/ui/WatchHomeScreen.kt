@@ -80,6 +80,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
@@ -576,12 +577,7 @@ fun WatchHomeScreen(
                                 }
                             },
                             title = {
-                                Text(
-                                    text = params.title,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontSize = 28.sp,
-                                    maxLines = 1,
-                                )
+                                WatchHomeTopBarTitle(params.title)
                             },
                             actions = {
                                 params.actions(this)
@@ -617,32 +613,14 @@ fun WatchHomeScreen(
                                 viewModel.selectedTab.value = route
                             },
                             icon = {
-                                BadgedBox(
-                                    badge = {
-                                        if (route.badge != null) {
-                                            val badgeNum = route.badge()
-                                            if (badgeNum > 0) {
-                                                Badge {
-                                                    Text(text = "$badgeNum")
-                                                }
-                                            }
-                                        }
-                                    },
-                                ) {
-                                    Icon(
-                                        route.icon,
-                                        contentDescription = null,
-                                        tint = if (viewModel.selectedTab.value == route) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
+                                WatchHomeTabIcon(
+                                    route,
+                                    selected = viewModel.selectedTab.value == route,
+                                    badgeCount = route.badge?.invoke() ?: 0,
+                                )
                             },
                             label = {
-                                Text(
-                                    stringResource(route.title),
-                                    fontSize = 9.sp,
-                                    color = if (viewModel.selectedTab.value == route) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                )
+                                WatchHomeTabLabel(route, selected = viewModel.selectedTab.value == route)
                             },
                             colors = NavigationBarItemDefaults.colors(
                                 indicatorColor = Color.Transparent
@@ -856,6 +834,50 @@ enum class WatchHomeNavTab(
             return listOfNotNull(Notifications.takeIf { it !in bar }, Health.takeIf { healthEnabled && it !in bar })
         }
     }
+}
+
+/** Gravel: a screen's title in the top bar, which ends in "..." when wider than the bar leaves it. */
+@Composable
+fun WatchHomeTopBarTitle(title: String) {
+    Text(
+        text = title,
+        color = MaterialTheme.colorScheme.primary,
+        fontSize = 28.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+/** Gravel: a tab's icon with its count, if any, as the bottom bar draws them. */
+@Composable
+fun WatchHomeTabIcon(tab: WatchHomeNavTab, selected: Boolean, badgeCount: Int) {
+    BadgedBox(
+        badge = {
+            if (badgeCount > 0) {
+                Badge {
+                    Text(text = "$badgeCount")
+                }
+            }
+        },
+    ) {
+        Icon(
+            tab.icon,
+            contentDescription = null,
+            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Gravel: a tab's label, which ends in "..." when the font size makes it wider than its tab. */
+@Composable
+fun WatchHomeTabLabel(tab: WatchHomeNavTab, selected: Boolean) {
+    Text(
+        stringResource(tab.title),
+        fontSize = 9.sp,
+        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Preview

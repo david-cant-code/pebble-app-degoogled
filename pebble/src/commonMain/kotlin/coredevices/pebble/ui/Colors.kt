@@ -36,6 +36,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PlainTooltip
@@ -65,6 +66,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.anopticlabs.gravel.ui.fontGrowth
 import coredevices.ui.PebbleElevatedButton
 import io.rebble.libpebblecommon.database.entity.RgbColorPreset
 import io.rebble.libpebblecommon.timeline.TimelineColor
@@ -477,7 +479,7 @@ private fun PresetChip(
 }
 
 @Composable
-private fun ChannelSlider(
+fun ChannelSlider(
     label: String,
     value: Int,
     accent: Color,
@@ -495,9 +497,10 @@ private fun ChannelSlider(
             colors = SliderDefaults.colors(thumbColor = accent, activeTrackColor = accent),
             modifier = Modifier.weight(1f),
         )
+        // Gravel: widens with the font size so "255" stays on one line.
         Text(
             value.toString(),
-            modifier = Modifier.padding(start = 8.dp).width(32.dp),
+            modifier = Modifier.padding(start = 8.dp).width(32.dp + fontGrowth("255", LocalTextStyle.current)),
         )
     }
 }

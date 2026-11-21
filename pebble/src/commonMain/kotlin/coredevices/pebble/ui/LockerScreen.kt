@@ -1190,6 +1190,7 @@ fun NativeWatchfaceMainContent(
                 fontSize = 10.sp,
                 lineHeight = 10.sp,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(bottom = 7.dp)
                     .weight(1f),
             )
@@ -1231,6 +1232,7 @@ fun NativeWatchfaceListItem(
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Row {
@@ -1255,6 +1257,7 @@ fun NativeWatchfaceListItem(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp,
                         maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
                         lineHeight = 11.sp,
                     )
                 }

@@ -786,26 +786,14 @@ fun LockerAppScreen(topBarParams: TopBarParams, uuid: Uuid?, navBarNav: NavBarNa
                                     text = {
                                         LazyColumn {
                                             items(changelog) { item ->
-                                                Row(modifier = Modifier.padding(5.dp)) {
-                                                    Text(
-                                                        item.version ?: "Unknown version",
-                                                        fontSize = 20.sp,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                    Spacer(modifier = Modifier.weight(1f))
-                                                    val date = remember(item.publishedDate) {
-                                                        item.publishedDate?.let {
-                                                            PUBLISHED_DATE_FORMAT.format(
-                                                                it.toLocalDateTime(TimeZone.currentSystemDefault())
-                                                            ).uppercase()
-                                                        } ?: ""
-                                                    }
-                                                    Text(
-                                                        date,
-                                                        fontSize = 20.sp,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
+                                                val date = remember(item.publishedDate) {
+                                                    item.publishedDate?.let {
+                                                        PUBLISHED_DATE_FORMAT.format(
+                                                            it.toLocalDateTime(TimeZone.currentSystemDefault())
+                                                        ).uppercase()
+                                                    } ?: ""
                                                 }
+                                                ChangelogEntryHeader(item.version ?: "Unknown version", date)
                                                 Text(
                                                     item.releaseNotes ?: "\n",
                                                     modifier = Modifier.padding(5.dp)
@@ -863,6 +851,18 @@ fun UriHandler.open(url : String): Boolean {
     }
 }
 
+/** Gravel: a changelog entry's version and date, the date moving under the version when they do not fit side by side. */
+@Composable
+fun ChangelogEntryHeader(version: String, date: String) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth().padding(5.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(version, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 16.dp))
+        Text(date, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
 @Composable
 fun PropertyRow(
     name: String,
@@ -872,7 +872,9 @@ fun PropertyRow(
     multiRow: Boolean = false,
     nameModifier: Modifier = Modifier,
 ) {
-    Row(modifier = Modifier.padding(5.dp).let{
+    // Gravel: the value and its icon wrap beside the name, or move under it when the value's longest word and the icon
+    // do not fit there.
+    FlowRow(modifier = Modifier.padding(5.dp).let{
         if (onClick != null) {
             it.then(Modifier.clickable(onClick = onClick))
         } else {
@@ -885,15 +887,17 @@ fun PropertyRow(
             modifier = nameModifier,
             maxLines = 1
         )
-        if (!multiRow) {
-            Text(text = value, modifier = Modifier.padding(start = 8.dp), maxLines = 1)
-        }
-        if (onClick != null) {
-            Icon(
-                imageVector = onClickIcon,
-                contentDescription = null,
-                modifier = Modifier.padding(start = 4.dp).align(Alignment.CenterVertically)
-            )
+        Row(Modifier.weight(1f, fill = false)) {
+            if (!multiRow) {
+                Text(text = value, modifier = Modifier.padding(start = 8.dp).weight(1f, fill = false))
+            }
+            if (onClick != null) {
+                Icon(
+                    imageVector = onClickIcon,
+                    contentDescription = null,
+                    modifier = Modifier.padding(start = 4.dp).align(Alignment.CenterVertically)
+                )
+            }
         }
     }
     if (multiRow) {
