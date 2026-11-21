@@ -210,9 +210,13 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   (`Color(0xFF...)`, `Color.White`, `gravelPurple`) in a composable is only
   for a color shown as data, such as the watch colors a color picker
   offers, or for the black or white drawn on one to contrast with it. This
-  applies to code a change adds, upstream picks included; fixed colors
-  still in older screens are not a pattern to copy, and converting one is
-  a change of its own.
+  applies to code a change adds, upstream picks included. The Health tab
+  (`HealthScreen.kt`, `HealthCharts.kt`) keeps upstream's colors, an
+  exception that keeps its upstream picks cheap. `FixedColorSentinelTest`
+  in `:androidApp` checks main Kotlin files whole, not only their
+  composables (its KDoc lists the spellings it flags and the paths it
+  skips), so a data color or a color outside a composable goes on its
+  allowlist with the reason.
 - **Keep changes single-purpose.** One concern per branch or PR.
 - **Prefer simple architectures.** For example, keep a storage format
   unchanged and convert at the boundary rather than adding format dispatch
