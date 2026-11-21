@@ -217,6 +217,12 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   composables (its KDoc lists the spellings it flags and the paths it
   skips), so a data color or a color outside a composable goes on its
   allowlist with the reason.
+- **Text stays readable:** it has 4.5:1 contrast against what it is drawn
+  on, at every size, in each scheme it is shown in (Light, Dark and Black,
+  or setup's), and it fits with the phone's font size at 2.0. This
+  applies to code a change adds, upstream picks included.
+  `DESIGN_NOTES.md` (Readable text) has the exceptions and the tests that
+  check it.
 - **Keep changes single-purpose.** One concern per branch or PR.
 - **Prefer simple architectures.** For example, keep a storage format
   unchanged and convert at the boundary rather than adding format dispatch

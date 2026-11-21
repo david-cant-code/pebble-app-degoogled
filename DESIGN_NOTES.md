@@ -2848,26 +2848,88 @@ come from `art/gravel-logo.png`; the brand color is `gravelPurple`
 background (`util .../res/values/ic_launcher_background.xml`) is a
 neutral dark so the purple mark stays visible against it.
 
-## Drawn-text tests
+## Readable text
+
+Gravel's contrast floor for text of every size is 4.5:1 against what it
+is drawn on, in each scheme the text is shown in (Light, Dark and Black,
+or setup's `onboardingScheme`); text on a disabled control is exempt.
+Text also has to fit at font size 2.0, the largest the Pixel 6 Pro
+offers: a value too long for its line wraps; text in a slot that holds a
+set number of lines, such as a tab label, a top bar title, or a list
+entry's title or description, may end in "..." (the font check passes
+any line shortened that way, so which slots may shorten is left to
+review); and a settings dropdown value's box widens for its longest word
+up to half the width its row offers it, so a single word wider than that
+breaks inside the word. Both
+rules cover text Gravel draws. They leave out icons, switch and checkbox
+edges, screen reader labels, Display size, web pages shown in the app (a
+watchapp's settings), and text on a color shown as data, such as a color
+picker's color names. The Health tab keeps upstream's colors and layout
+and falls short of both in places. In the Notebook at 2.0, a calendar
+day's "+N" count of 100 or more does not fit on one line; a day whose
+count goes under its dots is taller than the rest of its week, so a
+selected neighbor's fill or today's outline stops short of it; and the reminder
+editor's Every row breaks a unit such as "months" inside the word and
+clips the edge of a four-digit interval.
+`KNOWN_ISSUES.md` has the Health tab and the text on data colors.
+
+Dark and Black use paler purples for `primary`, `secondary` and
+`tertiary`, with black content, and keep `gravelPurple` for
+`primaryContainer` and `secondaryContainer`; Light, Dark and Black each
+have their own `error` color. Selected text is drawn on `gravelPurple` at
+40% in Dark and on black at 40% in setup, where `primary` at 40% would put
+it under the floor. `util` `theme/Theme.kt` holds the values.
+
+What checks it:
+
+- On the host, in CI: `SchemeTextContrastTest` (`util`) checks the
+  Light, Dark and Black schemes' text and content colors against the
+  floor as color values, for the pairs it lists. `ThemeTest` (`util`)
+  checks content on `gravelPurple` fills, `OnboardingSchemeContrastTest`
+  setup's popups and store card, and `WeatherDialogContrastTest`
+  (`pebble`) the weather popups and setup's weather screen, holding their
+  switch outline at 3:1. `FixedColorSentinelTest` (`androidApp`)
+  measures nothing: it flags fixed colors in main Kotlin sources, apart
+  from the paths and allowances its KDoc lists, so colors stay in the
+  schemes these tests check (the `CLAUDE.md` rule "Composables take their
+  colors from the theme").
+- On a phone, drawn (Drawn-text tests, below): `DrawnContrastCheckTest`
+  and `DrawnFontCheckTest` test the two checks themselves. The six piece
+  classes each run twice, once for contrast and once for fit at font size
+  2.0; a test that calls `assertContrast` is skipped in the font run.
+  `SharedPiecesDrawnTextTest` draws the Material pieces most screens use;
+  `ThemeFixPiecesDrawnTextTest`, `ScreenColorPiecesDrawnTextTest` and
+  `WeatherDrawnTextTest` draw screen pieces, listed in each class's KDoc;
+  `NotebookFontPiecesDrawnTextTest` and `ScreenFontPiecesDrawnTextTest`
+  draw pieces laid out again to fit at 2.0, and check some sizes at font
+  1.0 only when the phone is at 1.0. `ThemeFixPiecesDrawnTextTest` also
+  measures the spinners and icons it names at 4.5:1. The font check draws
+  at the phone's own width; the drawn tests were run on a Pixel 6 Pro at
+  its default display size (411 dp wide) with its font size at 1.0, so
+  narrower widths are not checked, apart from one check that the
+  Notebook section switch shows "Reminders" whole when it is selected,
+  at font 1.0 at a 360 dp-wide phone's width. `SelectionHighlightTest`
+  checks that the app theme and `OnboardingTheme`, which both setup
+  screens draw in, provide the selection highlights above.
+
+### Drawn-text tests
 
 `DrawnText` in `androidApp/src/androidTest` (package
 `com.anopticlabs.gravel.accessibility`) draws one piece of the app on a
-phone and checks the result. The contrast check measures each text at 4.5:1
-in the Light, Dark and Black themes (setup pieces in `onboardingScheme`, as
-`OnboardingScreen` draws them) from the drawn pixels; a styled text's colors
-are also measured as laid out, and a text field's typed value only as laid
-out, against the drawn background. It exempts text that is part of a
-disabled control. The font check fails, at font size 2.0, text cut off,
-sliced, broken inside a word or a number, hidden, or drawn over other text, a
-described icon, or a node with a Role, a progress range or a toggle state;
-"..." on a shortened line passes. `DrawnText`'s KDoc lists what each check
-does not see. The font check runs in
+phone and checks the result. The contrast check measures each text against
+the floor above in each theme the piece is drawn in (setup pieces in
+`onboardingScheme`, as `OnboardingScreen` draws them) from the drawn pixels;
+a styled text's colors are also measured as laid out, and a text field's
+typed value only as laid out, against the drawn background. The font check
+fails, at font size 2.0, text cut off, sliced, broken inside a word or a
+number, hidden, or drawn over other text, a described icon, or a node with a
+Role, a progress range or a toggle state; "..." on a shortened line passes.
+`DrawnText`'s KDoc lists what each check does not see. The font check runs in
 `LargestFontTestActivity`, a debug-only, non-exported activity declared in
 the debug overlay, whose resources carry the 2.0 font scale so popups opened
 from it are drawn at that size too. The piece tests are instrumented tests:
 they run on a phone with `am instrument` (each test class's KDoc has the
-command), not in CI; `SchemeTextContrastTest` checks the theme's color
-values on the host. Screens whose pieces are tested this way have those
+command), not in CI. Screens whose pieces are tested this way have those
 pieces as public composables (for example `CalendarPermissionCard`,
 `AddPebbleButton`, `StorageTroubleCardContent`), so a test can draw them
 without the screen's services.
