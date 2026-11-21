@@ -1868,3 +1868,14 @@ App Store's measure 6.3:1 to 12.7:1; the Rebble App Store's, shown when
 signed in to Rebble, were not measured, and any store can send a darker
 or see-through color. Closing this means picking whichever of black or
 white contrasts more with the color.
+
+## Some unreadable category data from an app store can crash the app
+
+**Status: accepted.**
+
+Some kinds of category data from an app store that the app cannot read
+crash the app when the Apps tab lists that store's watchapps, and again
+each time it does. This applies to the built-in Pebble App Store, to the
+Rebble App Store while signed in to Rebble, and to any app store source
+you add and keep on. Turning that store off under Configure Appstore
+Sources in Settings stops it.
