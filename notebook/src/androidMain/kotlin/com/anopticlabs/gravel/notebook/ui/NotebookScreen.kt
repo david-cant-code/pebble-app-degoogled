@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -43,11 +45,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.times
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -229,11 +233,17 @@ private fun RemedyButtons(remedy: CaptureRemedy?, holdActions: HoldActions) {
     when (remedy) {
         CaptureRemedy.TEXT_MODEL -> TextButton(onClick = holdActions.openTextModels) { Text(stringResource(R.string.notebook_text_model_settings)) }
         CaptureRemedy.SPEECH_SETTINGS -> TextButton(onClick = holdActions.openSpeechSettings) { Text(stringResource(R.string.notebook_speech_settings)) }
-        CaptureRemedy.SERVER_CHECK -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = holdActions.openSpeechSettings) { Text(stringResource(R.string.notebook_speech_settings)) }
-            TextButton(onClick = holdActions.tryServerAgain) { Text(stringResource(R.string.notebook_server_try_again)) }
-        }
+        CaptureRemedy.SERVER_CHECK -> ServerCheckButtons(holdActions.openSpeechSettings, holdActions.tryServerAgain)
         null -> {}
+    }
+}
+
+/** The buttons for a failing transcription server; Try again moves under the first when it does not fit. */
+@Composable
+fun ServerCheckButtons(openSpeechSettings: () -> Unit, tryAgain: () -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextButton(onClick = openSpeechSettings) { Text(stringResource(R.string.notebook_speech_settings)) }
+        TextButton(onClick = tryAgain) { Text(stringResource(R.string.notebook_server_try_again)) }
     }
 }
 
@@ -460,8 +470,9 @@ private fun CaptureResultRow(item: CaptureQueueItem, onOpen: (() -> Unit)?, onDi
     }
 }
 
+/** The Notes, Reminders and Calendar switch. */
 @Composable
-private fun SectionRow(selected: NotebookSection, onSelect: (NotebookSection) -> Unit) {
+fun SectionRow(selected: NotebookSection, onSelect: (NotebookSection) -> Unit) {
     val sections = NotebookSection.entries
     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
         sections.forEachIndexed { index, section ->
@@ -477,10 +488,29 @@ private fun SectionRow(selected: NotebookSection, onSelect: (NotebookSection) ->
                                 NotebookSection.REMINDERS -> R.string.notebook_section_reminders
                                 NotebookSection.CALENDAR -> R.string.notebook_section_calendar
                             }
-                        )
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.leaveSegmentIconRoom(section == selected),
                     )
                 },
             )
         }
     }
+}
+
+// SegmentedButton measures its label at the content's full width and adds the check icon's room, 18 dp plus 8 dp,
+// beside it; its content Box centers the result over the side paddings, and segments overlap by their border
+// (material3-android 1.5.0-alpha08, SegmentedButtonContentMeasurePolicy.measure, SegmentedButtonContent,
+// SingleChoiceSegmentedButtonRow). Only the selected segment draws the icon; its label leaves what the paddings, less
+// the border, cannot give.
+private fun Modifier.leaveSegmentIconRoom(selected: Boolean) = layout { measurable, constraints ->
+    val padding = SegmentedButtonDefaults.ContentPadding.let {
+        it.calculateStartPadding(layoutDirection) + it.calculateEndPadding(layoutDirection)
+    }
+    val iconRoom = SegmentedButtonDefaults.IconSize + 8.dp
+    val room = if (selected) (iconRoom - padding + 2 * SegmentedButtonDefaults.BorderWidth).roundToPx() else 0
+    val width = if (constraints.hasBoundedWidth) (constraints.maxWidth - room).coerceAtLeast(constraints.minWidth) else constraints.maxWidth
+    val placeable = measurable.measure(constraints.copy(maxWidth = width))
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
 }

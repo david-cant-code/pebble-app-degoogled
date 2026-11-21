@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -73,6 +72,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -269,15 +269,19 @@ private fun FolderCard(folder: FolderItem, onOpen: () -> Unit, onLongPress: (() 
     )
 }
 
+/** A tile of the folder grid: a folder with its note count, or an action such as New folder. */
 @Composable
-private fun FolderTile(icon: ImageVector, label: String, count: String?, onOpen: () -> Unit, onLongPress: (() -> Unit)? = null) {
+fun FolderTile(icon: ImageVector, label: String, count: String?, onOpen: () -> Unit, onLongPress: (() -> Unit)? = null) {
     Card(
-        modifier = Modifier.fillMaxWidth().height(96.dp).combinedClickable(onClick = onOpen, onLongClick = onLongPress),
+        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = onLongPress),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
-        Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
+        Column(Modifier.fillMaxWidth().heightIn(min = 96.dp).padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Column {
+                // A tile without a count keeps an empty count line above its label, so tiles sharing a grid row stay the
+                // same height and the label stays at the bottom.
+                if (count == null) Text("", style = MaterialTheme.typography.labelSmall, modifier = Modifier.clearAndSetSemantics {})
                 Text(label, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 count?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
