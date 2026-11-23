@@ -4,6 +4,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -275,34 +277,53 @@ fun NotebookSetupGuide(tab: NotebookTab) {
     }
     val recording = SetupStep.TYPED_ONLY !in all
     val index = all.indexOf(current)
-    Column(Modifier.fillMaxSize().padding(vertical = 8.dp)) {
+    SetupGuideFrame(
+        step = "Step ${index + 1} of ${all.size}",
+        onClose = if (guide.rerun) viewModel::finish else null,
+        pageKey = current,
+        buttons = { SetupButtons(viewModel, tab, current, first = index == 0, rerun = guide.rerun) },
+    ) {
+        when (current) {
+            SetupStep.EARLY_BETA -> EarlyBetaPage()
+            SetupStep.WELCOME -> WelcomePage(recording)
+            SetupStep.SPEECH -> SpeechPage(viewModel)
+            SetupStep.TEXT_MODEL -> TextModelPage(viewModel)
+            SetupStep.TYPED_ONLY -> TypedOnlyPage()
+            SetupStep.PROCESSING -> ProcessingPage(tab)
+            SetupStep.QUICK_COMPLETION -> QuickCompletionPage(tab)
+            SetupStep.REMINDER_TIME -> ReminderTimePage(tab)
+            SetupStep.BACKUPS -> BackupsPage(tab)
+            SetupStep.WATCH -> WatchPage(tab)
+            SetupStep.DONE -> DonePage(recording)
+        }
+    }
+}
+
+/** The guide's frame: the step line, with Close when [onClose] is given, the page scrolling under it, and [buttons] below. */
+@Composable
+fun SetupGuideFrame(
+    step: String,
+    onClose: (() -> Unit)?,
+    pageKey: Any,
+    buttons: @Composable () -> Unit,
+    page: @Composable ColumnScope.() -> Unit,
+) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Step ${index + 1} of ${all.size}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
-            if (guide.rerun) {
-                IconButton(onClick = viewModel::finish) { Icon(Icons.Filled.Close, contentDescription = "Close the setup guide") }
+            Text(step, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+            if (onClose != null) {
+                IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "Close the setup guide") }
             }
         }
-        key(current) {
+        // A new page starts scrolled to its top.
+        key(pageKey) {
             Column(
                 Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                when (current) {
-                    SetupStep.EARLY_BETA -> EarlyBetaPage()
-                    SetupStep.WELCOME -> WelcomePage(recording)
-                    SetupStep.SPEECH -> SpeechPage(viewModel)
-                    SetupStep.TEXT_MODEL -> TextModelPage(viewModel)
-                    SetupStep.TYPED_ONLY -> TypedOnlyPage()
-                    SetupStep.PROCESSING -> ProcessingPage(tab)
-                    SetupStep.QUICK_COMPLETION -> QuickCompletionPage(tab)
-                    SetupStep.REMINDER_TIME -> ReminderTimePage(tab)
-                    SetupStep.BACKUPS -> BackupsPage(tab)
-                    SetupStep.WATCH -> WatchPage(tab)
-                    SetupStep.DONE -> DonePage(recording)
-                }
-            }
+                content = page,
+            )
         }
-        SetupButtons(viewModel, tab, current, first = index == 0, rerun = guide.rerun)
+        buttons()
     }
 }
 
@@ -315,9 +336,7 @@ private fun SetupButtons(viewModel: NotebookSetupViewModel, tab: NotebookTab, st
     val backups by tab.autoBackup.collectAsState()
     val on = backupsOn(backups)
     val next = canContinue(step, speechCanGoOn(speech, offerFailed), textModelReady(textFacts, textRequest), on)
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (!first) TextButton(onClick = { viewModel.back(step) }) { Text("Back") }
-        Spacer(Modifier.weight(1f))
+    SetupButtonRow(onBack = if (first) null else ({ viewModel.back(step) })) {
         when (step) {
             SetupStep.WELCOME -> {
                 OutlinedButton(onClick = tab::startRestore) { Text("Restore from a backup") }
@@ -330,6 +349,20 @@ private fun SetupButtons(viewModel: NotebookSetupViewModel, tab: NotebookTab, st
             SetupStep.DONE -> Button(onClick = viewModel::finish) { Text(if (rerun) "Done" else "Open the Notebook") }
             else -> Button(onClick = { viewModel.next(step) }, enabled = next) { Text("Next") }
         }
+    }
+}
+
+/** Back at the start and [buttons] at the end; buttons that do not fit on a line move to the next, at its end. */
+@Composable
+fun SetupButtonRow(onBack: (() -> Unit)?, buttons: @Composable () -> Unit) {
+    FlowRow(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+        itemVerticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (onBack != null) TextButton(onClick = onBack) { Text("Back") }
+        Spacer(Modifier.weight(1f))
+        buttons()
     }
 }
 

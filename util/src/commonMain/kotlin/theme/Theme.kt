@@ -1,6 +1,8 @@
 package theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -26,7 +28,7 @@ import org.koin.compose.koinInject
 import theme.CoreAppTheme.Companion.asCoreAppTheme
 
 // Fork brand color, sampled from the Gravel logo artwork (art/gravel-logo.png).
-// Replaces upstream's coreOrange 0xFFFA4A36 everywhere; the launcher background in
+// Replaces upstream's coreOrange 0xFFFA4A36; the launcher background in
 // util res/values/ic_launcher_background.xml is chosen to contrast with this.
 val gravelPurple = Color(0xFF9129DE)
 
@@ -38,22 +40,39 @@ val coreGrey = Color(0xFF333333)
 val coreDarkGrey = Color(0xFF2B2930)
 val coreDarkGreen = Color(0xFF157a30)
 private val error = Color(0xFFFA6B66)
+
+// gravelPurple text is under 4.5:1 on Dark's and Black's surfaces, and so is `error` on Dark's,
+// so their primary, secondary, tertiary and (in Dark) error slots take these lighter colors. Those
+// slots are fills too, so their content is black. errorDeep is Light's error and the errorContainer
+// of Light, Dark and Black (setup's onboardingScheme keeps `error`). SchemeTextContrastTest checks
+// Light, Dark and Black.
+private val gravelLavender = Color(0xFFDBB8F4)
+private val gravelViolet = Color(0xFFB874EA)
+private val errorPale = Color(0xFFFCB2AF)
+private val errorDeep = Color(0xFFC02727)
+
+// Black's Notebook cards. contentColorFor matches the background by value and checks
+// surfaceVariant before surfaceContainerHighest (material3-android 1.5.0-alpha08,
+// ColorScheme.contentColorFor), so this stays one step off coreDarkGrey, or default Cards and
+// dialogs would take onSurfaceVariant text.
+private val blackCard = Color(0xFF2A282F)
+
 val greyScheme = darkColorScheme(
-    primary = gravelPurple,
-    onPrimary = Color.White,
+    primary = gravelLavender,
+    onPrimary = Color.Black,
     primaryContainer = gravelPurple,
     onPrimaryContainer = Color.White,
-    secondary = gravelPurple,
-    onSecondary = Color.White,
+    secondary = gravelLavender,
+    onSecondary = Color.Black,
     secondaryContainer = gravelPurple,
     onSecondaryContainer = Color.White,
-    tertiary = gravelPurple,
-    onTertiary = Color.White,
+    tertiary = gravelLavender,
+    onTertiary = Color.Black,
     tertiaryContainer = tertiaryContainerDark,
     onTertiaryContainer = onTertiaryContainerDark,
-    error = error,
-    onError = Color.White,
-    errorContainer = error,
+    error = errorPale,
+    onError = Color.Black,
+    errorContainer = errorDeep,
     onErrorContainer = Color.White,
     background = coreGrey,
     onBackground = onBackgroundDark,
@@ -75,7 +94,14 @@ val greyScheme = darkColorScheme(
 
 // Containers must ascend lowest -> highest, and surfaceContainer must clear `surface`: it is what
 // menus and popups paint themselves, so matching the page behind them leaves them with no edge.
+// copy() keeps greyScheme's surfaceTint, so it is set beside primary.
 val blackScheme = greyScheme.copy(
+    primary = gravelViolet,
+    secondary = gravelViolet,
+    tertiary = gravelViolet,
+    surfaceTint = gravelViolet,
+    error = error,
+    surfaceVariant = blackCard,
     background = Color.Black,
     surface = Color.Black,
     scrim = Color.Black,
@@ -101,9 +127,9 @@ val lightScheme = lightColorScheme(
     onTertiary = Color(0xFFFFFFFF),
     tertiaryContainer = tertiaryContainerLight,
     onTertiaryContainer = onTertiaryContainerLight,
-    error = error,
+    error = errorDeep,
     onError = Color.White,
-    errorContainer = error,
+    errorContainer = errorDeep,
     onErrorContainer = Color.White,
     background = Color.White,
     onBackground = onBackgroundLight,
@@ -165,6 +191,7 @@ val lightExtendedColors = ExtendedColors(
     onWarning = onWarningLight,
     success = successLight,
     onSuccess = onSuccessLight,
+    inCollection = coreDarkGreen,
 )
 
 val darkExtendedColors = ExtendedColors(
@@ -174,6 +201,7 @@ val darkExtendedColors = ExtendedColors(
     onWarning = onWarningDark,
     success = successDark,
     onSuccess = onSuccessDark,
+    inCollection = coreDarkGreen,
 )
 
 @Immutable
@@ -223,7 +251,12 @@ fun currentColorScheme(): CoreAppColorScheme {
 fun AppTheme(
     content: @Composable() () -> Unit
 ) {
-    val colorScheme = currentColorScheme()
+    AppTheme(currentColorScheme(), content)
+}
+
+/** The app theme in [colorScheme] whatever the setting says; the drawn-contrast tests draw through it. */
+@Composable
+fun AppTheme(colorScheme: CoreAppColorScheme, content: @Composable () -> Unit) {
     val extendedColors = if (colorScheme.isDark) darkExtendedColors else lightExtendedColors
     setStatusBarTheme(colorScheme)
     val materialColorScheme = when (colorScheme) {
@@ -232,11 +265,34 @@ fun AppTheme(
         CoreAppColorScheme.Black -> blackScheme
     }
     CompositionLocalProvider(LocalExtendedColors provides extendedColors) {
-        MaterialTheme(
-            colorScheme = materialColorScheme,
-            typography = AppTypography(),
-            content = content
-        )
+        MaterialTheme(colorScheme = materialColorScheme, typography = AppTypography()) {
+            CompositionLocalProvider(LocalTextSelectionColors provides textSelectionColors(colorScheme), content = content)
+        }
+    }
+}
+
+// Each MaterialTheme highlights selected text in its primary at 40% (material3-android 1.5.0-alpha08,
+// MaterialTheme.rememberTextSelectionColors). onSurface on Dark's lavender at 40% is under 4.5:1, so
+// Dark's highlight is gravelPurple; setup's white text on white at 40% is too, so setup's is black.
+// SchemeTextContrastTest checks both.
+internal fun textSelectionColors(colorScheme: CoreAppColorScheme): TextSelectionColors {
+    val primary = when (colorScheme) {
+        CoreAppColorScheme.Light -> lightScheme.primary
+        CoreAppColorScheme.Grey -> greyScheme.primary
+        CoreAppColorScheme.Black -> blackScheme.primary
+    }
+    val highlight = if (colorScheme == CoreAppColorScheme.Grey) gravelPurple else primary
+    return TextSelectionColors(handleColor = primary, backgroundColor = highlight.copy(alpha = 0.4f))
+}
+
+internal val onboardingTextSelectionColors =
+    TextSelectionColors(handleColor = Color.White, backgroundColor = Color.Black.copy(alpha = 0.4f))
+
+/** Setup's [onboardingScheme], drawn over the app theme, with its own selection highlight. */
+@Composable
+fun OnboardingTheme(content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme = onboardingScheme) {
+        CompositionLocalProvider(LocalTextSelectionColors provides onboardingTextSelectionColors, content = content)
     }
 }
 

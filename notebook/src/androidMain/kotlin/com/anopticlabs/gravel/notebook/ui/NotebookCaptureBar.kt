@@ -2,6 +2,7 @@ package com.anopticlabs.gravel.notebook.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -34,7 +35,7 @@ internal fun clockText(seconds: Long): String = "${seconds / 60}:${(seconds % 60
 
 /** The record control, the new-note button and what the last recording or record tap has to say. */
 @Composable
-internal fun CaptureBar(
+fun CaptureBar(
     recordingSupported: Boolean?,
     state: RecorderState,
     notice: RecorderNotice?,
@@ -52,7 +53,14 @@ internal fun CaptureBar(
         onDispose { view.keepScreenOn = false }
     }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        // FlowRow places the weighted hint by its longest word (foundation-layout-android 1.11.2, FlowLayoutKt.measureAndCache),
+        // so New note moves to the next line, at the end, once that word no longer fits beside both buttons.
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
             when {
                 recordingSupported != true -> Unit
                 state == RecorderState.Idle -> FilledIconButton(onClick = onRecord, modifier = Modifier.size(56.dp)) {

@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -40,7 +41,6 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -248,51 +248,29 @@ fun NotificationAppScreen(
                         }
                     }
                     item {
-                        ElevatedCard(
-                            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-                            modifier = Modifier.padding(10.dp),
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                            ) {
-                                Text("Allow duplicate notifications", fontSize = 17.sp)
-                                Switch(
-                                    checked = appWrapper.app.allowDuplicates,
-                                    onCheckedChange = { newValue ->
-                                        notificationApps.updateNotificationAppAllowDuplicates(
-                                            packageName = appWrapper.app.packageName,
-                                            allowDuplicates = newValue,
-                                        )
-                                    },
+                        AppSwitchCard(
+                            text = "Allow duplicate notifications",
+                            checked = appWrapper.app.allowDuplicates,
+                            onCheckedChange = { newValue ->
+                                notificationApps.updateNotificationAppAllowDuplicates(
+                                    packageName = appWrapper.app.packageName,
+                                    allowDuplicates = newValue,
                                 )
-                            }
-                        }
+                            },
+                        )
                     }
                     if (pebbleFeatures.supportsNotificationImages()) item {
-                        ElevatedCard(
-                            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-                            modifier = Modifier.padding(10.dp),
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                            ) {
-                                Text("Send images", fontSize = 17.sp)
-                                Switch(
-                                    checked = appWrapper.app.sendImages,
-                                    enabled = sendImagesEnabledGlobally,
-                                    onCheckedChange = { newValue ->
-                                        notificationApps.updateNotificationAppSendImages(
-                                            packageName = appWrapper.app.packageName,
-                                            sendImages = newValue,
-                                        )
-                                    },
+                        AppSwitchCard(
+                            text = "Send images",
+                            checked = appWrapper.app.sendImages,
+                            enabled = sendImagesEnabledGlobally,
+                            onCheckedChange = { newValue ->
+                                notificationApps.updateNotificationAppSendImages(
+                                    packageName = appWrapper.app.packageName,
+                                    sendImages = newValue,
                                 )
-                            }
-                        }
+                            },
+                        )
                     }
                 }
                 
@@ -548,7 +526,7 @@ private fun NotificationRuleDialog(
 }
 
 @Composable
-private fun ChannelCard(
+fun ChannelCard(
     channelItem: ChannelItem,
     app: NotificationAppItem,
     notificationApps: NotificationApps,
@@ -579,8 +557,10 @@ private fun ChannelCard(
         modifier = modifier,
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         headlineContent = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(channelItem.name, fontSize = 17.sp)
+            // Gravel: a long name wraps beside the count, and the count moves under the name when the name's longest
+            // word and the count do not fit on one line.
+            FlowRow(itemVerticalAlignment = Alignment.CenterVertically) {
+                Text(channelItem.name, fontSize = 17.sp, modifier = Modifier.weight(1f, fill = false))
                 if (clickable) {
                     Badge(modifier = Modifier.padding(horizontal = 7.dp)) {
                         Text("$count")
@@ -607,15 +587,29 @@ private fun ChannelCard(
                             muteState = toggledState,
                         )
                     },
-                    colors = SwitchDefaults.colors(
-                        checkedTrackColor = Color.Red,
-                        uncheckedTrackColor = Color.White
-                    ),
                     enabled = !appMuted,
                 )
             }
         }
     )
+}
+
+/** Gravel: an app's on/off setting on its own card; a long text wraps, keeping the switch in view. */
+@Composable
+fun AppSwitchCard(text: String, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
+    ElevatedCard(
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+        modifier = Modifier.padding(10.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+        ) {
+            Text(text, fontSize = 17.sp, modifier = Modifier.weight(1f))
+            Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+        }
+    }
 }
 
 @Preview

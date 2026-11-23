@@ -42,6 +42,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.anopticlabs.gravel.notebook.R
@@ -107,8 +108,8 @@ internal fun ReminderEditor(form: ReminderForm, times: ReminderTimes, viewModel:
                 if ((form.target as? ReminderFormTarget.Edit)?.item?.timeToCheck == true) {
                     Text(stringResource(R.string.notebook_reminders_time_to_check_note), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Field(stringResource(R.string.notebook_reminders_field_date), times.date(form.atMillis)) { pickDate = true }
-                Field(stringResource(R.string.notebook_reminders_field_time), times.time(form.atMillis)) { pickTime = true }
+                ReminderEditorField(stringResource(R.string.notebook_reminders_field_date), times.date(form.atMillis)) { pickDate = true }
+                ReminderEditorField(stringResource(R.string.notebook_reminders_field_time), times.time(form.atMillis)) { pickTime = true }
                 (plan as? ReminderEditPlan.Refused)?.problem?.takeIf { it != ReminderEditProblem.MESSAGE_MISSING }?.let {
                     Text(stringResource(problemText(it)), color = MaterialTheme.colorScheme.error)
                 }
@@ -182,11 +183,12 @@ internal fun ReminderEditor(form: ReminderForm, times: ReminderTimes, viewModel:
     }
 }
 
+/** A tappable row of the reminder editor: the label at the start, its value at the end, wrapping when it is long. */
 @Composable
-private fun Field(label: String, value: String, onClick: () -> Unit) {
+fun ReminderEditorField(label: String, value: String, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.titleMedium)
+        Text(label, modifier = Modifier.padding(end = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
     }
 }
 

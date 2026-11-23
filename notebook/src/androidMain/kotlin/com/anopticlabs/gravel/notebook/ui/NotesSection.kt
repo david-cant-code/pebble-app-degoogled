@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -42,6 +41,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -72,6 +72,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -230,13 +231,18 @@ private fun FolderGridPage(grid: Loadable<FolderGrid>, viewModel: NotesViewModel
     }
 }
 
+/** A Notebook part that could not be read; Try again shows when the failure may pass. */
 @Composable
-private fun PartProblem(text: Int, problem: StorageProblem, onRetry: () -> Unit) {
+fun PartProblem(text: Int, problem: StorageProblem, onRetry: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.small) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             Text(stringResource(text), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
             if (problem == StorageProblem.UNREADABLE) {
-                TextButton(onClick = onRetry, modifier = Modifier.align(Alignment.End)) { Text(stringResource(R.string.notebook_try_again)) }
+                TextButton(
+                    onClick = onRetry,
+                    modifier = Modifier.align(Alignment.End),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onErrorContainer),
+                ) { Text(stringResource(R.string.notebook_try_again)) }
             }
         }
     }
@@ -263,15 +269,19 @@ private fun FolderCard(folder: FolderItem, onOpen: () -> Unit, onLongPress: (() 
     )
 }
 
+/** A tile of the folder grid: a folder with its note count, or an action such as New folder. */
 @Composable
-private fun FolderTile(icon: ImageVector, label: String, count: String?, onOpen: () -> Unit, onLongPress: (() -> Unit)? = null) {
+fun FolderTile(icon: ImageVector, label: String, count: String?, onOpen: () -> Unit, onLongPress: (() -> Unit)? = null) {
     Card(
-        modifier = Modifier.fillMaxWidth().height(96.dp).combinedClickable(onClick = onOpen, onLongClick = onLongPress),
+        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = onLongPress),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
-        Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
+        Column(Modifier.fillMaxWidth().heightIn(min = 96.dp).padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Column {
+                // A tile without a count keeps an empty count line above its label, so tiles sharing a grid row stay the
+                // same height and the label stays at the bottom.
+                if (count == null) Text("", style = MaterialTheme.typography.labelSmall, modifier = Modifier.clearAndSetSemantics {})
                 Text(label, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 count?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
@@ -376,7 +386,7 @@ private fun MenuEntry(icon: ImageVector, label: Int, danger: Boolean = false, on
 }
 
 @Composable
-private fun NoteRow(note: NoteItem, date: String, selected: Boolean?, onClick: () -> Unit, onLongPress: (() -> Unit)?) {
+fun NoteRow(note: NoteItem, date: String, selected: Boolean?, onClick: () -> Unit, onLongPress: (() -> Unit)?) {
     Card(
         modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongPress),
         colors = CardDefaults.cardColors(
@@ -387,7 +397,8 @@ private fun NoteRow(note: NoteItem, date: String, selected: Boolean?, onClick: (
             if (selected != null) Checkbox(checked = selected, onCheckedChange = { onClick() })
             Column(Modifier.weight(1f)) {
                 Text(note.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
-                Text(date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Takes the card's content color, which follows the selected and unselected fills.
+                Text(date, style = MaterialTheme.typography.labelSmall)
             }
         }
     }

@@ -37,9 +37,9 @@ import coredevices.util.Platform
 import coredevices.util.granted
 import coredevices.util.isAndroid
 import coredevices.util.rememberUiContext
+import io.rebble.libpebblecommon.database.entity.CalendarEntity
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
-import theme.gravelPurple
 
 @Composable
 fun CalendarScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
@@ -65,41 +65,13 @@ fun CalendarScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
             LazyColumn(modifier = Modifier.padding(8.dp)) {
                 if (!calendarPermissionGrantedSafe) {
                     item {
-                        ElevatedCard(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            elevation = CardDefaults.cardElevation(
-                                defaultElevation = 6.dp
-                            ),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer
-                            )
-                        ) {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Text(
-                                    text = "Calendar permission missing",
-                                    modifier = Modifier.padding(15.dp)
-                                        .align(Alignment.CenterHorizontally),
-                                    textAlign = TextAlign.Center,
-                                )
-                                TextButton(
-                                    onClick = {
-                                        scope.launch {
-                                            permissionRequester.requestPermission(Permission.Calendar, uiContext)
-                                        }
-                                    },
-                                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                                ) {
-                                    Text(
-                                        text = "Approve",
-                                        modifier = Modifier.padding(15.dp),
-                                        textAlign = TextAlign.Center,
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                    )
+                        CalendarPermissionCard(
+                            onApprove = {
+                                scope.launch {
+                                    permissionRequester.requestPermission(Permission.Calendar, uiContext)
                                 }
-                            }
-                        }
+                            },
+                        )
                     }
                 } else if (calendars.isEmpty() && platform.isAndroid) {
                     // Have permission, but no calendars listed
@@ -141,25 +113,72 @@ fun CalendarScreen(navBarNav: NavBarNav, topBarParams: TopBarParams) {
 
                     items(calendarList.size) { i ->
                         val entry = calendarList[i]
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = entry.enabled,
-                                onCheckedChange = { isChecked ->
-                                    libPebble.updateCalendarEnabled(entry.id, isChecked)
-                                }
-                            )
-                            Text(entry.name)
-                        }
-                        if (entry.enabled && (!entry.syncEvents || !entry.visible)) {
-                            Row {
-                                Text(
-                                    text = "Not synced by Android - toggle checkbox to ask Android to sync",
-                                    color = gravelPurple,
-                                )
-                            }
-                        }
+                        CalendarEntryRow(
+                            entry = entry,
+                            onEnabledChange = { isChecked ->
+                                libPebble.updateCalendarEnabled(entry.id, isChecked)
+                            },
+                        )
                     }
                 }
+            }
+        }
+    }
+}
+
+/** One calendar's row in Calendar Settings, with a notice when it is on but Android does not sync or show it. */
+@Composable
+fun CalendarEntryRow(entry: CalendarEntity, onEnabledChange: (Boolean) -> Unit) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = entry.enabled,
+                onCheckedChange = onEnabledChange,
+            )
+            Text(entry.name)
+        }
+        if (entry.enabled && (!entry.syncEvents || !entry.visible)) {
+            Row {
+                Text(
+                    text = "Not synced by Android - toggle checkbox to ask Android to sync",
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
+
+/** The card Calendar Settings shows while the calendar permission is missing. */
+@Composable
+fun CalendarPermissionCard(onApprove: () -> Unit) {
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 6.dp
+        ),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        )
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = "Calendar permission missing",
+                modifier = Modifier.padding(15.dp)
+                    .align(Alignment.CenterHorizontally),
+                textAlign = TextAlign.Center,
+            )
+            TextButton(
+                onClick = onApprove,
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            ) {
+                Text(
+                    text = "Approve",
+                    modifier = Modifier.padding(15.dp),
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
             }
         }
     }

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -95,7 +96,7 @@ internal enum class TroubleText {
 internal data class TroubleLine(val text: TroubleText, val parts: List<NotebookPart> = emptyList(), val at: Long? = null)
 
 /** A button the storage card shows. */
-internal enum class TroubleAction { TRY_AGAIN, START_OVER, START_OVER_ANYWAY, RESTORE, REBUILD, START_FRESH }
+enum class TroubleAction { TRY_AGAIN, START_OVER, START_OVER_ANYWAY, RESTORE, REBUILD, START_FRESH }
 
 private fun keyStoreFailed(trouble: StorageTrouble, run: RecoveryRunState) = run.failedOn == trouble && run.failed == RecoveryFailure.KEY_STORE
 
@@ -184,26 +185,14 @@ internal fun StorageTroubleCard(status: NotebookStatus, run: RecoveryRunState, v
     val r = LocalContext.current.resources
     // Keyed on the kind of trouble, so a dialog opened for one kind is dropped when another kind shows.
     var confirming by rememberSaveable(trouble::class) { mutableStateOf<Confirming?>(null) }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            troubleLines(trouble, run, status.automaticBackupAt).forEach { Text(it.text(r), color = MaterialTheme.colorScheme.onErrorContainer) }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                if (run.busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                for (action in troubleActions(trouble, run)) {
-                    when (action) {
-                        TroubleAction.TRY_AGAIN -> Action(R.string.notebook_try_again, run.busy, viewModel::retry)
-                        TroubleAction.START_OVER -> Action(R.string.notebook_trouble_start_over, run.busy) { confirming = Confirming.START_OVER }
-                        TroubleAction.START_OVER_ANYWAY ->
-                            Action(R.string.notebook_trouble_start_over_anyway, run.busy) { confirming = Confirming.START_OVER_ANYWAY }
-                        TroubleAction.RESTORE -> Action(R.string.notebook_restore, run.busy) { viewModel.restore(status) }
-                        TroubleAction.REBUILD -> Action(R.string.notebook_trouble_rebuild, run.busy) { (trouble as? StorageTrouble.Damaged)?.let(viewModel::startFresh) }
-                        TroubleAction.START_FRESH -> Action(R.string.notebook_trouble_start_fresh, run.busy) { confirming = Confirming.START_FRESH }
-                    }
-                }
-            }
+    StorageTroubleCardContent(trouble, run, status.automaticBackupAt) { action ->
+        when (action) {
+            TroubleAction.TRY_AGAIN -> viewModel.retry()
+            TroubleAction.START_OVER -> confirming = Confirming.START_OVER
+            TroubleAction.START_OVER_ANYWAY -> confirming = Confirming.START_OVER_ANYWAY
+            TroubleAction.RESTORE -> viewModel.restore(status)
+            TroubleAction.REBUILD -> (trouble as? StorageTrouble.Damaged)?.let(viewModel::startFresh)
+            TroubleAction.START_FRESH -> confirming = Confirming.START_FRESH
         }
     }
     when (confirming) {
@@ -232,9 +221,37 @@ internal fun StorageTroubleCard(status: NotebookStatus, run: RecoveryRunState, v
     }
 }
 
+/** The storage card's lines and buttons for [trouble]; [onAction] gets the button tapped. */
+@Composable
+fun StorageTroubleCardContent(trouble: StorageTrouble, run: RecoveryRunState, automaticBackupAt: Long?, onAction: (TroubleAction) -> Unit) {
+    val r = LocalContext.current.resources
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            troubleLines(trouble, run, automaticBackupAt).forEach { Text(it.text(r), color = MaterialTheme.colorScheme.onErrorContainer) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                if (run.busy) CircularProgressIndicator(Modifier.size(16.dp), color = MaterialTheme.colorScheme.onErrorContainer, strokeWidth = 2.dp)
+                for (action in troubleActions(trouble, run)) Action(action.label(), run.busy) { onAction(action) }
+            }
+        }
+    }
+}
+
+private fun TroubleAction.label(): Int = when (this) {
+    TroubleAction.TRY_AGAIN -> R.string.notebook_try_again
+    TroubleAction.START_OVER -> R.string.notebook_trouble_start_over
+    TroubleAction.START_OVER_ANYWAY -> R.string.notebook_trouble_start_over_anyway
+    TroubleAction.RESTORE -> R.string.notebook_restore
+    TroubleAction.REBUILD -> R.string.notebook_trouble_rebuild
+    TroubleAction.START_FRESH -> R.string.notebook_trouble_start_fresh
+}
+
 @Composable
 private fun Action(label: Int, busy: Boolean, onClick: () -> Unit) {
-    TextButton(enabled = !busy, onClick = onClick) { Text(stringResource(label)) }
+    val colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onErrorContainer)
+    TextButton(enabled = !busy, onClick = onClick, colors = colors) { Text(stringResource(label)) }
 }
 
 @Composable

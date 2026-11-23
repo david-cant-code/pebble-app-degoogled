@@ -2,14 +2,18 @@ package coredevices.pebble.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Info
@@ -17,6 +21,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -33,7 +38,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.anopticlabs.gravel.pkjs.DeniedPkjsNotice
 import com.anopticlabs.gravel.pkjs.deniedPkjsNotice
@@ -329,13 +338,29 @@ private fun WatchappPermissionListRow(
         .collectAsState(false)
     val location by libPebble.watchappPermissionGranted(uuid, LockerAppPermissionType.Location)
         .collectAsState(false)
+    WatchappPermissionRow(app.properties.title, network, location, onClick)
+}
+
+/** One app in the list: its title, ending in "..." when too long, and its two permission states. */
+@Composable
+fun WatchappPermissionRow(
+    title: String,
+    network: Boolean,
+    location: Boolean,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(app.properties.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Text(
                 buildString {
                     append("Internet: ")
@@ -448,14 +473,64 @@ private fun WatchappPermissionSelector(
     )
     Text(label, style = MaterialTheme.typography.bodyLarge)
     Spacer(Modifier.height(4.dp))
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-        options.forEachIndexed { index, (value, text) ->
-            SegmentedButton(
-                selected = setting == value,
-                onClick = { scope.launch { libPebble.setWatchappPermission(uuid, type, value) } },
-                shape = SegmentedButtonDefaults.itemShape(index, options.size),
-            ) {
-                Text(text)
+    val pickedIndex = options.indexOfFirst { it.first == setting }
+    PermissionChoices(options.map { it.second }, pickedIndex) { index ->
+        scope.launch { libPebble.setWatchappPermission(uuid, type, options[index].first) }
+    }
+}
+
+/**
+ * A permission's choices as one row of segmented buttons or, when a label would not fit its
+ * segment at this font size, as a list of radio buttons instead of a cut label.
+ */
+@Composable
+fun PermissionChoices(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    val measurer = rememberTextMeasurer()
+    val style = MaterialTheme.typography.labelLarge
+    val density = LocalDensity.current
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        // A segment draws its label in labelLarge (material3-android 1.5.0-alpha08,
+        // OutlinedSegmentedButtonTokens.LabelTextFont) and, when picked, the check icon and 8 dp
+        // beside it (SegmentedButtonContentMeasurePolicy.measure), centered over the segment and
+        // into its padding when they need it (measured at font 1.0 and 2.0): the three have to
+        // fit inside the segment's outline.
+        val room = maxWidth / labels.size - SegmentedButtonDefaults.IconSize - 8.dp -
+            SegmentedButtonDefaults.BorderWidth * 2
+        val fits = labels.all { label ->
+            with(density) { measurer.measure(label, style).size.width.toDp() } <= room
+        }
+        if (fits) {
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                labels.forEachIndexed { index, text ->
+                    SegmentedButton(
+                        selected = index == selected,
+                        onClick = { onSelect(index) },
+                        shape = SegmentedButtonDefaults.itemShape(index, labels.size),
+                    ) {
+                        Text(text)
+                    }
+                }
+            }
+        } else {
+            Column(Modifier.selectableGroup()) {
+                labels.forEachIndexed { index, text ->
+                    val picked = index == selected
+                    // 48 dp: a full-size tap target at every font size.
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .selectable(picked, role = Role.RadioButton) { onSelect(index) }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = picked, onClick = null)
+                        Text(
+                            text,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(start = 12.dp),
+                        )
+                    }
+                }
             }
         }
     }

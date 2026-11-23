@@ -10,10 +10,9 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -39,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -184,17 +184,22 @@ private fun MonthGrid(cells: List<LocalDate>, page: CalendarPage, selected: Loca
             }
         }
         for (week in cells.chunked(7)) {
+            val counted = week.any { (page.rows[it].orEmpty().size + page.phoneEvents[it].orEmpty().size) > SHOWN_DOTS }
             Row {
                 for (day in week) {
+                    val today = day == page.today
+                    val rows = page.rows[day].orEmpty()
+                    val phoneEvents = page.phoneEvents[day].orEmpty().size
                     DayCell(
                         day,
                         day.month == page.month.month,
-                        day == page.today,
+                        today,
                         day == selected,
-                        page.rows[day].orEmpty(),
-                        page.phoneEvents[day].orEmpty().size,
-                        times,
+                        rows,
+                        phoneEvents,
+                        dayLabel(day, today, rows, phoneEvents, times),
                         Modifier.weight(1f),
+                        countLine = counted,
                     ) {
                         viewModel.selectDay(day)
                     }
@@ -204,23 +209,29 @@ private fun MonthGrid(cells: List<LocalDate>, page: CalendarPage, selected: Loca
     }
 }
 
+/** Dots a day cell shows before it counts the rest. */
+private const val SHOWN_DOTS = 3
+
+/** One day of the month grid; [label] is what a screen reader says for it; [countLine] as in [DayMarks]. */
 @Composable
-private fun DayCell(
+fun DayCell(
     day: LocalDate,
     inMonth: Boolean,
     today: Boolean,
     selected: Boolean,
     rows: List<CalendarOccurrence>,
     phoneEvents: Int,
-    times: ReminderTimes,
+    label: String,
     modifier: Modifier,
+    countLine: Boolean = false,
     onClick: () -> Unit,
 ) {
-    val label = dayLabel(day, today, rows, phoneEvents, times)
     val shape = RoundedCornerShape(8.dp)
+    // The reminders' dots come first, so phone calendar events do not crowd them out.
+    val dots = rows.map { dotStatus(it.status) }.sortedBy { it.ordinal }.map { dotColor(it) } + List(phoneEvents) { MaterialTheme.colorScheme.outline }
     Box(
         modifier
-            .aspectRatio(1f)
+            .squareOrTaller()
             .padding(2.dp)
             .clip(shape)
             .then(if (selected) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)) else Modifier)
@@ -232,21 +243,47 @@ private fun DayCell(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Column(Modifier.clearAndSetSemantics {}, horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                day.day.toString(),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (today) FontWeight.Bold else null,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (inMonth) 1f else 0.38f),
-            )
-            // The reminders' dots come first, so phone calendar events do not crowd them out.
-            val dots = rows.map { dotStatus(it.status) }.sortedBy { it.ordinal }.map { dotColor(it) } + List(phoneEvents) { MaterialTheme.colorScheme.outline }
-            Row(Modifier.height(8.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                for (color in dots.take(3)) Box(Modifier.size(5.dp).background(color, CircleShape))
-                if (dots.size > 3) Text("+${dots.size - 3}", style = MaterialTheme.typography.labelSmall)
+        DayMarks(day.day, today, inMonth, dots, countLine, Modifier.clearAndSetSemantics {})
+    }
+}
+
+/**
+ * What a day cell draws: the day's number and up to three [dots], with a count of the rest. With [countLine] the dots'
+ * strip keeps a count's line even without one, as every day of a week holding a count does, so the week's numbers line up.
+ */
+@Composable
+fun DayMarks(number: Int, today: Boolean, inMonth: Boolean, dots: List<Color>, countLine: Boolean, modifier: Modifier = Modifier) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            number.toString(),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (today) FontWeight.Bold else null,
+            // Other months' days are dimmed but kept at 4.5:1 or more on each theme's page.
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (inMonth) 1f else 0.62f),
+        )
+        Box(Modifier.heightIn(min = 8.dp), contentAlignment = Alignment.Center) {
+            if (countLine) Text("", style = MaterialTheme.typography.labelSmall, modifier = Modifier.clearAndSetSemantics {})
+            // A count too wide for the dots' line goes under them, whole up to "+99" at the largest font size.
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterHorizontally),
+                itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
+                for (color in dots.take(SHOWN_DOTS)) Box(Modifier.size(5.dp).background(color, CircleShape))
+                if (dots.size > SHOWN_DOTS) Text("+${dots.size - SHOWN_DOTS}", style = MaterialTheme.typography.labelSmall)
             }
         }
     }
+}
+
+/** Square when the width is bounded and the height allows it, taller when the content needs it (a large font size). */
+private fun Modifier.squareOrTaller() = layout { measurable, constraints ->
+    val placeable = if (constraints.hasBoundedWidth) {
+        val width = constraints.maxWidth
+        measurable.measure(constraints.copy(minWidth = width, minHeight = width.coerceIn(constraints.minHeight, constraints.maxHeight)))
+    } else {
+        measurable.measure(constraints)
+    }
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
 }
 
 /** The three statuses at rest a day shows (an overdue row counts as pending), in dot order. */

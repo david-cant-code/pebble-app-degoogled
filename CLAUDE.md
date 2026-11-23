@@ -202,6 +202,27 @@ Firebase stubs, the unplugged Ring module) lives in `DESIGN_NOTES.md`.
   handle the denied case gracefully. The exception is a permission that a
   tap in the foreground needs at that moment (the Notebook's record button
   asks for the microphone), requested through `PermissionRequester`.
+- **Composables take their colors from the theme:**
+  `MaterialTheme.colorScheme`, `ExtendedTheme.colors` or what derives from
+  them (a component's `*Defaults` colors, `LocalContentColor`);
+  `Color.Transparent` and `Color.Unspecified` are fine, and a new color
+  goes into a color scheme or `ExtendedColors`. A fixed color
+  (`Color(0xFF...)`, `Color.White`, `gravelPurple`) in a composable is only
+  for a color shown as data, such as the watch colors a color picker
+  offers, or for the black or white drawn on one to contrast with it. This
+  applies to code a change adds, upstream picks included. The Health tab
+  (`HealthScreen.kt`, `HealthCharts.kt`) keeps upstream's colors, an
+  exception that keeps its upstream picks cheap. `FixedColorSentinelTest`
+  in `:androidApp` checks main Kotlin files whole, not only their
+  composables (its KDoc lists the spellings it flags and the paths it
+  skips), so a data color or a color outside a composable goes on its
+  allowlist with the reason.
+- **Text stays readable:** it has 4.5:1 contrast against what it is drawn
+  on, at every size, in each scheme it is shown in (Light, Dark and Black,
+  or setup's), and it fits with the phone's font size at 2.0. This
+  applies to code a change adds, upstream picks included.
+  `DESIGN_NOTES.md` (Readable text) has the exceptions and the tests that
+  check it.
 - **Keep changes single-purpose.** One concern per branch or PR.
 - **Prefer simple architectures.** For example, keep a storage format
   unchanged and convert at the boundary rather than adding format dispatch

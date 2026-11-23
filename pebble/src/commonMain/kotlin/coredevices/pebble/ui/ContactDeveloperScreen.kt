@@ -348,24 +348,34 @@ fun ContactDeveloperScreen(
                         }
 
                         Spacer(Modifier.height(24.dp))
-                        Button(
-                            onClick = ::submit,
+                        SendMessageButton(
+                            sending = sending,
                             enabled = !sending && message.trim().isNotEmpty(),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            if (sending) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    strokeWidth = 2.dp,
-                                )
-                            } else {
-                                Text("Send message")
-                            }
-                        }
+                            onClick = ::submit,
+                        )
                     }
                 }
             }
+        }
+    }
+}
+
+/** Contact Developer's send button; a spinner replaces its label while the message is sent. */
+@Composable
+fun SendMessageButton(sending: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        if (sending) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                color = MaterialTheme.colorScheme.onSurface,
+                strokeWidth = 2.dp,
+            )
+        } else {
+            Text("Send message")
         }
     }
 }

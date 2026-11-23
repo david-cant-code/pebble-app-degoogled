@@ -1827,3 +1827,55 @@ too. Without location access, or with weather off, a fetch can put the row
 back with no position, which sends nothing. The row shows in the list
 again, and deleting it once more removes it. Closing this needs the fetch
 to update only a row that still exists.
+
+## Some Health tab text is low in contrast or does not fit at the largest font size
+
+**Status: accepted; kept as upstream draws it.**
+
+The Health tab keeps upstream's colors and layout so that upstream's
+later changes to it stay cheap to bring into Gravel. In every theme,
+parts of its cards are under the 4.5:1 contrast floor for Gravel's text
+(`DESIGN_NOTES.md`, Readable text): the Steps card's text on its green
+(measured 1.4:1 to 3.8:1), and on the Sleep and Heart Rate cards most of
+the smaller, tinted labels, hints, badges and chart labels, such as
+"DEEP SLEEP" and "avg bpm" (3.0:1 to 3.7:1 where measured). The Sleep
+and Heart Rate cards' titles, large numbers and heart rate zone lines
+clear it. At the largest font size (2.0 on a Pixel 6 Pro), the Month
+view runs the Steps card's averages ("Avg Distance", "Avg Calories",
+"Avg Active") together and clips the top of the Steps chart's date
+labels. Parts the test phone had no data for, such as the Sleep
+card's chart and averages and the Week view's Steps averages, were not
+checked at that size. Closing this means moving the tab's colors into
+the theme and laying out its averages and chart labels again.
+
+## Some text on a color shown as data is low in contrast
+
+**Status: accepted.**
+
+Where the app writes a color's name or code on the color itself, it
+picks black or white text by a brightness cutoff, which puts white on
+some mid-bright colors. In the Color row of an app's notification
+settings, and in the list view of the popup it opens, 13 of the 64 color
+names, such as "Vivid Cerulean" and "Red", are white at 2.6:1 to 4.0:1,
+computed from the color values; black would be 5.3:1 to 8.2:1 on each.
+The Backlight Color setting (its Day or Color row, and its Night row)
+uses a cutoff that puts white on brighter colors, in the row and in its
+popup: four of its twelve presets, "Red", "Orange", "Magenta" and
+"Pink", come out at about 4.0:1, 2.5:1, 3.1:1 and 2.6:1, and a custom
+color can drop to about 1.8:1. The category buttons
+on the Apps tab draw black text on the color the store sends: the Pebble
+App Store's measure 6.3:1 to 12.7:1; the Rebble App Store's, shown when
+signed in to Rebble, were not measured, and any store can send a darker
+or see-through color. Closing this means picking whichever of black or
+white contrasts more with the color.
+
+## Some unreadable category data from an app store can crash the app
+
+**Status: accepted.**
+
+Some kinds of category data from an app store that the app cannot read
+crash the app when the Apps tab lists that store's watchapps, and again
+each time it does. This applies to the built-in Pebble App Store, to the
+Rebble App Store while signed in to Rebble, and to any app store source
+you add and keep on. Turning that store off under Configure Appstore
+Sources in Settings stops it.

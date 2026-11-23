@@ -4,9 +4,11 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Arrangement.SpaceEvenly
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -346,39 +348,19 @@ fun NotificationAppsScreen(topBarParams: TopBarParams, nav: NavBarNav, gotoDefau
             }
             LazyColumn(state = listState) {
                 item(key = "toggle_all") {
-                    ListItem(
-                        headlineContent = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("All Apps", fontSize = 17.sp)
-                            }
+                    AllAppsRow(
+                        onMuteAll = {
+                            libPebble.updateNotificationAppMuteState(
+                                packageName = null,
+                                muteState = MuteState.Always,
+                            )
                         },
-                        trailingContent = {
-                            Row {
-                                PebbleElevatedButton(
-                                    text = "Mute All",
-                                    onClick = {
-                                        libPebble.updateNotificationAppMuteState(
-                                            packageName = null,
-                                            muteState = MuteState.Always,
-                                        )
-                                    },
-                                    primaryColor = true,
-                                    modifier = Modifier.padding(horizontal = 5.dp),
-                                )
-                                PebbleElevatedButton(
-                                    text = "Enable All",
-                                    onClick = {
-                                        libPebble.updateNotificationAppMuteState(
-                                            packageName = null,
-                                            muteState = MuteState.Never,
-                                        )
-                                    },
-                                    primaryColor = true,
-                                    modifier = Modifier.padding(horizontal = 5.dp),
-                                )
-                            }
+                        onEnableAll = {
+                            libPebble.updateNotificationAppMuteState(
+                                packageName = null,
+                                muteState = MuteState.Never,
+                            )
                         },
-                        shadowElevation = 2.dp,
                     )
                 }
                 if (pebbleFeatures.supportsNotificationFiltering()) {
@@ -421,4 +403,35 @@ fun NotificationAppsScreen(topBarParams: TopBarParams, nav: NavBarNav, gotoDefau
             }
         }
     }
+}
+
+/** Gravel: the All Apps row, whose buttons move under the heading when they do not fit beside it. */
+@Composable
+fun AllAppsRow(onMuteAll: () -> Unit, onEnableAll: () -> Unit) {
+    ListItem(
+        headlineContent = {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("All Apps", fontSize = 17.sp, modifier = Modifier.padding(end = 16.dp))
+                Row {
+                    PebbleElevatedButton(
+                        text = "Mute All",
+                        onClick = onMuteAll,
+                        primaryColor = true,
+                        modifier = Modifier.padding(horizontal = 5.dp),
+                    )
+                    PebbleElevatedButton(
+                        text = "Enable All",
+                        onClick = onEnableAll,
+                        primaryColor = true,
+                        modifier = Modifier.padding(horizontal = 5.dp),
+                    )
+                }
+            }
+        },
+        shadowElevation = 2.dp,
+    )
 }

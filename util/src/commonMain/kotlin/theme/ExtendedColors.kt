@@ -12,6 +12,8 @@ data class ExtendedColors(
     val onWarning: Color,
     val success: Color,
     val onSuccess: Color,
+    /** The check icon beside an app already in the user's collection (Locker and store lists). */
+    val inCollection: Color,
 )
 
 val LocalExtendedColors = staticCompositionLocalOf {
@@ -22,5 +24,6 @@ val LocalExtendedColors = staticCompositionLocalOf {
         onWarning = Color.Unspecified,
         success = Color.Unspecified,
         onSuccess = Color.Unspecified,
+        inCollection = Color.Unspecified,
     )
 }
